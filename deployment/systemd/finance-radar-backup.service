@@ -1,0 +1,16 @@
+[Unit]
+Description=Finance Radar verified online backup and restore drill
+After=finance-radar-api.service
+
+[Service]
+Type=oneshot
+User=finance-radar
+Group=finance-radar
+WorkingDirectory=/opt/finance-radar/current
+EnvironmentFile=/etc/finance-radar.env
+ExecStart=/opt/finance-radar/venv/bin/python -m app.ops.backup backup --retention 30 --weekly-retention 12
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/finance-radar/shared/data

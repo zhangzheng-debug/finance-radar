@@ -1,0 +1,25 @@
+{
+  "captured_at_utc": "2026-07-18T22:28:56.940Z",
+  "requested_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Operations_and_Model",
+  "final_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Operations_and_Model",
+  "title": "Operations & Model · Finance Radar",
+  "viewport": {
+    "width": 1366,
+    "height": 768
+  },
+  "full_page": false,
+  "scroll_y": 0,
+  "window_scroll_y": 0,
+  "tab": null,
+  "canvas_count": 8,
+  "iframe_count": 0,
+  "dataframe_count": 4,
+  "skeleton_count": 0,
+  "alert_count": 1,
+  "body_text_length": 391,
+  "body_text_excerpt": "Home\n\nEvent Intelligence\n\nReplay Lab\n\nOperations and Model\n\nAdjudication Studio\n\nFINANCE RADAR\n/\nOperations & Model\nRECENT_CAPTURE\n运行健康、数据游标、备份恢复和模型卡\n情报与人工复核系统 · 只读行情 · 不含下单、仓位、余额或交易执行能力\nAPI\nOK\nLEDGER\nOK\nWORKER\nRUNNING\n24H WINDOW\nPARTIAL · 13.8h\nSOURCE ERRORS\n0\nBACKUP\nVERIFIED\nMODEL\nready · SHADOW\n\nLIVE\n\nRECENT_CAPTURE\n\nREPLAY\n\n数据源\n\nWorker\n\n备份恢复\n\n模型卡\n\n硬边界审计\n\n当前没有来源错误；WATCH 项代表尚未观测或缺少成功游标。",
+  "console_errors": [],
+  "page_errors": [],
+  "http_errors": [],
+  "screenshot": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\reports\\ui_qa_20260719\\operations_model_1366x768.png"
+}

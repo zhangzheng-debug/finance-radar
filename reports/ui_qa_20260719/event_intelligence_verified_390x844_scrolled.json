@@ -1,0 +1,25 @@
+{
+  "captured_at_utc": "2026-07-18T22:28:56.131Z",
+  "requested_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Event_Intelligence?flow=%E5%B7%B2%E6%A0%B8%E9%AA%8C&limit=25",
+  "final_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Event_Intelligence?flow=%E5%B7%B2%E6%A0%B8%E9%AA%8C&limit=25&event_id=FR-LIVE-27b97a3819bea4d0743ab72686465b0d",
+  "title": "Event Workbench · Finance Radar",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "full_page": false,
+  "scroll_y": 1250,
+  "window_scroll_y": 0,
+  "tab": null,
+  "canvas_count": 13,
+  "iframe_count": 0,
+  "dataframe_count": 5,
+  "skeleton_count": 0,
+  "alert_count": 0,
+  "body_text_length": 2867,
+  "body_text_excerpt": "keyboard_double_arrow_left\n\nHome\n\nEvent Intelligence\n\nReplay Lab\n\nOperations and Model\n\nAdjudication Studio\n\nkeyboard_double_arrow_right\nFINANCE RADAR\n/\nEvent Workbench\nREAD ONLY\n情报与人工复核系统 · 只读行情 · 不含下单、仓位、余额或交易执行能力\n\n保存视图\n\n事件族\n\n全局检索\n\n数量\n\n已核验 · 546 events\n\nK / ↑ 上一条\n\nJ / ↓ 下一条\n\nJ/K 或 ↑/↓ 切换事件 · / 聚焦检索；输入框中不劫持按键\n\nVERIFIED 07-16 03:36 — · U.S. Central Command / M/T Belma\n\nVERIFIED 07-16 03:33 — · SBA Communications Corporation\n\nVERIFIED 07-16 03:25 — · GameSquare Holdings, Inc.\n\nVERIFIED 07-16 03:25 — · Michael J. Forster\n\nVERIFIED 07-16 03:20 — · Resmed\n\nVERIFIED 07-16 03:18 — · Vanilla Chip LLC d/b/a TruHeigh...\n\nVERIFIED 07-16 02:25 — · Auna S.A.\n\nVERIFIED 07-16 02:25 — · Centerra Gold Inc.\n\nVERIFIED 07-16 02:25 — · Nuvini Group Limited\n\nVERIFIED 07-16 02:25 — · Audax Private Credit Fund, LLC\n\nVERIFIED 07-16 02:23 — · Mako Mining Corp.\n\nVERIFIED 07-16 02:23 — · Perceptive Capital Solutions Corp.\n\nVERIFIED 07-16 02:23 — · Fury Gold Mines Limited\n\nVERIFIED 07-16 02:23 — · Eagle Nuclear E",
+  "console_errors": [],
+  "page_errors": [],
+  "http_errors": [],
+  "screenshot": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\reports\\ui_qa_20260719\\event_intelligence_verified_390x844_scrolled.png"
+}

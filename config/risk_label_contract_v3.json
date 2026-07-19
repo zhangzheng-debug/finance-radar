@@ -1,0 +1,42 @@
+{
+  "schema_version": 3,
+  "status": "PRE_FREEZE_CONTRACT",
+  "task": "adverse material event review routing",
+  "labels": {
+    "RISK_REVIEW": "Material adverse content supported by primary or independent corroborating evidence; route to a human reviewer.",
+    "NON_TARGET": "Supported positive, neutral, or otherwise non-material-adverse content; retain in the full-polarity ledger.",
+    "ABSTAIN": "Discovery-only, conflicted, insufficient, unclear, or axis-incoherent content."
+  },
+  "independent_axes": {
+    "materiality": ["MATERIAL_ADVERSE", "NOT_MATERIAL_ADVERSE", "UNCLEAR"],
+    "polarity": ["ADVERSE", "POSITIVE", "NEUTRAL", "MIXED", "UNCLEAR"],
+    "evidence_state": ["PRIMARY_SUPPORTED", "MULTI_SOURCE_SUPPORTED", "DISCOVERY_ONLY", "CONFLICTED", "INSUFFICIENT"]
+  },
+  "source_lane_policy": {
+    "P0": "evidence-ready or evidence-required lane only; authority never supplies the target label",
+    "P1": "issuer-context lane; authority never supplies the target label",
+    "P2_or_lower": "discovery-only lane and ABSTAIN until evidence is upgraded"
+  },
+  "adjudication": {
+    "content_required": true,
+    "rationale_minimum_characters": 20,
+    "independent_reviewer_required": true,
+    "source_used_as_label": false,
+    "pre_freeze_split": "UNASSIGNED"
+  },
+  "blind_v2_minimums": {
+    "RISK_REVIEW": 30,
+    "NON_TARGET": 30,
+    "ABSTAIN": 20,
+    "source_groups": 4
+  },
+  "freeze_rules": [
+    "validate every row before assigning a split",
+    "group by entity_group and event_chain_group",
+    "hold out complete sources where feasible",
+    "exclude all exact and near-duplicate v1 blind and training texts",
+    "hash and freeze text plus labels before the candidate sees blind-v2",
+    "never tune thresholds on blind-v2"
+  ],
+  "deployment_boundary": "This contract and its audit do not promote or replace the deployed shadow v1 router."
+}

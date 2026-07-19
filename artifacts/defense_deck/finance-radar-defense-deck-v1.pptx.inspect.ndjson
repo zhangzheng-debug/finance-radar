@@ -1,0 +1,289 @@
+{"kind":"deck","id":"pr/vbb9kj","name":"Deck"}
+{"kind":"layout","layoutId":"b9f6687a-7012-47ca-9399-bdd5e95b335e","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"242697c4-db1c-4ec9-970c-8c45ca12420c","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/5mij3j","slide":1,"title":"FINANCE RADAR","textShapes":18}
+{"kind":"shape","id":"sh/e1c3q98r","slide":1,"bbox":[64,54,160,3]}
+{"kind":"textbox","id":"sh/143mlori","slide":1,"text":"FINANCE RADAR","textPreview":"FINANCE RADAR","textChars":13,"textLines":1,"bbox":[64,86,560,36]}
+{"kind":"textbox","id":"sh/03ulsjqx","slide":1,"text":"金融事件证据雷达","textPreview":"金融事件证据雷达","textChars":8,"textLines":1,"bbox":[64,176,700,82]}
+{"kind":"textbox","id":"sh/n6l4ny98","slide":1,"text":"从实时信息流，到可复核的证据链","textPreview":"从实时信息流，到可复核的证据链","textChars":15,"textLines":1,"bbox":[64,274,760,56]}
+{"kind":"textbox","id":"sh/m5c3ut83","slide":1,"text":"FULL-POLARITY LEDGER · EVIDENCE GATES · DETERMINISTIC REPLAY","textPreview":"FULL-POLARITY LEDGER · EVIDENCE GATES · DETERMINISTIC REPLAY","textChars":60,"textLines":1,"bbox":[64,358,830,28]}
+{"kind":"shape","id":"sh/98nmpore","slide":1,"bbox":[870,112,2,456]}
+{"kind":"textbox","id":"sh/87elwjqt","slide":1,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[914,132,44,28]}
+{"kind":"textbox","id":"sh/va54ry9k","slide":1,"text":"可追溯","textPreview":"可追溯","textChars":3,"textLines":1,"bbox":[974,130,200,32]}
+{"kind":"textbox","id":"sh/a9w3yt8z","slide":1,"text":"每条结论回到原文证据","textPreview":"每条结论回到原文证据","textChars":10,"textLines":1,"bbox":[974,168,220,42]}
+{"kind":"textbox","id":"sh/43ep8n2l","slide":1,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[914,238,44,28]}
+{"kind":"textbox","id":"sh/p4n6hsj6","slide":1,"text":"可回放","textPreview":"可回放","textChars":3,"textLines":1,"bbox":[974,236,200,32]}
+{"kind":"textbox","id":"sh/21w76dkf","slide":1,"text":"没有新事件也能稳定演示","textPreview":"没有新事件也能稳定演示","textChars":11,"textLines":1,"bbox":[974,274,220,42]}
+{"kind":"textbox","id":"sh/325ofil0","slide":1,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[914,344,44,28]}
+{"kind":"textbox","id":"sh/crepc72h","slide":1,"text":"可拒绝","textPreview":"可拒绝","textChars":3,"textLines":1,"bbox":[974,342,200,32]}
+{"kind":"textbox","id":"sh/dsnq5cj2","slide":1,"text":"模型失败不会被包装上线","textPreview":"模型失败不会被包装上线","textChars":11,"textLines":1,"bbox":[974,380,220,42]}
+{"kind":"textbox","id":"sh/q5w7axkr","slide":1,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[914,450,44,28]}
+{"kind":"textbox","id":"sh/r658j21w","slide":1,"text":"可恢复","textPreview":"可恢复","textChars":3,"textLines":1,"bbox":[974,448,200,32]}
+{"kind":"textbox","id":"sh/0vypg72t","slide":1,"text":"服务器迁移有完整恢复门禁","textPreview":"服务器迁移有完整恢复门禁","textChars":12,"textLines":1,"bbox":[974,486,220,42]}
+{"kind":"textbox","id":"sh/1w7q9cje","slide":1,"text":"北京林业大学理学院 · 2026 实训项目答辩","textPreview":"北京林业大学理学院 · 2026 实训项目答辩","textChars":23,"textLines":1,"bbox":[64,645,720,24]}
+{"kind":"textbox","id":"sh/90jyd876","slide":1,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[1170,645,46,24]}
+{"kind":"notes","id":"nt/5mij3j","slide":1,"text":"开场只讲一句：这不是新闻摘要机器人，而是一套能追溯、回放、拒绝和恢复的证据系统。\n先建立评价尺度：重点不是预测多快，而是每一步能否被复核。"}
+{"kind":"slide","id":"sl/qxztpg","slide":2,"title":"FINANCE RADAR / 2026 实训答辩","textShapes":15}
+{"kind":"textbox","id":"sh/crmdofy1","slide":2,"text":"FINANCE RADAR / 2026 实训答辩","textPreview":"FINANCE RADAR / 2026 实训答辩","textChars":25,"textLines":1,"bbox":[64,30,560,24]}
+{"kind":"textbox","id":"sh/bqdcvaxg","slide":2,"text":"快，不代表可信","textPreview":"快，不代表可信","textChars":7,"textLines":1,"bbox":[64,68,1110,58]}
+{"kind":"shape","id":"sh/ap4vm5gb","slide":2,"bbox":[64,132,1152,1]}
+{"kind":"textbox","id":"sh/lwfe1kfy","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1170,32,46,24]}
+{"kind":"textbox","id":"sh/kv6dsfed","slide":2,"text":"传统新闻流把“发现”直接交给模型，却缺少三道决定可信度的门。","textPreview":"传统新闻流把“发现”直接交给模型，却缺少三道决定可信度的门。","textChars":30,"textLines":1,"bbox":[64,158,980,42]}
+{"kind":"textbox","id":"sh/zuxwzaxs","slide":2,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[64,232,60,32]}
+{"kind":"textbox","id":"sh/ytovq5w7","slide":2,"text":"来源不等于事实","textPreview":"来源不等于事实","textChars":7,"textLines":1,"bbox":[64,282,320,42]}
+{"kind":"textbox","id":"sh/90fe54fu","slide":2,"text":"聚合标题可以发现事件，但不能代替SEC、监管机构或公司原文。","textPreview":"聚合标题可以发现事件，但不能代替SEC、监管机构或公司原文。","textChars":30,"textLines":1,"bbox":[64,346,320,108]}
+{"kind":"shape","id":"sh/8z6dwze9","slide":2,"bbox":[64,486,96,3]}
+{"kind":"shape","id":"sh/yhofyhcn","slide":2,"bbox":[428,236,1,302]}
+{"kind":"textbox","id":"sh/zixg7mt8","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[450,232,60,32]}
+{"kind":"textbox","id":"sh/0j6x0rut","slide":2,"text":"现场事件不可控","textPreview":"现场事件不可控","textChars":7,"textLines":1,"bbox":[450,282,320,42]}
+{"kind":"textbox","id":"sh/lkfy9wbe","slide":2,"text":"答辩当天可能没有新的SEC事件；依赖“刚好发生”会让演示失真。","textPreview":"答辩当天可能没有新的SEC事件；依赖“刚好发生”会让演示失真。","textChars":31,"textLines":1,"bbox":[450,346,320,108]}
+{"kind":"shape","id":"sh/mlof21cj","slide":2,"bbox":[450,486,96,3]}
+{"kind":"shape","id":"sh/nmxgb6t4","slide":2,"bbox":[814,236,1,302]}
+{"kind":"textbox","id":"sh/8nqx4bap","slide":2,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[836,232,60,32]}
+{"kind":"textbox","id":"sh/9ozydwba","slide":2,"text":"高召回会制造误报","textPreview":"高召回会制造误报","textChars":8,"textLines":1,"bbox":[836,282,320,42]}
+{"kind":"textbox","id":"sh/2p4fqxcf","slide":2,"text":"负面风险路由若没有盲测和ABSTAIN，很容易把普通新闻也判成风险。","textPreview":"负面风险路由若没有盲测和ABSTAIN，很容易把普通新闻也判成风险。","textChars":34,"textLines":1,"bbox":[836,346,320,108]}
+{"kind":"shape","id":"sh/3qdwz2t0","slide":2,"bbox":[836,486,96,3]}
+{"kind":"textbox","id":"sh/ru9c7y9s","slide":2,"text":"设计目标：把“新闻快”变成“证据可核验”，并让不确定性在系统中可见。","textPreview":"设计目标：把“新闻快”变成“证据可核验”，并让不确定性在系统中可见。","textChars":34,"textLines":1,"bbox":[64,572,1110,46]}
+{"kind":"shape","id":"sh/6t0vyts7","slide":2,"bbox":[64,677,1152,1]}
+{"kind":"textbox","id":"sh/twbu98ry","slide":2,"text":"问题定义来自项目任务书与当前外部盲测失败证据","textPreview":"问题定义来自项目任务书与当前外部盲测失败证据","textChars":22,"textLines":1,"bbox":[64,686,1100,18]}
+{"kind":"notes","id":"nt/qxztpg","slide":2,"text":"三类风险对应后面三项设计：证据账本、冻结回放、模型门禁。\n不要把系统描述成追求最快新闻；核心是速度之后仍然能证明。"}
+{"kind":"slide","id":"sl/o2whd8","slide":3,"title":"FINANCE RADAR / 2026 实训答辩","textShapes":27}
+{"kind":"textbox","id":"sh/0vexgr2x","slide":3,"text":"FINANCE RADAR / 2026 实训答辩","textPreview":"FINANCE RADAR / 2026 实训答辩","textChars":25,"textLines":1,"bbox":[64,30,560,24]}
+{"kind":"textbox","id":"sh/fu5g7m1c","slide":3,"text":"证据链先于模型，模型只在边界内工作","textPreview":"证据链先于模型，模型只在边界内工作","textChars":17,"textLines":1,"bbox":[64,68,1110,58]}
+{"kind":"shape","id":"sh/etwfehkr","slide":3,"bbox":[64,132,1152,1]}
+{"kind":"textbox","id":"sh/9k7ydwje","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1170,32,46,24]}
+{"kind":"textbox","id":"sh/ojyxkr2t","slide":3,"text":"每个阶段留下可复核状态；任何一步不满足条件，都可以停在 ABSTAIN。","textPreview":"每个阶段留下可复核状态；任何一步不满足条件，都可以停在 ABSTAIN。","textChars":36,"textLines":1,"bbox":[64,151,1000,38]}
+{"kind":"textbox","id":"sh/nipgbm1o","slide":3,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[252,300,44,44]}
+{"kind":"textbox","id":"sh/2hgfihk3","slide":3,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[486,300,44,44]}
+{"kind":"textbox","id":"sh/5o3e1sja","slide":3,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[720,300,44,44]}
+{"kind":"textbox","id":"sh/4nux872p","slide":3,"text":"→","textPreview":"→","textChars":1,"textLines":1,"bbox":[954,300,44,44]}
+{"kind":"shape","id":"sh/a90retwz","slide":3,"bbox":[64,246,190,150]}
+{"kind":"textbox","id":"sh/va98nydk","slide":3,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[82,264,46,22]}
+{"kind":"textbox","id":"sh/wvi9g3e5","slide":3,"text":"多源采集","textPreview":"多源采集","textChars":4,"textLines":1,"bbox":[82,300,154,34]}
+{"kind":"textbox","id":"sh/xwrqpovq","slide":3,"text":"P0 官方 / P1 发行人 / P2 发现","textPreview":"P0 官方 / P1 发行人 / P2 发现","textChars":22,"textLines":1,"bbox":[82,346,154,42]}
+{"kind":"shape","id":"sh/ix0ritwb","slide":3,"bbox":[298,246,190,150]}
+{"kind":"textbox","id":"sh/jy98rydw","slide":3,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[316,264,46,22]}
+{"kind":"textbox","id":"sh/kz29k3eh","slide":3,"text":"不可变账本","textPreview":"不可变账本","textChars":5,"textLines":1,"bbox":[316,300,154,34]}
+{"kind":"textbox","id":"sh/50bqt8vm","slide":3,"text":"原始观测 · 修订 · 时间线","textPreview":"原始观测 · 修订 · 时间线","textChars":15,"textLines":1,"bbox":[316,346,154,42]}
+{"kind":"shape","id":"sh/61krmdw7","slide":3,"bbox":[532,246,190,150]}
+{"kind":"textbox","id":"sh/72tsvids","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[550,264,46,22]}
+{"kind":"textbox","id":"sh/36d83it0","slide":3,"text":"证据门","textPreview":"证据门","textChars":3,"textLines":1,"bbox":[550,300,154,34]}
+{"kind":"textbox","id":"sh/25k7adsf","slide":3,"text":"原文片段 · 冲突 · 最终性","textPreview":"原文片段 · 冲突 · 最终性","textChars":15,"textLines":1,"bbox":[550,346,154,42]}
+{"kind":"shape","id":"sh/psvq5sb6","slide":3,"bbox":[766,246,190,150]}
+{"kind":"textbox","id":"sh/47mpcnal","slide":3,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[784,264,46,22]}
+{"kind":"textbox","id":"sh/f2t8zyto","slide":3,"text":"Shadow 智能","textPreview":"Shadow 智能","textChars":9,"textLines":1,"bbox":[784,300,154,34]}
+{"kind":"textbox","id":"sh/u1k76tsj","slide":3,"text":"风险路由 + 本地摘要","textPreview":"风险路由 + 本地摘要","textChars":11,"textLines":1,"bbox":[784,346,154,42]}
+{"kind":"shape","id":"sh/h4bq18bu","slide":3,"bbox":[1000,246,190,150]}
+{"kind":"textbox","id":"sh/g32p83a9","slide":3,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1018,264,46,22]}
+{"kind":"textbox","id":"sh/7y98vyts","slide":3,"text":"双终端","textPreview":"双终端","textChars":3,"textLines":1,"bbox":[1018,300,154,34]}
+{"kind":"textbox","id":"sh/6x072ts7","slide":3,"text":"Web 工作台 + Telegram 深链","textPreview":"Web 工作台 + Telegram 深链","textChars":21,"textLines":1,"bbox":[1018,346,154,42]}
+{"kind":"shape","id":"sh/w3y5czq5","slide":3,"bbox":[64,456,1126,82]}
+{"kind":"textbox","id":"sh/x47m54rq","slide":3,"text":"硬边界贯穿全链路","textPreview":"硬边界贯穿全链路","textChars":8,"textLines":1,"bbox":[88,478,230,28]}
+{"kind":"textbox","id":"sh/ahgnap8z","slide":3,"text":"无下单 · 无仓位 · 无余额 · 无 LONG/SHORT · 无自动事实核验","textPreview":"无下单 · 无仓位 · 无余额 · 无 LONG/SHORT · 无自动事实核验","textChars":40,"textLines":1,"bbox":[338,478,800,30]}
+{"kind":"textbox","id":"sh/vip43u9k","slide":3,"text":"系统的输出是“是否值得人工复核”，不是交易方向或收益预测。","textPreview":"系统的输出是“是否值得人工复核”，不是交易方向或收益预测。","textChars":29,"textLines":1,"bbox":[64,577,1080,38]}
+{"kind":"shape","id":"sh/k7i5gzq1","slide":3,"bbox":[64,677,1152,1]}
+{"kind":"textbox","id":"sh/58r694rm","slide":3,"text":"证据：financial_event_radar_project_plan_v5_1_ai.md · no-trading audit","textPreview":"证据：financial_event_radar_project_plan_v5_1_ai.md · no-trading audit","textChars":67,"textLines":1,"bbox":[64,686,1100,18]}
+{"kind":"notes","id":"nt/o2whd8","slide":3,"text":"按从左到右讲一遍，每一段都能在数据库或操作日志中找到记录。\n强调模型排在证据门之后，并且保持Shadow，不拥有最终事实。"}
+{"kind":"slide","id":"sl/boeljf","slide":4,"title":"FINANCE RADAR / 2026 实训答辩","textShapes":13}
+{"kind":"textbox","id":"sh/gnehwre5","slide":4,"text":"FINANCE RADAR / 2026 实训答辩","textPreview":"FINANCE RADAR / 2026 实训答辩","textChars":25,"textLines":1,"bbox":[64,30,560,24]}
+{"kind":"textbox","id":"sh/v25g3mxk","slide":4,"text":"公网系统已经形成真实运行态，而不是静态原型","textPreview":"公网系统已经形成真实运行态，而不是静态原型","textChars":21,"textLines":1,"bbox":[64,68,1110,58]}
+{"kind":"shape","id":"sh/u1wzuhgz","slide":4,"bbox":[64,132,1152,1]}
+{"kind":"textbox","id":"sh/t0ny1cfe","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[1170,32,46,24]}
+{"kind":"textbox","id":"sh/8zehsryt","slide":4,"text":"22","textPreview":"22","textChars":2,"textLines":1,"bbox":[64,166,260,48]}
+{"kind":"textbox","id":"sh/7ylgzmx8","slide":4,"text":"持续注册的数据源","textPreview":"持续注册的数据源","textChars":8,"textLines":1,"bbox":[64,210,260,32]}
+{"kind":"textbox","id":"sh/6xczqhg3","slide":4,"text":"1,191","textPreview":"1,191","textChars":5,"textLines":1,"bbox":[64,258,260,48]}
+{"kind":"textbox","id":"sh/dw7idgfy","slide":4,"text":"规范化事件","textPreview":"规范化事件","textChars":5,"textLines":1,"bbox":[64,302,260,32]}
+{"kind":"textbox","id":"sh/svyh4bed","slide":4,"text":"2,394","textPreview":"2,394","textChars":5,"textLines":1,"bbox":[64,350,260,48]}
+{"kind":"textbox","id":"sh/6d4rq5wj","slide":4,"text":"声明—证据关联","textPreview":"声明—证据关联","textChars":7,"textLines":1,"bbox":[64,394,260,32]}
+{"kind":"textbox","id":"sh/7edsjad4","slide":4,"text":"15 / 15","textPreview":"15 / 15","textChars":7,"textLines":1,"bbox":[64,442,260,48]}
+{"kind":"textbox","id":"sh/8fm9svep","slide":4,"text":"公网产品验收","textPreview":"公网产品验收","textChars":6,"textLines":1,"bbox":[64,486,260,32]}
+{"kind":"textbox","id":"sh/tgval0va","slide":4,"text":"首页把事件流、人工复核队列和来源健康放在同一工作面。","textPreview":"首页把事件流、人工复核队列和来源健康放在同一工作面。","textChars":26,"textLines":1,"bbox":[64,552,300,70]}
+{"kind":"shape","id":"sh/ypkrmlwn","slide":4,"bbox":[387,159,834,473]}
+{"kind":"shape","id":"sh/kbm9oved","slide":4,"bbox":[64,677,1152,1]}
+{"kind":"textbox","id":"sh/lcvah0vy","slide":4,"text":"证据：reports/product_acceptance_live_latest.json · home_1920x1080.png","textPreview":"证据：reports/product_acceptance_live_latest.json · home_1920x1080.png","textChars":67,"textLines":1,"bbox":[64,686,1100,18]}
+{"kind":"image","id":"im/cfapcz29","slide":4,"name":"","geometry":"roundRect","alt":"Finance Radar Situation Room public UI","bbox":[392,164,824,463]}
+{"kind":"notes","id":"nt/boeljf","slide":4,"text":"先指右侧真实公网截图，再讲左侧四个数字。\n这些数字来自服务器数据库和15项公网验收，不是演示稿手填的估计值。"}
+{"kind":"slide","id":"sl/i3ikrv","slide":5,"title":"FINANCE RADAR / 2026 实训答辩","textShapes":11}
+{"kind":"textbox","id":"sh/uto3etgv","slide":5,"text":"FINANCE RADAR / 2026 实训答辩","textPreview":"FINANCE RADAR / 2026 实训答辩","textChars":25,"textLines":1,"bbox":[64,30,560,24]}
+{"kind":"textbox","id":"sh/hwf2p8f6","slide":5,"text":"一个事件被拆成证据、判断与审计历史","textPreview":"一个事件被拆成证据、判断与审计历史","textChars":17,"textLines":1,"bbox":[64,68,1110,58]}
+{"kind":"shape","id":"sh/gv6lg3yl","slide":5,"bbox":[64,132,1152,1]}
+{"kind":"textbox","id":"sh/3yhkryxc","slide":5,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1170,32,46,24]}
+{"kind":"shape","id":"sh/2xo3itgr","slide":5,"bbox":[64,171,8,8]}
+{"kind":"textbox","id":"sh/p0z2t8fi","slide":5,"text":"精确片段","textPreview":"精确片段","textChars":4,"textLines":1,"bbox":[82,164,268,28]}
+{"kind":"textbox","id":"sh/4zqlk3yx","slide":5,"text":"证据矩阵保存原文片段、来源等级与状态，而不是只有URL。","textPreview":"证据矩阵保存原文片段、来源等级与状态，而不是只有URL。","textChars":28,"textLines":1,"bbox":[82,196,268,62]}
+{"kind":"shape","id":"sh/j2dkfeh8","slide":5,"bbox":[64,283,8,8]}
+{"kind":"textbox","id":"sh/i14j69gn","slide":5,"text":"独立维度","textPreview":"独立维度","textChars":4,"textLines":1,"bbox":[82,276,268,28]}
+{"kind":"textbox","id":"sh/0vqtg3mh","slide":5,"text":"风险路由、证据边、权威性、冲突和工作流互不替代。","textPreview":"风险路由、证据边、权威性、冲突和工作流互不替代。","textChars":24,"textLines":1,"bbox":[82,308,268,62]}
+{"kind":"shape","id":"sh/1wzup832","slide":5,"bbox":[64,395,8,8]}
+{"kind":"textbox","id":"sh/et8bed4b","slide":5,"text":"可操作历史","textPreview":"可操作历史","textChars":5,"textLines":1,"bbox":[82,388,268,28]}
+{"kind":"textbox","id":"sh/fuhsnilw","slide":5,"text":"J/K切换、全局检索、事件版本与人工复核记录均可追踪。","textPreview":"J/K切换、全局检索、事件版本与人工复核记录均可追踪。","textChars":27,"textLines":1,"bbox":[82,420,268,62]}
+{"kind":"textbox","id":"sh/ojatknmd","slide":5,"text":"真实Chrome交互：J 下一条 · K 返回 · / 聚焦搜索","textPreview":"真实Chrome交互：J 下一条 · K 返回 · / 聚焦搜索","textChars":32,"textLines":1,"bbox":[64,532,286,66]}
+{"kind":"shape","id":"sh/pkjuts3y","slide":5,"bbox":[373,159,848,481]}
+{"kind":"shape","id":"sh/nyhcril8","slide":5,"bbox":[64,677,1152,1]}
+{"kind":"textbox","id":"sh/436t8jm9","slide":5,"text":"证据：public_interaction_acceptance.json · event_keyboard_after_jk_1920x1080.png","textPreview":"证据：public_interaction_acceptance.json · event_keyboard_after_jk_1920x1080.png","textChars":77,"textLines":1,"bbox":[64,686,1100,18]}
+{"kind":"image","id":"im/hgjatgju","slide":5,"name":"","geometry":"roundRect","alt":"Finance Radar Event Workbench evidence view","bbox":[378,164,838,471]}
+{"kind":"notes","id":"nt/i3ikrv","slide":5,"text":"从左列队列、中间证据、右列判断维度依次讲。\n快捷键已经由真实Chrome脚本验证了所选行与event_id同步，不只是AppTest。"}
+{"kind":"slide","id":"sl/5jvgmc","slide":6,"title":"FINANCE RADAR / 2026 实训答辩","textShapes":12}
+{"kind":"textbox","id":"sh/2ds7mlwr","slide":6,"text":"FINANCE RADAR / 2026 实训答辩","textPreview":"FINANCE RADAR / 2026 实训答辩","textChars":25,"textLines":1,"bbox":[64,30,560,24]}
+{"kind":"textbox","id":"sh/pgjqx0vi","slide":6,"text":"答辩演示不依赖“刚好发生一条SEC事件”","textPreview":"答辩演示不依赖“刚好发生一条SEC事件”","textChars":20,"textLines":1,"bbox":[64,68,1110,58]}
+{"kind":"shape","id":"sh/4fa9ovex","slide":6,"bbox":[64,132,1152,1]}
+{"kind":"textbox","id":"sh/ril8zado","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1170,32,46,24]}
+{"kind":"shape","id":"sh/qhsrq5w3","slide":6,"bbox":[59,161,830,471]}
+{"kind":"textbox","id":"sh/cju9sfet","slide":6,"text":"STEP 01","textPreview":"STEP 01","textChars":7,"textLines":1,"bbox":[926,176,214,22]}
+{"kind":"textbox","id":"sh/z6l83adk","slide":6,"text":"P2 新闻标题","textPreview":"P2 新闻标题","textChars":7,"textLines":1,"bbox":[926,210,250,32]}
+{"kind":"textbox","id":"sh/elcru5wz","slide":6,"text":"ABSTAIN","textPreview":"ABSTAIN","textChars":7,"textLines":1,"bbox":[926,254,250,40]}
+{"kind":"textbox","id":"sh/gzyd8re9","slide":6,"text":"没有主证据，不允许升级。","textPreview":"没有主证据，不允许升级。","textChars":12,"textLines":1,"bbox":[926,300,250,42]}
+{"kind":"shape","id":"sh/107u1wvu","slide":6,"bbox":[926,362,250,1]}
+{"kind":"textbox","id":"sh/exgv6hwj","slide":6,"text":"STEP 02","textPreview":"STEP 02","textChars":7,"textLines":1,"bbox":[926,388,214,22]}
+{"kind":"textbox","id":"sh/fypczmx4","slide":6,"text":"P0 SEC 原文","textPreview":"P0 SEC 原文","textChars":9,"textLines":1,"bbox":[926,422,250,32]}
+{"kind":"textbox","id":"sh/onydcrel","slide":6,"text":"RISK_REVIEW","textPreview":"RISK_REVIEW","textChars":11,"textLines":1,"bbox":[926,466,270,40]}
+{"kind":"textbox","id":"sh/poru5wv6","slide":6,"text":"2/2 · MET · 外网关闭","textPreview":"2/2 · MET · 外网关闭","textChars":16,"textLines":1,"bbox":[926,518,250,50]}
+{"kind":"shape","id":"sh/21gvahwf","slide":6,"bbox":[64,677,1152,1]}
+{"kind":"textbox","id":"sh/32pc3md0","slide":6,"text":"证据：public_interaction_acceptance.json · replay_completed_1920x1080.png","textPreview":"证据：public_interaction_acceptance.json · replay_completed_1920x1080.png","textChars":70,"textLines":1,"bbox":[64,686,1100,18]}
+{"kind":"image","id":"im/8ju1oryt","slide":6,"name":"","geometry":"roundRect","alt":"Finance Radar deterministic Replay Lab","bbox":[64,166,820,461]}
+{"kind":"notes","id":"nt/5jvgmc","slide":6,"text":"现场点击Run frozen replay，再点击Next step。\n强调同一个下游路由器、模拟时钟、外网关闭，因此没有新事件也能证明完整链路。"}
+{"kind":"slide","id":"sl/jerjy8","slide":7,"title":"FINANCE RADAR / 2026 实训答辩","textShapes":16}
+{"kind":"textbox","id":"sh/qtovy9gr","slide":7,"text":"FINANCE RADAR / 2026 实训答辩","textPreview":"FINANCE RADAR / 2026 实训答辩","textChars":25,"textLines":1,"bbox":[64,30,560,24]}
+{"kind":"textbox","id":"sh/dwzet4z2","slide":7,"text":"优先负面风险复核，不等于只采集负面新闻","textPreview":"优先负面风险复核，不等于只采集负面新闻","textChars":19,"textLines":1,"bbox":[64,68,1110,58]}
+{"kind":"shape","id":"sh/cv6d0zyx","slide":7,"bbox":[64,132,1152,1]}
+{"kind":"textbox","id":"sh/zyhwveh8","slide":7,"text":"07","textPreview":"07","textChars":2,"textLines":1,"bbox":[1170,32,46,24]}
+{"kind":"textbox","id":"sh/yx8f29gn","slide":7,"text":"采集层保持全极性；风险路由只回答“是否需要优先人工复核”。","textPreview":"采集层保持全极性；风险路由只回答“是否需要优先人工复核”。","textChars":29,"textLines":1,"bbox":[64,154,1050,40]}
+{"kind":"textbox","id":"sh/lkzexoze","slide":7,"text":"不利且重大","textPreview":"不利且重大","textChars":5,"textLines":1,"bbox":[64,238,320,34]}
+{"kind":"textbox","id":"sh/0jqx4jyt","slide":7,"text":"RISK_REVIEW","textPreview":"RISK_REVIEW","textChars":11,"textLines":1,"bbox":[64,296,320,38]}
+{"kind":"textbox","id":"sh/f2dwjah4","slide":7,"text":"破产、欺诈、监管处罚、安全事件等，先进入人工队列。","textPreview":"破产、欺诈、监管处罚、安全事件等，先进入人工队列。","textChars":25,"textLines":1,"bbox":[64,356,320,96]}
+{"kind":"shape","id":"sh/e14vqpgj","slide":7,"bbox":[64,474,114,3]}
+{"kind":"shape","id":"sh/oruhwnax","slide":7,"bbox":[428,238,1,256]}
+{"kind":"textbox","id":"sh/9s3ypsri","slide":7,"text":"正面或中性","textPreview":"正面或中性","textChars":5,"textLines":1,"bbox":[450,238,320,34]}
+{"kind":"textbox","id":"sh/mpczudsr","slide":7,"text":"NON_TARGET","textPreview":"NON_TARGET","textChars":10,"textLines":1,"bbox":[450,296,320,38]}
+{"kind":"textbox","id":"sh/nqlgni9c","slide":7,"text":"业绩改善、任命、正常产品新闻仍进入账本，作为真实对照。","textPreview":"业绩改善、任命、正常产品新闻仍进入账本，作为真实对照。","textChars":27,"textLines":1,"bbox":[450,356,320,96]}
+{"kind":"shape","id":"sh/wveh0na9","slide":7,"bbox":[450,474,114,3]}
+{"kind":"shape","id":"sh/xgnytsre","slide":7,"bbox":[814,238,1,256]}
+{"kind":"textbox","id":"sh/atczyds3","slide":7,"text":"不足或冲突","textPreview":"不足或冲突","textChars":5,"textLines":1,"bbox":[836,238,320,34]}
+{"kind":"textbox","id":"sh/bulgri9o","slide":7,"text":"ABSTAIN","textPreview":"ABSTAIN","textChars":7,"textLines":1,"bbox":[836,296,320,38]}
+{"kind":"textbox","id":"sh/czaxo3ap","slide":7,"text":"只有标题、缺少主证据、官方更正或含义不清时停止判断。","textPreview":"只有标题、缺少主证据、官方更正或含义不清时停止判断。","textChars":26,"textLines":1,"bbox":[836,356,320,96]}
+{"kind":"shape","id":"sh/dkjyhoba","slide":7,"bbox":[836,474,114,3]}
+{"kind":"shape","id":"sh/tgbelk3y","slide":7,"bbox":[64,536,1126,78]}
+{"kind":"textbox","id":"sh/sf2dsf2t","slide":7,"text":"P0 / P1 / P2 是证据权威等级，不是情绪标签","textPreview":"P0 / P1 / P2 是证据权威等级，不是情绪标签","textChars":27,"textLines":1,"bbox":[88,553,520,30]}
+{"kind":"textbox","id":"sh/7etwjal8","slide":7,"text":"authority ≠ sentiment · source ≠ target label","textPreview":"authority ≠ sentiment · source ≠ target label","textChars":45,"textLines":1,"bbox":[670,555,470,28]}
+{"kind":"shape","id":"sh/6tkvqpkn","slide":7,"bbox":[64,677,1152,1]}
+{"kind":"textbox","id":"sh/1kvep43a","slide":7,"text":"证据：config/risk_label_contract_v3.json · full-polarity ledger policy","textPreview":"证据：config/risk_label_contract_v3.json · full-polarity ledger policy","textChars":67,"textLines":1,"bbox":[64,686,1100,18]}
+{"kind":"notes","id":"nt/jerjy8","slide":7,"text":"回答‘模型是否只学做空事件’：模型目标是重大不利事件的复核优先级，不是价格做空。\n正面与中性新闻既被保存，也用于限制误报。"}
+{"kind":"slide","id":"sl/thqhmg","slide":8,"title":"FINANCE RADAR / 2026 实训答辩","textShapes":20}
+{"kind":"textbox","id":"sh/5sfuxcz2","slide":8,"text":"FINANCE RADAR / 2026 实训答辩","textPreview":"FINANCE RADAR / 2026 实训答辩","textChars":25,"textLines":1,"bbox":[64,30,560,24]}
+{"kind":"textbox","id":"sh/ipob2x0b","slide":8,"text":"本地小模型只负责摘要，事实与最终状态仍由证据图决定","textPreview":"本地小模型只负责摘要，事实与最终状态仍由证据图决定","textChars":25,"textLines":1,"bbox":[64,68,1110,58]}
+{"kind":"shape","id":"sh/jqxcv2hw","slide":8,"bbox":[64,132,1152,1]}
+{"kind":"textbox","id":"sh/sfqt87it","slide":8,"text":"08","textPreview":"08","textChars":2,"textLines":1,"bbox":[1170,32,46,24]}
+{"kind":"textbox","id":"sh/tgzu1czy","slide":8,"text":"↓","textPreview":"↓","textChars":1,"textLines":1,"bbox":[605,258,42,30]}
+{"kind":"shape","id":"sh/6d8b6x0n","slide":8,"bbox":[326,176,628,82]}
+{"kind":"textbox","id":"sh/7ehcz2h8","slide":8,"text":"确定性证据图","textPreview":"确定性证据图","textChars":6,"textLines":1,"bbox":[352,190,260,28]}
+{"kind":"textbox","id":"sh/8jmtwni9","slide":8,"text":"声明、精确引文、支持/反驳关系","textPreview":"声明、精确引文、支持/反驳关系","textChars":15,"textLines":1,"bbox":[620,192,306,42]}
+{"kind":"textbox","id":"sh/9kvapsju","slide":8,"text":"↓","textPreview":"↓","textChars":1,"textLines":1,"bbox":[605,376,42,30]}
+{"kind":"shape","id":"sh/twne10b2","slide":8,"bbox":[326,294,628,82]}
+{"kind":"textbox","id":"sh/8ved8fah","slide":8,"text":"本地 Qwen 0.5B","textPreview":"本地 Qwen 0.5B","textChars":12,"textLines":1,"bbox":[352,308,260,28]}
+{"kind":"textbox","id":"sh/7u5wzatw","slide":8,"text":"llama.cpp 回环推理 · summary only","textPreview":"llama.cpp 回环推理 · summary only","textChars":29,"textLines":1,"bbox":[620,310,306,42]}
+{"kind":"shape","id":"sh/69wv65sb","slide":8,"bbox":[326,412,628,82]}
+{"kind":"textbox","id":"sh/h07e5kry","slide":8,"text":"确定性最终门","textPreview":"确定性最终门","textChars":6,"textLines":1,"bbox":[352,426,260,28]}
+{"kind":"textbox","id":"sh/gzedcfad","slide":8,"text":"SUPPORTED / CONFLICT / INSUFFICIENT","textPreview":"SUPPORTED / CONFLICT / INSUFFICIENT","textChars":35,"textLines":1,"bbox":[620,428,306,42]}
+{"kind":"shape","id":"sh/vy5w3ats","slide":8,"bbox":[64,548,1152,1]}
+{"kind":"textbox","id":"sh/uxwva5s7","slide":8,"text":"8 / 8","textPreview":"8 / 8","textChars":5,"textLines":1,"bbox":[88,568,230,48]}
+{"kind":"textbox","id":"sh/547e9kru","slide":8,"text":"冻结案例合同通过","textPreview":"冻结案例合同通过","textChars":8,"textLines":1,"bbox":[88,612,230,32]}
+{"kind":"textbox","id":"sh/43ydgzap","slide":8,"text":"100%","textPreview":"100%","textChars":4,"textLines":1,"bbox":[368,568,240,48]}
+{"kind":"textbox","id":"sh/o76xc3il","slide":8,"text":"引用与注入抵抗","textPreview":"引用与注入抵抗","textChars":7,"textLines":1,"bbox":[368,612,240,32]}
+{"kind":"textbox","id":"sh/p8fy58z6","slide":8,"text":"4.61 s","textPreview":"4.61 s","textChars":6,"textLines":1,"bbox":[668,568,220,48]}
+{"kind":"textbox","id":"sh/25ofat0f","slide":8,"text":"本地推理 P95","textPreview":"本地推理 P95","textChars":8,"textLines":1,"bbox":[668,612,220,32]}
+{"kind":"textbox","id":"sh/36xg3yh0","slide":8,"text":"0","textPreview":"0","textChars":1,"textLines":1,"bbox":[948,568,190,48]}
+{"kind":"textbox","id":"sh/cb6xg3ix","slide":8,"text":"推理外部网络","textPreview":"推理外部网络","textChars":6,"textLines":1,"bbox":[948,612,190,32]}
+{"kind":"shape","id":"sh/dczy98zi","slide":8,"bbox":[64,677,1152,1]}
+{"kind":"textbox","id":"sh/q9ofed0r","slide":8,"text":"证据：reports/local_evidence_model_comparison_latest.json","textPreview":"证据：reports/local_evidence_model_comparison_latest.json","textChars":54,"textLines":1,"bbox":[64,686,1100,18]}
+{"kind":"notes","id":"nt/thqhmg","slide":8,"text":"小模型不拥有claim verdict，也不能把弱证据自动升级。\n8/8指冻结案例的结构合同、证据记录保持、引用合规和注入抵抗，不是泛化准确率。"}
+{"kind":"slide","id":"sl/6gv8bn","slide":9,"title":"FINANCE RADAR / 2026 实训答辩","textShapes":14}
+{"kind":"textbox","id":"sh/x8r25g7y","slide":9,"text":"FINANCE RADAR / 2026 实训答辩","textPreview":"FINANCE RADAR / 2026 实训答辩","textChars":25,"textLines":1,"bbox":[64,30,560,24]}
+{"kind":"textbox","id":"sh/a503u187","slide":9,"text":"95%误报不是坏消息，而是上线门禁真正生效","textPreview":"95%误报不是坏消息，而是上线门禁真正生效","textChars":21,"textLines":1,"bbox":[64,68,1110,58]}
+{"kind":"shape","id":"sh/b69k36ps","slide":9,"bbox":[64,132,1152,1]}
+{"kind":"textbox","id":"sh/kbil0bq9","slide":9,"text":"09","textPreview":"09","textChars":2,"textLines":1,"bbox":[1170,32,46,24]}
+{"kind":"textbox","id":"sh/y903yl83","slide":9,"text":"V1","textPreview":"V1","textChars":2,"textLines":1,"bbox":[770,182,72,26]}
+{"kind":"textbox","id":"sh/za947qpo","slide":9,"text":"REMAIN_SHADOW","textPreview":"REMAIN_SHADOW","textChars":13,"textLines":1,"bbox":[844,180,330,30]}
+{"kind":"textbox","id":"sh/0fylorq5","slide":9,"text":"高召回掩盖了普通新闻误报。","textPreview":"高召回掩盖了普通新闻误报。","textChars":13,"textLines":1,"bbox":[770,220,394,42]}
+{"kind":"shape","id":"sh/1g72xw7q","slide":9,"bbox":[770,278,394,1]}
+{"kind":"textbox","id":"sh/p8r2l4ve","slide":9,"text":"V2","textPreview":"V2","textChars":2,"textLines":1,"bbox":[770,304,72,26]}
+{"kind":"textbox","id":"sh/o7i1czut","slide":9,"text":"REJECTED","textPreview":"REJECTED","textChars":8,"textLines":1,"bbox":[844,302,330,30]}
+{"kind":"textbox","id":"sh/369kjud8","slide":9,"text":"来源留出近乎全体ABSTAIN，未部署。","textPreview":"来源留出近乎全体ABSTAIN，未部署。","textChars":20,"textLines":1,"bbox":[770,342,394,42]}
+{"kind":"shape","id":"sh/250japcn","slide":9,"bbox":[770,400,394,1]}
+{"kind":"textbox","id":"sh/dwr294va","slide":9,"text":"V3","textPreview":"V3","textChars":2,"textLines":1,"bbox":[770,426,72,26]}
+{"kind":"textbox","id":"sh/cvi1gzup","slide":9,"text":"877 → 0","textPreview":"877 → 0","textChars":7,"textLines":1,"bbox":[844,424,330,30]}
+{"kind":"textbox","id":"sh/bu9knedk","slide":9,"text":"旧清单无双人内容裁决，被禁止冻结blind-v2。","textPreview":"旧清单无双人内容裁决，被禁止冻结blind-v2。","textChars":25,"textLines":1,"bbox":[770,466,394,62]}
+{"kind":"shape","id":"sh/q90je9cz","slide":9,"bbox":[770,548,394,62]}
+{"kind":"textbox","id":"sh/l0b2dovm","slide":9,"text":"生产模型未改 · production_changed=false","textPreview":"生产模型未改 · production_changed=false","textChars":33,"textLines":1,"bbox":[788,566,356,26]}
+{"kind":"shape","id":"sh/0z2lkju1","slide":9,"bbox":[64,677,1152,1]}
+{"kind":"textbox","id":"sh/kfudwr69","slide":9,"text":"证据：external_blind_v1_report · risk_router_v2_candidate_report · risk_label_contract_v3_readiness","textPreview":"证据：external_blind_v1_report · risk_router_v2_candidate_report · risk_label_contract_v3_readiness","textChars":96,"textLines":1,"bbox":[64,686,1100,18]}
+{"kind":"chart","id":"ch/dgzix8ny","slide":9,"name":"","chartType":"bar","bbox":[64,174,654,388]}
+{"kind":"notes","id":"nt/6gv8bn","slide":9,"text":"这一页是模型治理亮点：失败没有被藏起来，而是触发REMAIN_SHADOW和REJECTED。\nV3把下一步变成真实双人内容裁决，而不是继续在旧盲测上调阈值。"}
+{"kind":"slide","id":"sl/gjenvp","slide":10,"title":"FINANCE RADAR / 2026 实训答辩","textShapes":14}
+{"kind":"textbox","id":"sh/utkvq1kj","slide":10,"text":"FINANCE RADAR / 2026 实训答辩","textPreview":"FINANCE RADAR / 2026 实训答辩","textChars":25,"textLines":1,"bbox":[64,30,560,24]}
+{"kind":"textbox","id":"sh/hwbulg3a","slide":10,"text":"系统能迁移、能恢复，也能诚实显示尚未完成的运行门禁","textPreview":"系统能迁移、能恢复，也能诚实显示尚未完成的运行门禁","textChars":25,"textLines":1,"bbox":[64,68,1110,58]}
+{"kind":"shape","id":"sh/wv2dsb2p","slide":10,"bbox":[64,132,1152,1]}
+{"kind":"textbox","id":"sh/7q9cfmls","slide":10,"text":"10","textPreview":"10","textChars":2,"textLines":1,"bbox":[1170,32,46,24]}
+{"kind":"shape","id":"sh/mp0bm1kn","slide":10,"bbox":[59,165,758,431]}
+{"kind":"textbox","id":"sh/8ritor2d","slide":10,"text":"5","textPreview":"5","textChars":1,"textLines":1,"bbox":[856,176,300,48]}
+{"kind":"textbox","id":"sh/rmdcrqlc","slide":10,"text":"常驻服务 active","textPreview":"常驻服务 active","textChars":11,"textLines":1,"bbox":[856,220,300,32]}
+{"kind":"textbox","id":"sh/6l4vylkr","slide":10,"text":"4,863","textPreview":"4,863","textChars":5,"textLines":1,"bbox":[856,268,300,48]}
+{"kind":"textbox","id":"sh/kfehwvyx","slide":10,"text":"迁移清单全部匹配","textPreview":"迁移清单全部匹配","textChars":8,"textLines":1,"bbox":[856,312,300,32]}
+{"kind":"textbox","id":"sh/lgnyp0fi","slide":10,"text":"4,864","textPreview":"4,864","textChars":5,"textLines":1,"bbox":[856,360,300,48]}
+{"kind":"textbox","id":"sh/ydwfulgr","slide":10,"text":"完整恢复准备文件","textPreview":"完整恢复准备文件","textChars":8,"textLines":1,"bbox":[856,404,300,32]}
+{"kind":"textbox","id":"sh/je5gnqxc","slide":10,"text":"AES-256-GCM · 两库完整性通过","textPreview":"AES-256-GCM · 两库完整性通过","textChars":21,"textLines":1,"bbox":[856,460,320,28]}
+{"kind":"textbox","id":"sh/wbuxsvy1","slide":10,"text":"不含交易项目 / TLS 私钥","textPreview":"不含交易项目 / TLS 私钥","textChars":15,"textLines":1,"bbox":[856,500,320,26]}
+{"kind":"shape","id":"sh/xc3yl0fm","slide":10,"bbox":[856,548,320,58]}
+{"kind":"textbox","id":"sh/a9cfqlgv","slide":10,"text":"24H WINDOW · PARTIAL","textPreview":"24H WINDOW · PARTIAL","textChars":20,"textLines":1,"bbox":[874,561,284,24]}
+{"kind":"textbox","id":"sh/balgjqxg","slide":10,"text":"时间未满，不提前宣称PASS","textPreview":"时间未满，不提前宣称PASS","textChars":14,"textLines":1,"bbox":[874,586,284,18]}
+{"kind":"shape","id":"sh/o7uxobyp","slide":10,"bbox":[64,677,1152,1]}
+{"kind":"textbox","id":"sh/983yhgfa","slide":10,"text":"证据：ACCEPTED_BACKUP.json · migration restore reports · runtime_gate_latest.json","textPreview":"证据：ACCEPTED_BACKUP.json · migration restore reports · runtime_gate_latest.json","textChars":78,"textLines":1,"bbox":[64,686,1100,18]}
+{"kind":"image","id":"im/0vepwnyd","slide":10,"name":"","geometry":"roundRect","alt":"Finance Radar Operations and Model public UI","bbox":[64,170,748,421]}
+{"kind":"notes","id":"nt/gjenvp","slide":10,"text":"指出迁移已经做到审计和PREPARED_NOT_ACTIVATED，没有触碰当前交易程序。\n24小时门禁仍是PARTIAL，这种诚实状态反而说明运维监控不是装饰。"}
+{"kind":"slide","id":"sl/wkgb5v","slide":11,"title":"FINANCE RADAR / 2026 实训答辩","textShapes":17}
+{"kind":"textbox","id":"sh/axcza5cb","slide":11,"text":"FINANCE RADAR / 2026 实训答辩","textPreview":"FINANCE RADAR / 2026 实训答辩","textChars":25,"textLines":1,"bbox":[64,30,560,24]}
+{"kind":"textbox","id":"sh/x03i5kbm","slide":11,"text":"工程证据覆盖正常路径、故障路径与离线复核","textPreview":"工程证据覆盖正常路径、故障路径与离线复核","textChars":20,"textLines":1,"bbox":[64,68,1110,58]}
+{"kind":"shape","id":"sh/czuhcfuh","slide":11,"bbox":[64,132,1152,1]}
+{"kind":"textbox","id":"sh/z2l07uts","slide":11,"text":"11","textPreview":"11","textChars":2,"textLines":1,"bbox":[1170,32,46,24]}
+{"kind":"textbox","id":"sh/y1czepc7","slide":11,"text":"313","textPreview":"313","textChars":3,"textLines":1,"bbox":[64,170,190,50]}
+{"kind":"textbox","id":"sh/l4ni9kby","slide":11,"text":"自动化测试","textPreview":"自动化测试","textChars":5,"textLines":1,"bbox":[282,172,260,30]}
+{"kind":"textbox","id":"sh/k3ehgfud","slide":11,"text":"含模型合同、恢复安全、网页交互与注入边界","textPreview":"含模型合同、恢复安全、网页交互与注入边界","textChars":20,"textLines":1,"bbox":[548,173,636,42]}
+{"kind":"shape","id":"sh/7q50but4","slide":11,"bbox":[282,232,902,1]}
+{"kind":"textbox","id":"sh/mpwzipcj","slide":11,"text":"120 / 120","textPreview":"120 / 120","textChars":9,"textLines":1,"bbox":[64,272,190,50]}
+{"kind":"textbox","id":"sh/wje5gf69","slide":11,"text":"并发负载","textPreview":"并发负载","textChars":4,"textLines":1,"bbox":[282,274,260,30]}
+{"kind":"textbox","id":"sh/hkn6pknu","slide":11,"text":"15并发请求，公网与回环路径均100%成功","textPreview":"15并发请求，公网与回环路径均100%成功","textChars":21,"textLines":1,"bbox":[548,275,636,42]}
+{"kind":"shape","id":"sh/uxcne5oj","slide":11,"bbox":[282,334,902,1]}
+{"kind":"textbox","id":"sh/vilona5o","slide":11,"text":"6 / 6","textPreview":"6 / 6","textChars":5,"textLines":1,"bbox":[64,374,190,50]}
+{"kind":"textbox","id":"sh/4ne5kf6l","slide":11,"text":"故障注入","textPreview":"故障注入","textChars":4,"textLines":1,"bbox":[282,376,260,30]}
+{"kind":"textbox","id":"sh/5on6tkn6","slide":11,"text":"坏XML、坏模型、坏备份、证据升级、官方更正、禁交易","textPreview":"坏XML、坏模型、坏备份、证据升级、官方更正、禁交易","textChars":26,"textLines":1,"bbox":[548,377,636,42]}
+{"kind":"shape","id":"sh/ilwnipof","slide":11,"bbox":[282,436,902,1]}
+{"kind":"textbox","id":"sh/jm5ora50","slide":11,"text":"85","textPreview":"85","textChars":2,"textLines":1,"bbox":[64,476,190,50]}
+{"kind":"textbox","id":"sh/srypoz6h","slide":11,"text":"离线证据文件","textPreview":"离线证据文件","textChars":6,"textLines":1,"bbox":[282,478,260,30]}
+{"kind":"textbox","id":"sh/ts76x4n2","slide":11,"text":"逐文件SHA-256、ZIP CRC、清单一致性与敏感值扫描","textPreview":"逐文件SHA-256、ZIP CRC、清单一致性与敏感值扫描","textChars":30,"textLines":1,"bbox":[548,479,636,42]}
+{"kind":"shape","id":"sh/1wjel0bu","slide":11,"bbox":[282,538,902,1]}
+{"kind":"shape","id":"sh/gvaxsvu9","slide":11,"bbox":[64,590,1120,56]}
+{"kind":"textbox","id":"sh/fu1wjqt4","slide":11,"text":"硬边界审计：交易能力 0 · 自动核验违规 0 · 市场特征泄漏 0","textPreview":"硬边界审计：交易能力 0 · 自动核验违规 0 · 市场特征泄漏 0","textChars":34,"textLines":1,"bbox":[88,606,1072,28]}
+{"kind":"shape","id":"sh/etsfqlcj","slide":11,"bbox":[64,677,1152,1]}
+{"kind":"textbox","id":"sh/p03epkb6","slide":11,"text":"证据：pytest 313+17 · public_load_test_120x15 · defense_drills · defense_pack_latest","textPreview":"证据：pytest 313+17 · public_load_test_120x15 · defense_drills · defense_pack_latest","textChars":81,"textLines":1,"bbox":[64,686,1100,18]}
+{"kind":"notes","id":"nt/wkgb5v","slide":11,"text":"四类证据分别回答：代码是否回归、系统是否扛得住、故障是否可见、断网时是否能复核。\n答辩现场可直接打开离线证据包，避免网络成为唯一证明。"}
+{"kind":"slide","id":"sl/c9rzxt","slide":12,"title":"FINANCE RADAR / 结论","textShapes":15}
+{"kind":"textbox","id":"sh/upsbmtoj","slide":12,"text":"FINANCE RADAR / 结论","textPreview":"FINANCE RADAR / 结论","textChars":18,"textLines":1,"bbox":[64,46,420,24]}
+{"kind":"textbox","id":"sh/hsjuh87a","slide":12,"text":"真正的差异化，","textPreview":"真正的差异化，","textChars":7,"textLines":1,"bbox":[64,132,650,58]}
+{"kind":"textbox","id":"sh/grato36p","slide":12,"text":"是系统知道何时不能下结论。","textPreview":"是系统知道何时不能下结论。","textChars":13,"textLines":1,"bbox":[64,196,1000,72]}
+{"kind":"shape","id":"sh/3u1cjip0","slide":12,"bbox":[64,324,200,3]}
+{"kind":"textbox","id":"sh/itsbqdof","slide":12,"text":"可检查","textPreview":"可检查","textChars":3,"textLines":1,"bbox":[64,348,220,32]}
+{"kind":"textbox","id":"sh/5w3uls76","slide":12,"text":"结论回到精确证据","textPreview":"结论回到精确证据","textChars":8,"textLines":1,"bbox":[64,392,228,40]}
+{"kind":"shape","id":"sh/4vutsn6l","slide":12,"bbox":[352,324,200,3]}
+{"kind":"textbox","id":"sh/rylcni5c","slide":12,"text":"可回放","textPreview":"可回放","textChars":3,"textLines":1,"bbox":[352,348,220,32]}
+{"kind":"textbox","id":"sh/qxcbudor","slide":12,"text":"现场不依赖随机事件","textPreview":"现场不依赖随机事件","textChars":9,"textLines":1,"bbox":[352,392,228,40]}
+{"kind":"shape","id":"sh/cfmxgb2l","slide":12,"bbox":[640,324,200,3]}
+{"kind":"textbox","id":"sh/dgvy9g3q","slide":12,"text":"可拒绝","textPreview":"可拒绝","textChars":3,"textLines":1,"bbox":[640,348,220,32]}
+{"kind":"textbox","id":"sh/qd4fe1kf","slide":12,"text":"失败模型不会上线","textPreview":"失败模型不会上线","textChars":8,"textLines":1,"bbox":[640,392,228,40]}
+{"kind":"shape","id":"sh/bedg76l0","slide":12,"bbox":[928,324,200,3]}
+{"kind":"textbox","id":"sh/0jmxkb2h","slide":12,"text":"可恢复","textPreview":"可恢复","textChars":3,"textLines":1,"bbox":[928,348,220,32]}
+{"kind":"textbox","id":"sh/l4fydg32","slide":12,"text":"服务器更换有硬门禁","textPreview":"服务器更换有硬门禁","textChars":9,"textLines":1,"bbox":[928,392,228,40]}
+{"kind":"textbox","id":"sh/yh4fi1kb","slide":12,"text":"工程闭环已具备优秀基础；课程闭环还必须由真实过程证据完成。","textPreview":"工程闭环已具备优秀基础；课程闭环还必须由真实过程证据完成。","textChars":29,"textLines":1,"bbox":[64,490,1110,42]}
+{"kind":"textbox","id":"sh/zidgb6lw","slide":12,"text":"仍待：24小时窗口 · 学生禁飞区与Git贡献 · 教师批准 · V3双人内容裁决","textPreview":"仍待：24小时窗口 · 学生禁飞区与Git贡献 · 教师批准 · V3双人内容裁决","textChars":41,"textLines":1,"bbox":[64,554,1110,32]}
+{"kind":"shape","id":"sh/876xov2d","slide":12,"bbox":[64,618,1120,44]}
+{"kind":"textbox","id":"sh/98fyh03y","slide":12,"text":"最终证明的不是一次预测，而是一条可复核、可审计、可迁移的工程链路。","textPreview":"最终证明的不是一次预测，而是一条可复核、可审计、可迁移的工程链路。","textChars":33,"textLines":1,"bbox":[88,628,1072,24]}
+{"kind":"textbox","id":"sh/xsr6lwr6","slide":12,"text":"12","textPreview":"12","textChars":2,"textLines":1,"bbox":[1170,682,46,20]}
+{"kind":"notes","id":"nt/c9rzxt","slide":12,"text":"收尾回到开场：价值不是一次预测，而是证据链的可复核性。\n剩余项明确归属真实学生、教师和时间窗口，不用更多AI生成代码替代。"}

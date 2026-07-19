@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "teacher_approval": {
+    "evidence_path": null,
+    "sha256": null,
+    "approved_high_difficulty": false,
+    "approved_fz3": false
+  },
+  "role_matrix_path": null,
+  "members": [],
+  "forbidden_zones": [
+    {
+      "id": "FZ1",
+      "owner": null,
+      "reviewer": null,
+      "design_path": null,
+      "implementation_path": null,
+      "tests_path": null,
+      "first_student_commit": null,
+      "final_student_commit": null
+    },
+    {
+      "id": "FZ2",
+      "owner": null,
+      "reviewer": null,
+      "design_path": null,
+      "implementation_path": null,
+      "tests_path": null,
+      "first_student_commit": null,
+      "final_student_commit": null
+    },
+    {
+      "id": "FZ3",
+      "owner": null,
+      "reviewer": null,
+      "design_path": null,
+      "implementation_path": null,
+      "tests_path": null,
+      "first_student_commit": null,
+      "final_student_commit": null
+    }
+  ],
+  "timed_drills": [],
+  "improvised_changes": []
+}

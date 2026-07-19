@@ -1,0 +1,14 @@
+.git
+.env
+.pytest_cache
+__pycache__
+*.pyc
+*.session
+*.session-journal
+data
+reports
+tmp
+qa_render*
+*.docx
+*.pdf
+artifacts/*.joblib

@@ -1,0 +1,59 @@
+{
+  "generated_at": "2026-07-16T17:51:27.614199+00:00",
+  "database": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\data\\finance_radar.sqlite3",
+  "backup_before_migration": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\data\\backups\\finance_radar_before_event_ledger_20260715T211307Z.sqlite3",
+  "import_counts": {
+    "queue_rows": 932,
+    "events": 1160,
+    "observations": 3556,
+    "evidence_rows": 2386,
+    "market_metrics": 1898,
+    "adjudicated_events": 792,
+    "jobs": 1160
+  },
+  "schema_version": 12,
+  "table_counts": {
+    "sources": 18,
+    "raw_observations": 3556,
+    "source_revisions": 710,
+    "canonical_events": 1160,
+    "event_chains": 3,
+    "event_chain_members": 7,
+    "event_versions": 2081,
+    "event_observations": 3548,
+    "event_evidence": 2386,
+    "event_assessments": 109,
+    "entities": 7,
+    "assets": 5,
+    "event_entities": 7,
+    "event_asset_impacts": 6,
+    "market_jobs": 4,
+    "market_snapshots": 3,
+    "event_market_metrics": 1898,
+    "observation_jobs": 400,
+    "pipeline_jobs": 1160,
+    "alert_outbox": 13,
+    "alert_delivery_attempts": 4,
+    "alert_delivery_leases": 0,
+    "alert_delivery_cleanup": 2,
+    "runtime_leases": 0,
+    "source_cursors": 9,
+    "sec_filing_enrichments": 48,
+    "event_review_triage": 114
+  },
+  "event_status": {
+    "candidate": 263,
+    "rejected": 351,
+    "verified": 546
+  },
+  "job_status": {
+    "COMPLETED_DISCOVERY_FILTERED": 7,
+    "COMPLETED_DUPLICATE_CLUSTER": 1,
+    "COMPLETED_MANUAL_ADJUDICATION": 897,
+    "PENDING_EVIDENCE_REVIEW": 139,
+    "PENDING_PRIMARY_EVIDENCE": 116
+  },
+  "no_trading_violations": 0,
+  "auto_verification_violations": 0,
+  "market_metric_scope_violations": 0
+}

@@ -1,0 +1,25 @@
+{
+  "captured_at_utc": "2026-07-18T22:29:08.953Z",
+  "requested_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Replay_Lab",
+  "final_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Replay_Lab",
+  "title": "Replay Lab · Finance Radar",
+  "viewport": {
+    "width": 1366,
+    "height": 768
+  },
+  "full_page": false,
+  "scroll_y": 0,
+  "window_scroll_y": 0,
+  "tab": null,
+  "canvas_count": 5,
+  "iframe_count": 0,
+  "dataframe_count": 1,
+  "skeleton_count": 0,
+  "alert_count": 0,
+  "body_text_length": 504,
+  "body_text_excerpt": "Home\n\nEvent Intelligence\n\nReplay Lab\n\nOperations and Model\n\nAdjudication Studio\n\nFINANCE RADAR\n/\nReplay Lab\nREPLAY\n冻结事件时钟保证现场没有新 SEC 事件时仍能证明完整链路\n情报与人工复核系统 · 只读行情 · 不含下单、仓位、余额或交易执行能力\n\nFrozen case\n\nCASE\nsec_bankruptcy_verified\nSTEPS\n2\nEXPECTED\nRISK_REVIEW\nEXTERNAL NETWORK\nOFF\n\nA discovery headline is followed by a P0 SEC filing passage. The same router used by live processing should escalate it for risk review.\n\nRun frozen replay\n\nNext step\n\nShow all\n\nReset history\n\nRecent replay evidence\nLAST 10 RUNS",
+  "console_errors": [],
+  "page_errors": [],
+  "http_errors": [],
+  "screenshot": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\reports\\ui_qa_20260719\\replay_lab_1366x768.png"
+}

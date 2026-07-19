@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-18T16:46:43.462382+00:00",
+  "target": "http://127.0.0.1:18000",
+  "read_only": true,
+  "passed": true,
+  "requests": 120,
+  "concurrency": 15,
+  "elapsed_seconds": 3.901,
+  "throughput_requests_per_second": 30.763,
+  "success_rate": 1.0,
+  "status_counts": {
+    "200": 120
+  },
+  "latency_ms": {
+    "mean": 472.184,
+    "p50": 553.755,
+    "p95": 860.03,
+    "p99": 913.791,
+    "max": 957.551
+  },
+  "routes": {
+    "/api/v1/overview": {
+      "requests": 40,
+      "p50_ms": 650.534,
+      "p95_ms": 860.03,
+      "max_ms": 913.791
+    },
+    "/api/v1/events": {
+      "requests": 40,
+      "p50_ms": 138.136,
+      "p95_ms": 223.663,
+      "max_ms": 262.242
+    },
+    "/api/v1/health": {
+      "requests": 40,
+      "p50_ms": 596.235,
+      "p95_ms": 900.859,
+      "max_ms": 957.551
+    }
+  },
+  "errors": [],
+  "pass_policy": {
+    "minimum_success_rate": 0.99,
+    "maximum_p95_ms": 5000
+  }
+}

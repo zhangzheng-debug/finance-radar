@@ -1,0 +1,27 @@
+{
+  "captured_at_utc": "2026-07-18T18:09:38.292Z",
+  "requested_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Event_Intelligence",
+  "final_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Event_Intelligence?flow=%E5%BE%85%E5%A4%8D%E6%A0%B8&limit=25&event_id=FR-LIVE-7c4ecef2b8640f1a1a6d7b8bc1db8e39",
+  "title": "Event Workbench · Finance Radar",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "full_page": false,
+  "scroll_y": 1350,
+  "window_scroll_y": 0,
+  "tab": null,
+  "canvas_count": 3,
+  "iframe_count": 0,
+  "dataframe_count": 3,
+  "skeleton_count": 0,
+  "alert_count": 1,
+  "body_text_length": 1916,
+  "body_text_excerpt": "keyboard_double_arrow_left\n\nHome\n\nEvent Intelligence\n\nReplay Lab\n\nOperations and Model\n\nkeyboard_double_arrow_right\nFINANCE RADAR\n/\nEvent Workbench\nREAD ONLY\n情报与人工复核系统 · 只读行情 · 不含下单、仓位、余额或交易执行能力\n\n保存视图\n\n事件族\n\n全局检索\n\n数量\n\n待复核 · 294 events\n\nK / ↑ 上一条\n\nJ / ↓ 下一条\n\nJ/K 或 ↑/↓ 切换事件 · / 聚焦检索；输入框中不劫持按键\n\nREVIEW 07-18 16:01 — · hack_or_exploit\n\nREVIEW 07-18 08:24 — · new_listing\n\nREVIEW 07-18 08:24 — · conflict_or_blockade\n\nREVIEW 07-18 08:38 — · sec_litigation_release\n\nREVIEW 07-18 08:38 — · sec_litigation_release\n\nREVIEW 07-18 08:38 — · sec_litigation_release\n\nREVIEW 07-18 08:29 — · BEYOND MEAT, INC.\n\nREVIEW 07-18 08:29 — · Wisekey International Holding S.A.\n\nREVIEW 07-18 08:24 — · monetary_policy\n\nREVIEW 07-18 08:24 — · COMMERCE BANCSHARES INC /MO/\n\nREVIEW 07-18 08:24 — · SkyAI, Inc.\n\nREVIEW 07-18 08:24 — · SOUTHERN COPPER CORP/\n\nREVIEW 07-18 08:24 — · Empire State Realty Trust, Inc.\n\nREVIEW 07-18 08:24 — · VivoPower PLC\n\nREVIEW 07-18 08:24 — · Digital Brands Group, Inc.\n\nREVIEW 07-18 08:24 — · Ex",
+  "console_errors": [
+    "Failed to load resource: the server responded with a status of 404 ()",
+    "Failed to load resource: the server responded with a status of 404 ()"
+  ],
+  "page_errors": [],
+  "screenshot": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\reports\\ui_qa_20260719\\event_intelligence_390x844_scrolled.png"
+}

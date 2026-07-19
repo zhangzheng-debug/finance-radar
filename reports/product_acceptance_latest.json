@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-18T22:10:51.257248+00:00",
+  "target": {
+    "api": "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api",
+    "web": "https://radar.167-172-69-16.sslip.io:8443/radar"
+  },
+  "passed": true,
+  "checks": {
+    "https_certificate_valid": true,
+    "web_health_ok": true,
+    "api_health_ok": true,
+    "ledger_schema_12": true,
+    "ledger_quick_check_ok": true,
+    "operations_quick_check_ok": true,
+    "worker_success": true,
+    "backup_verified": true,
+    "model_ready_shadow_only": true,
+    "external_blind_evidence_present": true,
+    "external_blind_promotion_guard": true,
+    "required_frozen_replays": true,
+    "no_trading_routes": true,
+    "safe_demo_default": true,
+    "safety_audits_zero": true
+  },
+  "tls": {
+    "host": "radar.167-172-69-16.sslip.io",
+    "port": 8443,
+    "protocol": "TLSv1.3",
+    "not_after": "Oct 16 07:49:23 2026 GMT",
+    "subject_alt_names": [
+      "radar.167-172-69-16.sslip.io"
+    ]
+  },
+  "snapshot": {
+    "ledger": {
+      "status": "ok",
+      "database": "/opt/finance-radar/shared/data/finance_radar.sqlite3",
+      "database_bytes": 28516352,
+      "schema_version": 12,
+      "quick_check": "ok",
+      "last_event_update": "2026-07-18T16:01:30.460745+00:00",
+      "counts": {
+        "sources": 22,
+        "raw_observations": 3821,
+        "canonical_events": 1191,
+        "event_versions": 2114,
+        "event_evidence": 2394,
+        "event_market_metrics": 1898,
+        "pipeline_jobs": 1191,
+        "alert_outbox": 13
+      },
+      "event_status": {
+        "candidate": 294,
+        "rejected": 351,
+        "verified": 546
+      },
+      "audit": {
+        "trading_boundary_violations": 0,
+        "auto_verification_violations": 0,
+        "market_feature_leakage_violations": 0
+      }
+    },
+    "operations_counts": {
+      "replay_runs": 7,
+      "model_runs": 7,
+      "worker_cycles": 178,
+      "backup_runs": 23,
+      "agent_decisions": 3,
+      "evidence_objects": 2,
+      "human_overrides": 0,
+      "adjudication_samples": 24,
+      "adjudication_reviews": 0
+    },
+    "latest_worker": {
+      "cycle_id": "cycle-d664aedd27d74a1492a94f62df163bdb",
+      "status": "SUCCESS",
+      "started_at": "2026-07-18T22:08:26.179256+00:00",
+      "finished_at": "2026-07-18T22:08:27.185988+00:00"
+    },
+    "latest_backup": {
+      "backup_id": "backup-dbff3847070349b2a09f6e6996c37eea",
+      "backup_path": "/opt/finance-radar/shared/data/operational_backups/finance_radar_20260718T212518Z.sqlite3",
+      "source_bytes": 28069888,
+      "backup_bytes": 28069888,
+      "quick_check": "ok",
+      "status": "VERIFIED",
+      "created_at": "2026-07-18T21:25:18.686960+00:00",
+      "verified_at": "2026-07-18T21:25:19.140134+00:00",
+      "error": null,
+      "restored_counts": {
+        "canonical_events": 1191,
+        "event_evidence": 2394,
+        "event_market_metrics": 1898,
+        "event_versions": 2114,
+        "raw_observations": 3821,
+        "sources": 22
+      }
+    },
+    "model": {
+      "status": "ready",
+      "model_version": "risk-router-v1-e1ce020d3445",
+      "artifact_sha256": "84b9186bd2d1c1d16dcc2f37560e034181bcbc257286c458c2bf7c600c4f7a28",
+      "shadow": true,
+      "no_trading": true,
+      "external_blind": {
+        "evaluation_type": "true_external_blind_label_first",
+        "freeze_id": "external-blind-v1-2dd91c8b9acf",
+        "dataset_sha256": "2dd91c8b9acfa7423c1e1818efa880e33e6f3c3a2be1bc8dd2f035e92a214abc",
+        "rows": 40,
+        "label_counts": {
+          "RISK_REVIEW": 20,
+          "NON_TARGET": 20
+        },
+        "source_counts": {
+          "sec_litigation_external": 15,
+          "nvidia_press_external": 17,
+          "cftc_enforcement_external": 5,
+          "federal_reserve_policy_external": 3
+        },
+        "model_version": "risk-router-v1-e1ce020d3445",
+        "model_artifact_sha256": "84b9186bd2d1c1d16dcc2f37560e034181bcbc257286c458c2bf7c600c4f7a28",
+        "training_dataset_sha256": "e1ce020d344534485c09593d23ca7b0ae1cb17f4490ca5ab4cab3a557884e01f",
+        "overlap_audit": {
+          "event_or_sample_id_overlap_count": 0,
+          "title_substring_overlap_count": 0,
+          "max_training_shingle_jaccard": 0.072464,
+          "rejection_threshold": 0.8
+        },
+        "metrics": {
+          "coverage": 0.975,
+          "abstain_rate": 0.025000000000000022,
+          "strict_accuracy": 0.5,
+          "covered_accuracy": 0.5128205128205128,
+          "risk_recall": 1.0,
+          "non_target_false_risk_rate": 0.95,
+          "mean_latency_ms": 1.5166499999999998,
+          "confusion_expected_to_predicted": {
+            "RISK_REVIEW": {
+              "RISK_REVIEW": 20
+            },
+            "NON_TARGET": {
+              "RISK_REVIEW": 19,
+              "ABSTAIN": 1
+            }
+          }
+        },
+        "source_metrics": {
+          "sec_litigation_external": {
+            "rows": 15,
+            "expected_label": "RISK_REVIEW",
+            "route_distribution": {
+              "RISK_REVIEW": 15
+            },
+            "coverage": 1.0,
+            "strict_accuracy": 1.0
+          },
+          "nvidia_press_external": {
+            "rows": 17,
+            "expected_label": "NON_TARGET",
+            "route_distribution": {
+              "RISK_REVIEW": 16,
+              "ABSTAIN": 1
+            },
+            "coverage": 0.9411764705882353,
+            "strict_accuracy": 0.0
+          },
+          "cftc_enforcement_external": {
+            "rows": 5,
+            "expected_label": "RISK_REVIEW",
+            "route_distribution": {
+              "RISK_REVIEW": 5
+            },
+            "coverage": 1.0,
+            "strict_accuracy": 1.0
+          },
+          "federal_reserve_policy_external": {
+            "rows": 3,
+            "expected_label": "NON_TARGET",
+            "route_distribution": {
+              "RISK_REVIEW": 3
+            },
+            "coverage": 1.0,
+            "strict_accuracy": 0.0
+          }
+        },
+        "thresholds": {
+          "minimum_rows": 40,
+          "coverage_gte": 0.65,
+          "covered_accuracy_gte": 0.8,
+          "risk_recall_gte": 0.8,
+          "non_target_false_risk_rate_lte": 0.2
+        },
+        "gates": {
+          "minimum_rows": true,
+          "coverage": true,
+          "covered_accuracy": false,
+          "risk_recall": true,
+          "non_target_false_risk_rate": false,
+          "zero_training_overlap": true,
+          "label_first_freeze": true
+        },
+        "gate_pass": false,
+        "promotion_decision": "REMAIN_SHADOW",
+        "no_trading": true
+      }
+    },
+    "replay_case_ids": [
+      "sec_bankruptcy_verified",
+      "positive_earnings_non_target",
+      "rumor_correction_abstain",
+      "sec_filing_corrected_abstain"
+    ],
+    "api_route_count": 21,
+    "forbidden_paths": []
+  }
+}

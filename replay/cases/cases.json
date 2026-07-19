@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "sec_bankruptcy_verified",
+      "title": "SEC bankruptcy filing becomes a verified downside-risk event",
+      "description": "A discovery headline is followed by a P0 SEC filing passage. The same router used by live processing should escalate it for risk review.",
+      "expected_label": "RISK_REVIEW",
+      "observations": [
+        {
+          "at_seconds": 0,
+          "source": "aggregated_news",
+          "authority_tier": "P2",
+          "title": "Company reportedly prepares a court-supervised restructuring",
+          "passage": "A news summary says the issuer may seek bankruptcy protection, but no primary filing is yet available.",
+          "contradicts": false
+        },
+        {
+          "at_seconds": 18,
+          "source": "sec_current_filings",
+          "authority_tier": "P0",
+          "title": "Issuer files Form 8-K under Item 1.03",
+          "passage": "The company disclosed that it and certain subsidiaries filed voluntary petitions for relief under Chapter 11 and will operate as debtors in possession while pursuing a court-supervised restructuring.",
+          "contradicts": false
+        }
+      ]
+    },
+    {
+      "case_id": "positive_earnings_non_target",
+      "title": "Positive earnings announcement remains outside the downside-risk queue",
+      "description": "Full-polarity ingestion is preserved, while the specialized risk router marks ordinary positive news as non-target rather than inventing a bearish conclusion.",
+      "expected_label": "NON_TARGET",
+      "observations": [
+        {
+          "at_seconds": 0,
+          "source": "issuer_release",
+          "authority_tier": "P1",
+          "title": "Company raises guidance after record revenue",
+          "passage": "The company reported record revenue, profit growth and results above estimates, and management raised full-year guidance while announcing a new partnership.",
+          "contradicts": false
+        }
+      ]
+    },
+    {
+      "case_id": "rumor_correction_abstain",
+      "title": "Conflicting rumor and correction force abstention",
+      "description": "A low-authority bankruptcy rumor is contradicted by a primary issuer statement. Conflict handling caps confidence and prevents an alert.",
+      "expected_label": "ABSTAIN",
+      "observations": [
+        {
+          "at_seconds": 0,
+          "source": "social_channel",
+          "authority_tier": "P3",
+          "title": "Unverified post claims imminent bankruptcy",
+          "passage": "An anonymous social post claims the company will file for bankruptcy and default on its obligations this week.",
+          "contradicts": false
+        },
+        {
+          "at_seconds": 11,
+          "source": "issuer_release",
+          "authority_tier": "P1",
+          "title": "Issuer denies bankruptcy rumor",
+          "passage": "The issuer states that the circulating bankruptcy claim is false and that it has not filed a petition or defaulted on the referenced obligations.",
+          "contradicts": true
+        }
+      ]
+    },
+    {
+      "case_id": "sec_filing_corrected_abstain",
+      "title": "SEC filing correction withdraws an initially alert-eligible risk claim",
+      "description": "A P0 filing first makes a Chapter 11 claim alert-eligible. A later P0 correction explicitly supersedes that observation, creates a primary-source conflict and forces abstention instead of preserving a stale alert.",
+      "expected_label": "ABSTAIN",
+      "observations": [
+        {
+          "at_seconds": 0,
+          "source": "sec_current_filings",
+          "authority_tier": "P0",
+          "title": "Issuer files Form 8-K under Item 1.03",
+          "passage": "The filing states that the issuer commenced a voluntary case under Chapter 11 of the United States Bankruptcy Code.",
+          "revision_kind": "INITIAL",
+          "contradicts": false
+        },
+        {
+          "at_seconds": 42,
+          "source": "sec_current_filings",
+          "authority_tier": "P0",
+          "title": "Corrected Form 8-K withdraws Item 1.03 disclosure",
+          "passage": "The amended filing states that Item 1.03 was selected in error, the issuer has not filed a bankruptcy petition, and the earlier disclosure is withdrawn and superseded.",
+          "revision_kind": "CORRECTION",
+          "supersedes_step": 1,
+          "contradicts": true
+        }
+      ]
+    }
+  ]
+}

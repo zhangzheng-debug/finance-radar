@@ -1,0 +1,15 @@
+{
+  "sec_evidence_top_n": 25,
+  "sec_window_before_days": 0,
+  "sec_window_after_days": 180,
+  "sec_filings_per_event": 20,
+  "sec_extract_events": 25,
+  "sec_extract_filings_per_event": 20,
+  "sec_evidence_passage_max_chars": 900,
+  "policy": {
+    "purpose": "resolve_provisional_or_future_event_outcomes_with_primary_evidence",
+    "post_event_market_outcomes_used_for_ranking": false,
+    "automatic_label_promotion": false,
+    "live_trading_allowed": false
+  }
+}

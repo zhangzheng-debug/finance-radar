@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+import urllib.parse
+from pathlib import Path
+from typing import Any
+
+from streamlit.testing.v1 import AppTest
+
+import app.web.common as web_common
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PAGE = ROOT / "app" / "web" / "pages" / "1_Event_Intelligence.py"
+
+
+def _event(event_id: str, company: str) -> dict[str, Any]:
+    return {
+        "event_id": event_id,
+        "status": "candidate",
+        "event_date": "2026-07-18",
+        "event_type": "bankruptcy_or_distress",
+        "event_family": "bankruptcy_or_distress",
+        "company_name": company,
+        "ticker_at_event": "TST",
+        "last_updated_at": "2026-07-18T12:34:00+00:00",
+        "current_version": 1,
+        "manual_grade": "A",
+        "discovery_source": "sec_current_filings",
+        "evidence_excerpt": f"Evidence summary for {company}",
+    }
+
+
+EVENTS = [_event("event-a", "Alpha Test"), _event("event-b", "Beta Test")]
+
+
+def _fake_api(path: str, *, method: str = "GET", json_body: dict[str, Any] | None = None) -> dict[str, Any]:
+    parsed = urllib.parse.urlsplit(path)
+    query = urllib.parse.parse_qs(parsed.query)
+    if parsed.path == "/api/v1/events/facets":
+        return {
+            "families": [{"value": "bankruptcy_or_distress", "count": 2}],
+            "sources": [{"value": "sec_current_filings", "count": 2}],
+            "read_only": True,
+            "no_trading": True,
+        }
+    if parsed.path == "/api/v1/events":
+        items = [] if query.get("q") == ["__empty__"] else EVENTS
+        return {"items": items, "total": len(items)}
+    event_id = parsed.path.split("/")[4] if parsed.path.startswith("/api/v1/events/") else "event-a"
+    if parsed.path.endswith("/evidence"):
+        return {
+            "items": [
+                {
+                    "authority_tier": "P0",
+                    "source_name": "Official source",
+                    "evidence_status": "confirmed",
+                    "evidence_passage": "Exact primary-source passage.",
+                    "evidence_url": "https://example.test/source",
+                }
+            ]
+        }
+    if parsed.path.endswith("/timeline"):
+        return {"items": []}
+    if parsed.path.endswith("/trace"):
+        return {
+            "agent_decisions": [],
+            "pipeline_jobs": [],
+            "alerts": [],
+            "evidence_objects": [],
+            "human_overrides": [],
+        }
+    if parsed.path.startswith("/api/v1/events/"):
+        event = next(item for item in EVENTS if item["event_id"] == event_id)
+        return {
+            "event": event,
+            "current_version": {"facts": {"evidence_summary": event["evidence_excerpt"]}},
+            "model_shadow_output": {
+                "label": "ABSTAIN",
+                "confidence": 0.61,
+                "model_version": "test-shadow",
+                "runtime": "rules",
+                "latency_ms": 0.4,
+            },
+            "market_snapshots": [],
+            "market_metrics": [],
+        }
+    raise AssertionError(f"unexpected API request: {method} {path} {json_body}")
+
+
+def test_event_workbench_next_button_changes_selected_event(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "api_request", _fake_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10).run()
+    assert not page.exception
+    assert page.session_state["selected_event_id"] == "event-a"
+    next(button for button in page.button if button.label == "J / ↓ 下一条").click()
+    page.run()
+    assert not page.exception
+    assert page.session_state["selected_event_id"] == "event-b"
+    assert page.query_params["event_id"] == ["event-b"]
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+    assert "只读行情上下文" in rendered
+    assert "NO REVIEWED ASSET" in rendered
+
+
+def test_event_workbench_empty_view_can_reset_without_stale_state(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "api_request", _fake_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["flow"] = "全部事件"
+    page.query_params["q"] = "__empty__"
+    page.run()
+    reset = next(button for button in page.button if button.label == "重置为待复核视图")
+    reset.click()
+    page.run()
+    assert not page.exception
+    assert "q" not in page.query_params
+    assert page.query_params["flow"] == ["待复核"]
+    assert page.session_state["selected_event_id"] == "event-a"
+
+
+def test_event_workbench_failure_state_hides_internal_diagnostics(monkeypatch) -> None:
+    def fail(*args, **kwargs):
+        raise web_common.ApiError("API unavailable at http://internal:8000: private diagnostic")
+
+    monkeypatch.setattr(web_common, "api_request", fail)
+    monkeypatch.setattr(web_common, "SHOW_DEBUG", False)
+    page = AppTest.from_file(str(PAGE), default_timeout=10).run()
+    rendered = "\n".join(str(item.value) for item in [*page.markdown, *page.info, *page.error])
+    assert not page.exception
+    assert "数据服务暂时不可用" in rendered
+    assert "internal:8000" not in rendered
+    assert "uvicorn" not in rendered
+
+
+def test_event_workbench_external_query_replaces_stale_widget_state(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "api_request", _fake_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10).run()
+    flow_widget = next(item for item in page.selectbox if item.key == "event_flow")
+    flow_widget.set_value("已核验")
+    page.run()
+    assert page.query_params["flow"] == ["已核验"]
+
+    page.query_params["flow"] = "全部事件"
+    page.query_params["q"] = "Beta"
+    page.query_params["source"] = "sec_current_filings"
+    page.query_params["limit"] = "50"
+    page.query_params["event_id"] = "event-b"
+    page.run()
+    assert not page.exception
+    assert next(item for item in page.selectbox if item.key == "event_flow").value == "全部事件"
+    assert next(item for item in page.text_input if item.key == "event_global_query").value == "Beta"
+    assert next(item for item in page.selectbox if item.key == "event_source_filter").value == (
+        "sec_current_filings"
+    )
+    assert next(item for item in page.selectbox if item.key == "event_limit").value == 50
+    assert page.session_state["selected_event_id"] == "event-b"

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "input": "UTF-8 event and exact-evidence text",
+  "features": [
+    "word TF-IDF 1-2 grams",
+    "character TF-IDF 3-5 grams"
+  ],
+  "excluded": [
+    "event status and label status",
+    "manual grade and training role",
+    "post-event prices, returns and event_market_metrics"
+  ],
+  "output": [
+    "RISK_REVIEW",
+    "NON_TARGET",
+    "ABSTAIN"
+  ],
+  "post_event_market_features_allowed": false
+}

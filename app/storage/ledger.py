@@ -1,0 +1,475 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from contextlib import closing
+from pathlib import Path
+from typing import Any
+
+
+def _dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    return dict(row) if row is not None else None
+
+
+def _json(value: Any, default: Any = None) -> Any:
+    if value in (None, ""):
+        return default
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return default if default is not None else value
+
+
+class LedgerRepository:
+    """Read-only product query adapter over the existing Schema 12 ledger."""
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+
+    def connect(self) -> sqlite3.Connection:
+        if not self.path.is_file():
+            raise FileNotFoundError(f"ledger database not found: {self.path}")
+        connection = sqlite3.connect(
+            f"file:{self.path.as_posix()}?mode=ro",
+            uri=True,
+            timeout=5,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA busy_timeout=5000")
+        return connection
+
+    def schema_version(self) -> int:
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                "SELECT MAX(version) AS version FROM event_ledger_schema"
+            ).fetchone()
+            return int(row["version"] or 0)
+
+    def health(self) -> dict[str, Any]:
+        with closing(self.connect()) as connection:
+            quick_check = connection.execute("PRAGMA quick_check").fetchone()[0]
+            counts = {
+                table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    "sources",
+                    "raw_observations",
+                    "canonical_events",
+                    "event_versions",
+                    "event_evidence",
+                    "event_market_metrics",
+                    "pipeline_jobs",
+                    "alert_outbox",
+                )
+            }
+            event_status = {
+                row["status"]: row["n"]
+                for row in connection.execute(
+                    "SELECT status, COUNT(*) AS n FROM canonical_events GROUP BY status"
+                )
+            }
+            audit = {
+                "trading_boundary_violations": connection.execute(
+                    "SELECT COUNT(*) FROM canonical_events WHERE no_trading != 1"
+                ).fetchone()[0],
+                "auto_verification_violations": connection.execute(
+                    "SELECT COUNT(*) FROM event_evidence WHERE auto_verification_allowed != 0"
+                ).fetchone()[0],
+                "market_feature_leakage_violations": connection.execute(
+                    "SELECT COUNT(*) FROM event_market_metrics WHERE allowed_as_model_feature != 0"
+                ).fetchone()[0],
+            }
+            last_event_update = connection.execute(
+                "SELECT MAX(last_updated_at) FROM canonical_events"
+            ).fetchone()[0]
+        return {
+            "status": "ok" if quick_check == "ok" and not any(audit.values()) else "degraded",
+            "database": str(self.path),
+            "database_bytes": self.path.stat().st_size,
+            "schema_version": self.schema_version(),
+            "quick_check": quick_check,
+            "last_event_update": last_event_update,
+            "counts": counts,
+            "event_status": event_status,
+            "audit": audit,
+        }
+
+    def overview(self, recent_limit: int = 12) -> dict[str, Any]:
+        health = self.health()
+        with closing(self.connect()) as connection:
+            job_status = {
+                row["status"]: row["n"]
+                for row in connection.execute(
+                    "SELECT status, COUNT(*) AS n FROM pipeline_jobs GROUP BY status"
+                )
+            }
+            review_queue = connection.execute(
+                "SELECT COUNT(*) FROM canonical_events WHERE status IN ('candidate','weak')"
+            ).fetchone()[0]
+            alert_status = {
+                row["status"]: row["n"]
+                for row in connection.execute(
+                    "SELECT status, COUNT(*) AS n FROM alert_outbox GROUP BY status"
+                )
+            }
+        return {
+            **health,
+            "review_queue": review_queue,
+            "job_status": job_status,
+            "alert_status": alert_status,
+            "recent_events": self.list_events(status="verified", limit=recent_limit)["items"],
+            "source_health": self.list_source_health(),
+        }
+
+    def list_source_health(self) -> list[dict[str, Any]]:
+        with closing(self.connect()) as connection:
+            sources = [dict(row) for row in connection.execute("SELECT * FROM sources ORDER BY authority_tier, name")]
+            cursors = [dict(row) for row in connection.execute("SELECT * FROM source_cursors ORDER BY source_id, cursor_type")]
+            observation_counts = {
+                row["source_id"]: row["n"]
+                for row in connection.execute(
+                    "SELECT source_id, COUNT(*) AS n FROM raw_observations GROUP BY source_id"
+                )
+            }
+        by_source: dict[str, list[dict[str, Any]]] = {}
+        for cursor in cursors:
+            by_source.setdefault(cursor["source_id"], []).append(cursor)
+        result = []
+        for source in sources:
+            source_cursors = by_source.get(source["source_id"], [])
+            latest = max(source_cursors, key=lambda item: item.get("updated_at") or "", default=None)
+            source["observations"] = observation_counts.get(source["source_id"], 0)
+            source["cursor_status"] = latest.get("status") if latest else "UNOBSERVED"
+            source["last_polled_at"] = latest.get("last_polled_at") if latest else None
+            source["last_success_at"] = latest.get("last_success_at") if latest else None
+            source["last_error"] = latest.get("last_error") if latest else None
+            source["cursors"] = source_cursors
+            result.append(source)
+        return result
+
+    def list_events(
+        self,
+        *,
+        status: str | None = None,
+        family: str | None = None,
+        source: str | None = None,
+        query: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        where: list[str] = []
+        params: list[Any] = []
+        if status:
+            where.append("e.status=?")
+            params.append(status)
+        if family:
+            where.append("e.event_family=?")
+            params.append(family)
+        if source:
+            where.append("e.discovery_source=?")
+            params.append(source)
+        if query:
+            where.append(
+                "LOWER(COALESCE(e.company_name,'') || ' ' || COALESCE(e.ticker_at_event,'') || ' ' || "
+                "e.event_type || ' ' || COALESCE(e.event_family,'') || ' ' || "
+                "COALESCE(e.discovery_source,'') || ' ' || e.event_id) LIKE ?"
+            )
+            params.append(f"%{query.lower()}%")
+        where_sql = " WHERE " + " AND ".join(where) if where else ""
+        base = f"""
+            FROM canonical_events e
+            {where_sql}
+        """
+        with closing(self.connect()) as connection:
+            total = connection.execute("SELECT COUNT(*) " + base, params).fetchone()[0]
+            rows = connection.execute(
+                """
+                SELECT e.*,
+                       (SELECT COUNT(*) FROM event_evidence x WHERE x.event_id=e.event_id) AS evidence_count,
+                       (SELECT severity_grade FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS severity_grade,
+                       (SELECT credibility_tier FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS credibility_tier,
+                       (SELECT evidence_passage FROM event_evidence x WHERE x.event_id=e.event_id AND evidence_passage IS NOT NULL ORDER BY passage_score DESC, updated_at DESC LIMIT 1) AS evidence_excerpt
+                """
+                + base
+                + " ORDER BY e.event_date DESC, e.last_updated_at DESC LIMIT ? OFFSET ?",
+                [*params, limit, offset],
+            ).fetchall()
+        return {"items": [dict(row) for row in rows], "total": total, "limit": limit, "offset": offset}
+
+    def event_facets(self) -> dict[str, Any]:
+        """Return bounded, live filter suggestions without exposing event content."""
+        with closing(self.connect()) as connection:
+            families = [
+                {"value": row["value"], "count": int(row["n"])}
+                for row in connection.execute(
+                    """SELECT event_family AS value, COUNT(*) AS n
+                       FROM canonical_events
+                       WHERE event_family IS NOT NULL AND TRIM(event_family) != ''
+                       GROUP BY event_family
+                       ORDER BY n DESC, value ASC
+                       LIMIT 100"""
+                )
+            ]
+            sources = [
+                {"value": row["value"], "count": int(row["n"])}
+                for row in connection.execute(
+                    """SELECT discovery_source AS value, COUNT(*) AS n
+                       FROM canonical_events
+                       WHERE discovery_source IS NOT NULL AND TRIM(discovery_source) != ''
+                       GROUP BY discovery_source
+                       ORDER BY n DESC, value ASC
+                       LIMIT 100"""
+                )
+            ]
+        return {
+            "families": families,
+            "sources": sources,
+            "read_only": True,
+            "no_trading": True,
+        }
+
+    def event_detail(self, event_id: str) -> dict[str, Any] | None:
+        with closing(self.connect()) as connection:
+            event = _dict(connection.execute("SELECT * FROM canonical_events WHERE event_id=?", (event_id,)).fetchone())
+            if event is None:
+                return None
+            version = _dict(
+                connection.execute(
+                    "SELECT * FROM event_versions WHERE event_id=? AND version=?",
+                    (event_id, event["current_version"]),
+                ).fetchone()
+            )
+            if version:
+                version["facts"] = _json(version.pop("facts_json"), {})
+            assessment = _dict(
+                connection.execute(
+                    "SELECT * FROM event_assessments WHERE event_id=? ORDER BY created_at DESC LIMIT 1",
+                    (event_id,),
+                ).fetchone()
+            )
+            assets = [
+                dict(row)
+                for row in connection.execute(
+                    """SELECT i.*, a.asset_type, a.symbol, a.provider_symbol, a.currency,
+                              a.venue, a.metadata_json
+                       FROM event_asset_impacts i JOIN assets a ON a.asset_id=i.asset_id
+                       WHERE i.event_id=? ORDER BY i.impact_score DESC""",
+                    (event_id,),
+                )
+            ]
+            for asset in assets:
+                asset["reason_codes"] = _json(asset.pop("reason_codes_json"), [])
+                asset["metadata"] = _json(asset.pop("metadata_json"), {})
+            metrics = [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT * FROM event_market_metrics WHERE event_id=? ORDER BY metric_name",
+                    (event_id,),
+                )
+            ]
+            snapshots = [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT * FROM market_snapshots WHERE event_id=? ORDER BY captured_at DESC",
+                    (event_id,),
+                )
+            ]
+            market_jobs = [
+                dict(row)
+                for row in connection.execute(
+                    """SELECT market_job_id,event_id,asset_id,provider,observation_window,
+                              status,scheduled_at,completed_at,attempts,last_error,no_trading
+                       FROM market_jobs WHERE event_id=?
+                       ORDER BY asset_id,scheduled_at,observation_window""",
+                    (event_id,),
+                )
+            ]
+        return {
+            "event": event,
+            "current_version": version,
+            "assessment": assessment,
+            "assets": assets,
+            "market_metrics": metrics,
+            "market_snapshots": snapshots,
+            "market_jobs": market_jobs,
+        }
+
+    def market_capabilities(self) -> dict[str, Any]:
+        """Summarize observed read-only providers without exposing credentials."""
+        registry = {
+            "binance_public": {
+                "name": "Binance Public Spot",
+                "role": "PERSISTED_EVENT_OBSERVATION",
+                "asset_classes": ["crypto"],
+                "access": "PUBLIC_NONE_AUTH",
+                "deployment": "SERVER_DIRECT",
+            },
+            "twelve_data": {
+                "name": "Twelve Data",
+                "role": "PERSISTED_EVENT_OBSERVATION",
+                "asset_classes": ["equity", "etf", "fx", "commodity_proxy"],
+                "access": "API_KEY_MARKET_DATA_ONLY",
+                "deployment": "SERVER_DIRECT",
+            },
+            "ibkr_tws_readonly": {
+                "name": "IBKR TWS Read-Only",
+                "role": "CAPABILITY_PROBE_ONLY",
+                "asset_classes": ["equity", "fx", "futures"],
+                "access": "LOCAL_TWS_READ_ONLY",
+                "deployment": "OPERATOR_DESKTOP",
+            },
+        }
+        with closing(self.connect()) as connection:
+            job_rows = {
+                row["provider"]: dict(row)
+                for row in connection.execute(
+                    """SELECT provider,COUNT(*) AS jobs,
+                              SUM(CASE WHEN status='COMPLETED' THEN 1 ELSE 0 END) AS completed,
+                              SUM(CASE WHEN status IN ('PENDING','RETRY') THEN 1 ELSE 0 END) AS pending,
+                              SUM(CASE WHEN status IN ('RETRY','FAILED') AND last_error IS NOT NULL
+                                       THEN 1 ELSE 0 END) AS errors,
+                              MAX(completed_at) AS last_completed_at
+                       FROM market_jobs GROUP BY provider"""
+                )
+            }
+            snapshot_rows = {
+                row["provider"]: dict(row)
+                for row in connection.execute(
+                    """SELECT provider,COUNT(*) AS snapshots,MAX(captured_at) AS last_snapshot_at
+                       FROM market_snapshots GROUP BY provider"""
+                )
+            }
+            latest_errors = {
+                row["provider"]: row["last_error"]
+                for row in connection.execute(
+                    """SELECT j.provider,j.last_error FROM market_jobs j
+                       JOIN (
+                         SELECT provider,MAX(scheduled_at) AS scheduled_at
+                         FROM market_jobs
+                         WHERE status IN ('RETRY','FAILED') AND last_error IS NOT NULL
+                         GROUP BY provider
+                       ) latest ON latest.provider=j.provider AND latest.scheduled_at=j.scheduled_at
+                       WHERE j.status IN ('RETRY','FAILED') AND j.last_error IS NOT NULL"""
+                )
+            }
+            window_rows = connection.execute(
+                """SELECT provider,observation_window,status,COUNT(*) AS count
+                   FROM market_jobs
+                   GROUP BY provider,observation_window,status
+                   ORDER BY provider,observation_window,status"""
+            ).fetchall()
+
+        window_status: dict[str, dict[str, dict[str, int]]] = {}
+        for row in window_rows:
+            provider_windows = window_status.setdefault(row["provider"], {})
+            statuses = provider_windows.setdefault(row["observation_window"], {})
+            statuses[row["status"]] = int(row["count"])
+
+        providers = []
+        for provider_id, definition in registry.items():
+            jobs = job_rows.get(provider_id, {})
+            snapshots = snapshot_rows.get(provider_id, {})
+            completed = int(jobs.get("completed") or 0)
+            pending = int(jobs.get("pending") or 0)
+            errors = int(jobs.get("errors") or 0)
+            if provider_id == "ibkr_tws_readonly":
+                status = "LOCAL_PROBE_ONLY"
+            elif errors:
+                status = "DEGRADED"
+            elif completed:
+                status = "OBSERVED"
+            elif pending:
+                status = "PENDING"
+            else:
+                status = "UNOBSERVED"
+            providers.append(
+                {
+                    "provider_id": provider_id,
+                    **definition,
+                    "status": status,
+                    "jobs": int(jobs.get("jobs") or 0),
+                    "completed_jobs": completed,
+                    "pending_jobs": pending,
+                    "snapshots": int(snapshots.get("snapshots") or 0),
+                    "last_snapshot_at": snapshots.get("last_snapshot_at"),
+                    "last_error": latest_errors.get(provider_id),
+                    "observation_windows": window_status.get(provider_id, {}),
+                    "read_only": True,
+                    "account_data_used": False,
+                    "order_endpoints_present": False,
+                }
+            )
+        return {
+            "providers": providers,
+            "provider_policy": {
+                "crypto": "binance_public",
+                "non_crypto": "twelve_data",
+                "ibkr": "local_capability_probe_only",
+            },
+            "horizon_policy": {
+                "baseline": "first_real_observer_snapshot",
+                "windows": ["t_plus_5m", "t_plus_30m", "t_plus_1d"],
+                "missed_window_behavior": "record_MISSED_WINDOW_without_latest_quote_substitution",
+                "return_metric_scope": "post_event_audit_only",
+            },
+            "boundary": {
+                "read_only": True,
+                "no_trading": True,
+                "account_data_used": False,
+                "post_event_audit_only": True,
+                "allowed_as_model_feature": False,
+            },
+        }
+
+    def event_evidence(self, event_id: str) -> list[dict[str, Any]]:
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                """SELECT ev.*, o.title AS observation_title, o.summary AS observation_summary,
+                          o.source_published_at, o.local_received_at, s.source_id, s.name AS source_name,
+                          s.authority_tier, s.source_type
+                   FROM event_evidence ev
+                   JOIN raw_observations o ON o.observation_id=ev.observation_id
+                   JOIN sources s ON s.source_id=o.source_id
+                   WHERE ev.event_id=?
+                   ORDER BY ev.passage_score DESC, ev.updated_at DESC""",
+                (event_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def event_timeline(self, event_id: str) -> list[dict[str, Any]]:
+        with closing(self.connect()) as connection:
+            entries: list[dict[str, Any]] = []
+            for row in connection.execute(
+                "SELECT * FROM event_versions WHERE event_id=? ORDER BY version", (event_id,)
+            ):
+                item = dict(row)
+                item["facts"] = _json(item.pop("facts_json"), {})
+                entries.append({"at": item["changed_at"], "kind": "event_version", "payload": item})
+            for row in connection.execute(
+                """SELECT o.observation_id,o.source_id,o.source_published_at,o.local_received_at,
+                          o.title,o.canonical_url,eo.relation_type,eo.linked_at
+                   FROM event_observations eo JOIN raw_observations o ON o.observation_id=eo.observation_id
+                   WHERE eo.event_id=?""",
+                (event_id,),
+            ):
+                item = dict(row)
+                entries.append({"at": item["local_received_at"], "kind": "observation", "payload": item})
+            for row in connection.execute(
+                "SELECT * FROM event_assessments WHERE event_id=?", (event_id,)
+            ):
+                item = dict(row)
+                entries.append({"at": item["created_at"], "kind": "assessment", "payload": item})
+        return sorted(entries, key=lambda item: item["at"] or "")
+
+    def event_trace(self, event_id: str) -> dict[str, Any]:
+        with closing(self.connect()) as connection:
+            jobs = [dict(row) for row in connection.execute("SELECT * FROM pipeline_jobs WHERE event_id=? ORDER BY created_at", (event_id,))]
+            alerts = [dict(row) for row in connection.execute("SELECT * FROM alert_outbox WHERE event_id=? ORDER BY created_at", (event_id,))]
+            for item in jobs:
+                item["payload"] = _json(item.pop("payload_json"), {})
+            for item in alerts:
+                item["payload"] = _json(item.pop("payload_json"), {})
+        return {"pipeline_jobs": jobs, "alerts": alerts}

@@ -1,0 +1,37 @@
+{
+  "selected": 52,
+  "attempted": 6,
+  "archived": 6,
+  "already_archived": 5,
+  "policy_skipped": 11,
+  "policy_skip_examples": [
+    "EVID-0959d4f79c50b0c23435e6985c4aa07b: URL outside registered source domain fda_medwatch",
+    "EVID-3ec198313722242ed9f6cfbaad59cfde: URL outside registered source domain fda_medwatch",
+    "EVID-46a98cf4540bff69c6ee522ed4da7fd5: URL outside registered source domain fda_medwatch",
+    "EVID-78b8b51074a596e55c57271b3502b3bc: URL outside registered source domain fda_medwatch",
+    "EVID-f9a594f59e8ebde5903c82a6e8efb2d9: URL outside registered source domain fda_medwatch",
+    "EVID-07572e92f57119827f920dd9e4a65a79: URL outside registered source domain fda_medwatch",
+    "EVID-0bc6614e5f8f73788fdedee263300b81: URL outside registered source domain fda_medwatch",
+    "EVID-348171d951df32ea0e68b3a4da0c06be: URL outside registered source domain fda_medwatch",
+    "EVID-66a9b7d4387305e4fe4c50224ddb7ad9: URL outside registered source domain fda_medwatch",
+    "EVID-75ae1674981594cabefd932a7e66354d: URL outside registered source domain fda_medwatch"
+  ],
+  "cache_hits": 6,
+  "network_fetches": 0,
+  "archived_bytes": 4134937,
+  "by_mime": {
+    "text/html": 6
+  },
+  "errors": [],
+  "policy": {
+    "official_source_allowlist": true,
+    "https_only": true,
+    "redirect_host_revalidated": true,
+    "max_snapshot_bytes": 10485760,
+    "immutable_content_address": "sha256",
+    "auto_verification_allowed": false,
+    "allowed_as_model_feature": false,
+    "no_trading": true
+  },
+  "status": "PASS"
+}

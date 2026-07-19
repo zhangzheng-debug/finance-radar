@@ -1,0 +1,22 @@
+[Unit]
+Description=Finance Radar FastAPI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=finance-radar
+Group=finance-radar
+WorkingDirectory=/opt/finance-radar/current
+EnvironmentFile=/etc/finance-radar.env
+ExecStart=/opt/finance-radar/venv/bin/python -m uvicorn app.api.main:app --host 127.0.0.1 --port 18000 --workers 1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/finance-radar/shared/data /opt/finance-radar/shared/reports
+
+[Install]
+WantedBy=multi-user.target

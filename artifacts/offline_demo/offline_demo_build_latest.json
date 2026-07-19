@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-07-19T04:40:28.236826+00:00",
+  "status": "BUILT_PENDING_INDEPENDENT_VERIFY",
+  "current_directory": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\artifacts\\offline_demo\\current",
+  "archive": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\artifacts\\offline_demo\\finance-radar-offline-demo-20260719T044026Z.zip",
+  "latest_archive": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\artifacts\\offline_demo\\finance-radar-offline-demo-latest.zip",
+  "archive_bytes": 1698396,
+  "archive_sha256": "a2eaefb1611b48366c073ac25ab3a6e97d9b8e16a304f976e3d12a439e12b64f",
+  "ledger": {
+    "selected_event_ids": [
+      "FR-LIVE-eed9151c62729747422910a77daea675",
+      "FR-LIVE-db4f6db23f507d8988a58f844cff6c7f",
+      "FR-LIVE-0093a3bce6fc247843f481217d4f5705",
+      "FR-LIVE-27b97a3819bea4d0743ab72686465b0d",
+      "FR-LIVE-5e3f0f7f56bdc5f42bd18b201e401ab9",
+      "FR-LIVE-5c97439401b00afcff355bf324937df0",
+      "FR-LIVE-5d43ea8ab0910829e4d534a56fd123c0",
+      "FR-LIVE-7d4c32fa1171b8f1346cbd777ffe4414",
+      "FR-LIVE-2957e2a27af04f85bc97c64d5981608f",
+      "FR-LIVE-8fe10bd11b3f46790461c266cf7112b2",
+      "FR-LIVE-33f1d04c751625bb2be3d6cb97b04545",
+      "FR-LIVE-dda195400096e1d7d7602c6341eb516d",
+      "FR-LIVE-ccc3fe6f8d15c0c2ac50865b08021e31",
+      "FR-LIVE-c4c07ae18f1bb902ec736fb178764ec8",
+      "FR-LIVE-4af2bda9c80295072f0a0355ab4ac7ca",
+      "FR-LIVE-9f396f7adc5b9d48484e81233f6f2160",
+      "FR-LIVE-f6b588800d6bfeca61436be4525b98bc",
+      "FR-HIST-CAND-12067374798867287594",
+      "FR-HIST-CAND-14606774787152120897",
+      "FR-HIST-CAND-14286881167494880267",
+      "FR-HIST-CAND-6026108798150667357",
+      "FR-HIST-CAND-16185300028448829762"
+    ],
+    "counts": {
+      "sources": 18,
+      "raw_observations": 78,
+      "canonical_events": 22,
+      "event_versions": 41,
+      "event_evidence": 30,
+      "event_assessments": 14,
+      "event_market_metrics": 46,
+      "event_asset_impacts": 5,
+      "pipeline_jobs": 0,
+      "alert_outbox": 0
+    },
+    "status_counts": {
+      "candidate": 4,
+      "rejected": 2,
+      "verified": 16
+    },
+    "quick_check": "ok",
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "boundary_violations": {
+      "trading": 0,
+      "auto_verification": 0,
+      "market_feature_leakage": 0
+    },
+    "bytes": 1052672,
+    "sha256": "b9bd178b36b34ba04984b4665884a43080e1da677dbcb944333b5b6ed370ba73"
+  },
+  "operations": {
+    "schema_version": 3,
+    "quick_check": "ok",
+    "adjudication_samples": 10,
+    "adjudication_reviews": 0,
+    "target_labels_fabricated": false,
+    "bytes": 172032,
+    "sha256": "1424a4fe05ffeb356c33698de9e1df19f9b2053c39f41e375252b537778401d4"
+  },
+  "boundaries": {
+    "external_network": "blocked_by_sitecustomize",
+    "external_collectors_included": false,
+    "telegram_capability_included": false,
+    "broker_or_exchange_client_included": false,
+    "trading_capability_included": false,
+    "credentials_included": false,
+    "review_ui_enabled": false,
+    "model_mode": "SHADOW"
+  }
+}

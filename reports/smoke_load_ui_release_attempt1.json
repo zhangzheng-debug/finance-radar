@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-18T16:44:14.132417+00:00",
+  "target": "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api",
+  "read_only": true,
+  "passed": true,
+  "requests": 120,
+  "concurrency": 15,
+  "elapsed_seconds": 7.392,
+  "throughput_requests_per_second": 16.233,
+  "success_rate": 0.9916666666666667,
+  "status_counts": {
+    "200": 119,
+    "0": 1
+  },
+  "latency_ms": {
+    "mean": 881.568,
+    "p50": 773.015,
+    "p95": 2361.649,
+    "p99": 2463.314,
+    "max": 5002.149
+  },
+  "routes": {
+    "/api/v1/overview": {
+      "requests": 40,
+      "p50_ms": 799.307,
+      "p95_ms": 2361.649,
+      "max_ms": 2463.314
+    },
+    "/api/v1/events": {
+      "requests": 40,
+      "p50_ms": 474.684,
+      "p95_ms": 1911.472,
+      "max_ms": 1991.77
+    },
+    "/api/v1/health": {
+      "requests": 40,
+      "p50_ms": 769.599,
+      "p95_ms": 2439.131,
+      "max_ms": 5002.149
+    }
+  },
+  "errors": [
+    {
+      "route": "/api/v1/health",
+      "status": 0,
+      "valid_envelope": false,
+      "latency_ms": 5002.149,
+      "error": "ConnectError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1000)"
+    }
+  ],
+  "pass_policy": {
+    "minimum_success_rate": 0.99,
+    "maximum_p95_ms": 5000
+  }
+}

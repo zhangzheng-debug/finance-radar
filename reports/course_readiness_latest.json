@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-19T05:17:23.205773+00:00",
+  "status": "NOT_READY",
+  "product_status": "WAITING",
+  "course_process_status": "WAITING_EXTERNAL",
+  "product_checks": {
+    "public_acceptance_current_report_all_checks_pass": true,
+    "full_encrypted_migration_restore": true,
+    "runtime_24h_hash_chain_pass": false,
+    "external_blind_failure_disclosed_and_shadow_blocked": true,
+    "risk_label_v3_invalid_data_blocked": true,
+    "v3_dual_review_workflow_operational": true,
+    "v3_public_readonly_boundary_pass": true,
+    "human_taskbook_present": true,
+    "ai_spec_present": true,
+    "rendered_defense_deck_present": true,
+    "browser_QA_baseline_present": true,
+    "public_1920_interaction_QA_baseline_pass": true,
+    "current_release_browser_QA_pass": false
+  },
+  "course_checks": {
+    "teacher_approval_evidence": false,
+    "teacher_approved_high_difficulty": false,
+    "teacher_approved_FZ3": false,
+    "role_matrix_evidence": false,
+    "member_records_complete": false,
+    "three_forbidden_zone_file_sets": false,
+    "forbidden_zone_ownership_and_review": false,
+    "forbidden_zone_student_commits": false,
+    "three_timed_drills_per_member": false,
+    "one_improvised_change_per_member": false,
+    "repository_has_real_commits": false
+  },
+  "missing_product_evidence": [
+    "runtime_24h_hash_chain_pass",
+    "current_release_browser_QA_pass"
+  ],
+  "missing_course_evidence": [
+    "teacher_approval_evidence",
+    "teacher_approved_high_difficulty",
+    "teacher_approved_FZ3",
+    "role_matrix_evidence",
+    "member_records_complete",
+    "three_forbidden_zone_file_sets",
+    "forbidden_zone_ownership_and_review",
+    "forbidden_zone_student_commits",
+    "three_timed_drills_per_member",
+    "one_improvised_change_per_member",
+    "repository_has_real_commits"
+  ],
+  "no_fabrication": true
+}

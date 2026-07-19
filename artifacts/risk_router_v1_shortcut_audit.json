@@ -1,0 +1,363 @@
+{
+  "schema_version": 1,
+  "audit_type": "post_blind_diagnostic_no_training",
+  "model_version": "risk-router-v1-e1ce020d3445",
+  "artifact_sha256": "84b9186bd2d1c1d16dcc2f37560e034181bcbc257286c458c2bf7c600c4f7a28",
+  "external_blind_freeze_id": "external-blind-v1-2dd91c8b9acf",
+  "external_blind_gate_pass": false,
+  "external_blind_route_distribution": {
+    "RISK_REVIEW": 39,
+    "ABSTAIN": 1
+  },
+  "mean_risk_route_confidence": 0.7568569487179487,
+  "suspected_shortcut_features": [
+    {
+      "feature": "word_tfidf__candidate official",
+      "coefficient": 0.599156,
+      "direction": "RISK_REVIEW",
+      "matched_markers": [
+        "candidate official"
+      ]
+    },
+    {
+      "feature": "word_tfidf__official sec",
+      "coefficient": 0.519319,
+      "direction": "RISK_REVIEW",
+      "matched_markers": [
+        "official sec"
+      ]
+    },
+    {
+      "feature": "word_tfidf__distress_equity_death",
+      "coefficient": 0.443478,
+      "direction": "RISK_REVIEW",
+      "matched_markers": [
+        "distress_equity_death"
+      ]
+    },
+    {
+      "feature": "word_tfidf__delisting_or_suspension",
+      "coefficient": 0.349772,
+      "direction": "RISK_REVIEW",
+      "matched_markers": [
+        "delisting_or_suspension"
+      ]
+    },
+    {
+      "feature": "word_tfidf__bankruptcyliquidation",
+      "coefficient": -0.726016,
+      "direction": "NON_TARGET",
+      "matched_markers": [
+        "bankruptcyliquidation"
+      ]
+    },
+    {
+      "feature": "word_tfidf__source_metadata_control",
+      "coefficient": -0.478932,
+      "direction": "NON_TARGET",
+      "matched_markers": [
+        "source_metadata_control"
+      ]
+    },
+    {
+      "feature": "word_tfidf__bankruptcy_liquidation",
+      "coefficient": -0.428797,
+      "direction": "NON_TARGET",
+      "matched_markers": [
+        "bankruptcy_liquidation"
+      ]
+    },
+    {
+      "feature": "word_tfidf__bankruptcyliquidation value",
+      "coefficient": -0.428797,
+      "direction": "NON_TARGET",
+      "matched_markers": [
+        "bankruptcyliquidation"
+      ]
+    },
+    {
+      "feature": "word_tfidf__bankruptcy_liquidation candidate",
+      "coefficient": -0.428797,
+      "direction": "NON_TARGET",
+      "matched_markers": [
+        "bankruptcy_liquidation"
+      ]
+    },
+    {
+      "feature": "word_tfidf__value bankruptcyliquidation",
+      "coefficient": -0.428797,
+      "direction": "NON_TARGET",
+      "matched_markers": [
+        "bankruptcyliquidation"
+      ]
+    },
+    {
+      "feature": "word_tfidf__action bankruptcyliquidation",
+      "coefficient": -0.428797,
+      "direction": "NON_TARGET",
+      "matched_markers": [
+        "bankruptcyliquidation"
+      ]
+    }
+  ],
+  "top_toward_risk": [
+    {
+      "feature": "word_tfidf__recovery",
+      "coefficient": 0.637969
+    },
+    {
+      "feature": "word_tfidf__candidate official",
+      "coefficient": 0.599156
+    },
+    {
+      "feature": "word_tfidf__split",
+      "coefficient": 0.565494
+    },
+    {
+      "feature": "word_tfidf__official sec",
+      "coefficient": 0.519319
+    },
+    {
+      "feature": "word_tfidf__one for",
+      "coefficient": 0.458184
+    },
+    {
+      "feature": "word_tfidf__distress_equity_death",
+      "coefficient": 0.443478
+    },
+    {
+      "feature": "word_tfidf__voluntarily",
+      "coefficient": 0.4333
+    },
+    {
+      "feature": "word_tfidf__common",
+      "coefficient": 0.411981
+    },
+    {
+      "feature": "word_tfidf__warrants",
+      "coefficient": 0.397369
+    },
+    {
+      "feature": "word_tfidf__for 100",
+      "coefficient": 0.39675
+    },
+    {
+      "feature": "word_tfidf__official",
+      "coefficient": 0.393683
+    },
+    {
+      "feature": "word_tfidf__issued",
+      "coefficient": 0.389349
+    },
+    {
+      "feature": "word_tfidf__reverse",
+      "coefficient": 0.388464
+    },
+    {
+      "feature": "word_tfidf__chapter",
+      "coefficient": 0.379931
+    },
+    {
+      "feature": "word_tfidf__holders",
+      "coefficient": 0.378114
+    },
+    {
+      "feature": "word_tfidf__100",
+      "coefficient": 0.372773
+    },
+    {
+      "feature": "char_tfidf__uity",
+      "coefficient": 0.366502
+    },
+    {
+      "feature": "char_tfidf__uit",
+      "coefficient": 0.361975
+    },
+    {
+      "feature": "word_tfidf__common shares",
+      "coefficient": 0.361867
+    },
+    {
+      "feature": "word_tfidf__voluntary chapter",
+      "coefficient": 0.357557
+    },
+    {
+      "feature": "word_tfidf__filed voluntary",
+      "coefficient": 0.353428
+    },
+    {
+      "feature": "word_tfidf__recovery value",
+      "coefficient": 0.351668
+    },
+    {
+      "feature": "char_tfidf__th_",
+      "coefficient": 0.350738
+    },
+    {
+      "feature": "word_tfidf__while",
+      "coefficient": 0.350688
+    },
+    {
+      "feature": "word_tfidf__after",
+      "coefficient": 0.349943
+    },
+    {
+      "feature": "word_tfidf__delisting_or_suspension",
+      "coefficient": 0.349772
+    },
+    {
+      "feature": "char_tfidf__with_",
+      "coefficient": 0.341944
+    },
+    {
+      "feature": "char_tfidf__ith_",
+      "coefficient": 0.341944
+    },
+    {
+      "feature": "char_tfidf__uity_",
+      "coefficient": 0.339568
+    },
+    {
+      "feature": "char_tfidf__spl",
+      "coefficient": 0.337152
+    }
+  ],
+  "top_toward_non_target": [
+    {
+      "feature": "word_tfidf__bankruptcyliquidation",
+      "coefficient": -0.726016
+    },
+    {
+      "feature": "word_tfidf__row",
+      "coefficient": -0.529129
+    },
+    {
+      "feature": "word_tfidf__later",
+      "coefficient": -0.526066
+    },
+    {
+      "feature": "char_tfidf__rol ",
+      "coefficient": -0.524747
+    },
+    {
+      "feature": "char_tfidf__trol ",
+      "coefficient": -0.524747
+    },
+    {
+      "feature": "char_tfidf__tro",
+      "coefficient": -0.508474
+    },
+    {
+      "feature": "char_tfidf__contr",
+      "coefficient": -0.505926
+    },
+    {
+      "feature": "char_tfidf__trol",
+      "coefficient": -0.499699
+    },
+    {
+      "feature": "char_tfidf__ontr",
+      "coefficient": -0.499072
+    },
+    {
+      "feature": "char_tfidf__ntro",
+      "coefficient": -0.497923
+    },
+    {
+      "feature": "char_tfidf__ontro",
+      "coefficient": -0.497108
+    },
+    {
+      "feature": "char_tfidf__ntrol",
+      "coefficient": -0.497108
+    },
+    {
+      "feature": "word_tfidf__acquisition",
+      "coefficient": -0.479869
+    },
+    {
+      "feature": "word_tfidf__source_metadata_control",
+      "coefficient": -0.478932
+    },
+    {
+      "feature": "char_tfidf__rol",
+      "coefficient": -0.475013
+    },
+    {
+      "feature": "word_tfidf__identity",
+      "coefficient": -0.471631
+    },
+    {
+      "feature": "word_tfidf__combination",
+      "coefficient": -0.453765
+    },
+    {
+      "feature": "char_tfidf__ntr",
+      "coefficient": -0.447173
+    },
+    {
+      "feature": "word_tfidf__corp",
+      "coefficient": -0.44311
+    },
+    {
+      "feature": "char_tfidf__ol ",
+      "coefficient": -0.442021
+    },
+    {
+      "feature": "char_tfidf___cont",
+      "coefficient": -0.433894
+    },
+    {
+      "feature": "word_tfidf__merger",
+      "coefficient": -0.433188
+    },
+    {
+      "feature": "word_tfidf__action",
+      "coefficient": -0.429669
+    },
+    {
+      "feature": "char_tfidf__rup",
+      "coefficient": -0.429622
+    },
+    {
+      "feature": "word_tfidf__bankruptcy_liquidation",
+      "coefficient": -0.428797
+    },
+    {
+      "feature": "word_tfidf__bankruptcyliquidation value",
+      "coefficient": -0.428797
+    },
+    {
+      "feature": "word_tfidf__bankruptcy_liquidation candidate",
+      "coefficient": -0.428797
+    },
+    {
+      "feature": "word_tfidf__value bankruptcyliquidation",
+      "coefficient": -0.428797
+    },
+    {
+      "feature": "word_tfidf__action bankruptcyliquidation",
+      "coefficient": -0.428797
+    },
+    {
+      "feature": "word_tfidf__25 nse",
+      "coefficient": -0.424753
+    }
+  ],
+  "findings": [
+    "The in-domain grouped holdout did not expose the cross-source failure seen on the external set.",
+    "Training text includes event_family, event_type and discovery_source-derived language; top coefficients contain internal taxonomy/control markers.",
+    "The NON_TARGET class is composed of rejected candidates and controls, not a representative sample of ordinary official company and macro news.",
+    "All frozen blind rows used the trained artifact; the positive keyword guardrail was not a general-domain solution."
+  ],
+  "required_v2_controls": [
+    "Do not reuse external-blind-v1 as a promotion test after diagnosis.",
+    "Build development hard negatives from separate ordinary official company and macro news.",
+    "Train only on publish-time content fields; remove event_family, event_type, discovery_source and internal control strings from model input.",
+    "Add a coefficient shortcut audit and source-held-out development split before freezing model v2.",
+    "Freeze a new label-first external-blind-v2 only after the v2 artifact and thresholds are locked."
+  ],
+  "model_or_labels_mutated": false,
+  "promotion_decision": "REMAIN_SHADOW",
+  "no_trading": true
+}
