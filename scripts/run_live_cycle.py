@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""Run one leased Finance Radar live cycle from discovery through outbox."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import sys
+import uuid
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.config import Settings
+from app.storage import EvidenceObjectStore, OperationsRepository
+from apply_live_asset_relations import apply_relations
+from apply_live_primary_adjudications import apply_rows
+from build_live_evidence_review import build_rows, write_outputs
+from build_live_review_triage import build as build_review_triage
+from build_live_review_triage import write_outputs as write_triage_outputs
+from event_ledger import open_ledger, stable_json, upsert_source, utc_now
+from live_candidate_extractor import process_pending, write_report as write_candidate_report
+from observe_live_event_markets import run_pending, schedule_followup_jobs, schedule_jobs
+from official_event_collector import collect_all as collect_official_sources
+from official_primary_page_enricher import enrich as enrich_official_primary_pages
+from opennews_free_collector import collect_category
+from sec_filing_enricher import (
+    SecFilingClient,
+    enrich_pending as enrich_sec_filings,
+    repair_negated_enrichment_matches,
+)
+from snapshot_evidence_sources import archive_pending as archive_evidence_sources
+from snapshot_evidence_sources import write_report as write_snapshot_report
+from telegram_alert_outbox import (
+    TelegramBotClient,
+    deliver_pending,
+    enqueue_verified_alerts,
+    require_bot_config,
+)
+from telegram_mtproto_listener import load_dotenv
+
+
+DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
+DEFAULT_ENV = ROOT / ".env"
+DEFAULT_REPORT = ROOT / "reports" / "live_cycle_latest.json"
+
+
+def acquire_cycle_lease(connection: Any, *, ttl_seconds: int = 300) -> str | None:
+    now = dt.datetime.now(dt.timezone.utc)
+    token = str(uuid.uuid4())
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        connection.execute(
+            "DELETE FROM runtime_leases WHERE lease_name='live_cycle' AND expires_at<=?",
+            (now.isoformat(),),
+        )
+        before = connection.total_changes
+        connection.execute(
+            """INSERT OR IGNORE INTO runtime_leases(
+               lease_name,lease_token,acquired_at,expires_at) VALUES ('live_cycle',?,?,?)""",
+            (
+                token,
+                now.isoformat(),
+                (now + dt.timedelta(seconds=ttl_seconds)).isoformat(),
+            ),
+        )
+        acquired = connection.total_changes > before
+        connection.commit()
+        return token if acquired else None
+    except Exception:
+        connection.rollback()
+        raise
+
+
+def release_cycle_lease(connection: Any, token: str) -> None:
+    connection.execute(
+        "DELETE FROM runtime_leases WHERE lease_name='live_cycle' AND lease_token=?", (token,)
+    )
+    connection.commit()
+
+
+def load_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def run_cycle(
+    connection: Any,
+    *,
+    send: bool,
+    timeout: float,
+    operations: OperationsRepository | None = None,
+    evidence_object_store: EvidenceObjectStore | None = None,
+) -> dict[str, Any]:
+    started_at = utc_now()
+    result: dict[str, Any] = {"started_at": started_at, "errors": []}
+    sec_user_agent = os.environ.get("SEC_USER_AGENT", "").strip()
+    official = collect_official_sources(
+        connection,
+        sec_user_agent=sec_user_agent or None,
+        timeout=timeout,
+    )
+    result["official_sources"] = official["sources"]
+    result["errors"].extend(official["errors"])
+    upsert_source(
+        connection,
+        source_id="opennews_free",
+        name="OpenNews Free hot feed",
+        source_type="aggregated_discovery",
+        authority_tier="P2_experimental",
+    )
+    collection = {"items": 0, "new_revisions": 0, "jobs": 0, "categories": 0}
+    for category in ("macro", "ai", "web3"):
+        try:
+            counts = collect_category(connection, category=category, timeout=timeout)
+        except (RuntimeError, ValueError) as exc:
+            result["errors"].append(f"opennews:{category}:{exc}")
+            continue
+        collection["categories"] += 1
+        for key in ("items", "new_revisions", "jobs"):
+            collection[key] += counts[key]
+    result["opennews"] = collection
+
+    candidates = process_pending(connection, limit=500)
+    result["candidate_extraction"] = candidates
+    write_candidate_report(
+        ROOT / "reports" / "live_candidate_extraction_latest.md", candidates, connection
+    )
+
+    if sec_user_agent:
+        result["sec_filing_enrichment"] = enrich_sec_filings(
+            connection,
+            SecFilingClient(sec_user_agent, timeout=timeout),
+            limit=8,
+        )
+    else:
+        result["sec_filing_enrichment"] = {
+            "requested": 0,
+            "parsed": 0,
+            "errors": 0,
+            "skipped_missing_user_agent": 1,
+        }
+    result["sec_filing_enrichment"]["negated_match_repairs"] = (
+        repair_negated_enrichment_matches(connection)
+    )
+
+    if sec_user_agent:
+        result["official_primary_page_enrichment"] = enrich_official_primary_pages(
+            connection,
+            cache_dir=ROOT / "data" / "cache" / "official_primary_pages",
+            user_agent=sec_user_agent,
+            limit=20,
+            timeout=timeout,
+            max_chars=1200,
+        )
+        result["errors"].extend(
+            f"official_primary_page:{error}"
+            for error in result["official_primary_page_enrichment"]["errors"]
+        )
+    else:
+        result["official_primary_page_enrichment"] = {
+            "selected": 0,
+            "inserted": 0,
+            "passages": 0,
+            "link_only": 0,
+            "errors": [],
+            "by_type": {},
+            "skipped_missing_user_agent": 1,
+        }
+
+    triage_rows = build_review_triage(connection)
+    write_triage_outputs(
+        triage_rows,
+        ROOT / "data" / "research" / "live_review_triage.csv",
+        ROOT / "reports" / "live_review_triage_latest.md",
+    )
+    result["review_triage"] = {
+        "pending_events": len(triage_rows),
+        "top_score": triage_rows[0]["review_score"] if triage_rows else None,
+    }
+
+    evidence_config = load_json(ROOT / "config" / "live_evidence_routes.json")
+    evidence_rows = build_rows(connection, evidence_config)
+    write_outputs(
+        evidence_rows,
+        ROOT / "data" / "research" / "live_evidence_review_queue.csv",
+        ROOT / "reports" / "live_evidence_review_latest.md",
+    )
+    result["evidence_review"] = {
+        "pending_events": len({row["event_id"] for row in evidence_rows}),
+        "routes": len(evidence_rows),
+    }
+
+    adjudication_rows = load_json(
+        ROOT / "config" / "live_primary_adjudications.json"
+    )["adjudications"]
+    result["adjudications"] = apply_rows(connection, adjudication_rows)
+
+    if sec_user_agent and operations is not None and evidence_object_store is not None:
+        snapshots = archive_evidence_sources(
+            connection,
+            operations,
+            evidence_object_store,
+            user_agent=sec_user_agent,
+            limit=4,
+            timeout=timeout,
+        )
+        write_snapshot_report(
+            ROOT / "reports" / "evidence_source_snapshots_latest.json",
+            ROOT / "reports" / "evidence_source_snapshots_latest.md",
+            snapshots,
+        )
+        result["evidence_source_snapshots"] = snapshots
+    else:
+        result["evidence_source_snapshots"] = {
+            "status": "SKIPPED",
+            "reason": (
+                "missing_SEC_USER_AGENT"
+                if not sec_user_agent
+                else "operations_or_object_store_not_configured"
+            ),
+            "archived": 0,
+            "errors": [],
+        }
+
+    asset_events = load_json(ROOT / "config" / "live_asset_relations.json")["events"]
+    result["asset_relations"] = apply_relations(connection, asset_events)
+
+    today = dt.datetime.now(dt.timezone.utc).date()
+    scheduled = schedule_jobs(connection, freshness_days=3, today=today)
+    followups_before = schedule_followup_jobs(connection)
+    api_key = os.environ.get("TWELVE_DATA_API_KEY", "").strip()
+    # Binance public crypto observations require no credentials and must still
+    # run when the optional Twelve Data key is absent.
+    market = run_pending(connection, api_key=api_key, timeout=timeout)
+    market["scheduled"] = scheduled
+    market["followups_scheduled"] = followups_before + schedule_followup_jobs(connection)
+    result["market"] = market
+
+    result["outbox_inserted"] = enqueue_verified_alerts(
+        connection, freshness_days=3, today=today
+    )
+    if send:
+        token, chat_id = require_bot_config()
+        sent, errors = deliver_pending(connection, TelegramBotClient(token), chat_id)
+        result["telegram"] = {"sent": sent, "errors": errors}
+    else:
+        result["telegram"] = {"sent": 0, "errors": 0, "mode": "dry_run"}
+    result["finished_at"] = utc_now()
+    return result
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--db", type=Path, default=DEFAULT_DB)
+    parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV)
+    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--send", action="store_true", help="deliver new eligible Telegram outbox rows")
+    args = parser.parse_args()
+    load_dotenv(args.env_file)
+    settings = Settings.from_env()
+    connection = open_ledger(args.db)
+    lease = acquire_cycle_lease(connection)
+    if lease is None:
+        connection.close()
+        print("live_cycle=skipped reason=lease_held")
+        return 3
+    try:
+        result = run_cycle(
+            connection,
+            send=args.send,
+            timeout=args.timeout,
+            operations=OperationsRepository(settings.operations_db),
+            evidence_object_store=EvidenceObjectStore(settings.evidence_object_dir),
+        )
+    finally:
+        release_cycle_lease(connection, lease)
+        connection.close()
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(stable_json(result))
+    print(f"REPORT={args.report}")
+    return 1 if result["errors"] or result["market"].get("errors") else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

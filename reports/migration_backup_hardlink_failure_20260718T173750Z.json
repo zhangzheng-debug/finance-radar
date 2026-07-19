@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-07-18T17:42:14.394830+00:00",
+  "status": "FAIL",
+  "encrypted_archive": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\server_migration_backup\\20260718T173750Z\\finance-radar-migration-20260718T173750Z.tgz.aesgcm",
+  "expected_release": "20260718T173521Z",
+  "error_type": "ValueError",
+  "error": "archive manifest verification failed: missing=72 mismatch=72 unexpected=0"
+}

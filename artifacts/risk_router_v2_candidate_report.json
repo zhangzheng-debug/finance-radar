@@ -1,0 +1,357 @@
+{
+  "schema_version": 1,
+  "candidate": {
+    "schema_version": 2,
+    "model_name": "Finance Radar Downside-Risk Review Router v2 candidate",
+    "model_version": "risk-router-v2-candidate-3629350054e0",
+    "artifact_sha256": "6e516105ab1200b6d5b5be80bdf9e17a2bdbe70d47274a824d47a3f60e7bc8c4",
+    "trained_at": "2026-07-18T18:39:24.221191+00:00",
+    "status": "REJECTED_CANDIDATE_NOT_DEPLOYED",
+    "task": "Evidence-stage adverse-risk queue prioritization",
+    "input_contract": "publish_time_content_and_exact_evidence_only",
+    "dataset": {
+      "rows": 823,
+      "label_counts": {
+        "RISK_REVIEW": 472,
+        "NON_TARGET": 351
+      },
+      "excluded": {
+        "verified_outside_downside_scope:opennews_free": 4,
+        "verified_outside_downside_scope:sec_current_filings": 45,
+        "verified_outside_downside_scope:federal_reserve_press": 18,
+        "verified_outside_downside_scope:bls_key_indicators": 4,
+        "verified_outside_downside_scope:fdic_press_releases": 3
+      },
+      "feature_contract": "company name + observed title/summary + confirmed facts + exact evidence passage",
+      "prohibited_model_features": [
+        "event_family",
+        "event_type",
+        "discovery_source",
+        "status",
+        "manual_grade",
+        "post_event_market_data"
+      ],
+      "taxonomy_markers_removed": 904,
+      "internal_control_markers_removed": [
+        "candidate official",
+        "official sec",
+        "recovery value",
+        "source metadata control"
+      ],
+      "hard_negative_sources": {
+        "microsoft_official_blog_dev": {
+          "url": "https://blogs.microsoft.com/feed/",
+          "raw_sha256": "385322bd29665aa611adeea2feab6529e954c118c33ec1f64554bfd43d5af92b",
+          "parsed": 10,
+          "accepted": 10,
+          "filtered_adverse": 0,
+          "filtered_legacy_overlap": 0
+        },
+        "apple_newsroom_dev": {
+          "url": "https://www.apple.com/newsroom/rss-feed.rss",
+          "raw_sha256": "17987e405959cd8757466327fa50b4ef254f4e8e77dd06b496058ccce1e9046d",
+          "parsed": 20,
+          "accepted": 20,
+          "filtered_adverse": 0,
+          "filtered_legacy_overlap": 0
+        }
+      },
+      "source_holdout": {
+        "source_counts": {
+          "ecb_press": 15,
+          "ecb_statistical_press": 6,
+          "eia_press": 3
+        },
+        "rows": 24
+      },
+      "total_rows": 877,
+      "dataset_sha256": "3629350054e0376bcd404b23c4e72d4e0fbdbda2ad934671502af96fcc049e08",
+      "train_rows": 647,
+      "test_rows": 230,
+      "split": {
+        "strategy": "deterministic recent connected-group holdout",
+        "grouping": "connected components of issuer_key and event_chain_id",
+        "target_test_fraction": 0.25,
+        "actual_test_fraction": 0.2503037667071689,
+        "train_rows": 617,
+        "test_rows": 206,
+        "train_label_counts": {
+          "NON_TARGET": 253,
+          "RISK_REVIEW": 364
+        },
+        "test_label_counts": {
+          "RISK_REVIEW": 108,
+          "NON_TARGET": 98
+        },
+        "train_date_range": [
+          "2020-01-31",
+          "2026-03-31"
+        ],
+        "test_date_range": [
+          "2022-02-07",
+          "2026-07-15"
+        ],
+        "issuer_overlap_count": 0,
+        "event_chain_overlap_count": 0
+      }
+    },
+    "metrics": {
+      "rows": 230,
+      "coverage": 0.4043478260869565,
+      "strict_accuracy": 0.3173913043478261,
+      "covered_accuracy": 0.7849462365591398,
+      "route_distribution": {
+        "NON_TARGET": 20,
+        "ABSTAIN": 137,
+        "RISK_REVIEW": 73
+      },
+      "confusion_matrix_covered": [
+        [
+          16,
+          16
+        ],
+        [
+          4,
+          57
+        ]
+      ]
+    },
+    "source_holdout_metrics": {
+      "rows": 24,
+      "coverage": 0.041666666666666664,
+      "strict_accuracy": 0.0,
+      "covered_accuracy": 0.0,
+      "route_distribution": {
+        "ABSTAIN": 23,
+        "RISK_REVIEW": 1
+      },
+      "confusion_matrix_covered": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    "feature_audit": {
+      "shortcut_hits": [],
+      "toward_risk": [
+        {
+          "feature": "word_tfidf__split",
+          "coefficient": 0.650554
+        },
+        {
+          "feature": "word_tfidf__common",
+          "coefficient": 0.559973
+        },
+        {
+          "feature": "word_tfidf__recovery",
+          "coefficient": 0.542829
+        },
+        {
+          "feature": "word_tfidf__shares",
+          "coefficient": 0.497775
+        },
+        {
+          "feature": "word_tfidf__voluntarily",
+          "coefficient": 0.492671
+        },
+        {
+          "feature": "word_tfidf__after",
+          "coefficient": 0.488834
+        },
+        {
+          "feature": "word_tfidf__issued",
+          "coefficient": 0.462104
+        },
+        {
+          "feature": "word_tfidf__one for",
+          "coefficient": 0.458357
+        },
+        {
+          "feature": "word_tfidf__holders",
+          "coefficient": 0.446992
+        },
+        {
+          "feature": "word_tfidf__million",
+          "coefficient": 0.443052
+        },
+        {
+          "feature": "word_tfidf__warrants",
+          "coefficient": 0.438146
+        },
+        {
+          "feature": "word_tfidf__reverse",
+          "coefficient": 0.431904
+        },
+        {
+          "feature": "word_tfidf__common shares",
+          "coefficient": 0.417131
+        },
+        {
+          "feature": "word_tfidf__100",
+          "coefficient": 0.390128
+        },
+        {
+          "feature": "word_tfidf__for 100",
+          "coefficient": 0.387514
+        },
+        {
+          "feature": "word_tfidf__while",
+          "coefficient": 0.384812
+        },
+        {
+          "feature": "word_tfidf__reporting",
+          "coefficient": 0.379041
+        },
+        {
+          "feature": "word_tfidf__filed",
+          "coefficient": 0.373308
+        },
+        {
+          "feature": "char_tfidf__ile",
+          "coefficient": 0.3675
+        },
+        {
+          "feature": "word_tfidf__series",
+          "coefficient": 0.360718
+        }
+      ],
+      "toward_non_target": [
+        {
+          "feature": "word_tfidf__apple",
+          "coefficient": -1.036268
+        },
+        {
+          "feature": "word_tfidf__bankruptcyliquidation",
+          "coefficient": -0.722378
+        },
+        {
+          "feature": "word_tfidf__ai",
+          "coefficient": -0.574225
+        },
+        {
+          "feature": "word_tfidf__row",
+          "coefficient": -0.565875
+        },
+        {
+          "feature": "word_tfidf__later",
+          "coefficient": -0.481665
+        },
+        {
+          "feature": "word_tfidf__acquisition",
+          "coefficient": -0.468699
+        },
+        {
+          "feature": "word_tfidf__liquidation",
+          "coefficient": -0.457668
+        },
+        {
+          "feature": "word_tfidf__combination",
+          "coefficient": -0.449845
+        },
+        {
+          "feature": "char_tfidf__uidat",
+          "coefficient": -0.433482
+        },
+        {
+          "feature": "char_tfidf__quida",
+          "coefficient": -0.433482
+        },
+        {
+          "feature": "word_tfidf__bankruptcy liquidation",
+          "coefficient": -0.432958
+        },
+        {
+          "feature": "char_tfidf__uida",
+          "coefficient": -0.431601
+        },
+        {
+          "feature": "word_tfidf__value bankruptcyliquidation",
+          "coefficient": -0.426648
+        },
+        {
+          "feature": "word_tfidf__action bankruptcyliquidation",
+          "coefficient": -0.426648
+        },
+        {
+          "feature": "word_tfidf__liquidation candidate",
+          "coefficient": -0.426648
+        },
+        {
+          "feature": "word_tfidf__bankruptcyliquidation value",
+          "coefficient": -0.426648
+        },
+        {
+          "feature": "word_tfidf__are",
+          "coefficient": -0.426597
+        },
+        {
+          "feature": "word_tfidf__2021",
+          "coefficient": -0.421109
+        },
+        {
+          "feature": "word_tfidf__ticker",
+          "coefficient": -0.415209
+        },
+        {
+          "feature": "char_tfidf__datio",
+          "coefficient": -0.414426
+        }
+      ]
+    },
+    "candidate_thresholds": {
+      "development_coverage_gte": 0.65,
+      "development_covered_accuracy_gte": 0.8,
+      "source_holdout_coverage_gte": 0.65,
+      "source_holdout_covered_accuracy_gte": 0.8,
+      "zero_top_coefficient_shortcut_hits": true
+    },
+    "candidate_gates": {
+      "development_coverage": false,
+      "development_covered_accuracy": false,
+      "source_holdout_coverage": false,
+      "source_holdout_covered_accuracy": false,
+      "zero_top_coefficient_shortcut_hits": true
+    },
+    "candidate_gate_pass": false,
+    "governance": {
+      "legacy_blind_v1_promotion_eligible": false,
+      "new_enriched_blind_v2_required": false,
+      "production_artifact_replaced": false,
+      "promotion_decision": "REMAIN_SHADOW",
+      "no_trading": true
+    }
+  },
+  "legacy_blind_v1_diagnostic": {
+    "evaluation_type": "legacy_blind_v1_diagnostic_after_failure_analysis",
+    "metrics": {
+      "coverage": 0.4,
+      "abstain_rate": 0.6,
+      "strict_accuracy": 0.375,
+      "covered_accuracy": 0.9375,
+      "risk_recall": 0.35,
+      "non_target_false_risk_rate": 0.05,
+      "mean_latency_ms": 1.420925,
+      "confusion_expected_to_predicted": {
+        "RISK_REVIEW": {
+          "ABSTAIN": 13,
+          "RISK_REVIEW": 7
+        },
+        "NON_TARGET": {
+          "ABSTAIN": 11,
+          "NON_TARGET": 8,
+          "RISK_REVIEW": 1
+        }
+      }
+    },
+    "promotion_eligible": false,
+    "benchmark_contract_valid": false
+  },
+  "production_artifact_modified": false,
+  "promotion_decision": "REMAIN_SHADOW",
+  "next_gate": "freeze evidence-enriched label-first external-blind-v2"
+}

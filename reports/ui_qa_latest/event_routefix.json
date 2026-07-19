@@ -1,0 +1,25 @@
+{
+  "captured_at_utc": "2026-07-18T22:01:45.890Z",
+  "requested_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Event_Intelligence?flow=%E5%B7%B2%E6%A0%B8%E9%AA%8C&limit=25",
+  "final_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Event_Intelligence?flow=%E5%B7%B2%E6%A0%B8%E9%AA%8C&limit=25",
+  "title": "Finance Radar · Situation Room",
+  "viewport": {
+    "width": 1366,
+    "height": 768
+  },
+  "full_page": false,
+  "scroll_y": 0,
+  "window_scroll_y": 0,
+  "tab": null,
+  "canvas_count": 0,
+  "iframe_count": 0,
+  "dataframe_count": 0,
+  "skeleton_count": 0,
+  "alert_count": 0,
+  "body_text_length": 5206,
+  "body_text_excerpt": "Home\n\nEvent Intelligence\n\nReplay Lab\n\nOperations and Model\n\nAdjudication Studio\n\nFINANCE RADAR\n/\nSituation Room\nRECENT_CAPTURE\n事件流、证据健康、复核队列与运行态总览\n情报与人工复核系统 · 只读行情 · 不含下单、仓位、余额或交易执行能力\n事件\n1,191\n已核验\n546\n待复核\n294\n证据边\n2,394\n最新事件\n360.1 min\nWORKER\n4.40 s\n实时事件流\nLATEST 12 · UTC · 点击进入证据工作台\n07-16 03:36\nVERIFIED\n●\nP0\n●\n地缘事件\n●\nOPENNEWS_FREE\nU.S. Central Command / M/T Belmaus enforcement of iran port blockade\nCENTCOM Public Affairs stated that U.S. forces disabled the unladen Curacao-flagged M/T Belma after it ignored warnings while transiting toward Kharg Island. It also stated that the naval blockade against vessels transiting to or from Iranian ports and coastal areas resumed at 4 p.m. ET on July 14, and that two compliant vessels were redirected and one non-compliant vessel was disabled in the first 24 hours.\n07-16 03:33\nVERIFIED\n●\nP0\n●\n债务融资\n●\nSEC_CURRENT_FILINGS\nSBA Communications Corporationsenior note debt refinancing pricing\nSBA Communications agreed to issue and sell $1.35 billion of 4.875",
+  "console_errors": [],
+  "page_errors": [],
+  "http_errors": [],
+  "screenshot": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\reports\\ui_qa_latest\\event_routefix.png"
+}

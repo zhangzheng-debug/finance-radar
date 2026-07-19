@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-19T04:53:43.502450+00:00",
+  "endpoint": "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api/api/v1/market/capabilities",
+  "passed": true,
+  "checks": {
+    "boundary_read_only": true,
+    "boundary_no_trading": true,
+    "boundary_no_account_data": true,
+    "boundary_post_event_only": true,
+    "boundary_not_model_feature": true,
+    "required_providers_present": true,
+    "all_providers_read_only": true,
+    "no_order_endpoints": true,
+    "binance_server_observed": true,
+    "twelve_server_observed": true,
+    "ibkr_local_probe_only": true,
+    "observer_relative_horizons_declared": true,
+    "missed_windows_never_backfilled": true,
+    "horizon_metrics_post_event_only": true,
+    "binance_public_role": true,
+    "twelve_data_role": true,
+    "ibkr_tws_readonly_role": true
+  },
+  "provider_policy": {
+    "crypto": "binance_public",
+    "non_crypto": "twelve_data",
+    "ibkr": "local_capability_probe_only"
+  },
+  "horizon_policy": {
+    "baseline": "first_real_observer_snapshot",
+    "windows": [
+      "t_plus_5m",
+      "t_plus_30m",
+      "t_plus_1d"
+    ],
+    "missed_window_behavior": "record_MISSED_WINDOW_without_latest_quote_substitution",
+    "return_metric_scope": "post_event_audit_only"
+  },
+  "boundary": {
+    "read_only": true,
+    "no_trading": true,
+    "account_data_used": false,
+    "post_event_audit_only": true,
+    "allowed_as_model_feature": false
+  },
+  "providers": [
+    {
+      "provider_id": "binance_public",
+      "name": "Binance Public Spot",
+      "role": "PERSISTED_EVENT_OBSERVATION",
+      "asset_classes": [
+        "crypto"
+      ],
+      "access": "PUBLIC_NONE_AUTH",
+      "deployment": "SERVER_DIRECT",
+      "status": "OBSERVED",
+      "jobs": 8,
+      "completed_jobs": 2,
+      "pending_jobs": 2,
+      "snapshots": 2,
+      "last_snapshot_at": "2026-07-18T23:04:08.179391+00:00",
+      "last_error": null,
+      "observation_windows": {
+        "initial": {
+          "COMPLETED": 2
+        },
+        "t_plus_1d": {
+          "PENDING": 2
+        },
+        "t_plus_30m": {
+          "MISSED_WINDOW": 2
+        },
+        "t_plus_5m": {
+          "MISSED_WINDOW": 2
+        }
+      },
+      "read_only": true,
+      "account_data_used": false,
+      "order_endpoints_present": false
+    },
+    {
+      "provider_id": "twelve_data",
+      "name": "Twelve Data",
+      "role": "PERSISTED_EVENT_OBSERVATION",
+      "asset_classes": [
+        "equity",
+        "etf",
+        "fx",
+        "commodity_proxy"
+      ],
+      "access": "API_KEY_MARKET_DATA_ONLY",
+      "deployment": "SERVER_DIRECT",
+      "status": "OBSERVED",
+      "jobs": 13,
+      "completed_jobs": 3,
+      "pending_jobs": 0,
+      "snapshots": 3,
+      "last_snapshot_at": "2026-07-15T20:37:35.000022+00:00",
+      "last_error": null,
+      "observation_windows": {
+        "initial": {
+          "CANCELLED_RELATION_DISABLED": 1,
+          "COMPLETED": 3
+        },
+        "t_plus_1d": {
+          "MISSED_WINDOW": 3
+        },
+        "t_plus_30m": {
+          "MISSED_WINDOW": 3
+        },
+        "t_plus_5m": {
+          "MISSED_WINDOW": 3
+        }
+      },
+      "read_only": true,
+      "account_data_used": false,
+      "order_endpoints_present": false
+    },
+    {
+      "provider_id": "ibkr_tws_readonly",
+      "name": "IBKR TWS Read-Only",
+      "role": "CAPABILITY_PROBE_ONLY",
+      "asset_classes": [
+        "equity",
+        "fx",
+        "futures"
+      ],
+      "access": "LOCAL_TWS_READ_ONLY",
+      "deployment": "OPERATOR_DESKTOP",
+      "status": "LOCAL_PROBE_ONLY",
+      "jobs": 0,
+      "completed_jobs": 0,
+      "pending_jobs": 0,
+      "snapshots": 0,
+      "last_snapshot_at": null,
+      "last_error": null,
+      "observation_windows": {},
+      "read_only": true,
+      "account_data_used": false,
+      "order_endpoints_present": false
+    }
+  ],
+  "interpretation": {
+    "market_data_role": "post_event_audit_context_only",
+    "truth_or_causality_evidence": false,
+    "model_feature_allowed": false,
+    "trading_or_account_access": false
+  }
+}

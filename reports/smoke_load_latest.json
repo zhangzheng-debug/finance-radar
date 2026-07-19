@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-18T16:48:02.094247+00:00",
+  "target": "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api",
+  "read_only": true,
+  "passed": true,
+  "requests": 120,
+  "concurrency": 15,
+  "elapsed_seconds": 4.339,
+  "throughput_requests_per_second": 27.659,
+  "success_rate": 1.0,
+  "status_counts": {
+    "200": 120
+  },
+  "latency_ms": {
+    "mean": 512.665,
+    "p50": 577.431,
+    "p95": 832.012,
+    "p99": 1029.309,
+    "max": 1048.12
+  },
+  "routes": {
+    "/api/v1/health": {
+      "requests": 40,
+      "p50_ms": 647.483,
+      "p95_ms": 924.202,
+      "max_ms": 1048.12
+    },
+    "/api/v1/overview": {
+      "requests": 40,
+      "p50_ms": 687.912,
+      "p95_ms": 834.581,
+      "max_ms": 1029.309
+    },
+    "/api/v1/events": {
+      "requests": 40,
+      "p50_ms": 195.347,
+      "p95_ms": 318.624,
+      "max_ms": 446.713
+    }
+  },
+  "errors": [],
+  "pass_policy": {
+    "minimum_success_rate": 0.99,
+    "maximum_p95_ms": 5000
+  }
+}

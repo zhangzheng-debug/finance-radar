@@ -1,0 +1,219 @@
+from __future__ import annotations
+
+import hashlib
+import sys
+import tempfile
+import unittest
+from unittest import mock
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from event_ledger import enqueue_observation_job, open_ledger, stable_id, upsert_source, utc_now
+import live_candidate_extractor as extractor
+import official_primary_page_enricher as enricher
+
+
+class OfficialPrimaryPageEnricherTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.connection = open_ledger(self.root / "ledger.sqlite3")
+
+    def tearDown(self) -> None:
+        self.connection.close()
+        self.temp_dir.cleanup()
+
+    def add_candidate(self, *, source_id: str, title: str, url: str) -> str:
+        upsert_source(
+            self.connection,
+            source_id=source_id,
+            name=source_id,
+            source_type="official_primary_feed",
+            authority_tier="P0_official",
+        )
+        observation_id = stable_id("OBS", source_id, title)
+        now = utc_now()
+        self.connection.execute(
+            """INSERT INTO raw_observations VALUES (
+               ?,?,?,?,?,?,?,?,?,'{}','captured')""",
+            (
+                observation_id,
+                source_id,
+                title,
+                "2026-07-15T12:00:00+00:00",
+                now,
+                title,
+                title,
+                url,
+                hashlib.sha256(title.encode()).hexdigest(),
+            ),
+        )
+        enqueue_observation_job(
+            self.connection,
+            observation_id=observation_id,
+            job_type="extract_live_event_candidate",
+            priority=90,
+            payload={},
+        )
+        self.connection.commit()
+        result = extractor.process_pending(self.connection, limit=10)
+        self.assertEqual(result["candidates"], 1)
+        return result["event_ids"][0]
+
+    def test_extracts_review_only_passage_without_promoting_candidate(self) -> None:
+        event_id = self.add_candidate(
+            source_id="fda_medwatch",
+            title="Heart Pump Recall: Example removes affected devices",
+            url="https://www.fda.gov/example-recall",
+        )
+        body = b"""<html><body><nav>Subscribe and contact us</nav><main>
+        <h1>Heart Pump Recall</h1><p>The company is recalling affected heart pump devices.</p>
+        <p>The FDA said the failure may cause serious injuries or deaths and customers should stop use.</p>
+        </main></body></html>"""
+
+        def fetcher(url: str, user_agent: str, timeout: float) -> enricher.FetchResult:
+            return enricher.FetchResult(body, url)
+
+        result = enricher.enrich(
+            self.connection,
+            cache_dir=self.root / "cache",
+            user_agent="FinanceRadar test@example.com",
+            limit=10,
+            timeout=1,
+            max_chars=500,
+            fetcher=fetcher,
+        )
+        self.assertEqual(result["passages"], 1)
+        evidence = self.connection.execute("SELECT * FROM event_evidence").fetchone()
+        self.assertIn("serious injuries or deaths", evidence["evidence_passage"])
+        self.assertEqual(evidence["evidence_status"], "machine_extracted_unreviewed")
+        self.assertEqual(evidence["auto_verification_allowed"], 0)
+        event = self.connection.execute(
+            "SELECT status,label_status,manual_grade FROM canonical_events WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        self.assertEqual((event["status"], event["label_status"], event["manual_grade"]), ("candidate", "candidate", None))
+
+    def test_disallowed_source_host_is_rejected(self) -> None:
+        self.add_candidate(
+            source_id="sec_litigation_releases",
+            title="Example Defendant",
+            url="https://malicious.example/redirect",
+        )
+
+        def fetcher(url: str, user_agent: str, timeout: float) -> enricher.FetchResult:
+            raise AssertionError("fetcher must not be called for a disallowed host")
+
+        result = enricher.enrich(
+            self.connection,
+            cache_dir=self.root / "cache",
+            user_agent="FinanceRadar test@example.com",
+            limit=10,
+            timeout=1,
+            max_chars=500,
+            fetcher=fetcher,
+        )
+        self.assertEqual(result["inserted"], 0)
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM event_evidence").fetchone()[0],
+            0,
+        )
+
+    def test_title_overlap_without_event_keywords_remains_link_only(self) -> None:
+        self.add_candidate(
+            source_id="ftc_press",
+            title="FTC takes action against Example Corp",
+            url="https://www.ftc.gov/example-commentary",
+        )
+        body = b"""<html><body><h1>FTC takes action against Example Corp</h1>
+        <p>This page contains general commentary and event logistics only.</p></body></html>"""
+
+        def fetcher(url: str, user_agent: str, timeout: float) -> enricher.FetchResult:
+            return enricher.FetchResult(body, url)
+
+        result = enricher.enrich(
+            self.connection,
+            cache_dir=self.root / "cache",
+            user_agent="FinanceRadar test@example.com",
+            limit=10,
+            timeout=1,
+            max_chars=500,
+            fetcher=fetcher,
+        )
+        self.assertEqual(result["link_only"], 1)
+        evidence = self.connection.execute("SELECT * FROM event_evidence").fetchone()
+        self.assertEqual(evidence["evidence_passage"], "")
+        self.assertEqual(evidence["evidence_status"], "link_only_no_relevant_passage")
+
+    def test_material_facts_outrank_keyword_heavy_page_title(self) -> None:
+        self.add_candidate(
+            source_id="fda_medwatch",
+            title="Heart Pump Recall: Example removes affected devices",
+            url="https://www.fda.gov/factual-recall",
+        )
+        body = b"""<html><body>
+        <h1>Heart Pump Recall: Example removes affected devices</h1>
+        <p>The company issued a letter requiring customers to remove 12,400 affected devices.
+        The malfunction may cause serious injuries or deaths, and the FDA reported seven injuries.</p>
+        </body></html>"""
+
+        def fetcher(url: str, user_agent: str, timeout: float) -> enricher.FetchResult:
+            return enricher.FetchResult(body, url)
+
+        result = enricher.enrich(
+            self.connection,
+            cache_dir=self.root / "cache",
+            user_agent="FinanceRadar test@example.com",
+            limit=10,
+            timeout=1,
+            max_chars=500,
+            fetcher=fetcher,
+        )
+        evidence = self.connection.execute("SELECT * FROM event_evidence").fetchone()
+        self.assertEqual(result["passages"], 1)
+        self.assertIn("12,400 affected devices", evidence["evidence_passage"])
+        self.assertIn("seven injuries", evidence["evidence_passage"])
+
+    def test_pdf_payload_uses_pdf_text_extraction(self) -> None:
+        pages = [
+            mock.Mock(
+                extract_text=mock.Mock(
+                    return_value="SEC order: potential manipulation through social media. Trading is suspended."
+                )
+            )
+        ]
+        with mock.patch.object(enricher, "PdfReader", return_value=mock.Mock(pages=pages)):
+            text = enricher.document_text(b"%PDF-test", "https://www.sec.gov/order.pdf")
+        self.assertIn("potential manipulation", text)
+        self.assertIn("Trading is suspended", text)
+
+    def test_pdf_visual_line_wraps_do_not_split_material_fact(self) -> None:
+        pages = [
+            mock.Mock(
+                extract_text=mock.Mock(
+                    return_value=(
+                        "Trading was suspended because of potential manipulation in the\n"
+                        "securities through recommendations by unknown persons via social media,\n"
+                        "which appear designed to artificially inflate price and volume."
+                    )
+                )
+            )
+        ]
+        with mock.patch.object(enricher, "PdfReader", return_value=mock.Mock(pages=pages)):
+            text = enricher.document_text(b"%PDF-test", "https://www.sec.gov/order.pdf")
+        passage = enricher.select_passage(
+            text,
+            title="Trading Suspensions: Example",
+            event_type="trading_suspension",
+            max_chars=500,
+        )
+        self.assertIn("unknown persons via social media", passage.text)
+        self.assertIn("artificially inflate", passage.text)
+
+
+if __name__ == "__main__":
+    unittest.main()

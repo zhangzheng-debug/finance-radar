@@ -1,0 +1,1477 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-07-18T21:03:59.219Z",
+  "target": "http://127.0.0.1:18721",
+  "status": "PASS",
+  "scope": "machine accessibility audit; not a substitute for assistive-technology user testing",
+  "thresholds": {
+    "one_main_landmark": true,
+    "one_navigation_landmark": true,
+    "one_h1_page_heading": true,
+    "all_interactive_controls_named": true,
+    "no_duplicate_ids": true,
+    "all_images_have_alt_attribute": true,
+    "all_visible_iframes_titled": true,
+    "no_heading_level_skips": true,
+    "no_horizontal_overflow_over_2px": true,
+    "focus_indicator_ratio_minimum": 0.8,
+    "wcag_aa_normal_text_contrast": 4.5,
+    "touch_target_advisory_minimum_px": 24
+  },
+  "blocker_count": 0,
+  "advisory_count": 0,
+  "browser_page_error_count": 0,
+  "pages": [
+    {
+      "name": "Situation Room",
+      "requested_url": "http://127.0.0.1:18721/",
+      "final_url": "http://127.0.0.1:18721/",
+      "blockers": [],
+      "advisories": [],
+      "page_errors": [],
+      "desktop": {
+        "title": "Finance Radar · Situation Room",
+        "language": "zh-CN",
+        "body_characters": 5198,
+        "main_landmarks": 1,
+        "navigation_landmarks": 1,
+        "interactive_elements": 23,
+        "missing_accessible_names": [],
+        "tiny_non_inline_targets": [],
+        "duplicate_ids": [],
+        "images_without_alt": 0,
+        "iframes_without_title": 0,
+        "headings": [
+          {
+            "level": 1,
+            "text": "Situation Room"
+          },
+          {
+            "level": 2,
+            "text": "实时事件流"
+          },
+          {
+            "level": 2,
+            "text": "人工工作队列"
+          },
+          {
+            "level": 2,
+            "text": "来源脉搏"
+          }
+        ],
+        "heading_level_skips": [],
+        "horizontal_overflow_pixels": 0,
+        "skeletons": 0
+      },
+      "mobile": {
+        "title": "Finance Radar · Situation Room",
+        "language": "zh-CN",
+        "body_characters": 5234,
+        "main_landmarks": 1,
+        "navigation_landmarks": 1,
+        "interactive_elements": 25,
+        "missing_accessible_names": [],
+        "tiny_non_inline_targets": [],
+        "duplicate_ids": [],
+        "images_without_alt": 0,
+        "iframes_without_title": 0,
+        "headings": [
+          {
+            "level": 1,
+            "text": "Situation Room"
+          },
+          {
+            "level": 2,
+            "text": "实时事件流"
+          },
+          {
+            "level": 2,
+            "text": "人工工作队列"
+          },
+          {
+            "level": 2,
+            "text": "来源脉搏"
+          }
+        ],
+        "heading_level_skips": [],
+        "horizontal_overflow_pixels": 0,
+        "skeletons": 0
+      },
+      "focus": {
+        "sampled": 20,
+        "visible_indicators": 20,
+        "ratio": 1,
+        "samples": [
+          {
+            "key": "A:Home",
+            "tag": "A",
+            "name": "Home",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Event Intelligence",
+            "tag": "A",
+            "name": "Event Intelligence",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Replay Lab",
+            "tag": "A",
+            "name": "Replay Lab",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Operations and Model",
+            "tag": "A",
+            "name": "Operations and Model",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Adjudication Studio",
+            "tag": "A",
+            "name": "Adjudication Studio",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "SECTION:Finance Radar 主工作区",
+            "tag": "SECTION",
+            "name": "Finance Radar 主工作区",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 1066,
+            "height": 768,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Link to heading",
+            "tag": "A",
+            "name": "Link to heading",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 U.S. Central Command / M/T Belma",
+            "tag": "A",
+            "name": "打开事件 U.S. Central Command / M/T Belma",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 95.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 SBA Communications Corporation",
+            "tag": "A",
+            "name": "打开事件 SBA Communications Corporation",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 95.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 GameSquare Holdings, Inc.",
+            "tag": "A",
+            "name": "打开事件 GameSquare Holdings, Inc.",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 95.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 Michael J. Forster",
+            "tag": "A",
+            "name": "打开事件 Michael J. Forster",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 95.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 Resmed",
+            "tag": "A",
+            "name": "打开事件 Resmed",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 95.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 Vanilla Chip LLC d/b/a TruHeight and two principals",
+            "tag": "A",
+            "name": "打开事件 Vanilla Chip LLC d/b/a TruHeight and two principals",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 113.6,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 Auna S.A.",
+            "tag": "A",
+            "name": "打开事件 Auna S.A.",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 95.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 Centerra Gold Inc.",
+            "tag": "A",
+            "name": "打开事件 Centerra Gold Inc.",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 95.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 Nuvini Group Limited",
+            "tag": "A",
+            "name": "打开事件 Nuvini Group Limited",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 95.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 Audax Private Credit Fund, LLC",
+            "tag": "A",
+            "name": "打开事件 Audax Private Credit Fund, LLC",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 95.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 Mako Mining Corp.",
+            "tag": "A",
+            "name": "打开事件 Mako Mining Corp.",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 95.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件 Perceptive Capital Solutions Corp.",
+            "tag": "A",
+            "name": "打开事件 Perceptive Capital Solutions Corp.",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 580,
+            "height": 94.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:打开事件工作台",
+            "tag": "A",
+            "name": "打开事件工作台",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 114,
+            "height": 40,
+            "visible_indicator": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "Event Intelligence",
+      "requested_url": "http://127.0.0.1:18721/Event_Intelligence",
+      "final_url": "http://127.0.0.1:18721/Event_Intelligence?flow=%E5%BE%85%E5%A4%8D%E6%A0%B8&limit=25&event_id=FR-LIVE-8c17bd049626d20ef20d836f002abf77",
+      "blockers": [],
+      "advisories": [],
+      "page_errors": [],
+      "desktop": {
+        "title": "Event Workbench · Finance Radar",
+        "language": "zh-CN",
+        "body_characters": 2062,
+        "main_landmarks": 1,
+        "navigation_landmarks": 1,
+        "interactive_elements": 52,
+        "missing_accessible_names": [],
+        "tiny_non_inline_targets": [],
+        "duplicate_ids": [],
+        "images_without_alt": 0,
+        "iframes_without_title": 0,
+        "headings": [
+          {
+            "level": 1,
+            "text": "Event Workbench"
+          },
+          {
+            "level": 2,
+            "text": "证据矩阵"
+          }
+        ],
+        "heading_level_skips": [],
+        "horizontal_overflow_pixels": 0,
+        "skeletons": 0
+      },
+      "mobile": {
+        "title": "Event Workbench · Finance Radar",
+        "language": "zh-CN",
+        "body_characters": 2086,
+        "main_landmarks": 1,
+        "navigation_landmarks": 1,
+        "interactive_elements": 54,
+        "missing_accessible_names": [],
+        "tiny_non_inline_targets": [],
+        "duplicate_ids": [],
+        "images_without_alt": 0,
+        "iframes_without_title": 0,
+        "headings": [
+          {
+            "level": 1,
+            "text": "Event Workbench"
+          },
+          {
+            "level": 2,
+            "text": "证据矩阵"
+          }
+        ],
+        "heading_level_skips": [],
+        "horizontal_overflow_pixels": 0,
+        "skeletons": 0
+      },
+      "focus": {
+        "sampled": 25,
+        "visible_indicators": 25,
+        "ratio": 1,
+        "samples": [
+          {
+            "key": "A:Home",
+            "tag": "A",
+            "name": "Home",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Event Intelligence",
+            "tag": "A",
+            "name": "Event Intelligence",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Replay Lab",
+            "tag": "A",
+            "name": "Replay Lab",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Operations and Model",
+            "tag": "A",
+            "name": "Operations and Model",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Adjudication Studio",
+            "tag": "A",
+            "name": "Adjudication Studio",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "SECTION:Finance Radar 主工作区",
+            "tag": "SECTION",
+            "name": "Finance Radar 主工作区",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 1066,
+            "height": 768,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Link to heading",
+            "tag": "A",
+            "name": "Link to heading",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "INPUT:保存视图",
+            "tag": "INPUT",
+            "name": "保存视图",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 136.9,
+            "height": 38,
+            "visible_indicator": true
+          },
+          {
+            "key": "INPUT:事件族",
+            "tag": "INPUT",
+            "name": "事件族",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 177.7,
+            "height": 35.6,
+            "visible_indicator": true
+          },
+          {
+            "key": "INPUT:全局检索",
+            "tag": "INPUT",
+            "name": "全局检索",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.067) 0px 0px 0px 0.885733px",
+            "width": 386.7,
+            "height": 35.6,
+            "visible_indicator": true
+          },
+          {
+            "key": "INPUT:数量",
+            "tag": "INPUT",
+            "name": "数量",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 84.7,
+            "height": 38,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:J / ↓ 下一条",
+            "tag": "BUTTON",
+            "name": "J / ↓ 下一条",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 121.2,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-16 03:02  — · merger_or_acquisition",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-16 03:02  — · merger_or_acquisition",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 54.8,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-16 03:02  — · earnings_or_guidance",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-16 03:02  — · earnings_or_guidance",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 54.8,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-16 03:02  — · hack_or_exploit",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-16 03:02  — · hack_or_exploit",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-16 03:02  — · monetary_policy",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-16 03:02  — · monetary_policy",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 54.8,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-16 01:03  — · OBSIDIAN ENERGY LTD.",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-16 01:03  — · OBSIDIAN ENERGY LTD.",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 54.8,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-16 00:59  — · Q32 Bio Inc.",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-16 00:59  — · Q32 Bio Inc.",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-15 21:13  — · CRESCENT BIOPHARMA, INC.",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-15 21:13  — · CRESCENT BIOPHARMA, INC.",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 54.8,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-15 20:21  — · monetary_policy",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-15 20:21  — · monetary_policy",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 54.8,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-16 14:02  EZGO · EZGO TECHNOLOGIES LTD",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-16 14:02  EZGO · EZGO TECHNOLOGIES LTD",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 54.8,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-16 03:43  PRTCY · PURETECH HEALTH PLC",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-16 03:43  PRTCY · PURETECH HEALTH PLC",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 54.8,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-16 17:00  MI · NFT LTD",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-16 17:00  MI · NFT LTD",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-16 17:00  CTNT · CHEETAH NET SUPPLY CHAIN SERVIC...",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-16 17:00  CTNT · CHEETAH NET SUPPLY CHAIN SERVIC...",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 54.8,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REVIEW    07-16 14:02  HAO · HAOXI HEALTH TECHNOLOGY LTD",
+            "tag": "BUTTON",
+            "name": "REVIEW    07-16 14:02  HAO · HAOXI HEALTH TECHNOLOGY LTD",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 258.3,
+            "height": 54.8,
+            "visible_indicator": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "Replay Lab",
+      "requested_url": "http://127.0.0.1:18721/Replay_Lab",
+      "final_url": "http://127.0.0.1:18721/Replay_Lab",
+      "blockers": [],
+      "advisories": [],
+      "page_errors": [],
+      "desktop": {
+        "title": "Replay Lab · Finance Radar",
+        "language": "zh-CN",
+        "body_characters": 504,
+        "main_landmarks": 1,
+        "navigation_landmarks": 1,
+        "interactive_elements": 19,
+        "missing_accessible_names": [],
+        "tiny_non_inline_targets": [],
+        "duplicate_ids": [],
+        "images_without_alt": 0,
+        "iframes_without_title": 0,
+        "headings": [
+          {
+            "level": 1,
+            "text": "Replay Lab"
+          },
+          {
+            "level": 2,
+            "text": "Recent replay evidence"
+          }
+        ],
+        "heading_level_skips": [],
+        "horizontal_overflow_pixels": 0,
+        "skeletons": 0
+      },
+      "mobile": {
+        "title": "Replay Lab · Finance Radar",
+        "language": "zh-CN",
+        "body_characters": 530,
+        "main_landmarks": 1,
+        "navigation_landmarks": 1,
+        "interactive_elements": 21,
+        "missing_accessible_names": [],
+        "tiny_non_inline_targets": [],
+        "duplicate_ids": [],
+        "images_without_alt": 0,
+        "iframes_without_title": 0,
+        "headings": [
+          {
+            "level": 1,
+            "text": "Replay Lab"
+          },
+          {
+            "level": 2,
+            "text": "Recent replay evidence"
+          }
+        ],
+        "heading_level_skips": [],
+        "horizontal_overflow_pixels": 0,
+        "skeletons": 0
+      },
+      "focus": {
+        "sampled": 16,
+        "visible_indicators": 16,
+        "ratio": 1,
+        "samples": [
+          {
+            "key": "A:Home",
+            "tag": "A",
+            "name": "Home",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Event Intelligence",
+            "tag": "A",
+            "name": "Event Intelligence",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Replay Lab",
+            "tag": "A",
+            "name": "Replay Lab",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Operations and Model",
+            "tag": "A",
+            "name": "Operations and Model",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Adjudication Studio",
+            "tag": "A",
+            "name": "Adjudication Studio",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "SECTION:Finance Radar 主工作区",
+            "tag": "SECTION",
+            "name": "Finance Radar 主工作区",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 1066,
+            "height": 768,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Link to heading",
+            "tag": "A",
+            "name": "Link to heading",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "INPUT:Frozen case",
+            "tag": "INPUT",
+            "name": "Frozen case",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 872,
+            "height": 38,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Run frozen replay",
+            "tag": "BUTTON",
+            "name": "Run frozen replay",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 158,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Reset history",
+            "tag": "BUTTON",
+            "name": "Reset history",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 120.9,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Show/hide columns",
+            "tag": "BUTTON",
+            "name": "Show/hide columns",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Download as CSV",
+            "tag": "BUTTON",
+            "name": "Download as CSV",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Search",
+            "tag": "BUTTON",
+            "name": "Search",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Fullscreen",
+            "tag": "BUTTON",
+            "name": "Fullscreen",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "CANVAS:run_idcasestatusmodelstartedreplay-af6eab32a2fc47d6a01928fb5088c94bpositive_earnings_non_targetCOMPLETEDrisk-router-v1-e1ce020d34452026-07-18T07:47:00.35",
+            "tag": "CANVAS",
+            "name": "run_idcasestatusmodelstartedreplay-af6eab32a2fc47d6a01928fb5088c94bpositive_earnings_non_targetCOMPL",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 904,
+            "height": 398,
+            "visible_indicator": true
+          },
+          {
+            "key": "DIV:",
+            "tag": "DIV",
+            "name": "",
+            "outline_style": "auto",
+            "outline_width": "3px",
+            "box_shadow": "none",
+            "width": 904,
+            "height": 398,
+            "visible_indicator": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "Operations and Model",
+      "requested_url": "http://127.0.0.1:18721/Operations_and_Model",
+      "final_url": "http://127.0.0.1:18721/Operations_and_Model",
+      "blockers": [],
+      "advisories": [],
+      "page_errors": [],
+      "desktop": {
+        "title": "Operations & Model · Finance Radar",
+        "language": "zh-CN",
+        "body_characters": 382,
+        "main_landmarks": 1,
+        "navigation_landmarks": 1,
+        "interactive_elements": 20,
+        "missing_accessible_names": [],
+        "tiny_non_inline_targets": [],
+        "duplicate_ids": [],
+        "images_without_alt": 0,
+        "iframes_without_title": 0,
+        "headings": [
+          {
+            "level": 1,
+            "text": "Operations & Model"
+          }
+        ],
+        "heading_level_skips": [],
+        "horizontal_overflow_pixels": 0,
+        "skeletons": 0
+      },
+      "mobile": {
+        "title": "Operations & Model · Finance Radar",
+        "language": "zh-CN",
+        "body_characters": 419,
+        "main_landmarks": 1,
+        "navigation_landmarks": 1,
+        "interactive_elements": 22,
+        "missing_accessible_names": [],
+        "tiny_non_inline_targets": [],
+        "duplicate_ids": [],
+        "images_without_alt": 0,
+        "iframes_without_title": 0,
+        "headings": [
+          {
+            "level": 1,
+            "text": "Operations & Model"
+          }
+        ],
+        "heading_level_skips": [],
+        "horizontal_overflow_pixels": 0,
+        "skeletons": 0
+      },
+      "focus": {
+        "sampled": 17,
+        "visible_indicators": 17,
+        "ratio": 1,
+        "samples": [
+          {
+            "key": "A:Home",
+            "tag": "A",
+            "name": "Home",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Event Intelligence",
+            "tag": "A",
+            "name": "Event Intelligence",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Replay Lab",
+            "tag": "A",
+            "name": "Replay Lab",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Operations and Model",
+            "tag": "A",
+            "name": "Operations and Model",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Adjudication Studio",
+            "tag": "A",
+            "name": "Adjudication Studio",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "SECTION:Finance Radar 主工作区",
+            "tag": "SECTION",
+            "name": "Finance Radar 主工作区",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 1066,
+            "height": 768,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Link to heading",
+            "tag": "A",
+            "name": "Link to heading",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:LIVE",
+            "tag": "BUTTON",
+            "name": "LIVE",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 291.3,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:RECENT_CAPTURE",
+            "tag": "BUTTON",
+            "name": "RECENT_CAPTURE",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 291.3,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:REPLAY",
+            "tag": "BUTTON",
+            "name": "REPLAY",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 291.3,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "DIV:数据源",
+            "tag": "DIV",
+            "name": "数据源",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 42,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Show/hide columns",
+            "tag": "BUTTON",
+            "name": "Show/hide columns",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Download as CSV",
+            "tag": "BUTTON",
+            "name": "Download as CSV",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Search",
+            "tag": "BUTTON",
+            "name": "Search",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Fullscreen",
+            "tag": "BUTTON",
+            "name": "Fullscreen",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "CANVAS:healthsource_idnameauthoritytypestatusWATCHfederal_reserveBoard of Governors of the Federal Reserve SystemP0official_primaryUNOBSERVEDWATCHdvids_centcom_",
+            "tag": "CANVAS",
+            "name": "healthsource_idnameauthoritytypestatusWATCHfederal_reserveBoard of Governors of the Federal Reserve ",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 904,
+            "height": 398,
+            "visible_indicator": true
+          },
+          {
+            "key": "DIV:",
+            "tag": "DIV",
+            "name": "",
+            "outline_style": "auto",
+            "outline_width": "3px",
+            "box_shadow": "none",
+            "width": 904,
+            "height": 398,
+            "visible_indicator": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "Adjudication Studio",
+      "requested_url": "http://127.0.0.1:18721/Adjudication_Studio",
+      "final_url": "http://127.0.0.1:18721/Adjudication_Studio",
+      "blockers": [],
+      "advisories": [],
+      "page_errors": [],
+      "desktop": {
+        "title": "Adjudication Studio · Finance Radar",
+        "language": "zh-CN",
+        "body_characters": 924,
+        "main_landmarks": 1,
+        "navigation_landmarks": 1,
+        "interactive_elements": 17,
+        "missing_accessible_names": [],
+        "tiny_non_inline_targets": [],
+        "duplicate_ids": [],
+        "images_without_alt": 0,
+        "iframes_without_title": 0,
+        "headings": [
+          {
+            "level": 1,
+            "text": "Adjudication Studio"
+          },
+          {
+            "level": 2,
+            "text": "Review control plane"
+          },
+          {
+            "level": 2,
+            "text": "Freeze readiness"
+          }
+        ],
+        "heading_level_skips": [],
+        "horizontal_overflow_pixels": 0,
+        "skeletons": 0
+      },
+      "mobile": {
+        "title": "Adjudication Studio · Finance Radar",
+        "language": "zh-CN",
+        "body_characters": 949,
+        "main_landmarks": 1,
+        "navigation_landmarks": 1,
+        "interactive_elements": 19,
+        "missing_accessible_names": [],
+        "tiny_non_inline_targets": [],
+        "duplicate_ids": [],
+        "images_without_alt": 0,
+        "iframes_without_title": 0,
+        "headings": [
+          {
+            "level": 1,
+            "text": "Adjudication Studio"
+          },
+          {
+            "level": 2,
+            "text": "Review control plane"
+          },
+          {
+            "level": 2,
+            "text": "Freeze readiness"
+          }
+        ],
+        "heading_level_skips": [],
+        "horizontal_overflow_pixels": 0,
+        "skeletons": 0
+      },
+      "focus": {
+        "sampled": 16,
+        "visible_indicators": 16,
+        "ratio": 1,
+        "samples": [
+          {
+            "key": "A:Home",
+            "tag": "A",
+            "name": "Home",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Event Intelligence",
+            "tag": "A",
+            "name": "Event Intelligence",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Replay Lab",
+            "tag": "A",
+            "name": "Replay Lab",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Operations and Model",
+            "tag": "A",
+            "name": "Operations and Model",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Adjudication Studio",
+            "tag": "A",
+            "name": "Adjudication Studio",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 239,
+            "height": 40,
+            "visible_indicator": true
+          },
+          {
+            "key": "SECTION:Finance Radar 主工作区",
+            "tag": "SECTION",
+            "name": "Finance Radar 主工作区",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 1066,
+            "height": 768,
+            "visible_indicator": true
+          },
+          {
+            "key": "A:Link to heading",
+            "tag": "A",
+            "name": "Link to heading",
+            "outline_style": "solid",
+            "outline_width": "2px",
+            "box_shadow": "rgba(41, 189, 227, 0.22) 0px 0px 0px 3px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "DIV:01",
+            "tag": "DIV",
+            "name": "01",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 55,
+            "height": 54.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "DIV:02",
+            "tag": "DIV",
+            "name": "02",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 55,
+            "height": 54.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "DIV:03",
+            "tag": "DIV",
+            "name": "03",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 55,
+            "height": 54.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "DIV:04",
+            "tag": "DIV",
+            "name": "04",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 55,
+            "height": 54.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Help for RISK_REVIEW",
+            "tag": "BUTTON",
+            "name": "Help for RISK_REVIEW",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Help for NON_TARGET",
+            "tag": "BUTTON",
+            "name": "Help for NON_TARGET",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "BUTTON:Help for ABSTAIN",
+            "tag": "BUTTON",
+            "name": "Help for ABSTAIN",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 28,
+            "height": 28,
+            "visible_indicator": true
+          },
+          {
+            "key": "DIV:production_changed=false · blind_v2_frozen=false",
+            "tag": "DIV",
+            "name": "production_changed=false · blind_v2_frozen=false",
+            "outline_style": "solid",
+            "outline_width": "3px",
+            "box_shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+            "width": 321.5,
+            "height": 54.4,
+            "visible_indicator": true
+          },
+          {
+            "key": "PRE:production_changed=false · blind_v2_frozen=false",
+            "tag": "PRE",
+            "name": "production_changed=false · blind_v2_frozen=false",
+            "outline_style": "auto",
+            "outline_width": "3px",
+            "box_shadow": "none",
+            "width": 321.5,
+            "height": 54.4,
+            "visible_indicator": true
+          }
+        ]
+      }
+    }
+  ],
+  "color_token_contract": [
+    {
+      "name": "primary text / canvas",
+      "foreground": "#e6eef5",
+      "background": "#060c13",
+      "ratio": 16.75,
+      "wcag_aa_normal_text": true
+    },
+    {
+      "name": "muted text / canvas",
+      "foreground": "#879caf",
+      "background": "#060c13",
+      "ratio": 6.92,
+      "wcag_aa_normal_text": true
+    },
+    {
+      "name": "muted text / panel",
+      "foreground": "#879caf",
+      "background": "#0a1420",
+      "ratio": 6.53,
+      "wcag_aa_normal_text": true
+    },
+    {
+      "name": "cyan action / panel",
+      "foreground": "#29bde3",
+      "background": "#0a1420",
+      "ratio": 8.36,
+      "wcag_aa_normal_text": true
+    },
+    {
+      "name": "green status / panel",
+      "foreground": "#3ed59f",
+      "background": "#0a1420",
+      "ratio": 9.9,
+      "wcag_aa_normal_text": true
+    },
+    {
+      "name": "amber status / panel",
+      "foreground": "#f0b35a",
+      "background": "#0a1420",
+      "ratio": 9.97,
+      "wcag_aa_normal_text": true
+    },
+    {
+      "name": "red status / panel",
+      "foreground": "#ff6b7c",
+      "background": "#0a1420",
+      "ratio": 6.74,
+      "wcag_aa_normal_text": true
+    },
+    {
+      "name": "violet evidence / panel",
+      "foreground": "#9b8afb",
+      "background": "#0a1420",
+      "ratio": 6.55,
+      "wcag_aa_normal_text": true
+    },
+    {
+      "name": "safe banner / safe surface",
+      "foreground": "#a8c8d7",
+      "background": "#0a1d2a",
+      "ratio": 9.74,
+      "wcag_aa_normal_text": true
+    }
+  ],
+  "contrast_failures": 0
+}

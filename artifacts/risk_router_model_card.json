@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "model_name": "Finance Radar Downside-Risk Review Router",
+  "model_version": "risk-router-v1-e1ce020d3445",
+  "artifact_sha256": "84b9186bd2d1c1d16dcc2f37560e034181bcbc257286c458c2bf7c600c4f7a28",
+  "trained_at": "2026-07-18T10:20:27.591555+00:00",
+  "task": "Route full-polarity financial event text to RISK_REVIEW, NON_TARGET or ABSTAIN.",
+  "intended_use": "Shadow-mode prioritization of potentially material downside-risk events for human evidence review.",
+  "explicit_non_uses": [
+    "trading or order execution",
+    "return prediction",
+    "long/short recommendations",
+    "automatic fact verification",
+    "automatic rejection of positive news"
+  ],
+  "polarity_policy": {
+    "ingestion": "full_polarity",
+    "specialization": "downside_risk_priority",
+    "positive_news": "normally NON_TARGET or ABSTAIN; retained in the ledger and never reinterpreted as bearish"
+  },
+  "dataset": {
+    "rows": 897,
+    "label_counts": {
+      "RISK_REVIEW": 546,
+      "NON_TARGET": 351
+    },
+    "top_event_families": {
+      "distress_equity_death": 68,
+      "equity_dilution": 65,
+      "listing_compliance": 54,
+      "listing_status": 47,
+      "delisting_or_suspension": 45,
+      "corporate_action_merger": 40,
+      "source_metadata_control": 39,
+      "fundamental_metric_control": 38,
+      "identity_control": 31,
+      "spac_lifecycle": 31,
+      "dilution_recapitalization": 29,
+      "price_dislocation_control": 27,
+      "listing_remediation": 23,
+      "regulatory_enforcement": 17,
+      "bankruptcy_reorganization": 16,
+      "equity_structure": 15,
+      "voluntary_listing_exit": 14,
+      "liquidity_and_financing_risk": 12,
+      "capital_structure": 12,
+      "product_safety": 11
+    },
+    "dataset_sha256": "e1ce020d344534485c09593d23ca7b0ae1cb17f4490ca5ab4cab3a557884e01f",
+    "label_definition": {
+      "RISK_REVIEW": "currently verified historical downside-risk event",
+      "NON_TARGET": "adjudicated rejected candidate or control"
+    },
+    "train_rows": 672,
+    "test_rows": 225,
+    "split": {
+      "strategy": "deterministic recent connected-group holdout",
+      "grouping": "connected components of issuer_key and event_chain_id",
+      "target_test_fraction": 0.25,
+      "actual_test_fraction": 0.2508361204013378,
+      "train_rows": 672,
+      "test_rows": 225,
+      "train_label_counts": {
+        "RISK_REVIEW": 392,
+        "NON_TARGET": 280
+      },
+      "test_label_counts": {
+        "RISK_REVIEW": 154,
+        "NON_TARGET": 71
+      },
+      "train_date_range": [
+        "2020-01-31",
+        "2026-04-24"
+      ],
+      "test_date_range": [
+        "2022-02-07",
+        "2026-07-15"
+      ],
+      "issuer_overlap_count": 0,
+      "event_chain_overlap_count": 0
+    },
+    "excluded_fields": [
+      "event status and label status",
+      "manual grade and training role",
+      "post-event prices, returns and event_market_metrics"
+    ]
+  },
+  "features": [
+    "word TF-IDF 1-2 grams",
+    "character TF-IDF 3-5 grams"
+  ],
+  "estimator": "sigmoid-calibrated class-balanced logistic regression",
+  "metrics": {
+    "abstain_threshold": 0.62,
+    "coverage": 0.8266666666666667,
+    "abstain_rate": 0.17333333333333334,
+    "covered_accuracy": 0.956989247311828,
+    "raw_argmax_accuracy": 0.8888888888888888,
+    "classification_report_covered": {
+      "NON_TARGET": {
+        "precision": 0.9767441860465116,
+        "recall": 0.8571428571428571,
+        "f1-score": 0.9130434782608695,
+        "support": 49.0
+      },
+      "RISK_REVIEW": {
+        "precision": 0.951048951048951,
+        "recall": 0.9927007299270073,
+        "f1-score": 0.9714285714285714,
+        "support": 137.0
+      },
+      "accuracy": 0.956989247311828,
+      "macro avg": {
+        "precision": 0.9638965685477313,
+        "recall": 0.9249217935349322,
+        "f1-score": 0.9422360248447205,
+        "support": 186.0
+      },
+      "weighted avg": {
+        "precision": 0.9578181258601364,
+        "recall": 0.956989247311828,
+        "f1-score": 0.9560475522607361,
+        "support": 186.0
+      }
+    },
+    "confusion_matrix_covered": [
+      [
+        42,
+        7
+      ],
+      [
+        1,
+        136
+      ]
+    ],
+    "mean_confidence": 0.7624543382656126
+  },
+  "limitations": [
+    "The dataset is intentionally rich in negative events and controls, so this is not a general financial-sentiment model.",
+    "Historical labels reflect the current evidence policy and can contain adjudication noise.",
+    "Issuer, source and event-family language may shift over time; drift monitoring is required.",
+    "The model is only a queueing aid; evidence and finality gates remain authoritative."
+  ],
+  "test_event_ids_sha256": "8fba36e57f799a89b66d73b589d55de647bfc9f72b488a4256faa3082d24cad2",
+  "no_trading": true,
+  "shadow": true
+}

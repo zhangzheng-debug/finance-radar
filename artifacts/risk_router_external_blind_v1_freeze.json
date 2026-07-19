@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "freeze_id": "external-blind-v1-2dd91c8b9acf",
+  "frozen_at": "2026-07-18T12:34:44.934388+00:00",
+  "collection_fetched_at": "2026-07-18T12:34:36.577766+00:00",
+  "label_policy_id": "external-blind-source-policy-v1",
+  "label_policy_locked_before_inference": true,
+  "predictions_present": false,
+  "dataset_path": "artifacts/risk_router_external_blind_v1.jsonl",
+  "dataset_sha256": "2dd91c8b9acfa7423c1e1818efa880e33e6f3c3a2be1bc8dd2f035e92a214abc",
+  "rows": 40,
+  "label_counts": {
+    "RISK_REVIEW": 20,
+    "NON_TARGET": 20
+  },
+  "source_counts": {
+    "sec_litigation_external": 15,
+    "nvidia_press_external": 17,
+    "cftc_enforcement_external": 5,
+    "federal_reserve_policy_external": 3
+  },
+  "model_version": "risk-router-v1-e1ce020d3445",
+  "model_trained_at": "2026-07-18T10:20:27.591555+00:00",
+  "model_artifact_sha256": "84b9186bd2d1c1d16dcc2f37560e034181bcbc257286c458c2bf7c600c4f7a28",
+  "training_rows": 897,
+  "training_dataset_sha256": "e1ce020d344534485c09593d23ca7b0ae1cb17f4490ca5ab4cab3a557884e01f",
+  "overlap_audit": {
+    "event_or_sample_id_overlap_count": 0,
+    "title_substring_overlap_count": 0,
+    "max_training_shingle_jaccard": 0.072464,
+    "rejection_threshold": 0.8
+  },
+  "raw_sources": [
+    {
+      "source_id": "sec_litigation_external",
+      "feed_url": "https://www.sec.gov/enforcement-litigation/litigation-releases/rss",
+      "http_status": 200,
+      "content_type": "application/rss+xml; charset=utf-8",
+      "bytes": 10216,
+      "sha256": "ab51f595cbe592a6d049b321412a9f526abdd9529c20d7721cbaf36b9542be0b",
+      "xml_repaired": true,
+      "raw_path": "artifacts/external_blind_raw_v1/sec_litigation_external.xml",
+      "expected_label": "RISK_REVIEW",
+      "label_basis": "Official SEC civil-action release; route for adverse-risk human review.",
+      "accepted_samples": 15
+    },
+    {
+      "source_id": "cftc_enforcement_external",
+      "feed_url": "https://www.cftc.gov/RSS/RSSENF/rssenf.xml",
+      "http_status": 200,
+      "content_type": "application/rss+xml; charset=utf-8",
+      "bytes": 4561,
+      "sha256": "cadf65557381accb8df45ee1a75cac813e821c692954a2b0bd77ef6753e445e7",
+      "xml_repaired": false,
+      "raw_path": "artifacts/external_blind_raw_v1/cftc_enforcement_external.xml",
+      "expected_label": "RISK_REVIEW",
+      "label_basis": "Official CFTC enforcement release; route for adverse-risk human review.",
+      "accepted_samples": 5
+    },
+    {
+      "source_id": "federal_reserve_policy_external",
+      "feed_url": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "http_status": 200,
+      "content_type": "text/xml",
+      "bytes": 14411,
+      "sha256": "dfa77324fc08e3933b1fef0a54f2157440d52d827aa81626a7daed89e74da76a",
+      "xml_repaired": false,
+      "raw_path": "artifacts/external_blind_raw_v1/federal_reserve_policy_external.xml",
+      "expected_label": "NON_TARGET",
+      "label_basis": "Official macro, policy or supervisory-information release outside issuer downside-risk routing.",
+      "accepted_samples": 3
+    },
+    {
+      "source_id": "nvidia_press_external",
+      "feed_url": "https://nvidianews.nvidia.com/releases.xml",
+      "http_status": 200,
+      "content_type": "text/xml",
+      "bytes": 59774,
+      "sha256": "1801f0545b14bc6fce1f4b92269baf2f901f999d3556667a0d587e1d4fc670b9",
+      "xml_repaired": false,
+      "raw_path": "artifacts/external_blind_raw_v1/nvidia_press_external.xml",
+      "expected_label": "NON_TARGET",
+      "label_basis": "Official non-adverse company announcement retained as favorable/neutral control.",
+      "accepted_samples": 17
+    }
+  ],
+  "contract": [
+    "Dataset and expected labels were written before any model inference.",
+    "Labels derive only from the declared source-family policy, not model output.",
+    "No row may be added, removed or relabeled after this hash without a new version.",
+    "This set is external to train/validation and must never be used for retraining v1."
+  ]
+}

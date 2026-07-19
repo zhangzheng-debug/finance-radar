@@ -1,0 +1,10 @@
+{
+  "channels": [
+    {
+      "handle": "example_public_channel",
+      "tier": "discovery",
+      "enabled": true,
+      "note": "Replace this entry with a public channel username or t.me link."
+    }
+  ]
+}

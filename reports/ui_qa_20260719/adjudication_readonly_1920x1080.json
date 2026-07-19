@@ -1,0 +1,25 @@
+{
+  "captured_at_utc": "2026-07-18T22:28:42.473Z",
+  "requested_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Adjudication_Studio",
+  "final_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Adjudication_Studio",
+  "title": "Adjudication Studio · Finance Radar",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "full_page": false,
+  "scroll_y": 0,
+  "window_scroll_y": 0,
+  "tab": null,
+  "canvas_count": 0,
+  "iframe_count": 0,
+  "dataframe_count": 0,
+  "skeleton_count": 0,
+  "alert_count": 0,
+  "body_text_length": 924,
+  "body_text_excerpt": "Home\n\nEvent Intelligence\n\nReplay Lab\n\nOperations and Model\n\nAdjudication Studio\n\nFINANCE RADAR\n/\nAdjudication Studio\nHUMAN ONLY\nV3 预冻结双人盲标：只提交独立判断轴，系统随后派生路由标签\n情报与人工复核系统 · 只读行情 · 不含下单、仓位、余额或交易执行能力\nSAMPLES\n24\nOPEN\n24\nCONFLICT\n0\nVALID DUAL REVIEW\n0\nFREEZE GATE\nNOT_READY_FOR_FREEZE\n\n同一样本的两名审核者互不可见答案；页面不展示影子模型输出、既有标签或事件后行情。两份判断一致后自动派生标签，不一致则进入第三人裁决。\n\nReview control plane\nLOCAL OPERATOR SETUP\n01\n\nUNLABELED\n\n账本原文与证据段落生成样本；不预置目标标签\n\n02\n\nREVIEW A / B\n\n两名审核者分别提交三个判断轴；同伴答案不可见\n\n03\n\nARBITRATION\n\n只在轴判断不一致时，交给第三个独立身份\n\n04\n\nPRE-FREEZE\n\n系统派生标签并验证合同；split 仍保持 UNASSIGNED\n\nFreeze readiness\nPRE-FREEZE GATE\n\nRISK_REVIEW\n\n−30\n\nNON_TARGET\n\n−30\n\nABSTAIN\n\n−20\n\nINTEGRITY GATES\n\n✓ target label not submitted by reviewers\n\n✓ model output and post-event market outcome hidden\n\n✓ public write controls closed by default\n\n○ independent source groups 0 / 4\n\nproduction_changed=false · blind_v2_frozen=false\n\n公网部署当前为只读观察模式。审核写入默认关闭；内部标注时需由运维显式启用独立访问门。",
+  "console_errors": [],
+  "page_errors": [],
+  "http_errors": [],
+  "screenshot": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\reports\\ui_qa_20260719\\adjudication_readonly_1920x1080.png"
+}

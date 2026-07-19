@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-07-19T05:33:18.494345+00:00",
+  "target_api": "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api",
+  "status": "WAITING",
+  "checks": {
+    "api_status_ok": true,
+    "ledger_quick_check_ok": true,
+    "operations_quick_check_ok": true,
+    "latest_worker_success": true,
+    "latest_backup_verified": true,
+    "model_shadow_no_trading": true,
+    "safety_audits_zero": true,
+    "runtime_window_complete": false
+  },
+  "worker_window_24h": {
+    "status": "PARTIAL",
+    "target_hours": 24,
+    "observed_hours": 20.868,
+    "first_started_at": "2026-07-18T08:38:42.135253+00:00",
+    "latest_finished_at": "2026-07-19T05:30:45.810935+00:00",
+    "latest_age_seconds": 148.171,
+    "cycles": 269,
+    "success_cycles": 252,
+    "degraded_cycles": 14,
+    "failed_cycles": 3,
+    "success_rate": 0.936803,
+    "max_start_gap_seconds": 336.836,
+    "expected_interval_seconds": 300,
+    "complete": false
+  },
+  "latest_worker": {
+    "cycle_id": "cycle-926506e40e2342c5a43301e7c9af5f7e",
+    "status": "SUCCESS",
+    "started_at": "2026-07-19T05:30:40.318978+00:00",
+    "finished_at": "2026-07-19T05:30:45.810935+00:00",
+    "error": null
+  },
+  "ledger_counts": {
+    "sources": 22,
+    "raw_observations": 3951,
+    "canonical_events": 1194,
+    "event_versions": 2117,
+    "event_evidence": 2394,
+    "event_market_metrics": 1898,
+    "pipeline_jobs": 1194,
+    "alert_outbox": 13
+  },
+  "operations_counts": {
+    "replay_runs": 7,
+    "model_runs": 7,
+    "worker_cycles": 269,
+    "backup_runs": 35,
+    "agent_decisions": 3,
+    "evidence_objects": 104,
+    "human_overrides": 0,
+    "adjudication_samples": 24,
+    "adjudication_reviews": 0
+  },
+  "safety_audit": {
+    "trading_boundary_violations": 0,
+    "auto_verification_violations": 0,
+    "market_feature_leakage_violations": 0
+  },
+  "known_last_non_success": "2026-07-18T12:11:35.589624+00:00",
+  "known_earliest_possible_pass": "2026-07-19T12:11:35.589624+00:00",
+  "eligibility_note": "Earliest known time only; any new non-success cycle moves the gate later.",
+  "sequence": 83,
+  "previous_record_sha256": "9d244f8b33a198907e118a12b3104361c51257920cb3784dbb4634acb9e94139",
+  "record_sha256": "9fde6d9d32fdacf35cb8314c85b76984635e4b1ab6eab617a74e301a19047583"
+}

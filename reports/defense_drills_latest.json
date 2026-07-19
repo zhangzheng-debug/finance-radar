@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-18T14:04:01.812613+00:00",
+  "passed": true,
+  "network_used": false,
+  "trading_system_touched": false,
+  "drills": [
+    {
+      "name": "malformed_official_xml",
+      "passed": true,
+      "evidence": {
+        "injected_fault": "bare_ampersand",
+        "xml_repaired": true,
+        "items": 1
+      }
+    },
+    {
+      "name": "corrupt_model_artifact",
+      "passed": true,
+      "evidence": {
+        "load_error_visible": true,
+        "runtime": "fallback",
+        "label": "RISK_REVIEW",
+        "no_trading": true
+      }
+    },
+    {
+      "name": "corrupt_backup",
+      "passed": true,
+      "evidence": {
+        "corruption_detected": true,
+        "error_type": "DatabaseError"
+      }
+    },
+    {
+      "name": "primary_evidence_gate",
+      "passed": true,
+      "evidence": {
+        "step_1": {
+          "label": "ABSTAIN",
+          "alert_eligible": false
+        },
+        "step_2": {
+          "label": "RISK_REVIEW",
+          "alert_eligible": true
+        },
+        "persisted_runs": 1,
+        "external_network_used": false
+      }
+    },
+    {
+      "name": "official_revision_withdrawal",
+      "passed": true,
+      "evidence": {
+        "step_1": {
+          "label": "RISK_REVIEW",
+          "alert_eligible": true
+        },
+        "step_2": {
+          "revision_kind": "CORRECTION",
+          "supersedes_step": 1,
+          "evidence_status": "CONFLICT_REVIEW",
+          "label": "ABSTAIN",
+          "alert_eligible": false
+        },
+        "persisted_runs": 1,
+        "external_network_used": false
+      }
+    },
+    {
+      "name": "forbidden_route_injection_guard",
+      "passed": true,
+      "evidence": {
+        "route_count": 21,
+        "forbidden_routes": []
+      }
+    }
+  ]
+}

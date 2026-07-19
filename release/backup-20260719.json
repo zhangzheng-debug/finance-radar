@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "version": "2026.07.19.1",
+  "tag": "v2026.07.19.1",
+  "visibility": "private",
+  "application_release": "20260719T044852Z",
+  "migration_snapshot": "20260719T045536Z",
+  "assets": [
+    {
+      "name": "finance-radar-migration-20260719T045536Z.tgz.aesgcm",
+      "role": "encrypted_full_server_recovery",
+      "bytes": 788301307,
+      "sha256": "9c792371786adeb4eb747e1e4a420015b6456220c9d3e3395320000f267c9129",
+      "plaintext_sha256_after_authenticated_decryption": "ac3ed8ba2a1ebd0f90eddfff921b39f683f17a397bfa9b2d6e074a467b24c1a5"
+    },
+    {
+      "name": "finance-radar-deploy-20260719T044852Z.tgz",
+      "role": "current_deployment_archive",
+      "bytes": 4063840,
+      "sha256": "aa2465e80d61a1668eeea6ccdafe013d2fed88d51093bc2a7ceeb6e20620b19e"
+    },
+    {
+      "name": "finance-radar-offline-demo-latest.zip",
+      "role": "offline_demonstration_bundle",
+      "bytes": 1698396,
+      "sha256": "a2eaefb1611b48366c073ac25ab3a6e97d9b8e16a304f976e3d12a439e12b64f"
+    },
+    {
+      "name": "finance-radar-defense-evidence-20260719T051836Z.zip",
+      "role": "reviewer_evidence_bundle",
+      "bytes": 4843744,
+      "sha256": "247c20ea996fa7da9407c18245524e031614e9119e7f876722e6923dc5bc6fbf"
+    }
+  ],
+  "excluded_secrets": [
+    "environment files",
+    "backup passphrase",
+    "Telegram sessions and tokens",
+    "SSH and TLS private keys",
+    "broker and exchange credentials"
+  ]
+}

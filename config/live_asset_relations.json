@@ -1,0 +1,117 @@
+{
+  "events": [
+    {
+      "event_id": "FR-LIVE-0093a3bce6fc247843f481217d4f5705",
+      "entities": [
+        {"type": "government_agency", "name": "U.S. Department of the Treasury", "role": "AUTHORITY", "confidence": 1.0},
+        {"type": "organization_network", "name": "Shamkhani shipping network", "role": "TARGET", "confidence": 1.0}
+      ],
+      "assets": [
+        {
+          "asset_type": "commodity",
+          "symbol": "WTI",
+          "provider_symbol": "WTI/USD",
+          "venue": "TwelveData",
+          "currency": "USD",
+          "relation_type": "MACRO_PROXY",
+          "direction": "ABSTAIN",
+          "impact_score": 30,
+          "confidence": 0.4,
+          "reason_codes": ["IRAN_OIL_NETWORK_SANCTIONS", "TWELVE_DATA_FREE_PLAN_UNAVAILABLE"],
+          "market_observation_allowed": false
+        },
+        {
+          "asset_type": "etf",
+          "symbol": "USO",
+          "provider_symbol": "USO",
+          "venue": "TwelveData",
+          "currency": "USD",
+          "relation_type": "MACRO_PROXY",
+          "direction": "ABSTAIN",
+          "impact_score": 25,
+          "confidence": 0.35,
+          "reason_codes": ["OIL_ETF_PROXY", "NO_DIRECT_EQUITY_MAPPING"],
+          "market_observation_allowed": true
+        }
+      ]
+    },
+    {
+      "event_id": "FR-LIVE-db4f6db23f507d8988a58f844cff6c7f",
+      "entities": [
+        {"type": "defi_protocol", "name": "Ostium", "role": "SUBJECT", "confidence": 1.0},
+        {"type": "blockchain", "name": "Arbitrum", "role": "LOCATION", "confidence": 0.9}
+      ],
+      "assets": [
+        {
+          "asset_type": "crypto",
+          "symbol": "ARB",
+          "provider_symbol": "ARB/USD",
+          "venue": "TwelveData",
+          "currency": "USD",
+          "relation_type": "ECOSYSTEM_PROXY",
+          "direction": "ABSTAIN",
+          "impact_score": 35,
+          "confidence": 0.45,
+          "reason_codes": ["ARBITRUM_PROTOCOL_INCIDENT", "PROXY_NOT_CAUSAL_CLAIM"],
+          "market_observation_allowed": true
+        },
+        {
+          "asset_type": "crypto",
+          "symbol": "ETH",
+          "provider_symbol": "ETH/USD",
+          "venue": "TwelveData",
+          "currency": "USD",
+          "relation_type": "ECOSYSTEM_PROXY",
+          "direction": "ABSTAIN",
+          "impact_score": 15,
+          "confidence": 0.25,
+          "reason_codes": ["FUNDS_REPORTEDLY_SWAPPED_TO_ETH", "SECONDARY_CONTEXT_ONLY"],
+          "market_observation_allowed": true
+        }
+      ]
+    },
+    {
+      "event_id": "FR-LIVE-eed9151c62729747422910a77daea675",
+      "entities": [
+        {"type": "country", "name": "Iran", "role": "TARGET", "confidence": 0.9},
+        {"type": "military_command", "name": "USCENTCOM", "role": "ACTOR", "confidence": 0.7}
+      ],
+      "assets": [
+        {
+          "asset_type": "commodity",
+          "symbol": "WTI",
+          "provider_symbol": "WTI/USD",
+          "venue": "TwelveData",
+          "currency": "USD",
+          "relation_type": "MACRO_PROXY",
+          "direction": "ABSTAIN",
+          "impact_score": 70,
+          "confidence": 0.55,
+          "reason_codes": ["SHIPPING_ROUTE_DISRUPTION", "CURRENT_CLAIM_NOT_PRIMARY_VERIFIED"],
+          "market_observation_allowed": false
+        }
+      ]
+    },
+    {
+      "event_id": "FR-LIVE-a8b94684ba13a7e2317cd943f20cf841",
+      "entities": [
+        {"type": "central_bank", "name": "European Central Bank", "role": "SUBJECT", "confidence": 0.8}
+      ],
+      "assets": [
+        {
+          "asset_type": "fx",
+          "symbol": "EUR/USD",
+          "provider_symbol": "EUR/USD",
+          "venue": "TwelveData",
+          "currency": "USD",
+          "relation_type": "MACRO_PROXY",
+          "direction": "ABSTAIN",
+          "impact_score": 45,
+          "confidence": 0.4,
+          "reason_codes": ["ECB_POLICY_EXPECTATIONS", "CURRENT_QUOTE_NOT_PRIMARY_VERIFIED"],
+          "market_observation_allowed": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-19T04:41:41.718499+00:00",
+  "status": "PASS",
+  "passed_checks": 11,
+  "total_checks": 11,
+  "checks": {
+    "manifest": true,
+    "ledger": true,
+    "operations": true,
+    "restore_copy": true,
+    "network_guard": true,
+    "api": true,
+    "five_pages": true,
+    "replay": true,
+    "no_trading": true,
+    "honest_model_gate": true,
+    "write_boundary": true
+  },
+  "bundle_root": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\artifacts\\offline_demo\\current",
+  "manifest": {
+    "files": 45,
+    "hashes": "PASS",
+    "secret_scan": "PASS"
+  },
+  "archive": {
+    "path": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\artifacts\\offline_demo\\finance-radar-offline-demo-latest.zip",
+    "bytes": 1698396,
+    "sha256": "a2eaefb1611b48366c073ac25ab3a6e97d9b8e16a304f976e3d12a439e12b64f",
+    "crc": "PASS",
+    "entries": 46
+  },
+  "ledger": {
+    "schema_version": 12,
+    "quick_check": "ok",
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "counts": {
+      "sources": 18,
+      "raw_observations": 78,
+      "canonical_events": 22,
+      "event_evidence": 30,
+      "event_market_metrics": 46
+    },
+    "boundary_violations": {
+      "trading": 0,
+      "auto_verification": 0,
+      "market_feature_leakage": 0
+    },
+    "bytes": 1052672,
+    "sha256": "b9bd178b36b34ba04984b4665884a43080e1da677dbcb944333b5b6ed370ba73"
+  },
+  "operations": {
+    "schema_version": 3,
+    "quick_check": "ok",
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "counts": {
+      "replay_runs": 0,
+      "model_runs": 0,
+      "worker_cycles": 1,
+      "adjudication_samples": 10,
+      "adjudication_reviews": 0
+    },
+    "boundary_violations": {
+      "fabricated_human_reviews": 0
+    },
+    "bytes": 172032,
+    "sha256": "1424a4fe05ffeb356c33698de9e1df19f9b2053c39f41e375252b537778401d4"
+  },
+  "restore_copy": {
+    "schema_version": 12,
+    "quick_check": "ok",
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "counts": {
+      "sources": 18,
+      "raw_observations": 78,
+      "canonical_events": 22,
+      "event_evidence": 30,
+      "event_market_metrics": 46
+    },
+    "boundary_violations": {
+      "trading": 0,
+      "auto_verification": 0,
+      "market_feature_leakage": 0
+    },
+    "bytes": 1052672,
+    "sha256": "b9bd178b36b34ba04984b4665884a43080e1da677dbcb944333b5b6ed370ba73"
+  },
+  "network_guard": {
+    "external_dns_and_connect": "BLOCKED",
+    "loopback_bind": "PASS",
+    "loopback_probe_port": 63329
+  },
+  "product": {
+    "api_checks": 11,
+    "api_status": "PASS",
+    "verified_events": 16,
+    "candidate_events": 4,
+    "overview_events": 22,
+    "evidence_rows_for_probe": 1,
+    "model_status": "ready",
+    "model_mode": "SHADOW",
+    "external_blind_gate_pass": false,
+    "replay_case": "sec_bankruptcy_verified",
+    "replay_expectation_met": true,
+    "replay_external_network_used": false,
+    "replay_no_trading": true,
+    "missing_admin_token_status": 403,
+    "trading_like_routes": [],
+    "pages": {
+      "Home": "PASS",
+      "Event Intelligence": "PASS",
+      "Replay Lab": "PASS",
+      "Operations and Model": "PASS",
+      "Adjudication Studio": "PASS"
+    }
+  }
+}

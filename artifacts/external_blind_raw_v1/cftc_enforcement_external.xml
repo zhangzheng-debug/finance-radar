@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:foaf="http://xmlns.com/foaf/0.1/" xmlns:og="http://ogp.me/ns#" xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#" xmlns:schema="http://schema.org/" xmlns:sioc="http://rdfs.org/sioc/ns#" xmlns:sioct="http://rdfs.org/sioc/types#" xmlns:skos="http://www.w3.org/2004/02/skos/core#" xmlns:xsd="http://www.w3.org/2001/XMLSchema#" version="2.0" xml:base="https://www.cftc.gov/">
+  <channel>
+    <title>Press Releases</title>
+    <link>https://www.cftc.gov/</link>
+    <description/>
+    <language>en</language>
+    
+    <item>
+  <title>CFTC Charges North Carolina Commodity Pool Operator and His Company with Fraud </title>
+  <link>https://www.cftc.gov/PressRoom/PressReleases/9264-26</link>
+  <description/>
+  <pubDate>Tue, 07 Jul 2026 18:59:40 +0000</pubDate>
+    <dc:creator>CCollins</dc:creator>
+    <guid isPermaLink="true">https://www.cftc.gov/PressRoom/PressReleases/9264-26</guid>
+    </item>
+<item>
+  <title>CFTC Orders Two Foreign Firms to Pay $2.5 Million for Illegal Off-Exchange Transactions with U.S. Customers</title>
+  <link>https://www.cftc.gov/PressRoom/PressReleases/9263-26</link>
+  <description/>
+  <pubDate>Mon, 29 Jun 2026 15:10:21 +0000</pubDate>
+    <dc:creator>CCollins</dc:creator>
+    <guid isPermaLink="true">https://www.cftc.gov/PressRoom/PressReleases/9263-26</guid>
+    </item>
+<item>
+  <title>CFTC Resolves Action Against Celsius Founder</title>
+  <link>https://www.cftc.gov/PressRoom/PressReleases/9256-26</link>
+  <description/>
+  <pubDate>Thu, 18 Jun 2026 18:40:00 +0000</pubDate>
+    <dc:creator>aturner</dc:creator>
+    <guid isPermaLink="true">https://www.cftc.gov/PressRoom/PressReleases/9256-26</guid>
+    </item>
+<item>
+  <title>CFTC Rescinds Policy Regarding Denials of Settlements in Enforcement Actions</title>
+  <link>https://www.cftc.gov/PressRoom/PressReleases/9247-26</link>
+  <description/>
+  <pubDate>Wed, 03 Jun 2026 19:46:28 +0000</pubDate>
+    <dc:creator>dfaulk-white</dc:creator>
+    <guid isPermaLink="true">https://www.cftc.gov/PressRoom/PressReleases/9247-26</guid>
+    </item>
+<item>
+  <title>CFTC Grants Five Whistleblower Awards Totaling Over $8M</title>
+  <link>https://www.cftc.gov/PressRoom/PressReleases/9245-26</link>
+  <description/>
+  <pubDate>Mon, 01 Jun 2026 20:00:58 +0000</pubDate>
+    <dc:creator>aturner</dc:creator>
+    <guid isPermaLink="true">https://www.cftc.gov/PressRoom/PressReleases/9245-26</guid>
+    </item>
+<item>
+  <title>CFTC Charges Google Employee with Insider Trading in Search Result-Related Event Contracts</title>
+  <link>https://www.cftc.gov/PressRoom/PressReleases/9237-26</link>
+  <description/>
+  <pubDate>Thu, 28 May 2026 00:22:23 +0000</pubDate>
+    <dc:creator>CCollins</dc:creator>
+    <guid isPermaLink="true">https://www.cftc.gov/PressRoom/PressReleases/9237-26</guid>
+    </item>
+<item>
+  <title>CFTC Orders New York Trader to Pay $200,000 for Spoofing</title>
+  <link>https://www.cftc.gov/PressRoom/PressReleases/9227-26</link>
+  <description/>
+  <pubDate>Wed, 06 May 2026 13:51:12 +0000</pubDate>
+    <dc:creator>CCollins</dc:creator>
+    <guid isPermaLink="true">https://www.cftc.gov/PressRoom/PressReleases/9227-26</guid>
+    </item>
+<item>
+  <title>CFTC Secures Judgment Against Michigan Commodity Pool Operator and His Company Engaged in Fraud Scheme</title>
+  <link>https://www.cftc.gov/PressRoom/PressReleases/9225-26</link>
+  <description/>
+  <pubDate>Fri, 01 May 2026 20:14:38 +0000</pubDate>
+    <dc:creator>dfaulk-white</dc:creator>
+    <guid isPermaLink="true">https://www.cftc.gov/PressRoom/PressReleases/9225-26</guid>
+    </item>
+<item>
+  <title>CFTC Charges U.S. Service Member with Insider Trading in Nicolás Maduro-Related Event Contracts </title>
+  <link>https://www.cftc.gov/PressRoom/PressReleases/9217-26</link>
+  <description/>
+  <pubDate>Thu, 23 Apr 2026 21:54:18 +0000</pubDate>
+    <dc:creator>aturner</dc:creator>
+    <guid isPermaLink="true">https://www.cftc.gov/PressRoom/PressReleases/9217-26</guid>
+    </item>
+<item>
+  <title>CFTC Secures Court Order Requiring Florida Resident to Pay Over $1.3 Million in Disgorgement and Imposes Trading Ban for Commodity Pool Fraud</title>
+  <link>https://www.cftc.gov/PressRoom/PressReleases/9213-26</link>
+  <description/>
+  <pubDate>Wed, 15 Apr 2026 16:02:06 +0000</pubDate>
+    <dc:creator>dfaulk-white</dc:creator>
+    <guid isPermaLink="true">https://www.cftc.gov/PressRoom/PressReleases/9213-26</guid>
+    </item>
+
+  </channel>
+</rss>

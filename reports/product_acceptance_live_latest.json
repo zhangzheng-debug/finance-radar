@@ -1,0 +1,979 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-19T04:53:59.887039+00:00",
+  "target": {
+    "api": "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api",
+    "web": "https://radar.167-172-69-16.sslip.io:8443/radar"
+  },
+  "passed": true,
+  "checks": {
+    "https_certificate_valid": true,
+    "web_health_ok": true,
+    "api_health_ok": true,
+    "ledger_schema_12": true,
+    "ledger_quick_check_ok": true,
+    "operations_quick_check_ok": true,
+    "worker_success": true,
+    "backup_verified": true,
+    "model_ready_shadow_only": true,
+    "external_blind_evidence_present": true,
+    "external_blind_promotion_guard": true,
+    "required_frozen_replays": true,
+    "no_trading_routes": true,
+    "safe_demo_default": true,
+    "safety_audits_zero": true,
+    "raw_evidence_archive_present": true,
+    "raw_evidence_integrity_sample": true,
+    "raw_evidence_policy_safe": true,
+    "event_facets_and_exact_filters_read_only": true
+  },
+  "tls": {
+    "host": "radar.167-172-69-16.sslip.io",
+    "port": 8443,
+    "protocol": "TLSv1.3",
+    "not_after": "Oct 16 07:49:23 2026 GMT",
+    "subject_alt_names": [
+      "radar.167-172-69-16.sslip.io"
+    ]
+  },
+  "snapshot": {
+    "ledger": {
+      "status": "ok",
+      "database": "/opt/finance-radar/shared/data/finance_radar.sqlite3",
+      "database_bytes": 33312768,
+      "schema_version": 12,
+      "quick_check": "ok",
+      "last_event_update": "2026-07-19T00:02:31.338802+00:00",
+      "counts": {
+        "sources": 22,
+        "raw_observations": 3951,
+        "canonical_events": 1194,
+        "event_versions": 2117,
+        "event_evidence": 2394,
+        "event_market_metrics": 1898,
+        "pipeline_jobs": 1194,
+        "alert_outbox": 13
+      },
+      "event_status": {
+        "candidate": 297,
+        "rejected": 351,
+        "verified": 546
+      },
+      "audit": {
+        "trading_boundary_violations": 0,
+        "auto_verification_violations": 0,
+        "market_feature_leakage_violations": 0
+      }
+    },
+    "operations_counts": {
+      "replay_runs": 7,
+      "model_runs": 7,
+      "worker_cycles": 261,
+      "backup_runs": 34,
+      "agent_decisions": 3,
+      "evidence_objects": 80,
+      "human_overrides": 0,
+      "adjudication_samples": 24,
+      "adjudication_reviews": 0
+    },
+    "latest_worker": {
+      "cycle_id": "cycle-c76c4c0b7042421d829516f5866814f8",
+      "status": "SUCCESS",
+      "started_at": "2026-07-19T04:49:55.622481+00:00",
+      "finished_at": "2026-07-19T04:49:58.116754+00:00"
+    },
+    "latest_backup": {
+      "backup_id": "backup-ab3c81b8aa3047429b64bda07a994bc7",
+      "backup_path": "/opt/finance-radar/shared/data/operational_backups/finance_radar_20260719T041559Z.sqlite3",
+      "source_bytes": 32964608,
+      "backup_bytes": 32964608,
+      "quick_check": "ok",
+      "status": "VERIFIED",
+      "created_at": "2026-07-19T04:15:59.417155+00:00",
+      "verified_at": "2026-07-19T04:15:59.905982+00:00",
+      "error": null,
+      "restored_counts": {
+        "canonical_events": 1194,
+        "event_evidence": 2394,
+        "event_market_metrics": 1898,
+        "event_versions": 2117,
+        "raw_observations": 3951,
+        "sources": 22
+      }
+    },
+    "evidence_archive": {
+      "objects": 80,
+      "archived_bytes": 10830322,
+      "source_snapshots": 78,
+      "exact_excerpts": 2,
+      "by_mime": {
+        "application/pdf": {
+          "objects": 1,
+          "bytes": 101310
+        },
+        "text/html": {
+          "objects": 77,
+          "bytes": 10727393
+        },
+        "text/plain": {
+          "objects": 2,
+          "bytes": 1619
+        }
+      },
+      "recent_objects": [
+        {
+          "object_sha256": "4844180a1cacd23019da87c17c30c662e70655d69788062125a64c964ea52c82",
+          "relative_path": "48/4844180a1cacd23019da87c17c30c662e70655d69788062125a64c964ea52c82.html",
+          "mime_type": "text/html",
+          "byte_length": 17086,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1370416/000137041626000017/wprt-6xkchangeinauditor.htm",
+          "fetched_at": "2026-07-19T04:49:57.810812+00:00",
+          "event_id": "FR-LIVE-039e560fc91954c295eeff3e0581331d",
+          "evidence_id": "EVID-71cd2a4228d51c131d0087d1c89bbfc5",
+          "linked_at": "2026-07-19T04:49:57.811800+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "c24be76bfc5e60d5e55e9d8f3c1965509ff08cf3945a3be0f3b595e543beb58a",
+          "relative_path": "c2/c24be76bfc5e60d5e55e9d8f3c1965509ff08cf3945a3be0f3b595e543beb58a.html",
+          "mime_type": "text/html",
+          "byte_length": 27872,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1519449/000151944926000044/skwd-20260715.htm",
+          "fetched_at": "2026-07-19T04:49:57.740584+00:00",
+          "event_id": "FR-LIVE-06427b7e02ff440155e45e005dd2b17a",
+          "evidence_id": "EVID-0ed2fa2a117c571546a07fc15ee673b7",
+          "linked_at": "2026-07-19T04:49:57.743653+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "c1e8a51f773c380013747a4324903ac345de0d4a13dd17a10bc2b90ce85ff6ed",
+          "relative_path": "c1/c1e8a51f773c380013747a4324903ac345de0d4a13dd17a10bc2b90ce85ff6ed.html",
+          "mime_type": "text/html",
+          "byte_length": 11648,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1467093/000175392626001175/g085810_6k.htm",
+          "fetched_at": "2026-07-19T04:49:57.611658+00:00",
+          "event_id": "FR-LIVE-079c04c16a8987f902741f902a2e41fd",
+          "evidence_id": "EVID-a1b38ee82e0f6e6bc8bc8e358114b79a",
+          "linked_at": "2026-07-19T04:49:57.614719+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "fb1d81244d6ef3928a2b2f700f39e49a644e7dca290a4bee7fa82aff1f9381db",
+          "relative_path": "fb/fb1d81244d6ef3928a2b2f700f39e49a644e7dca290a4bee7fa82aff1f9381db.html",
+          "mime_type": "text/html",
+          "byte_length": 34252,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1951294/000149315226033381/form6-k.htm",
+          "fetched_at": "2026-07-19T04:49:46.138233+00:00",
+          "event_id": "FR-LIVE-07c5f9c96d69e6b73b2ac2941a3feba9",
+          "evidence_id": "EVID-bd93570343cceb641582254629b93069",
+          "linked_at": "2026-07-19T04:49:46.139409+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "02f30961b5ebe1c544b101c3926ffd017220c19547742c81303f3f167a5a8347",
+          "relative_path": "02/02f30961b5ebe1c544b101c3926ffd017220c19547742c81303f3f167a5a8347.html",
+          "mime_type": "text/html",
+          "byte_length": 12261,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1612042/000119312526304903/d109910d6k.htm",
+          "fetched_at": "2026-07-19T04:49:46.081788+00:00",
+          "event_id": "FR-LIVE-3bcfcf7ccd57a823f708b9a562669ea4",
+          "evidence_id": "EVID-122d7f20a0aa4812174857e30439f5f8",
+          "linked_at": "2026-07-19T04:49:46.082739+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "19385314a349cae925343e362f50b572cd70126aa8be64737eea290eaa589eea",
+          "relative_path": "19/19385314a349cae925343e362f50b572cd70126aa8be64737eea290eaa589eea.html",
+          "mime_type": "text/html",
+          "byte_length": 70485,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/2017526/000114036126028571/ef20078084_8k.htm",
+          "fetched_at": "2026-07-19T04:49:46.018713+00:00",
+          "event_id": "FR-LIVE-3fce4dee5218a403373d3fe3673e5d84",
+          "evidence_id": "EVID-70c9c7997d0efc272ff4086a83311ffe",
+          "linked_at": "2026-07-19T04:49:46.019951+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "25762ebb928cd9db04cc4a3c6be77e15e9399fe0b5d32cd269b71715684e04c3",
+          "relative_path": "25/25762ebb928cd9db04cc4a3c6be77e15e9399fe0b5d32cd269b71715684e04c3.html",
+          "mime_type": "text/html",
+          "byte_length": 20342,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/2089283/000110465926083915/tm2616197d2_nt10q.htm",
+          "fetched_at": "2026-07-19T04:44:41.401571+00:00",
+          "event_id": "FR-LIVE-4bb23d2d7c9be11416b4eeccc788f71f",
+          "evidence_id": "EVID-19ed79f1119056f2a259d97ab09bc18d",
+          "linked_at": "2026-07-19T04:44:41.402430+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "a388a8bda338476fd74f7d07b84268932a4fc46c961d0767cf061e6245af2097",
+          "relative_path": "a3/a388a8bda338476fd74f7d07b84268932a4fc46c961d0767cf061e6245af2097.html",
+          "mime_type": "text/html",
+          "byte_length": 6012,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1514597/000117184326004695/f6k_071526.htm",
+          "fetched_at": "2026-07-19T04:44:41.358768+00:00",
+          "event_id": "FR-LIVE-57f99aab3d1adf24370c01aea854b2a0",
+          "evidence_id": "EVID-8a10bf02901c4ce529573d90a49faab3",
+          "linked_at": "2026-07-19T04:44:41.359713+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "abec967e9adb779e33dbe7ad9f3cea288da8804fcc88fa4e14f43ded611b7d2f",
+          "relative_path": "ab/abec967e9adb779e33dbe7ad9f3cea288da8804fcc88fa4e14f43ded611b7d2f.html",
+          "mime_type": "text/html",
+          "byte_length": 71411,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1615219/000119312526304949/dcoy-20260714.htm",
+          "fetched_at": "2026-07-19T04:44:41.295387+00:00",
+          "event_id": "FR-LIVE-622381444e0de9a55ebfca153915dbe5",
+          "evidence_id": "EVID-4188c230b2bf124380746f5c8b780a79",
+          "linked_at": "2026-07-19T04:44:41.296319+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "6fc2a9e336380c92cc1465b9a6300cde9ea3247e4732b30b30dec75aede27cc5",
+          "relative_path": "6f/6fc2a9e336380c92cc1465b9a6300cde9ea3247e4732b30b30dec75aede27cc5.html",
+          "mime_type": "text/html",
+          "byte_length": 5660,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1784930/000106299326003680/form6k.htm",
+          "fetched_at": "2026-07-19T04:39:37.380598+00:00",
+          "event_id": "FR-LIVE-71b204f6eb360068517ac4e686f37125",
+          "evidence_id": "EVID-9cb7050349193241352a70fc4afdae8a",
+          "linked_at": "2026-07-19T04:39:37.381260+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "cc353b0a35b843aba20d224ea5305bb421cdb77268d6e10411afb0be2838cbe5",
+          "relative_path": "cc/cc353b0a35b843aba20d224ea5305bb421cdb77268d6e10411afb0be2838cbe5.html",
+          "mime_type": "text/html",
+          "byte_length": 56889,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/2033362/000119312526304890/ck0002033362-20260709.htm",
+          "fetched_at": "2026-07-19T04:39:37.335372+00:00",
+          "event_id": "FR-LIVE-7f262a07177037fb60f801e96621464d",
+          "evidence_id": "EVID-c2bbd7c7148f26ecedda2f2de1922397",
+          "linked_at": "2026-07-19T04:39:37.336448+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "14f7cf9fa89cbf12fd7787c84206c1dca000189ace089a89f890402fcb68831b",
+          "relative_path": "14/14f7cf9fa89cbf12fd7787c84206c1dca000189ace089a89f890402fcb68831b.html",
+          "mime_type": "text/html",
+          "byte_length": 19110,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1965143/000121390026078391/ea0298135-6k_nvni.htm",
+          "fetched_at": "2026-07-19T04:39:37.286440+00:00",
+          "event_id": "FR-LIVE-803d6a7e9929864585f6020946e3c616",
+          "evidence_id": "EVID-d1422097768bc212f39c8acec67830c6",
+          "linked_at": "2026-07-19T04:39:37.287453+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "62f0d24ad3f48ede4582525e4b96fde9072cce7aa4617cf64f60a45f8950d6f3",
+          "relative_path": "62/62f0d24ad3f48ede4582525e4b96fde9072cce7aa4617cf64f60a45f8950d6f3.html",
+          "mime_type": "text/html",
+          "byte_length": 14732,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1966750/000121390026078368/ea0297781-6k_zhibao.htm",
+          "fetched_at": "2026-07-19T04:34:32.396864+00:00",
+          "event_id": "FR-LIVE-82894ffea7f37fab0f8e0e41681b8323",
+          "evidence_id": "EVID-b8a8d884d2f96a17652eae93fcf278e3",
+          "linked_at": "2026-07-19T04:34:32.397820+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "420fdccb90114862bebb781269fca0ba3ad414f18fdaa0e846f0332d29d4f602",
+          "relative_path": "42/420fdccb90114862bebb781269fca0ba3ad414f18fdaa0e846f0332d29d4f602.html",
+          "mime_type": "text/html",
+          "byte_length": 31889,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1799207/000095010326010680/dp250077_ex9901.htm",
+          "fetched_at": "2026-07-19T04:34:32.319441+00:00",
+          "event_id": "FR-LIVE-b30e2aaaa4d1b84de61263249c68d239",
+          "evidence_id": "EVID-741e62c09720e01eeffd8d5f4636eb56",
+          "linked_at": "2026-07-19T04:34:32.320434+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "b94d5b5e3e65d77c5b4dd5acf6bc947b6c3ab65531a31f653c3cdecadfe9cef1",
+          "relative_path": "b9/b94d5b5e3e65d77c5b4dd5acf6bc947b6c3ab65531a31f653c3cdecadfe9cef1.html",
+          "mime_type": "text/html",
+          "byte_length": 3430,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1854640/000117184326004693/exh_991.htm",
+          "fetched_at": "2026-07-19T04:34:32.262748+00:00",
+          "event_id": "FR-LIVE-da4be06f465d209959056effc8f0de6c",
+          "evidence_id": "EVID-2589dc80516037db364daaf4c6aee9d9",
+          "linked_at": "2026-07-19T04:34:32.263749+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "8efb3846df9dc4dceb1d28e0718af28d8387d7f862d5cecdaa7de3cb5f2dab2e",
+          "relative_path": "8e/8efb3846df9dc4dceb1d28e0718af28d8387d7f862d5cecdaa7de3cb5f2dab2e.html",
+          "mime_type": "text/html",
+          "byte_length": 51533,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1341235/000119312526304880/aldx-20260714.htm",
+          "fetched_at": "2026-07-19T04:28:55.678250+00:00",
+          "event_id": "FR-LIVE-e32f481cb55d8455a2f95a88eee63c39",
+          "evidence_id": "EVID-4d4a697e1370ed093d373fdcd1448f1b",
+          "linked_at": "2026-07-19T04:28:55.679190+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "280f2f7b5830ca1096a62e30bed4ef9770779fa20fad6be8ceec328a681ce713",
+          "relative_path": "28/280f2f7b5830ca1096a62e30bed4ef9770779fa20fad6be8ceec328a681ce713.html",
+          "mime_type": "text/html",
+          "byte_length": 10342,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1848309/000129281426003762/sgml20260715_6k1.htm",
+          "fetched_at": "2026-07-19T04:28:55.206229+00:00",
+          "event_id": "FR-LIVE-ec122510ec5a5ac26c132d51115fad34",
+          "evidence_id": "EVID-8eb5dc91a4ca373663d873cca9289766",
+          "linked_at": "2026-07-19T04:28:55.207108+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "95f6d464966fbf63b803486685812945857633d7faacea6a02f6855d462e7d1d",
+          "relative_path": "95/95f6d464966fbf63b803486685812945857633d7faacea6a02f6855d462e7d1d.html",
+          "mime_type": "text/html",
+          "byte_length": 10356,
+          "source_url": "https://www.sec.gov/Archives/edgar/data/1848309/000129281426003760/sgml20260715_6k.htm",
+          "fetched_at": "2026-07-19T04:28:55.162198+00:00",
+          "event_id": "FR-LIVE-ed676036e32ffa74f70d9a0d647c2718",
+          "evidence_id": "EVID-03d480fceab86476c68661cfa6109efa",
+          "linked_at": "2026-07-19T04:28:55.163074+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "622b0c26b58a5699bd82a5799adad781cd5ae98b597253ed0fcd5e0251898631",
+          "relative_path": "62/622b0c26b58a5699bd82a5799adad781cd5ae98b597253ed0fcd5e0251898631.html",
+          "mime_type": "text/html",
+          "byte_length": 43676,
+          "source_url": "https://www.fda.gov/medical-devices/medical-device-recalls-and-early-alerts/early-alert-ventilator-issue-resmed",
+          "fetched_at": "2026-07-19T04:23:50.147867+00:00",
+          "event_id": "FR-LIVE-7c4ebc1de5ab555d2d914cc9633b4407",
+          "evidence_id": "EVID-07572e92f57119827f920dd9e4a65a79",
+          "linked_at": "2026-07-19T04:23:50.148730+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        },
+        {
+          "object_sha256": "07c0d3549fa112fc5ed719ab80d134af1743c78f2c70e39ae44460e8e28f80bc",
+          "relative_path": "07/07c0d3549fa112fc5ed719ab80d134af1743c78f2c70e39ae44460e8e28f80bc.html",
+          "mime_type": "text/html",
+          "byte_length": 38869,
+          "source_url": "https://www.fda.gov/medical-devices/medical-device-recalls-and-early-alerts/infusion-pump-correction-fresenius-kabi-issues-correction-dropped-or-jarred-ivenix-large-volume",
+          "fetched_at": "2026-07-19T04:23:49.882786+00:00",
+          "event_id": "FR-LIVE-7761f80928f3f7571b90a0e4d55f96e8",
+          "evidence_id": "EVID-b026f0899674e62086e55774760c348c",
+          "linked_at": "2026-07-19T04:23:49.883703+00:00",
+          "object_kind": "SOURCE_SNAPSHOT",
+          "integrity_verified": true
+        }
+      ],
+      "policy": {
+        "immutable": true,
+        "content_address": "sha256",
+        "raw_snapshot_mime_types": [
+          "text/html",
+          "application/pdf",
+          "application/json"
+        ],
+        "no_trading": true,
+        "allowed_as_model_feature": false
+      },
+      "integrity_failures_in_recent_sample": 0
+    },
+    "event_facets": {
+      "families": [
+        {
+          "value": "price_crash",
+          "count": 105
+        },
+        {
+          "value": "equity_dilution",
+          "count": 98
+        },
+        {
+          "value": "delisting_or_suspension",
+          "count": 74
+        },
+        {
+          "value": "distress_equity_death",
+          "count": 68
+        },
+        {
+          "value": "fundamental_shock",
+          "count": 63
+        },
+        {
+          "value": "listing_compliance",
+          "count": 54
+        },
+        {
+          "value": "listing_status",
+          "count": 48
+        },
+        {
+          "value": "corporate_action_merger",
+          "count": 40
+        },
+        {
+          "value": "source_metadata_control",
+          "count": 39
+        },
+        {
+          "value": "fundamental_metric_control",
+          "count": 38
+        },
+        {
+          "value": "identity_control",
+          "count": 31
+        },
+        {
+          "value": "spac_lifecycle",
+          "count": 31
+        },
+        {
+          "value": "dilution_recapitalization",
+          "count": 29
+        },
+        {
+          "value": "bankruptcy_or_distress",
+          "count": 28
+        },
+        {
+          "value": "price_dislocation_control",
+          "count": 27
+        },
+        {
+          "value": "listing_remediation",
+          "count": 23
+        },
+        {
+          "value": "regulatory_enforcement",
+          "count": 17
+        },
+        {
+          "value": "bankruptcy_reorganization",
+          "count": 16
+        },
+        {
+          "value": "equity_structure",
+          "count": 15
+        },
+        {
+          "value": "product_safety",
+          "count": 15
+        },
+        {
+          "value": "capital_structure",
+          "count": 14
+        },
+        {
+          "value": "voluntary_listing_exit",
+          "count": 14
+        },
+        {
+          "value": "macro_policy",
+          "count": 13
+        },
+        {
+          "value": "liquidity_and_financing_risk",
+          "count": 12
+        },
+        {
+          "value": "accounting_capital_structure",
+          "count": 10
+        },
+        {
+          "value": "ratio_noise",
+          "count": 10
+        },
+        {
+          "value": "corporate_action",
+          "count": 9
+        },
+        {
+          "value": "delisting_control",
+          "count": 9
+        },
+        {
+          "value": "fundamental_distress",
+          "count": 9
+        },
+        {
+          "value": "earnings",
+          "count": 8
+        },
+        {
+          "value": "fundamental_distress_and_dilution",
+          "count": 8
+        },
+        {
+          "value": "identity_and_date_control",
+          "count": 8
+        },
+        {
+          "value": "price_only_control",
+          "count": 8
+        },
+        {
+          "value": "regulatory_resolution",
+          "count": 8
+        },
+        {
+          "value": "bankruptcy_control",
+          "count": 7
+        },
+        {
+          "value": "debt_financing",
+          "count": 7
+        },
+        {
+          "value": "temporal_price_proxy",
+          "count": 7
+        },
+        {
+          "value": "SPAC_lifecycle_control",
+          "count": 6
+        },
+        {
+          "value": "fundamental_formula_control",
+          "count": 6
+        },
+        {
+          "value": "date_control",
+          "count": 5
+        },
+        {
+          "value": "governance",
+          "count": 5
+        },
+        {
+          "value": "regulatory",
+          "count": 5
+        },
+        {
+          "value": "macro_data",
+          "count": 4
+        },
+        {
+          "value": "regulatory_filing",
+          "count": 4
+        },
+        {
+          "value": "revenue_quality_boundary",
+          "count": 4
+        },
+        {
+          "value": "temporal_comparison_boundary",
+          "count": 4
+        },
+        {
+          "value": "temporal_source_mismatch",
+          "count": 4
+        },
+        {
+          "value": "corporate_action_redemption",
+          "count": 3
+        },
+        {
+          "value": "corporate_action_reorganization",
+          "count": 3
+        },
+        {
+          "value": "debt_distress",
+          "count": 3
+        },
+        {
+          "value": "forced_delisting_risk",
+          "count": 3
+        },
+        {
+          "value": "fundamental_boundary",
+          "count": 3
+        },
+        {
+          "value": "fundamental_metric_boundary",
+          "count": 3
+        },
+        {
+          "value": "geopolitical",
+          "count": 3
+        },
+        {
+          "value": "insolvency_restructuring",
+          "count": 3
+        },
+        {
+          "value": "security_incident",
+          "count": 3
+        },
+        {
+          "value": "shareholder_administration",
+          "count": 3
+        },
+        {
+          "value": "spac_accounting_boundary",
+          "count": 3
+        },
+        {
+          "value": "accounting_boundary",
+          "count": 2
+        },
+        {
+          "value": "bankruptcy_and_restructuring",
+          "count": 2
+        },
+        {
+          "value": "bankruptcy_consequence",
+          "count": 2
+        },
+        {
+          "value": "compensation_administration",
+          "count": 2
+        },
+        {
+          "value": "corporate_action_going_private",
+          "count": 2
+        },
+        {
+          "value": "corporate_action_spac",
+          "count": 2
+        },
+        {
+          "value": "corporate_liquidation",
+          "count": 2
+        },
+        {
+          "value": "corporate_reorganization_control",
+          "count": 2
+        },
+        {
+          "value": "corporate_transaction",
+          "count": 2
+        },
+        {
+          "value": "equity_financing",
+          "count": 2
+        },
+        {
+          "value": "macro_policy_administration",
+          "count": 2
+        },
+        {
+          "value": "operating_results",
+          "count": 2
+        },
+        {
+          "value": "price_consequence",
+          "count": 2
+        },
+        {
+          "value": "regulatory_administration",
+          "count": 2
+        },
+        {
+          "value": "source_and_date_control",
+          "count": 2
+        },
+        {
+          "value": "temporal_event_proxy",
+          "count": 2
+        },
+        {
+          "value": "SPAC_transaction_control",
+          "count": 1
+        },
+        {
+          "value": "accounting_impairment",
+          "count": 1
+        },
+        {
+          "value": "audit_governance",
+          "count": 1
+        },
+        {
+          "value": "bank_aml_regulation",
+          "count": 1
+        },
+        {
+          "value": "bank_failure",
+          "count": 1
+        },
+        {
+          "value": "bank_reporting_policy",
+          "count": 1
+        },
+        {
+          "value": "bank_supervision_policy",
+          "count": 1
+        },
+        {
+          "value": "biopharma_regulatory",
+          "count": 1
+        },
+        {
+          "value": "capital_return",
+          "count": 1
+        },
+        {
+          "value": "capital_structure_and_dilution",
+          "count": 1
+        },
+        {
+          "value": "cash_merger_control",
+          "count": 1
+        },
+        {
+          "value": "clinical_program_failure",
+          "count": 1
+        },
+        {
+          "value": "clinical_regulatory",
+          "count": 1
+        },
+        {
+          "value": "commercialization_and_financing_stress",
+          "count": 1
+        },
+        {
+          "value": "community_reinvestment_administration",
+          "count": 1
+        },
+        {
+          "value": "compensation_dilution",
+          "count": 1
+        },
+        {
+          "value": "corporate_action_acquisition",
+          "count": 1
+        },
+        {
+          "value": "corporate_action_control",
+          "count": 1
+        },
+        {
+          "value": "credit_distress",
+          "count": 1
+        },
+        {
+          "value": "data_identity_control",
+          "count": 1
+        },
+        {
+          "value": "debt_contract_control",
+          "count": 1
+        },
+        {
+          "value": "digital_asset_regulation",
+          "count": 1
+        },
+        {
+          "value": "distress",
+          "count": 1
+        },
+        {
+          "value": "duplicate_price_proxy",
+          "count": 1
+        },
+        {
+          "value": "entity_source_mismatch",
+          "count": 1
+        },
+        {
+          "value": "external_demand_shock",
+          "count": 1
+        }
+      ],
+      "sources": [
+        {
+          "value": "sharadar_active_research",
+          "count": 1044
+        },
+        {
+          "value": "sec_current_filings",
+          "count": 60
+        },
+        {
+          "value": "federal_reserve_press",
+          "count": 20
+        },
+        {
+          "value": "opennews_free",
+          "count": 19
+        },
+        {
+          "value": "fda_medwatch",
+          "count": 15
+        },
+        {
+          "value": "sec_litigation_releases",
+          "count": 10
+        },
+        {
+          "value": "ftc_press",
+          "count": 7
+        },
+        {
+          "value": "cftc_enforcement",
+          "count": 5
+        },
+        {
+          "value": "bls_key_indicators",
+          "count": 4
+        },
+        {
+          "value": "ecb_press",
+          "count": 4
+        },
+        {
+          "value": "fdic_press_releases",
+          "count": 4
+        },
+        {
+          "value": "ecb_statistical_press",
+          "count": 1
+        },
+        {
+          "value": "sec_trading_suspensions",
+          "count": 1
+        }
+      ],
+      "read_only": true,
+      "no_trading": true,
+      "verified_family_filter": "price_crash",
+      "verified_family_filter_total": 105,
+      "verified_source_filter": "sharadar_active_research",
+      "verified_source_filter_total": 1044
+    },
+    "model": {
+      "status": "ready",
+      "model_version": "risk-router-v1-e1ce020d3445",
+      "artifact_sha256": "84b9186bd2d1c1d16dcc2f37560e034181bcbc257286c458c2bf7c600c4f7a28",
+      "shadow": true,
+      "no_trading": true,
+      "external_blind": {
+        "evaluation_type": "true_external_blind_label_first",
+        "freeze_id": "external-blind-v1-2dd91c8b9acf",
+        "dataset_sha256": "2dd91c8b9acfa7423c1e1818efa880e33e6f3c3a2be1bc8dd2f035e92a214abc",
+        "rows": 40,
+        "label_counts": {
+          "RISK_REVIEW": 20,
+          "NON_TARGET": 20
+        },
+        "source_counts": {
+          "sec_litigation_external": 15,
+          "nvidia_press_external": 17,
+          "cftc_enforcement_external": 5,
+          "federal_reserve_policy_external": 3
+        },
+        "model_version": "risk-router-v1-e1ce020d3445",
+        "model_artifact_sha256": "84b9186bd2d1c1d16dcc2f37560e034181bcbc257286c458c2bf7c600c4f7a28",
+        "training_dataset_sha256": "e1ce020d344534485c09593d23ca7b0ae1cb17f4490ca5ab4cab3a557884e01f",
+        "overlap_audit": {
+          "event_or_sample_id_overlap_count": 0,
+          "title_substring_overlap_count": 0,
+          "max_training_shingle_jaccard": 0.072464,
+          "rejection_threshold": 0.8
+        },
+        "metrics": {
+          "coverage": 0.975,
+          "abstain_rate": 0.025000000000000022,
+          "strict_accuracy": 0.5,
+          "covered_accuracy": 0.5128205128205128,
+          "risk_recall": 1.0,
+          "non_target_false_risk_rate": 0.95,
+          "mean_latency_ms": 1.5166499999999998,
+          "confusion_expected_to_predicted": {
+            "RISK_REVIEW": {
+              "RISK_REVIEW": 20
+            },
+            "NON_TARGET": {
+              "RISK_REVIEW": 19,
+              "ABSTAIN": 1
+            }
+          }
+        },
+        "source_metrics": {
+          "sec_litigation_external": {
+            "rows": 15,
+            "expected_label": "RISK_REVIEW",
+            "route_distribution": {
+              "RISK_REVIEW": 15
+            },
+            "coverage": 1.0,
+            "strict_accuracy": 1.0
+          },
+          "nvidia_press_external": {
+            "rows": 17,
+            "expected_label": "NON_TARGET",
+            "route_distribution": {
+              "RISK_REVIEW": 16,
+              "ABSTAIN": 1
+            },
+            "coverage": 0.9411764705882353,
+            "strict_accuracy": 0.0
+          },
+          "cftc_enforcement_external": {
+            "rows": 5,
+            "expected_label": "RISK_REVIEW",
+            "route_distribution": {
+              "RISK_REVIEW": 5
+            },
+            "coverage": 1.0,
+            "strict_accuracy": 1.0
+          },
+          "federal_reserve_policy_external": {
+            "rows": 3,
+            "expected_label": "NON_TARGET",
+            "route_distribution": {
+              "RISK_REVIEW": 3
+            },
+            "coverage": 1.0,
+            "strict_accuracy": 0.0
+          }
+        },
+        "thresholds": {
+          "minimum_rows": 40,
+          "coverage_gte": 0.65,
+          "covered_accuracy_gte": 0.8,
+          "risk_recall_gte": 0.8,
+          "non_target_false_risk_rate_lte": 0.2
+        },
+        "gates": {
+          "minimum_rows": true,
+          "coverage": true,
+          "covered_accuracy": false,
+          "risk_recall": true,
+          "non_target_false_risk_rate": false,
+          "zero_training_overlap": true,
+          "label_first_freeze": true
+        },
+        "gate_pass": false,
+        "promotion_decision": "REMAIN_SHADOW",
+        "no_trading": true
+      }
+    },
+    "replay_case_ids": [
+      "sec_bankruptcy_verified",
+      "positive_earnings_non_target",
+      "rumor_correction_abstain",
+      "sec_filing_corrected_abstain"
+    ],
+    "api_route_count": 24,
+    "forbidden_paths": []
+  }
+}

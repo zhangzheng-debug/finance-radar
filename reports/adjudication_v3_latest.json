@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "status": "NOT_READY_FOR_FREEZE",
+  "samples": 24,
+  "status_counts": {
+    "OPEN": 24
+  },
+  "valid_annotations": 0,
+  "invalid_annotations": [],
+  "label_counts": {},
+  "label_minimums": {
+    "RISK_REVIEW": 30,
+    "NON_TARGET": 30,
+    "ABSTAIN": 20
+  },
+  "label_deficits": {
+    "RISK_REVIEW": 30,
+    "NON_TARGET": 30,
+    "ABSTAIN": 20
+  },
+  "source_groups": 0,
+  "minimum_source_groups": 4,
+  "annotations": [],
+  "split": "UNASSIGNED",
+  "production_changed": false,
+  "blind_v2_frozen": false,
+  "next_gate": "deduplicate against v1 training/blind text, then group split and freeze",
+  "reviewer_inputs_target_label": false,
+  "peer_answers_hidden_during_independent_review": true,
+  "model_and_market_outcomes_hidden": true,
+  "source_used_as_label": false,
+  "public_review_ui_default_closed": true,
+  "no_trading": true,
+  "generated_at": "2026-07-18T19:49:25.960174+00:00"
+}

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "prepared_at": "2026-07-19T05:03:20.569871+00:00",
+  "status": "PREPARED_NOT_ACTIVATED",
+  "source_archive": "C:\\Users\\MR\\AppData\\Local\\Temp\\finance-radar-cutover-20260719T050147Z-7e77fae3e87b46de9dfbe6ed942a7af7\\finance-radar-migration-20260719T045536Z.tgz",
+  "archive_sha256": "ac3ed8ba2a1ebd0f90eddfff921b39f683f17a397bfa9b2d6e074a467b24c1a5",
+  "snapshot": "20260719T045536Z",
+  "expected_release": "20260719T044852Z",
+  "target_base": "/opt/finance-radar",
+  "destination": "C:\\Users\\MR\\AppData\\Local\\Temp\\finance-radar-cutover-20260719T050147Z-7e77fae3e87b46de9dfbe6ed942a7af7\\finance-radar-restore-20260719T050147Z.prepared",
+  "members_scanned": 11091,
+  "manifest_entries_verified": 9860,
+  "regular_files_extracted": 9861,
+  "unpacked_bytes_scanned": 1559757804,
+  "symlinks_skipped": 78,
+  "symlinks_planned": 78,
+  "activation_required": true,
+  "local_evidence_model": {
+    "required_by_release": true,
+    "included": true,
+    "sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db",
+    "pinned_sha256_match": true
+  },
+  "boundaries": {
+    "existing_destination_overwritten": false,
+    "trading_project_included": false,
+    "credentials_or_ssh_paths_included": false,
+    "archive_symlinks_followed": false
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "short_research_root": "D:/short",
+  "start_date": "2020-01-01",
+  "end_date": null,
+  "per_family": 30,
+  "max_total": 150,
+  "common_equity_only": true,
+  "exclude_reviewed": true,
+  "queue_refill_floor": 50,
+  "queue_target": 150,
+  "active_cycle_batch_size": 25,
+  "sec_evidence_top_n": 25,
+  "sec_window_before_days": 10,
+  "sec_window_after_days": 45,
+  "sec_filings_per_event": 5,
+  "sec_extract_events": 25,
+  "sec_extract_filings_per_event": 2,
+  "sec_evidence_passage_max_chars": 700,
+  "policy": {
+    "price_only_is_evidence_trigger": true,
+    "price_only_can_assign_severe_grade": false,
+    "candidate_can_mutate_verified_label": false,
+    "post_event_returns_used_for_ranking": false,
+    "family_and_event_type_balanced": true,
+    "live_trading_allowed": false
+  }
+}

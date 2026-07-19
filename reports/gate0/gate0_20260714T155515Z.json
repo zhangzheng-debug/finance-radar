@@ -1,0 +1,415 @@
+{
+  "run": {
+    "started_at_utc": "2026-07-14T15:54:54+00:00",
+    "finished_at_utc": "2026-07-14T15:55:15+00:00",
+    "python_version": "3.12.2",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "timeout_seconds": 15.0
+  },
+  "summary": {
+    "PASS": 12,
+    "WARN": 3,
+    "FAIL": 0,
+    "BLOCKED": 5
+  },
+  "configuration": {
+    "SEC_USER_AGENT": true,
+    "BLS_API_KEY": false,
+    "BEA_API_KEY": false,
+    "MARKETAUX_API_TOKEN": false,
+    "APCA_API_KEY_ID": false,
+    "APCA_API_SECRET_KEY": false,
+    "TELEGRAM_BOT_TOKEN": true,
+    "TELEGRAM_CHAT_ID": true,
+    "FRED_API_KEY": false,
+    "TWELVE_DATA_API_KEY": true,
+    "BINANCE_REMOTE_SSH_HOST": true,
+    "BINANCE_REMOTE_SSH_PORT": true,
+    "BINANCE_REMOTE_SSH_USER": true,
+    "BINANCE_REMOTE_SSH_KEY": true
+  },
+  "results": [
+    {
+      "order": 10,
+      "probe_id": "fed_rss",
+      "name": "Federal Reserve RSS",
+      "group": "public",
+      "status": "PASS",
+      "endpoint": "federalreserve.gov/feeds/press_all.xml",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": 16887,
+      "http_status": 200,
+      "summary": "Feed parsed and contains entries",
+      "evidence": {
+        "entry_count": 20,
+        "first_title": "Federal Reserve announces the leadership and objectives of its task forces to advance the conduct of monetary policy",
+        "transport_attempts": 1
+      }
+    },
+    {
+      "order": 20,
+      "probe_id": "bls_rss",
+      "name": "BLS RSS",
+      "group": "public",
+      "status": "PASS",
+      "endpoint": "bls.gov/feed/bls_latest.rss",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": 1197,
+      "http_status": 200,
+      "summary": "Feed parsed and contains entries",
+      "evidence": {
+        "entry_count": 1,
+        "first_title": "Major Economic Indicators Latest Numbers",
+        "transport_attempts": 1
+      }
+    },
+    {
+      "order": 30,
+      "probe_id": "bls_api",
+      "name": "BLS Public Data API",
+      "group": "public",
+      "status": "PASS",
+      "endpoint": "api.bls.gov/publicAPI/v2/timeseries/data",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": 1655,
+      "http_status": 200,
+      "summary": "BLS public API returned CPI observations",
+      "evidence": {
+        "series_count": 1,
+        "observation_count": 18,
+        "used_registration_key": false,
+        "transport_attempts": 1
+      }
+    },
+    {
+      "order": 40,
+      "probe_id": "gdelt_doc_api",
+      "name": "GDELT DOC API",
+      "group": "public",
+      "status": "WARN",
+      "endpoint": "api.gdeltproject.org/api/v2/doc/doc",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": 10552,
+      "http_status": 429,
+      "summary": "HTTP 429: Too Many Requests",
+      "evidence": {
+        "response_preview": "Please limit requests to one every 5 seconds or contact kalev.leetaru5@gmail.com for larger queries. All high-traffic users should switch to our ngrams dataset: https://blog.gdeltp"
+      }
+    },
+    {
+      "order": 50,
+      "probe_id": "binance_spot_rest",
+      "name": "Binance Spot REST",
+      "group": "public",
+      "status": "WARN",
+      "endpoint": "api.binance.com/api/v3/time",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": 1894,
+      "http_status": 451,
+      "summary": "HTTP 451: ",
+      "evidence": {
+        "response_preview": "{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believ"
+      }
+    },
+    {
+      "order": 55,
+      "probe_id": "binance_spot_market_data_rest",
+      "name": "Binance Spot Market-Data-Only REST",
+      "group": "public",
+      "status": "PASS",
+      "endpoint": "data-api.binance.vision/api/v3/time",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": 1998,
+      "http_status": 200,
+      "summary": "Exchange REST endpoint returned server time",
+      "evidence": {
+        "server_time_ms": 1784044497538,
+        "transport_attempts": 1
+      }
+    },
+    {
+      "order": 60,
+      "probe_id": "binance_futures_rest",
+      "name": "Binance USD-M Futures REST",
+      "group": "public",
+      "status": "WARN",
+      "endpoint": "fapi.binance.com/fapi/v1/time",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": 1867,
+      "http_status": 451,
+      "summary": "HTTP 451: ",
+      "evidence": {
+        "response_preview": "{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believ"
+      }
+    },
+    {
+      "order": 70,
+      "probe_id": "binance_futures_agg_trade_ws",
+      "name": "Binance USD-M Futures Aggregate-Trade WebSocket",
+      "group": "public",
+      "status": "PASS",
+      "endpoint": "fstream.binance.com/market/ws/btcusdt@aggTrade",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": 1993,
+      "http_status": 101,
+      "summary": "WebSocket upgraded and delivered stream bytes",
+      "evidence": {
+        "received_frame_bytes": 16
+      }
+    },
+    {
+      "order": 75,
+      "probe_id": "binance_futures_mark_price_ws",
+      "name": "Binance USD-M Futures Mark-Price WebSocket",
+      "group": "public",
+      "status": "PASS",
+      "endpoint": "fstream.binance.com/market/ws/btcusdt@markPrice@1s",
+      "started_at_utc": "2026-07-14T15:54:56+00:00",
+      "latency_ms": 1866,
+      "http_status": 101,
+      "summary": "WebSocket upgraded and delivered stream bytes",
+      "evidence": {
+        "received_frame_bytes": 16
+      }
+    },
+    {
+      "order": 80,
+      "probe_id": "binance_remote_public_quotes",
+      "name": "Binance Public Quotes via Singapore SSH Relay",
+      "group": "credentialed",
+      "status": "PASS",
+      "endpoint": "SSH relay -> Binance public spot/USD-M ticker endpoints",
+      "started_at_utc": "2026-07-14T15:54:56+00:00",
+      "latency_ms": 14872,
+      "http_status": null,
+      "summary": "Remote relay returned spot and USD-M public prices without account/order access",
+      "evidence": {
+        "quote_count": 10,
+        "symbols": {
+          "spot": [
+            "BTCUSDT",
+            "ETHUSDT",
+            "SOLUSDT",
+            "BNBUSDT",
+            "XRPUSDT"
+          ],
+          "usdm": [
+            "BTCUSDC",
+            "ETHUSDC",
+            "XRPUSDC",
+            "BTCUSDT",
+            "ETHUSDT"
+          ]
+        },
+        "safety": {
+          "account_credentials_used": false,
+          "account_endpoint_called": false,
+          "order_endpoint_called": false,
+          "remote_project_files_read": false
+        }
+      }
+    },
+    {
+      "order": 90,
+      "probe_id": "ibkr_tws_readonly_market_data",
+      "name": "IBKR TWS Read-Only Multi-Asset Market Data",
+      "group": "local-app",
+      "status": "PASS",
+      "endpoint": "TWS socket 127.0.0.1:7497 (market-data snapshots only)",
+      "started_at_utc": "2026-07-14T15:54:56+00:00",
+      "latency_ms": 1337,
+      "http_status": null,
+      "summary": "Received prices for 2/3 asset classes",
+      "evidence": {
+        "quoted": [
+          "EUR.USD spot FX",
+          "CL Aug-2026 future"
+        ],
+        "unavailable": [
+          "AAPL stock"
+        ],
+        "market_data_types": {
+          "AAPL stock": "not-reported",
+          "EUR.USD spot FX": "live",
+          "CL Aug-2026 future": "delayed"
+        },
+        "error_codes": [
+          10089
+        ],
+        "safety": "market-data snapshots only; no account/order methods"
+      }
+    },
+    {
+      "order": 100,
+      "probe_id": "sec_submissions",
+      "name": "SEC Submissions API",
+      "group": "credentialed",
+      "status": "PASS",
+      "endpoint": "data.sec.gov/submissions/CIK0000320193.json",
+      "started_at_utc": "2026-07-14T15:54:56+00:00",
+      "latency_ms": 3296,
+      "http_status": 200,
+      "summary": "SEC submissions JSON returned a valid filing list",
+      "evidence": {
+        "cik": "0000320193",
+        "entity_name": "Apple Inc.",
+        "recent_filing_count": 1000,
+        "transport_attempts": 1
+      }
+    },
+    {
+      "order": 110,
+      "probe_id": "bea_api",
+      "name": "BEA Data API",
+      "group": "credentialed",
+      "status": "BLOCKED",
+      "endpoint": "apps.bea.gov/api/data",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": null,
+      "http_status": null,
+      "summary": "Missing configuration: BEA_API_KEY",
+      "evidence": {
+        "required_env": [
+          "BEA_API_KEY"
+        ],
+        "configured": false
+      }
+    },
+    {
+      "order": 120,
+      "probe_id": "marketaux_news",
+      "name": "Marketaux News API",
+      "group": "credentialed",
+      "status": "BLOCKED",
+      "endpoint": "api.marketaux.com/v1/news/all",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": null,
+      "http_status": null,
+      "summary": "Missing configuration: MARKETAUX_API_TOKEN",
+      "evidence": {
+        "required_env": [
+          "MARKETAUX_API_TOKEN"
+        ],
+        "configured": false
+      }
+    },
+    {
+      "order": 125,
+      "probe_id": "twelve_data_multiasset",
+      "name": "Twelve Data Multi-Asset Prices",
+      "group": "credentialed",
+      "status": "PASS",
+      "endpoint": "api.twelvedata.com/price?symbol=<stock,ETF,FX,crypto>&apikey=<redacted>",
+      "started_at_utc": "2026-07-14T15:54:56+00:00",
+      "latency_ms": 17305,
+      "http_status": 200,
+      "summary": "Twelve Data returned stock, ETF, FX, and crypto prices",
+      "evidence": {
+        "symbols": [
+          "AAPL",
+          "SPY",
+          "EUR/USD",
+          "BTC/USD"
+        ],
+        "prices": {
+          "AAPL": "313.605",
+          "SPY": "751.02",
+          "EUR/USD": "1.14295",
+          "BTC/USD": "64624.89"
+        },
+        "transport_attempts": 1
+      }
+    },
+    {
+      "order": 130,
+      "probe_id": "alpaca_iex_snapshot",
+      "name": "Alpaca IEX Snapshot",
+      "group": "credentialed",
+      "status": "BLOCKED",
+      "endpoint": "data.alpaca.markets/v2/stocks/AAPL/snapshot?feed=iex",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": null,
+      "http_status": null,
+      "summary": "Missing configuration: APCA_API_KEY_ID, APCA_API_SECRET_KEY",
+      "evidence": {
+        "required_env": [
+          "APCA_API_KEY_ID",
+          "APCA_API_SECRET_KEY"
+        ],
+        "configured": false
+      }
+    },
+    {
+      "order": 140,
+      "probe_id": "alpaca_news",
+      "name": "Alpaca Historical News",
+      "group": "credentialed",
+      "status": "BLOCKED",
+      "endpoint": "data.alpaca.markets/v1beta1/news",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": null,
+      "http_status": null,
+      "summary": "Missing configuration: APCA_API_KEY_ID, APCA_API_SECRET_KEY",
+      "evidence": {
+        "required_env": [
+          "APCA_API_KEY_ID",
+          "APCA_API_SECRET_KEY"
+        ],
+        "configured": false
+      }
+    },
+    {
+      "order": 150,
+      "probe_id": "telegram_get_me",
+      "name": "Telegram Bot getMe",
+      "group": "credentialed",
+      "status": "PASS",
+      "endpoint": "api.telegram.org/bot<redacted>/getMe",
+      "started_at_utc": "2026-07-14T15:54:56+00:00",
+      "latency_ms": 5784,
+      "http_status": 200,
+      "summary": "Telegram read-only method succeeded",
+      "evidence": {
+        "id": 8818206671,
+        "username": "mr_finance_radar_bot",
+        "transport_attempts": 1
+      }
+    },
+    {
+      "order": 160,
+      "probe_id": "telegram_get_chat",
+      "name": "Telegram Bot getChat",
+      "group": "credentialed",
+      "status": "PASS",
+      "endpoint": "api.telegram.org/bot<redacted>/getChat",
+      "started_at_utc": "2026-07-14T15:54:58+00:00",
+      "latency_ms": 17625,
+      "http_status": 200,
+      "summary": "Telegram read-only method succeeded",
+      "evidence": {
+        "id": 5944506109,
+        "username": "Benorma1",
+        "type": "private",
+        "transport_attempts": 1
+      }
+    },
+    {
+      "order": 170,
+      "probe_id": "fred_api",
+      "name": "FRED API",
+      "group": "credentialed",
+      "status": "BLOCKED",
+      "endpoint": "api.stlouisfed.org/fred/series/observations",
+      "started_at_utc": "2026-07-14T15:54:54+00:00",
+      "latency_ms": null,
+      "http_status": null,
+      "summary": "Missing configuration: FRED_API_KEY",
+      "evidence": {
+        "required_env": [
+          "FRED_API_KEY"
+        ],
+        "configured": false
+      }
+    }
+  ]
+}

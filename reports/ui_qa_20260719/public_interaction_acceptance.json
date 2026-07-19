@@ -1,0 +1,56 @@
+{
+  "accepted_at_utc": "2026-07-18T22:09:32.413Z",
+  "base_url": "https://radar.167-172-69-16.sslip.io:8443/radar",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "result": "PASS",
+  "checks": [
+    {
+      "name": "event_selected_on_load",
+      "passed": true,
+      "detail": "FR-LIVE-27b97a3819bea4d0743ab72686465b0d"
+    },
+    {
+      "name": "keyboard_j_selects_next_event",
+      "passed": true,
+      "detail": "FR-LIVE-27b97a3819bea4d0743ab72686465b0d -> FR-LIVE-5e3f0f7f56bdc5f42bd18b201e401ab9; VERIFIED 07-16 03:36 — · U.S. Central Command / M/T Belma -> VERIFIED 07-16 03:33 — · SBA Communications Corporation"
+    },
+    {
+      "name": "keyboard_k_selects_previous_event",
+      "passed": true,
+      "detail": "FR-LIVE-5e3f0f7f56bdc5f42bd18b201e401ab9 -> FR-LIVE-27b97a3819bea4d0743ab72686465b0d"
+    },
+    {
+      "name": "slash_focuses_global_search",
+      "passed": true,
+      "detail": "focused=true"
+    },
+    {
+      "name": "replay_starts_at_first_step",
+      "passed": true,
+      "detail": "run_id=replay-01b4a5c94aca47258212edfade6a2c89"
+    },
+    {
+      "name": "replay_completes_with_expected_decision",
+      "passed": true,
+      "detail": "progress=2/2 expectation=MET decision=RISK_REVIEW"
+    }
+  ],
+  "event": {
+    "initial_event_id": "FR-LIVE-27b97a3819bea4d0743ab72686465b0d",
+    "after_j_event_id": "FR-LIVE-5e3f0f7f56bdc5f42bd18b201e401ab9",
+    "after_k_event_id": "FR-LIVE-27b97a3819bea4d0743ab72686465b0d",
+    "screenshot": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\reports\\ui_qa_20260719\\event_keyboard_after_jk_1920x1080.png",
+    "body_text_length": 2843
+  },
+  "replay": {
+    "run_id": "replay-01b4a5c94aca47258212edfade6a2c89",
+    "screenshot": "C:\\Users\\MR\\Desktop\\Vibecoder\\finance radar\\reports\\ui_qa_20260719\\replay_completed_1920x1080.png",
+    "body_text_length": 1625
+  },
+  "console_errors": [],
+  "page_errors": [],
+  "http_errors": []
+}

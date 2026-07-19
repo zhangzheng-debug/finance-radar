@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-18T11:28:33.182474+00:00",
+  "dataset": {
+    "rows": 897,
+    "label_counts": {
+      "RISK_REVIEW": 546,
+      "NON_TARGET": 351
+    },
+    "top_event_families": {
+      "distress_equity_death": 68,
+      "equity_dilution": 65,
+      "listing_compliance": 54,
+      "listing_status": 47,
+      "delisting_or_suspension": 45,
+      "corporate_action_merger": 40,
+      "source_metadata_control": 39,
+      "fundamental_metric_control": 38,
+      "identity_control": 31,
+      "spac_lifecycle": 31,
+      "dilution_recapitalization": 29,
+      "price_dislocation_control": 27,
+      "listing_remediation": 23,
+      "regulatory_enforcement": 17,
+      "bankruptcy_reorganization": 16,
+      "equity_structure": 15,
+      "voluntary_listing_exit": 14,
+      "liquidity_and_financing_risk": 12,
+      "capital_structure": 12,
+      "product_safety": 11
+    }
+  },
+  "holdout": {
+    "strategy": "deterministic recent connected-group holdout",
+    "grouping": "connected components of issuer_key and event_chain_id",
+    "target_test_fraction": 0.25,
+    "actual_test_fraction": 0.2508361204013378,
+    "train_rows": 672,
+    "test_rows": 225,
+    "train_label_counts": {
+      "RISK_REVIEW": 392,
+      "NON_TARGET": 280
+    },
+    "test_label_counts": {
+      "RISK_REVIEW": 154,
+      "NON_TARGET": 71
+    },
+    "train_date_range": [
+      "2020-01-31",
+      "2026-04-24"
+    ],
+    "test_date_range": [
+      "2022-02-07",
+      "2026-07-15"
+    ],
+    "issuer_overlap_count": 0,
+    "event_chain_overlap_count": 0,
+    "event_ids_sha256_only": true,
+    "date_range": [
+      "2022-02-07",
+      "2026-07-15"
+    ],
+    "note": "This is a frozen grouped temporal holdout, not a never-observed external blind set."
+  },
+  "ablation": [
+    {
+      "feature_mode": "word_only",
+      "fit_seconds": 0.388,
+      "inference_ms_per_row": 0.3275,
+      "raw_argmax_accuracy": 0.8622222222222222,
+      "coverage": 0.7244444444444444,
+      "covered_accuracy": 0.9386503067484663,
+      "route_distribution": {
+        "NON_TARGET": 37,
+        "ABSTAIN": 62,
+        "RISK_REVIEW": 126
+      },
+      "rows": 225
+    },
+    {
+      "feature_mode": "char_only",
+      "fit_seconds": 1.186,
+      "inference_ms_per_row": 1.3276,
+      "raw_argmax_accuracy": 0.8933333333333333,
+      "coverage": 0.8444444444444444,
+      "covered_accuracy": 0.9526315789473684,
+      "route_distribution": {
+        "NON_TARGET": 42,
+        "ABSTAIN": 35,
+        "RISK_REVIEW": 148
+      },
+      "rows": 225
+    },
+    {
+      "feature_mode": "combined",
+      "fit_seconds": 1.641,
+      "inference_ms_per_row": 1.6442,
+      "raw_argmax_accuracy": 0.8888888888888888,
+      "coverage": 0.8266666666666667,
+      "covered_accuracy": 0.956989247311828,
+      "route_distribution": {
+        "NON_TARGET": 43,
+        "ABSTAIN": 39,
+        "RISK_REVIEW": 143
+      },
+      "rows": 225
+    }
+  ],
+  "monitoring_policy": {
+    "mode": "shadow_only",
+    "minimum_window_rows": 100,
+    "reference_route_distribution": {
+      "NON_TARGET": 0.19111111111111112,
+      "ABSTAIN": 0.17333333333333334,
+      "RISK_REVIEW": 0.6355555555555555
+    },
+    "warn_if": {
+      "absolute_abstain_rate_delta_gte": 0.15,
+      "absolute_risk_review_rate_delta_gte": 0.2,
+      "mean_confidence_delta_gte": 0.12,
+      "p95_latency_ms_gte": 100.0
+    },
+    "block_promotion_if": {
+      "covered_accuracy_lt": 0.85,
+      "coverage_lt": 0.65,
+      "issuer_overlap_count_gt": 0,
+      "event_chain_overlap_count_gt": 0,
+      "unresolved_drift_warning": true
+    }
+  },
+  "no_trading": true,
+  "promotion_decision": "REMAIN_SHADOW"
+}

@@ -1,0 +1,130 @@
+{
+  "started_at": "2026-07-16T03:37:12.501176+00:00",
+  "errors": [],
+  "official_sources": {
+    "federal_reserve_press": {
+      "source_id": "federal_reserve_press",
+      "not_modified": 1,
+      "items": 0,
+      "jobs": 0
+    },
+    "sec_current_filings": {
+      "source_id": "sec_current_filings",
+      "items": 15,
+      "filtered": 85,
+      "new_revisions": 2,
+      "jobs": 0
+    },
+    "bls_key_indicators": {
+      "source_id": "bls_key_indicators",
+      "skipped_interval": 1,
+      "items": 0,
+      "jobs": 0
+    },
+    "cftc_enforcement": {
+      "source_id": "cftc_enforcement",
+      "not_modified": 1,
+      "items": 0,
+      "jobs": 0
+    },
+    "fda_medwatch": {
+      "source_id": "fda_medwatch",
+      "not_modified": 1,
+      "items": 0,
+      "jobs": 0
+    },
+    "ftc_press": {
+      "source_id": "ftc_press",
+      "items": 10,
+      "filtered": 0,
+      "new_revisions": 7,
+      "jobs": 0
+    },
+    "sec_litigation_releases": {
+      "source_id": "sec_litigation_releases",
+      "not_modified": 1,
+      "items": 0,
+      "jobs": 0
+    },
+    "sec_trading_suspensions": {
+      "source_id": "sec_trading_suspensions",
+      "not_modified": 1,
+      "items": 0,
+      "jobs": 0
+    },
+    "fdic_press_releases": {
+      "source_id": "fdic_press_releases",
+      "not_modified": 1,
+      "items": 0,
+      "jobs": 0
+    }
+  },
+  "opennews": {
+    "items": 150,
+    "new_revisions": 150,
+    "jobs": 0,
+    "categories": 3
+  },
+  "candidate_extraction": {
+    "processed": 0,
+    "candidates": 0,
+    "no_candidate": 0,
+    "new_events": 0,
+    "linked_observations": 0,
+    "by_type": {},
+    "event_ids": [],
+    "retracted_events": 0,
+    "duplicate_events_reconciled": 0,
+    "unique_events": 0
+  },
+  "sec_filing_enrichment": {
+    "requested": 0,
+    "refresh_parsed": false,
+    "parsed": 0,
+    "no_document": 0,
+    "errors": 0,
+    "refined": 0,
+    "by_type": {},
+    "negated_match_repairs": 0
+  },
+  "official_primary_page_enrichment": {
+    "selected": 0,
+    "inserted": 0,
+    "passages": 0,
+    "link_only": 0,
+    "errors": [],
+    "by_type": {}
+  },
+  "review_triage": {
+    "pending_events": 3,
+    "top_score": 90
+  },
+  "evidence_review": {
+    "pending_events": 3,
+    "routes": 12
+  },
+  "adjudications": {
+    "requested": 105,
+    "applied": 0,
+    "already_applied": 105
+  },
+  "asset_relations": {
+    "events": 4,
+    "entities": 0,
+    "asset_impacts": 6,
+    "market_enabled": 3
+  },
+  "market": {
+    "requested": 0,
+    "completed": 0,
+    "errors": 0,
+    "scheduled": 0
+  },
+  "outbox_inserted": 3,
+  "telegram": {
+    "sent": 0,
+    "errors": 0,
+    "mode": "dry_run"
+  },
+  "finished_at": "2026-07-16T03:38:43.692175+00:00"
+}

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Finance Radar backup and restore verification
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=24h
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-07-18T09:09:31.6424621Z",
+  "source": "/opt/finance-radar/shared/data/operational_backups/finance_radar_20260718T085720Z.sqlite3",
+  "offhost_copy": "tmp/offhost_backups/finance_radar_20260718T085720Z.sqlite3",
+  "bytes": 20832256,
+  "source_sha256": "6a26b7cc0c372e188d2c4f9780f18dee67ff6687700d42747c8cdfe7e1bd1209",
+  "offhost_sha256": "6a26b7cc0c372e188d2c4f9780f18dee67ff6687700d42747c8cdfe7e1bd1209",
+  "hash_match": true,
+  "restore": {
+    "quick_check": "ok",
+    "schema_version": 12,
+    "isolated_restore": true,
+    "counts": {
+      "sources": 18,
+      "raw_observations": 3729,
+      "canonical_events": 1185,
+      "event_versions": 2108,
+      "event_evidence": 2394,
+      "event_market_metrics": 1898
+    }
+  }
+}

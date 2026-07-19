@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-18T20:13:41.038216+00:00",
+  "status": "PASS",
+  "passed": 11,
+  "total": 11,
+  "checks": {
+    "public_health_ok": true,
+    "api_schema_1_1": true,
+    "operations_schema_3": true,
+    "dual_review_capability_advertised": true,
+    "aggregate_status_public": true,
+    "aggregate_status_hides_annotations": true,
+    "public_write_controls_default_closed": true,
+    "no_unauthenticated_queue_read": true,
+    "production_and_blind_freeze_unchanged": true,
+    "public_web_route_rendered": true,
+    "browser_QA_no_runtime_error": true
+  },
+  "observed": {
+    "samples": 24,
+    "workflow_status": "NOT_READY_FOR_FREEZE",
+    "status_counts": {
+      "OPEN": 24
+    },
+    "valid_annotations": 0,
+    "api_schema": "1.1",
+    "operations_schema": 3,
+    "unauthenticated_queue_status": 403,
+    "web_final_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Adjudication_Studio",
+    "browser_final_url": "https://radar.167-172-69-16.sslip.io:8443/radar/Adjudication_Studio",
+    "browser_http_errors": [
+      {
+        "status": 404,
+        "url": "https://radar.167-172-69-16.sslip.io:8443/radar/Adjudication_Studio/_stcore/host-config"
+      },
+      {
+        "status": 404,
+        "url": "https://radar.167-172-69-16.sslip.io:8443/radar/Adjudication_Studio/_stcore/health"
+      }
+    ]
+  },
+  "boundaries": {
+    "admin_token_used": false,
+    "review_submitted": false,
+    "target_label_assigned": false,
+    "trading_system_touched": false
+  }
+}

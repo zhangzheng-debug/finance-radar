@@ -1,0 +1,100 @@
+name: finance-radar
+
+x-radar-environment: &radar-environment
+  FINANCE_RADAR_DB: /app/data/finance_radar.sqlite3
+  FINANCE_RADAR_OPS_DB: /app/data/finance_radar_operations.sqlite3
+  FINANCE_RADAR_ARTIFACT_DIR: /app/artifacts
+  FINANCE_RADAR_REPLAY_DIR: /app/replay/cases
+  FINANCE_RADAR_API_URL: http://api:8000
+  FINANCE_RADAR_WEB_URL: ${FINANCE_RADAR_PUBLIC_URL:-http://localhost}
+  FINANCE_RADAR_DEMO_MODE: ${FINANCE_RADAR_DEMO_MODE:-RECENT_CAPTURE}
+  FINANCE_RADAR_ADMIN_TOKEN: ${FINANCE_RADAR_ADMIN_TOKEN:-change-me-before-public-deploy}
+
+x-radar-service: &radar-service
+  build:
+    context: ..
+    dockerfile: deployment/Dockerfile
+  image: finance-radar:local
+  restart: unless-stopped
+  env_file:
+    - ../.env
+  environment: *radar-environment
+  volumes:
+    - ../data:/app/data
+    - ../artifacts:/app/artifacts
+    - ../reports:/app/reports
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  api:
+    <<: *radar-service
+    command: ["python", "-m", "uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5)"]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+
+  web:
+    <<: *radar-service
+    command: ["python", "-m", "streamlit", "run", "app/web/Home.py", "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true", "--browser.gatherUsageStats", "false"]
+    expose: ["8501"]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5)"]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    <<: *radar-service
+    command: ["python", "-m", "app.workers.continuous", "--interval", "300"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  backup:
+    <<: *radar-service
+    command: ["python", "-m", "app.workers.backup_scheduler", "--interval", "86400", "--retention", "30", "--weekly-retention", "12"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  notifier:
+    <<: *radar-service
+    profiles: ["notifications"]
+    command: ["python", "-m", "app.workers.notifier", "--send", "--interval", "60"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      FINANCE_RADAR_DOMAIN: ${FINANCE_RADAR_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  caddy_data:
+  caddy_config:

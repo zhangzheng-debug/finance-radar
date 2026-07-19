@@ -1,0 +1,615 @@
+{
+  "schema_version": 1,
+  "audit_type": "risk_router_input_contract",
+  "rows": 40,
+  "label_counts": {
+    "RISK_REVIEW": 20,
+    "NON_TARGET": 20
+  },
+  "risk_body_coverage": 0.0,
+  "risk_title_only_rows": 20,
+  "risk_content_ambiguous_rows": 16,
+  "source_metrics": {
+    "cftc_enforcement_external": {
+      "rows": 5,
+      "title_only": 5
+    },
+    "federal_reserve_policy_external": {
+      "rows": 3,
+      "title_only": 3
+    },
+    "nvidia_press_external": {
+      "rows": 17,
+      "title_only": 0
+    },
+    "sec_litigation_external": {
+      "rows": 15,
+      "title_only": 15
+    }
+  },
+  "thresholds": {
+    "minimum_rows": 40,
+    "risk_body_coverage_gte": 0.8
+  },
+  "gates": {
+    "minimum_rows": true,
+    "risk_rows_present": true,
+    "risk_body_coverage": false
+  },
+  "benchmark_contract_valid": false,
+  "required_remediation": "Freeze exact official-page evidence passages before evaluating the content model; keep P0 enforcement-source discovery routing outside learned text features.",
+  "ambiguous_risk_samples": [
+    {
+      "sample_id": "EXT-032e752e592a6d9c2671",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "NanoBit Limited, et al.",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-27e9b67edee61347785e",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "American Patriot Brands, Inc.; Urban Pharms, LLC; TSL Distribution, LLC; DJ&S Property #1, LLC; Robert Y. Lee; Brian L. Pallas",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-3581399f5f1a61d0d691",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Michael Bowen and Chol Kim a/k/a Brandon Kim",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-37a05abddd1af5406326",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Mingran Wang",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-3e740f3d88cde13d94dd",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Giovanni Pennetta",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-4509117f96b2fb9c1b57",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Sanders Family Office; Margaret Sanders; Francisco J. Herrera",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-5d9fb7b4b60ab40cdc6a",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "David Kushner and La Mancha Funding Corp.",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-6a5bdf6493215288a739",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Charles E. Jones",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-71123388985bffc58ea4",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Steve M. Bajic et al.",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-8f33d2a243141e232fa5",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Shane Schmidt",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-95880770e67472aee1c7",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "AI Financial Education Foundation Ltd.",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-9c61cbc9684bcebb81df",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Michael J. Forster",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-badf41c0b8f34b8568d4",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Jamal (“Jimmy”) Chammout; Ali El Siblani; Ali Jawad; Rabih Rakha",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-c115bdb1147d6be1b8b8",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Weiguo Zhai",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-d17aec80fdc0b86de511",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Casey Muggleston",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-fc9f87a95436efda8c69",
+      "source_id": "cftc_enforcement_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "CFTC Orders New York Trader to Pay $200,000 for Spoofing",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    }
+  ],
+  "samples": [
+    {
+      "sample_id": "EXT-032e752e592a6d9c2671",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "NanoBit Limited, et al.",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-03d2c947fe2db2ee7ba5",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "Nemotron Labs: How Open Models Give Enterprises and Nations AI They Can Trust, Control and Customize",
+      "title_only": false,
+      "residual_body_characters": 252,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-0a7412f811df6e3454ea",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "Japan’s Robotics and Manufacturing Leaders Build on NVIDIA Cosmos to Advance Physical AI Frontier",
+      "title_only": false,
+      "residual_body_characters": 259,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-133a970622dc59b62e2e",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "NVIDIA Nemotron Achieves Benchmark-Leading Performance With LangChain Deep Agents Harness",
+      "title_only": false,
+      "residual_body_characters": 350,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-1984cc473844f50a4f15",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "NVIDIA Unlocks AI Compute at Scale, Inviting Capital Partners to Power the AI Infrastructure Buildout",
+      "title_only": false,
+      "residual_body_characters": 395,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-27e9b67edee61347785e",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "American Patriot Brands, Inc.; Urban Pharms, LLC; TSL Distribution, LLC; DJ&S Property #1, LLC; Robert Y. Lee; Brian L. Pallas",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-3266e592e9012e7ab6fc",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "How Open Models Are Driving AI Research",
+      "title_only": false,
+      "residual_body_characters": 355,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-346e7a975c99f3b67c40",
+      "source_id": "cftc_enforcement_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "CFTC Secures Judgment Against Michigan Commodity Pool Operator and His Company Engaged in Fraud Scheme",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [
+        "fraud",
+        "judgment"
+      ],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-3581399f5f1a61d0d691",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Michael Bowen and Chol Kim a/k/a Brandon Kim",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-37a05abddd1af5406326",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Mingran Wang",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-3e740f3d88cde13d94dd",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Giovanni Pennetta",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-41fb95adcac441610dec",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "Why Performance per Watt Is the Ultimate Metric for AI Infrastructure Efficiency",
+      "title_only": false,
+      "residual_body_characters": 337,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-4509117f96b2fb9c1b57",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Sanders Family Office; Margaret Sanders; Francisco J. Herrera",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-48c5cd1cbd7ed28df113",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "NVIDIA and Hugging Face Bring New Models and Frameworks to LeRobot for the Open Robotics Community",
+      "title_only": false,
+      "residual_body_characters": 349,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-52a263d8d3a71dfeea4a",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "How Nations Are Deploying AI for Strategic Priorities",
+      "title_only": false,
+      "residual_body_characters": 388,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-56ee56dd0f49b2600dbe",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "Joyride Through July With 12 Games Coming to GeForce NOW",
+      "title_only": false,
+      "residual_body_characters": 300,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-5d9fb7b4b60ab40cdc6a",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "David Kushner and La Mancha Funding Corp.",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-641878407c74b47eafaf",
+      "source_id": "cftc_enforcement_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "CFTC Charges Google Employee with Insider Trading in Search Result-Related Event Contracts",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [
+        "charges"
+      ],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-6a5bdf6493215288a739",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Charles E. Jones",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-71123388985bffc58ea4",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Steve M. Bajic et al.",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-7f3768ee857027ff6e3a",
+      "source_id": "federal_reserve_policy_external",
+      "expected_label": "NON_TARGET",
+      "title": "Agencies issue joint statement on handling of highly sensitive information during bank examinations",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-86f750304bb3cb6392e1",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "Japan’s Enterprises and Startups Build Industry-Specialized AI With NVIDIA Nemotron Open Models",
+      "title_only": false,
+      "residual_body_characters": 293,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-8f33d2a243141e232fa5",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Shane Schmidt",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-9455abdc90f550168f7f",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "GeForce NOW Turns Up the Heat With New GeForce RTX 5080-Powered Toronto Server",
+      "title_only": false,
+      "residual_body_characters": 319,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-95880770e67472aee1c7",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "AI Financial Education Foundation Ltd.",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-9c61cbc9684bcebb81df",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Michael J. Forster",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-9c74e321b6de6895e744",
+      "source_id": "federal_reserve_policy_external",
+      "expected_label": "NON_TARGET",
+      "title": "Federal Reserve notes with deep sadness the passing of Alan Greenspan",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-aab15e1898381a39d57f",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "AI Innovators Adopt NVIDIA Vera — Why Max Single-Threaded CPU at Scale Matters",
+      "title_only": false,
+      "residual_body_characters": 309,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-b08973dc78ebfc965c67",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "Japan Government, Industrial Leaders and NVIDIA Launch the World’s First National AI Infrastructure",
+      "title_only": false,
+      "residual_body_characters": 178,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-badf41c0b8f34b8568d4",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Jamal (“Jimmy”) Chammout; Ali El Siblani; Ali Jawad; Rabih Rakha",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-bc8d4fd386edbafc3c92",
+      "source_id": "federal_reserve_policy_external",
+      "expected_label": "NON_TARGET",
+      "title": "Federal Reserve issues initial findings from its 2025 triennial payments study",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-c115bdb1147d6be1b8b8",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Weiguo Zhai",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-d17aec80fdc0b86de511",
+      "source_id": "sec_litigation_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "Casey Muggleston",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    },
+    {
+      "sample_id": "EXT-d4cfe858b14ae3635683",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "NVIDIA Vera Rubin Maximizes Intelligence per Dollar for Post-Training Workloads — a Key Metric for Agentic AI",
+      "title_only": false,
+      "residual_body_characters": 114,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-d78a689995ef688120b9",
+      "source_id": "cftc_enforcement_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "CFTC Charges U.S. Service Member with Insider Trading in Nicolás Maduro-Related Event Contracts",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [
+        "charges"
+      ],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-d7f72e9bc84c5d7ac327",
+      "source_id": "cftc_enforcement_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "CFTC Secures Court Order Requiring Florida Resident to Pay Over $1.3 Million in Disgorgement and Imposes Trading Ban for Commodity Pool Fraud",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [
+        "court order",
+        "fraud"
+      ],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-df6158c65d5ebef2cfe2",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "NVIDIA Introduces New Jetson Thor Computers to Advance Mainstream Robotics and Edge AI",
+      "title_only": false,
+      "residual_body_characters": 381,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-e5f34023ba49e3e0d08d",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "Sharpen the Sword, Skip the Downloads — ‘Onimusha: Way of the Sword’ Is Coming to GeForce NOW",
+      "title_only": false,
+      "residual_body_characters": 315,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-f03c112a6a86b1160ab0",
+      "source_id": "nvidia_press_external",
+      "expected_label": "NON_TARGET",
+      "title": "NVIDIA and Japan Bring Full-Stack AI and Robotics to Every Industry",
+      "title_only": false,
+      "residual_body_characters": 336,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": false
+    },
+    {
+      "sample_id": "EXT-fc9f87a95436efda8c69",
+      "source_id": "cftc_enforcement_external",
+      "expected_label": "RISK_REVIEW",
+      "title": "CFTC Orders New York Trader to Pay $200,000 for Spoofing",
+      "title_only": true,
+      "residual_body_characters": 0,
+      "adverse_title_terms": [],
+      "content_ambiguous_at_discovery": true
+    }
+  ]
+}

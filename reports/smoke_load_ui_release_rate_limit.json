@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-18T16:44:46.648792+00:00",
+  "target": "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api",
+  "read_only": true,
+  "passed": false,
+  "requests": 120,
+  "concurrency": 15,
+  "elapsed_seconds": 6.168,
+  "throughput_requests_per_second": 19.454,
+  "success_rate": 0.4583333333333333,
+  "status_counts": {
+    "200": 55,
+    "429": 65
+  },
+  "latency_ms": {
+    "mean": 744.697,
+    "p50": 472.947,
+    "p95": 2428.059,
+    "p99": 2495.898,
+    "max": 2517.133
+  },
+  "routes": {
+    "/api/v1/health": {
+      "requests": 40,
+      "p50_ms": 472.789,
+      "p95_ms": 2428.059,
+      "max_ms": 2480.056
+    },
+    "/api/v1/events": {
+      "requests": 40,
+      "p50_ms": 473.153,
+      "p95_ms": 1874.294,
+      "max_ms": 1984.995
+    },
+    "/api/v1/overview": {
+      "requests": 40,
+      "p50_ms": 462.98,
+      "p95_ms": 2478.208,
+      "max_ms": 2517.133
+    }
+  },
+  "errors": [
+    {
+      "route": "/api/v1/overview",
+      "status": 429,
+      "valid_envelope": true,
+      "latency_ms": 472.859,
+      "error": "invalid_response_envelope"
+    },
+    {
+      "route": "/api/v1/events",
+      "status": 429,
+      "valid_envelope": true,
+      "latency_ms": 472.961,
+      "error": "invalid_response_envelope"
+    },
+    {
+      "route": "/api/v1/health",
+      "status": 429,
+      "valid_envelope": true,
+      "latency_ms": 463.938,
+      "error": "invalid_response_envelope"
+    },
+    {
+      "route": "/api/v1/overview",
+      "status": 429,
+      "valid_envelope": true,
+      "latency_ms": 457.234,
+      "error": "invalid_response_envelope"
+    },
+    {
+      "route": "/api/v1/events",
+      "status": 429,
+      "valid_envelope": true,
+      "latency_ms": 473.515,
+      "error": "invalid_response_envelope"
+    },
+    {
+      "route": "/api/v1/health",
+      "status": 429,
+      "valid_envelope": true,
+      "latency_ms": 456.375,
+      "error": "invalid_response_envelope"
+    },
+    {
+      "route": "/api/v1/overview",
+      "status": 429,
+      "valid_envelope": true,
+      "latency_ms": 458.335,
+      "error": "invalid_response_envelope"
+    },
+    {
+      "route": "/api/v1/events",
+      "status": 429,
+      "valid_envelope": true,
+      "latency_ms": 470.386,
+      "error": "invalid_response_envelope"
+    },
+    {
+      "route": "/api/v1/health",
+      "status": 429,
+      "valid_envelope": true,
+      "latency_ms": 461.237,
+      "error": "invalid_response_envelope"
+    },
+    {
+      "route": "/api/v1/overview",
+      "status": 429,
+      "valid_envelope": true,
+      "latency_ms": 459.973,
+      "error": "invalid_response_envelope"
+    }
+  ],
+  "pass_policy": {
+    "minimum_success_rate": 0.99,
+    "maximum_p95_ms": 5000
+  }
+}

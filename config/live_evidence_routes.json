@@ -1,0 +1,173 @@
+{
+  "routes": {
+    "conflict_or_blockade": {
+      "goal": "Confirm the current operational status, effective time, scope, and any change from ceasefire conditions.",
+      "official_sources": [
+        ["USCENTCOM", "https://www.centcom.mil/MEDIA/PUBLIC-RELEASES/"],
+        ["White House", "https://www.whitehouse.gov/presidential-actions/"],
+        ["U.S. Department of State", "https://www.state.gov/press-releases/"],
+        ["U.S. Maritime Administration", "https://www.maritime.dot.gov/msci-advisories"]
+      ],
+      "query_terms": ["Iran blockade", "Gulf of Oman", "Strait of Hormuz", "effective date"]
+    },
+    "monetary_policy": {
+      "goal": "Confirm the exact speaker, statement date, policy meeting, and whether the wording represents a decision or only scenario commentary.",
+      "official_sources": [
+        ["European Central Bank", "https://www.ecb.europa.eu/press/html/index.en.html"],
+        ["Deutsche Bundesbank", "https://www.bundesbank.de/en/press"],
+        ["Federal Reserve", "https://www.federalreserve.gov/newsevents.htm"]
+      ],
+      "query_terms": ["interest rate decision", "reassess", "geopolitical", "energy inflation"]
+    },
+    "inflation_release": {
+      "goal": "Confirm the release period, headline value, revision status, and exact BLS series before assessing market impact.",
+      "official_sources": [
+        ["BLS CPI", "https://www.bls.gov/cpi/"],
+        ["BLS PPI", "https://www.bls.gov/ppi/"],
+        ["BLS Public Data API", "https://www.bls.gov/developers/"]
+      ],
+      "query_terms": ["CPI", "PPI", "reference period", "revision"]
+    },
+    "employment_release": {
+      "goal": "Confirm the reference period, payroll, unemployment or job-openings value, preliminary status, and later revisions.",
+      "official_sources": [
+        ["BLS Employment Situation", "https://www.bls.gov/news.release/empsit.htm"],
+        ["BLS JOLTS", "https://www.bls.gov/jlt/"],
+        ["BLS Public Data API", "https://www.bls.gov/developers/"]
+      ],
+      "query_terms": ["employment situation", "payrolls", "unemployment", "job openings", "revision"]
+    },
+    "enforcement_action": {
+      "goal": "Confirm the named institution or person, order date, legal basis, penalty, restrictions, and whether the action is new or terminated.",
+      "official_sources": [
+        ["Federal Reserve Enforcement Actions", "https://www.federalreserve.gov/supervisionreg/enforcement-actions.htm"],
+        ["Federal Reserve Press Releases", "https://www.federalreserve.gov/newsevents/pressreleases.htm"]
+      ],
+      "query_terms": ["enforcement action", "order", "penalty", "termination"]
+    },
+    "cftc_enforcement_action": {
+      "goal": "Confirm the named respondent, filing or order date, alleged or proven conduct, monetary relief, trading restrictions, and current procedural stage.",
+      "official_sources": [
+        ["CFTC Enforcement Press Releases", "https://www.cftc.gov/PressRoom/PressReleases/EnforcementPressReleases"],
+        ["CFTC Enforcement Actions", "https://www.cftc.gov/LawRegulation/EnforcementActions/index.htm"]
+      ],
+      "query_terms": ["CFTC", "charges", "order", "fraud", "penalty", "respondent"]
+    },
+    "sec_litigation_release": {
+      "goal": "Confirm defendants, complaint date, alleged securities-law violations, requested relief, whether the matter is alleged or adjudicated, and any issuer or listed-security impact.",
+      "official_sources": [
+        ["SEC Litigation Releases", "https://www.sec.gov/enforcement-litigation/litigation-releases"],
+        ["SEC Enforcement", "https://www.sec.gov/enforcement-litigation"]
+      ],
+      "query_terms": ["SEC litigation release", "complaint", "fraud", "defendant", "relief"]
+    },
+    "trading_suspension": {
+      "goal": "Confirm the exact issuer and security, suspension start and end times, stated regulatory concerns, exchange or OTC venue, and whether the action is temporary or followed by delisting.",
+      "official_sources": [
+        ["SEC Trading Suspensions", "https://www.sec.gov/enforcement-litigation/trading-suspensions"],
+        ["SEC EDGAR", "https://www.sec.gov/edgar/search/"]
+      ],
+      "query_terms": ["trading suspension", "security", "issuer", "accuracy", "adequacy", "delisting"]
+    },
+    "product_safety_alert": {
+      "goal": "Confirm the affected product and manufacturer, recall or correction class, failure mode, patient risk, injuries or deaths, distribution scope, and required customer action.",
+      "official_sources": [
+        ["FDA MedWatch", "https://www.fda.gov/safety/medwatch-fda-safety-information-and-adverse-event-reporting-program"],
+        ["FDA Medical Device Recalls and Early Alerts", "https://www.fda.gov/medical-devices/medical-device-safety/medical-device-recalls"]
+      ],
+      "query_terms": ["recall", "correction", "early alert", "patient risk", "injuries", "deaths"]
+    },
+    "product_recall": {
+      "goal": "Confirm the affected product and manufacturer, recall class and reason, patient or consumer risk, injuries or deaths, distribution scope, and remediation status.",
+      "official_sources": [
+        ["FDA Recalls", "https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts"],
+        ["FDA MedWatch", "https://www.fda.gov/safety/medwatch-fda-safety-information-and-adverse-event-reporting-program"]
+      ],
+      "query_terms": ["recall", "removes", "risk", "injuries", "deaths", "affected product"]
+    },
+    "bank_receivership": {
+      "goal": "Confirm the failed institution, charter-closing authority, receiver appointment, acquiring institution, deposit treatment, asset disposition, and whether listed equity or a holding company is affected.",
+      "official_sources": [
+        ["FDIC Bank Failures", "https://www.fdic.gov/bank-failures"],
+        ["FDIC Press Releases", "https://www.fdic.gov/news/press-releases"]
+      ],
+      "query_terms": ["bank failure", "receiver", "assumes deposits", "closed", "acquiring institution"]
+    },
+    "bank_enforcement_orders_digest": {
+      "goal": "Open the monthly FDIC order list, separate institution-specific orders from the digest, and create a new event only for material capital, activity, management, or license restrictions.",
+      "official_sources": [
+        ["FDIC Enforcement Decisions and Orders", "https://orders.fdic.gov/s/"],
+        ["FDIC Press Releases", "https://www.fdic.gov/news/press-releases"]
+      ],
+      "query_terms": ["enforcement order", "consent order", "civil money penalty", "prompt corrective action"]
+    },
+    "bank_regulatory_update": {
+      "goal": "Confirm whether the release is a proposal, final rule, test result, or future schedule and identify affected institutions and effective dates.",
+      "official_sources": [
+        ["Federal Reserve Banking and Regulatory Policy", "https://www.federalreserve.gov/newsevents/pressreleases.htm"],
+        ["Federal Register", "https://www.federalregister.gov/agencies/federal-reserve-system"]
+      ],
+      "query_terms": ["proposal", "final rule", "stress test", "effective date", "public comment"]
+    },
+    "sec_material_filing": {
+      "goal": "Open the captured filing and determine the exact disclosed event, relevant item or exhibit, effective date, and materiality.",
+      "official_sources": [
+        ["SEC EDGAR Latest Filings", "https://www.sec.gov/search-filings"],
+        ["Company investor relations", "company-specific"]
+      ],
+      "query_terms": ["8-K", "6-K", "item", "exhibit", "material event"]
+    },
+    "earnings_or_guidance": {
+      "goal": "Confirm reported period, actual results, guidance changes, accounting basis, and management attribution from the filing or earnings release.",
+      "official_sources": [
+        ["SEC EDGAR", "https://www.sec.gov/search-filings"],
+        ["Company investor relations", "company-specific"]
+      ],
+      "query_terms": ["results", "guidance", "revenue", "earnings", "Item 2.02"]
+    },
+    "ofac_network_sanctions": {
+      "goal": "Confirm designated parties, legal authority, effective date, and official action scope.",
+      "official_sources": [
+        ["U.S. Treasury", "https://home.treasury.gov/news/press-releases"],
+        ["OFAC Recent Actions", "https://ofac.treasury.gov/recent-actions"]
+      ],
+      "query_terms": ["sanctions", "designation", "network", "OFAC"]
+    },
+    "protocol_incident_trading_paused": {
+      "goal": "Confirm the protocol acknowledgement, operational status, affected component, loss estimate, and recovery status separately.",
+      "official_sources": [
+        ["Project official status and social account", "project-specific"],
+        ["CISA", "https://www.cisa.gov/news-events/cybersecurity-advisories"]
+      ],
+      "query_terms": ["incident", "trading paused", "vault", "investigation", "post-mortem"]
+    },
+    "default": {
+      "goal": "Locate a dated original document that confirms the event cause and current legal or operational stage.",
+      "official_sources": [
+        ["SEC EDGAR", "https://www.sec.gov/edgar/search/"],
+        ["Company investor relations", "company-specific"]
+      ],
+      "query_terms": ["official release", "filing", "announcement"]
+    }
+  },
+  "known_context": {
+    "FR-LIVE-eed9151c62729747422910a77daea675": [
+      {
+        "source_name": "USCENTCOM",
+        "evidence_url": "https://www.centcom.mil/MEDIA/PUBLIC-RELEASES/Article/4513450/centcom-disables-non-compliant-vessel-in-gulf-of-oman/",
+        "evidence_date": "2026-06-10",
+        "support_level": "partial_context_only",
+        "note": "Officially confirms an ongoing Iran port blockade and enforcement in June, but does not by itself confirm the July 15 claim that it was newly reimposed."
+      }
+    ],
+    "FR-LIVE-a8b94684ba13a7e2317cd943f20cf841": [
+      {
+        "source_name": "European Central Bank",
+        "evidence_url": "https://www.ecb.europa.eu/press/accounts/2026/html/ecb.mg260709~0e7f8241c9.en.html",
+        "evidence_date": "2026-07-09",
+        "support_level": "partial_context_only",
+        "note": "Officially confirms that the Middle East conflict and shipping disruption affect ECB inflation and rate analysis, but not the reported July 15 Nagel wording or next-week timing."
+      }
+    ]
+  }
+}
