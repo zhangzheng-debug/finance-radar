@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -131,6 +132,14 @@ def detect_mime(payload: bytes, content_type: str) -> str:
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError("invalid JSON evidence object") from exc
         return "application/json"
+    if normalized == "text/plain":
+        if b"\x00" in payload:
+            raise ValueError("binary payload declared as text/plain")
+        try:
+            payload.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError("non-UTF-8 payload declared as text/plain") from exc
+        return "text/plain"
     raise ValueError(f"unsupported evidence content type: {normalized or 'unknown'}")
 
 
@@ -139,7 +148,7 @@ def fetch_source(url: str, user_agent: str, timeout: float, max_bytes: int) -> F
         url,
         headers={
             "User-Agent": user_agent,
-            "Accept": "text/html,application/xhtml+xml,application/pdf;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,text/plain,application/pdf;q=0.9",
             "Accept-Encoding": "identity",
         },
     )
@@ -223,6 +232,7 @@ def archive_pending(
         "archived_bytes": 0,
         "by_mime": {},
         "errors": [],
+        "deferred_failures": 0,
         "policy": {
             "official_source_allowlist": True,
             "https_only": True,
@@ -236,6 +246,15 @@ def archive_pending(
         },
     }
     cache_dir.mkdir(parents=True, exist_ok=True)
+    failure_key = "source_snapshot_failures_v1"
+    failure_state: dict[str, Any] = (
+        operations.get_state(failure_key, {})
+        if hasattr(operations, "get_state")
+        else {}
+    )
+    failure_state = failure_state if isinstance(failure_state, dict) else {}
+    failure_state_changed = False
+    now = datetime.now(timezone.utc)
     batch_size = max(100, limit * 25)
     scan_offset = 0
     while result["attempted"] < limit:
@@ -254,6 +273,16 @@ def archive_pending(
                 continue
             original_url = str(row["evidence_url"])
             source_id = str(row["source_id"])
+            failure_id = f"{row['event_id']}:{row['evidence_id']}"
+            prior_failure = failure_state.get(failure_id, {})
+            retry_at = datetime.fromisoformat(str(prior_failure.get("retry_after", "")).replace("Z", "+00:00")) if prior_failure.get("retry_after") else None
+            if (
+                prior_failure.get("source_url") == original_url
+                and retry_at is not None
+                and retry_at > now
+            ):
+                result["deferred_failures"] += 1
+                continue
             url = canonical_source_url(source_id, original_url)
             if url is None or not host_allowed(source_id, url):
                 result["policy_skipped"] += 1
@@ -290,15 +319,31 @@ def archive_pending(
                     metadata,
                     source_url=fetched.final_url,
                     fetched_at=utc_now(),
+                    object_kind="SOURCE_SNAPSHOT",
                 )
             except (OSError, RuntimeError, ValueError, urllib.error.URLError) as exc:
+                attempts = int(prior_failure.get("attempts", 0)) + 1
+                retry_hours = min(168, 24 if isinstance(exc, urllib.error.HTTPError) and exc.code in {401, 403, 404} else 2 ** min(attempts, 7))
+                failure_state[failure_id] = {
+                    "source_url": original_url,
+                    "attempts": attempts,
+                    "last_error": f"{type(exc).__name__}: {str(exc)[:240]}",
+                    "last_attempt_at": now.isoformat(),
+                    "retry_after": (now + timedelta(hours=retry_hours)).isoformat(),
+                }
+                failure_state_changed = True
                 result["errors"].append(
                     f"{row['evidence_id']}: {type(exc).__name__}: {str(exc)[:240]}"
                 )
                 continue
+            if failure_id in failure_state:
+                failure_state.pop(failure_id, None)
+                failure_state_changed = True
             result["archived"] += 1
             result["archived_bytes"] += int(metadata["byte_length"])
             result["by_mime"][mime_type] = result["by_mime"].get(mime_type, 0) + 1
+    if failure_state_changed and hasattr(operations, "set_state"):
+        operations.set_state(failure_key, failure_state)
     result["status"] = "PASS" if not result["errors"] else "DEGRADED"
     return result
 
@@ -318,6 +363,7 @@ def write_report(json_path: Path, markdown_path: Path, result: dict[str, Any]) -
         f"- Registered official HTTP links upgraded to HTTPS: `{result['http_upgraded_to_https']}`",
         f"- Cache hits / network fetches: `{result['cache_hits']}` / `{result['network_fetches']}`",
         f"- New archived bytes: `{result['archived_bytes']}`",
+        f"- Persistently deferred failed links: `{result.get('deferred_failures', 0)}`",
         "- Boundary: registered official domains, safe HTTP-to-HTTPS canonicalization, redirect revalidation, 10 MiB cap, no auto-verification, no model feature use and no trading.",
         "",
         "## MIME types",

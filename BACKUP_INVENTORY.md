@@ -1,8 +1,8 @@
 # Backup inventory
 
-- Backup version: `2026.07.19.1`
-- Application release: `20260719T044852Z`
-- Accepted migration snapshot: `20260719T045536Z`
+- Backup version: `2026.07.22.1`
+- Application release: `20260721T184054Z`
+- Accepted migration snapshot: `20260721T185507Z`
 
 ## Stored in Git
 
@@ -15,16 +15,17 @@
 
 ## Stored in the private GitHub Release
 
-The release `v2026.07.19.1` carries four immutable assets. Their sizes and
-SHA-256 hashes are recorded in `release/backup-20260719.json`.
+The release `v2026.07.22.1` carries the current encrypted AWS recovery asset.
+Its encrypted and authenticated-plaintext SHA-256 hashes are recorded in
+`release/backup-20260722.json`. The preceding `v2026.07.19.1` release
+continues to carry the offline demo and reviewer evidence bundle.
 
-1. Encrypted full-server migration snapshot: application releases, event
+1. Current encrypted AWS migration snapshot: application releases, event
    history, evidence objects, reports, pinned local-model runtime/model, and
    Finance Radar service configuration. This is the production-disaster-recovery
    asset; it excludes the trading project, SSH material, and TLS private keys.
-2. Current deployment archive for release `20260719T044852Z`.
-3. Offline five-page demonstration bundle.
-4. Reviewer-facing defense evidence bundle.
+2. The prior release's offline five-page demonstration and reviewer-facing
+   evidence bundles remain valid supporting artifacts.
 
 ## Deliberately local only
 

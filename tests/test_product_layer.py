@@ -105,6 +105,10 @@ class ProductLayerTests(unittest.TestCase):
         self.assertEqual(repository.list_events(source="test")["total"], 1)
         self.assertEqual(repository.list_events(source="missing")["total"], 0)
         self.assertEqual(repository.list_events(query="test")["total"], 1)
+        source = repository.list_source_health()[0]
+        self.assertEqual(source["observations"], 1)
+        self.assertEqual(source["cursor_status"], "STATIC_IMPORTED")
+        self.assertIsNotNone(source["last_success_at"])
 
     def test_market_capabilities_distinguish_persisted_providers_and_local_probe(self) -> None:
         connection = open_ledger(self.ledger_path)

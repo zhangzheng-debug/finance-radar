@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-07-19T05:33:18.494345+00:00",
+  "captured_at": "2026-07-20T18:03:18.798488+00:00",
   "target_api": "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api",
-  "status": "WAITING",
+  "status": "PASS",
   "checks": {
     "api_status_ok": true,
     "ledger_quick_check_ok": true,
@@ -11,48 +11,48 @@
     "latest_backup_verified": true,
     "model_shadow_no_trading": true,
     "safety_audits_zero": true,
-    "runtime_window_complete": false
+    "runtime_window_complete": true
   },
   "worker_window_24h": {
-    "status": "PARTIAL",
+    "status": "PASS",
     "target_hours": 24,
-    "observed_hours": 20.868,
+    "observed_hours": 57.393,
     "first_started_at": "2026-07-18T08:38:42.135253+00:00",
-    "latest_finished_at": "2026-07-19T05:30:45.810935+00:00",
-    "latest_age_seconds": 148.171,
-    "cycles": 269,
-    "success_cycles": 252,
-    "degraded_cycles": 14,
-    "failed_cycles": 3,
-    "success_rate": 0.936803,
-    "max_start_gap_seconds": 336.836,
+    "latest_finished_at": "2026-07-20T18:02:18.613547+00:00",
+    "latest_age_seconds": 57.369,
+    "cycles": 281,
+    "success_cycles": 279,
+    "degraded_cycles": 2,
+    "failed_cycles": 0,
+    "success_rate": 0.992883,
+    "max_start_gap_seconds": 340.765,
     "expected_interval_seconds": 300,
-    "complete": false
+    "complete": true
   },
   "latest_worker": {
-    "cycle_id": "cycle-926506e40e2342c5a43301e7c9af5f7e",
+    "cycle_id": "cycle-4d481bb7e2dd4225a537efa75c0714e3",
     "status": "SUCCESS",
-    "started_at": "2026-07-19T05:30:40.318978+00:00",
-    "finished_at": "2026-07-19T05:30:45.810935+00:00",
+    "started_at": "2026-07-20T18:02:05.733328+00:00",
+    "finished_at": "2026-07-20T18:02:18.613547+00:00",
     "error": null
   },
   "ledger_counts": {
     "sources": 22,
-    "raw_observations": 3951,
-    "canonical_events": 1194,
-    "event_versions": 2117,
-    "event_evidence": 2394,
-    "event_market_metrics": 1898,
-    "pipeline_jobs": 1194,
+    "raw_observations": 4573,
+    "canonical_events": 1349,
+    "event_versions": 2303,
+    "event_evidence": 2396,
+    "event_market_metrics": 1900,
+    "pipeline_jobs": 1349,
     "alert_outbox": 13
   },
   "operations_counts": {
     "replay_runs": 7,
     "model_runs": 7,
-    "worker_cycles": 269,
-    "backup_runs": 35,
+    "worker_cycles": 697,
+    "backup_runs": 38,
     "agent_decisions": 3,
-    "evidence_objects": 104,
+    "evidence_objects": 1311,
     "human_overrides": 0,
     "adjudication_samples": 24,
     "adjudication_reviews": 0
@@ -65,7 +65,7 @@
   "known_last_non_success": "2026-07-18T12:11:35.589624+00:00",
   "known_earliest_possible_pass": "2026-07-19T12:11:35.589624+00:00",
   "eligibility_note": "Earliest known time only; any new non-success cycle moves the gate later.",
-  "sequence": 83,
-  "previous_record_sha256": "9d244f8b33a198907e118a12b3104361c51257920cb3784dbb4634acb9e94139",
-  "record_sha256": "9fde6d9d32fdacf35cb8314c85b76984635e4b1ab6eab617a74e301a19047583"
+  "sequence": 228,
+  "previous_record_sha256": "84a144ef3f859240592f31be7d66d2ae23c1d89f848c2f2a91946b0c4f53a684",
+  "record_sha256": "47d98b23e02807ee03350b4d1cdef7307b64c56589b17d3a70d974f6373bbf11"
 }

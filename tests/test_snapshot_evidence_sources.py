@@ -169,6 +169,7 @@ def test_pdf_detection_and_size_contract() -> None:
         "fda_medwatch", "http://malicious.example/medical-devices/recall"
     ) is None
     assert snapshots.detect_mime(b'{"official":true}', "application/json") == "application/json"
+    assert snapshots.detect_mime(b"official filing text", "text/plain; charset=utf-8") == "text/plain"
 
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -287,3 +288,36 @@ def test_paginates_past_archived_head_rows(monkeypatch) -> None:
     assert result["attempted"] == 1
     assert result["archived"] == 1
     assert len(Operations.recorded) == 1
+
+
+def test_failed_snapshot_is_persistently_deferred_and_does_not_block_later_rows(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        ledger, operations, store = _fixture(root)
+        first = snapshots.archive_pending(
+            ledger,
+            operations,
+            store,
+            user_agent="FinanceRadar test@example.com",
+            cache_dir=root / "cache",
+            limit=1,
+            fetcher=lambda *_: (_ for _ in ()).throw(
+                snapshots.urllib.error.HTTPError("https://www.sec.gov/example.htm", 403, "Forbidden", {}, None)
+            ),
+        )
+        assert first["status"] == "DEGRADED"
+        assert first["attempted"] == 1
+
+        second = snapshots.archive_pending(
+            ledger,
+            operations,
+            store,
+            user_agent="FinanceRadar test@example.com",
+            cache_dir=root / "cache",
+            limit=1,
+            fetcher=lambda *_: (_ for _ in ()).throw(AssertionError("deferred URL must not refetch")),
+        )
+        assert second["status"] == "PASS"
+        assert second["attempted"] == 0
+        assert second["deferred_failures"] == 1
+        ledger.close()

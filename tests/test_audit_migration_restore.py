@@ -51,7 +51,7 @@ def _ledger(path: Path) -> None:
 def _operations(path: Path) -> None:
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE operations_schema(version INTEGER)")
-        connection.execute("INSERT INTO operations_schema VALUES (2)")
+        connection.execute("INSERT INTO operations_schema VALUES (4)")
         for table in (
             "replay_runs",
             "model_runs",
@@ -62,6 +62,8 @@ def _operations(path: Path) -> None:
             "human_overrides",
         ):
             connection.execute(f"CREATE TABLE {table}(id INTEGER)")
+        connection.execute("CREATE TABLE adjudication_samples(id INTEGER)")
+        connection.execute("CREATE TABLE adjudication_reviews(id INTEGER)")
         connection.execute("INSERT INTO worker_cycles VALUES (1)")
         connection.commit()
 
@@ -126,7 +128,7 @@ def test_full_encrypted_migration_restore_audit(tmp_path: Path) -> None:
         "auto_verification_violations": 0,
         "market_feature_leakage_violations": 0,
     }
-    assert result["operations_restore"]["schema_version"] == 2
+    assert result["operations_restore"]["schema_version"] == 4
     assert result["release"]["external_blind_promotion"] == "REMAIN_SHADOW"
     assert result["temporary_workspace_cleaned"] is True
     markdown = render_markdown(result)

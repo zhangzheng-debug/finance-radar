@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-OPS_SCHEMA_VERSION = 3
+OPS_SCHEMA_VERSION = 4
 DEMO_MODES = {"LIVE", "RECENT_CAPTURE", "REPLAY"}
 
 
@@ -83,6 +83,7 @@ class OperationsRepository:
                 CREATE TABLE IF NOT EXISTS evidence_object_links(
                     event_id TEXT NOT NULL, evidence_id TEXT NOT NULL, object_sha256 TEXT NOT NULL,
                     linked_at TEXT NOT NULL,
+                    object_kind TEXT NOT NULL DEFAULT 'EXACT_EXCERPT',
                     PRIMARY KEY(event_id, evidence_id, object_sha256),
                     FOREIGN KEY(object_sha256) REFERENCES evidence_objects(object_sha256)
                 );
@@ -123,6 +124,22 @@ class OperationsRepository:
                     ON adjudication_reviews(sample_id, created_at);
                 """
             )
+            link_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(evidence_object_links)")
+            }
+            if "object_kind" not in link_columns:
+                connection.execute(
+                    "ALTER TABLE evidence_object_links ADD COLUMN object_kind TEXT NOT NULL DEFAULT 'EXACT_EXCERPT'"
+                )
+                connection.execute(
+                    """UPDATE evidence_object_links
+                       SET object_kind='SOURCE_SNAPSHOT'
+                       WHERE object_sha256 IN (
+                           SELECT object_sha256 FROM evidence_objects
+                           WHERE mime_type IN ('text/html','application/pdf','application/json')
+                       )"""
+                )
             connection.execute(
                 "INSERT OR IGNORE INTO operations_schema(version,applied_at) VALUES (?,?)",
                 (OPS_SCHEMA_VERSION, utc_now()),
@@ -243,7 +260,10 @@ class OperationsRepository:
         *,
         source_url: str,
         fetched_at: str | None = None,
+        object_kind: str = "EXACT_EXCERPT",
     ) -> None:
+        if object_kind not in {"EXACT_EXCERPT", "SOURCE_SNAPSHOT"}:
+            raise ValueError(f"invalid evidence object kind: {object_kind}")
         with closing(self.connect()) as connection:
             connection.execute(
                 """INSERT OR IGNORE INTO evidence_objects(
@@ -259,10 +279,15 @@ class OperationsRepository:
                 ),
             )
             connection.execute(
-                """INSERT OR IGNORE INTO evidence_object_links(
-                       event_id,evidence_id,object_sha256,linked_at
-                   ) VALUES (?,?,?,?)""",
-                (event_id, evidence_id, metadata["sha256"], utc_now()),
+                """INSERT INTO evidence_object_links(
+                       event_id,evidence_id,object_sha256,linked_at,object_kind
+                   ) VALUES (?,?,?,?,?)
+                   ON CONFLICT(event_id,evidence_id,object_sha256) DO UPDATE SET
+                       object_kind=CASE
+                           WHEN excluded.object_kind='SOURCE_SNAPSHOT' THEN 'SOURCE_SNAPSHOT'
+                           ELSE evidence_object_links.object_kind
+                       END""",
+                (event_id, evidence_id, metadata["sha256"], utc_now(), object_kind),
             )
             connection.commit()
 
@@ -271,19 +296,13 @@ class OperationsRepository:
             rows = [
                 dict(row)
                 for row in connection.execute(
-                    """SELECT o.*,l.event_id,l.evidence_id,l.linked_at
+                    """SELECT o.*,l.event_id,l.evidence_id,l.linked_at,l.object_kind
                        FROM evidence_object_links l
                        JOIN evidence_objects o ON o.object_sha256=l.object_sha256
                        WHERE l.event_id=? ORDER BY l.linked_at DESC LIMIT ?""",
                     (event_id, max(1, min(limit, 500))),
                 )
             ]
-        for row in rows:
-            row["object_kind"] = (
-                "SOURCE_SNAPSHOT"
-                if row["mime_type"] in {"text/html", "application/pdf", "application/json"}
-                else "EXACT_EXCERPT"
-            )
         return rows
 
     def has_source_snapshot(self, event_id: str, evidence_id: str) -> bool:
@@ -293,7 +312,7 @@ class OperationsRepository:
                    FROM evidence_object_links l
                    JOIN evidence_objects o ON o.object_sha256=l.object_sha256
                    WHERE l.event_id=? AND l.evidence_id=?
-                     AND o.mime_type IN ('text/html','application/pdf','application/json')
+                     AND l.object_kind='SOURCE_SNAPSHOT'
                    LIMIT 1""",
                 (event_id, evidence_id),
             ).fetchone()
@@ -302,12 +321,14 @@ class OperationsRepository:
     def evidence_archive_summary(self, limit: int = 20) -> dict[str, Any]:
         with closing(self.connect()) as connection:
             totals = connection.execute(
-                """SELECT COUNT(*) AS objects,
-                          COALESCE(SUM(byte_length),0) AS archived_bytes,
-                          SUM(CASE WHEN mime_type IN ('text/html','application/pdf','application/json')
-                                   THEN 1 ELSE 0 END) AS source_snapshots,
-                          SUM(CASE WHEN mime_type='text/plain' THEN 1 ELSE 0 END) AS exact_excerpts
+                """SELECT COUNT(*) AS objects,COALESCE(SUM(byte_length),0) AS archived_bytes
                    FROM evidence_objects"""
+            ).fetchone()
+            kinds = connection.execute(
+                """SELECT
+                       COUNT(DISTINCT CASE WHEN object_kind='SOURCE_SNAPSHOT' THEN object_sha256 END) AS source_snapshots,
+                       COUNT(DISTINCT CASE WHEN object_kind='EXACT_EXCERPT' THEN object_sha256 END) AS exact_excerpts
+                   FROM evidence_object_links"""
             ).fetchone()
             by_mime = {
                 row["mime_type"]: {
@@ -322,30 +343,24 @@ class OperationsRepository:
             recent = [
                 dict(row)
                 for row in connection.execute(
-                    """SELECT o.*,l.event_id,l.evidence_id,l.linked_at
+                    """SELECT o.*,l.event_id,l.evidence_id,l.linked_at,l.object_kind
                        FROM evidence_object_links l
                        JOIN evidence_objects o ON o.object_sha256=l.object_sha256
                        ORDER BY l.linked_at DESC LIMIT ?""",
                     (max(1, min(int(limit), 100)),),
                 )
             ]
-        for row in recent:
-            row["object_kind"] = (
-                "SOURCE_SNAPSHOT"
-                if row["mime_type"] in {"text/html", "application/pdf", "application/json"}
-                else "EXACT_EXCERPT"
-            )
         return {
             "objects": int(totals["objects"] or 0),
             "archived_bytes": int(totals["archived_bytes"] or 0),
-            "source_snapshots": int(totals["source_snapshots"] or 0),
-            "exact_excerpts": int(totals["exact_excerpts"] or 0),
+            "source_snapshots": int(kinds["source_snapshots"] or 0),
+            "exact_excerpts": int(kinds["exact_excerpts"] or 0),
             "by_mime": by_mime,
             "recent_objects": recent,
             "policy": {
                 "immutable": True,
                 "content_address": "sha256",
-                "raw_snapshot_mime_types": ["text/html", "application/pdf", "application/json"],
+                "raw_snapshot_mime_types": ["text/html", "text/plain", "application/pdf", "application/json"],
                 "no_trading": True,
                 "allowed_as_model_feature": False,
             },

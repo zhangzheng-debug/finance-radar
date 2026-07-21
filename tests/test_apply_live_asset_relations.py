@@ -57,7 +57,7 @@ class LiveAssetRelationTests(unittest.TestCase):
             event = connection.execute("SELECT ticker_at_event FROM canonical_events").fetchone()
             impact = connection.execute("SELECT * FROM event_asset_impacts").fetchone()
             connection.close()
-        self.assertIsNone(event["ticker_at_event"])
+        self.assertEqual(event["ticker_at_event"], "WRONG")
         self.assertEqual(impact["direction"], "ABSTAIN")
         self.assertEqual(impact["no_trading"], 1)
         self.assertEqual(result["market_enabled"], 1)

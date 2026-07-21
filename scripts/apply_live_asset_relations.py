@@ -20,9 +20,6 @@ DEFAULT_REPORT = ROOT / "reports" / "live_asset_relations_latest.md"
 def apply_relations(connection: Any, events: list[dict[str, Any]]) -> dict[str, int]:
     result = {"events": 0, "entities": 0, "asset_impacts": 0, "market_enabled": 0}
     now = utc_now()
-    connection.execute(
-        "UPDATE canonical_events SET ticker_at_event=NULL WHERE event_id LIKE 'FR-LIVE-%'"
-    )
     for definition in events:
         event = connection.execute(
             "SELECT * FROM canonical_events WHERE event_id=?", (definition["event_id"],)

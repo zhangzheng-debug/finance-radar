@@ -3,6 +3,21 @@
 This project uses date-based versions: `YYYY.MM.DD.N`. Git tags and GitHub
 Releases use the same version prefixed by `v`.
 
+## 2026.07.22.1
+
+- Migrated the complete Finance Radar application and data history to AWS while
+  keeping unrelated VPN and trading programs outside the project boundary.
+- Deployed Evidence Terminal v2 with live/frozen provenance, source health,
+  recovery status, shadow-model governance, and dual-review workflow states.
+- Added Operations Schema 4 immutable source snapshots, failure backoff, SEC
+  issuer/ticker mapping, verified-event-only market context, and safe Telegram
+  delivery cutover.
+- Added daily encrypted off-host backups with a complete isolated-restore audit;
+  the scheduled workflow was manually executed and returned `0`.
+- Kept the external blind model result visibly failed and shadow-only instead
+  of training on or concealing the blind set.
+- Passed 364 tests and 17 subtests.
+
 ## 2026.07.19.1
 
 - Established the first durable GitHub backup of the complete maintainable

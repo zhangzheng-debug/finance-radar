@@ -115,6 +115,12 @@ chown -R finance-radar:finance-radar "$BASE/releases" "$BASE/shared" "$BASE/conf
 if [ -d "$BASE/evidence-llm" ]; then
     chown -R finance-radar:finance-radar "$BASE/evidence-llm"
 fi
+if [ -f "$BASE/var/www/finance-radar-terminal/index.html" ]; then
+    install -d -m 0755 -o root -g root /var/www/finance-radar-terminal
+    install -m 0644 -o root -g root \
+        "$BASE/var/www/finance-radar-terminal/index.html" \
+        /var/www/finance-radar-terminal/index.html
+fi
 install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-api.service" /etc/systemd/system/
 install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-web.service" /etc/systemd/system/
 install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-worker.service" /etc/systemd/system/

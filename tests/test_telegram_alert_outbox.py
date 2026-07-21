@@ -112,6 +112,29 @@ class TelegramAlertOutboxTests(unittest.TestCase):
         with patch.dict("os.environ", {"FINANCE_RADAR_WEB_URL": "https://other.example/radar"}):
             self.assertEqual(alerts.refresh_pending_payloads(self.connection), 0)
 
+    def test_cutover_expires_old_rows_then_sends_only_audited_operational_test(self) -> None:
+        today = dt.date(2026, 7, 16)
+        self.add_event("cutover", "2026-07-15")
+        alerts.enqueue_verified_alerts(self.connection, freshness_days=3, today=today)
+        self.connection.execute(
+            "UPDATE alert_outbox SET created_at='2026-07-15T00:00:00+00:00'"
+        )
+        self.connection.commit()
+        expired = alerts.expire_stale_pending(
+            self.connection,
+            max_age_hours=24,
+            now=dt.datetime(2026, 7, 16, 12, tzinfo=dt.timezone.utc),
+        )
+        self.assertEqual(expired, 1)
+        self.assertEqual(alerts.pending_rows(self.connection), [])
+        self.assertEqual(alerts.enqueue_operational_test(self.connection), 1)
+        self.assertEqual(alerts.enqueue_operational_test(self.connection), 0)
+        pending = alerts.pending_rows(self.connection)
+        self.assertEqual(len(pending), 1)
+        payload = json.loads(pending[0]["payload_json"])
+        self.assertEqual(payload["kind"], "cutover_acceptance")
+        self.assertTrue(payload["no_trading"])
+
 
 if __name__ == "__main__":
     unittest.main()

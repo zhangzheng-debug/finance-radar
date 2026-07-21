@@ -187,8 +187,8 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
         raise ValueError(f"SQLite integrity failure: quick={quick_check} integrity={integrity_check}")
     if ledger and (schema_version != 12 or any(audit.values())):
         raise ValueError(f"ledger safety/schema failure: schema={schema_version} audit={audit}")
-    if not ledger and schema_version not in {2, 3}:
-        raise ValueError(f"operations schema failure: schema={schema_version}; expected 2 or 3")
+    if not ledger and schema_version not in {2, 3, 4}:
+        raise ValueError(f"operations schema failure: schema={schema_version}; expected 2, 3 or 4")
     return {
         "bytes": path.stat().st_size,
         "sha256": sha256_file(path),

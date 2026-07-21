@@ -1,0 +1,85 @@
+/* ============================================================
+   Finance Radar · Calm Institutional v2 "Obsidian" 设计令牌
+   ------------------------------------------------------------
+   本文件是唯一权威 token 源。prototype/index.html 内联了一份
+   相同副本；streamlit_patch/style_v2.css 基于同一组变量。
+   命名保持 --fr- 前缀，向后兼容现有 app/web/common.py。
+   ============================================================ */
+
+:root {
+  /* ---- 画布层级（由深到浅） ---- */
+  --fr-canvas:        #05090f;   /* 页面底 */
+  --fr-panel:         #0b1220;   /* 卡片 / 面板 */
+  --fr-raised:        #101a2b;   /* 悬浮 / hover / 选中 */
+  --fr-overlay:       #141f33;   /* 弹层 / 命令面板 */
+
+  /* ---- 描边 ---- */
+  --fr-border:        #1c2b3d;
+  --fr-border-strong: #2c4257;
+  --fr-border-focus:  #38c7ec;
+
+  /* ---- 文字 ---- */
+  --fr-text:          #e8eef6;   /* 主文字 */
+  --fr-text-2:        #a7b7c7;   /* 次要文字 */
+  --fr-muted:         #6d8196;   /* 标签 / 弱化 */
+  --fr-text-dim:      #46586c;   /* 分隔符 / 最弱 */
+
+  /* ---- 语义状态（值） ---- */
+  --fr-cyan:          #38c7ec;   /* 交互 / 品牌 */
+  --fr-green:         #2fd08f;   /* ok / verified */
+  --fr-amber:         #f5b453;   /* watch / candidate */
+  --fr-red:           #ff6b7a;   /* risk / error / conflict */
+  --fr-purple:        #a08bff;   /* evidence / 引用 */
+
+  /* ---- 语义状态（弱底色，用于徽章/横幅） ---- */
+  --fr-cyan-dim:      rgba(56, 199, 236, .12);
+  --fr-green-dim:     rgba(47, 208, 143, .12);
+  --fr-amber-dim:     rgba(245, 180, 83, .12);
+  --fr-red-dim:       rgba(255, 107, 122, .12);
+  --fr-purple-dim:    rgba(160, 139, 255, .12);
+
+  /* ---- 权威层级（来源可信度，与极性分离） ---- */
+  --fr-p0:            #e9c46a;   /* 官方一手 P0：制度金 */
+  --fr-p1:            #8ecae6;   /* 发行人 P1 */
+  --fr-p2:            #6d8196;   /* 发现源 P2 */
+
+  /* ---- 极性（新闻方向，与权威分离；配套形状 ▼▲◆◈） ---- */
+  --fr-adverse:       #ff6b7a;
+  --fr-positive:      #2fd08f;
+  --fr-neutral:       #a7b7c7;
+  --fr-mixed:         #f5b453;
+
+  /* ---- 字体 ---- */
+  --fr-font-ui:   "Inter", "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --fr-font-mono: ui-monospace, "JetBrains Mono", "IBM Plex Mono", Consolas, monospace;
+
+  /* ---- 字号阶（px 基准；Streamlit 中换算 rem） ---- */
+  --fr-fs-nano:   10px;   /* 蚂蚁标签，仅大写字母/数字 */
+  --fr-fs-micro:  11px;   /* 表格元信息、chip */
+  --fr-fs-small:  12px;   /* 次要正文 */
+  --fr-fs-body:   13px;   /* 正文 */
+  --fr-fs-lead:   15px;   /* 事件标题 */
+  --fr-fs-title:  18px;   /* 页面区块标题 */
+  --fr-fs-hero:   24px;   /* 大数字 KPI */
+
+  /* ---- 间距（8px 网格，密集场景允许 4px 半步） ---- */
+  --fr-sp-1: 4px;
+  --fr-sp-2: 8px;
+  --fr-sp-3: 12px;
+  --fr-sp-4: 16px;
+  --fr-sp-5: 24px;
+  --fr-sp-6: 32px;
+
+  /* ---- 圆角：数据密集 UI 保持克制 ---- */
+  --fr-radius-s: 4px;
+  --fr-radius-m: 6px;
+  --fr-radius-l: 10px;   /* 仅弹层 */
+
+  /* ---- 阴影：深色 UI 用亮度分层为主，阴影只给弹层 ---- */
+  --fr-shadow-overlay: 0 12px 40px rgba(0, 0, 0, .5);
+
+  /* ---- 动效 ---- */
+  --fr-ease: cubic-bezier(.2, .7, .3, 1);
+  --fr-dur-fast: 120ms;
+  --fr-dur-base: 200ms;
+}
