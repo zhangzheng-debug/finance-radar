@@ -23,8 +23,9 @@ from apply_live_primary_adjudications import apply_rows
 from build_live_evidence_review import build_rows, write_outputs
 from build_live_review_triage import build as build_review_triage
 from build_live_review_triage import write_outputs as write_triage_outputs
-from event_ledger import open_ledger, stable_json, upsert_source, utc_now
+from event_ledger import open_ledger, record_source_poll, stable_json, upsert_source, utc_now
 from live_candidate_extractor import process_pending, write_report as write_candidate_report
+from link_sec_issuer_assets import link_sec_issuer_assets
 from observe_live_event_markets import run_pending, schedule_followup_jobs, schedule_jobs
 from official_event_collector import collect_all as collect_official_sources
 from official_primary_page_enricher import enrich as enrich_official_primary_pages
@@ -40,6 +41,7 @@ from telegram_alert_outbox import (
     TelegramBotClient,
     deliver_pending,
     enqueue_verified_alerts,
+    expire_stale_pending,
     require_bot_config,
 )
 from telegram_mtproto_listener import load_dotenv
@@ -124,6 +126,17 @@ def run_cycle(
         for key in ("items", "new_revisions", "jobs"):
             collection[key] += counts[key]
     result["opennews"] = collection
+    record_source_poll(
+        connection,
+        source_id="opennews_free",
+        cursor_type="aggregate_hot_feed",
+        cursor_value=stable_json(
+            {"categories": collection["categories"], "items": collection["items"]}
+        ),
+        status="SUCCESS" if collection["categories"] else "FAILED",
+        error=None if collection["categories"] else "all OpenNews categories failed",
+    )
+    connection.commit()
 
     candidates = process_pending(connection, limit=500)
     result["candidate_extraction"] = candidates
@@ -229,9 +242,23 @@ def run_cycle(
 
     asset_events = load_json(ROOT / "config" / "live_asset_relations.json")["events"]
     result["asset_relations"] = apply_relations(connection, asset_events)
+    if sec_user_agent:
+        result["sec_issuer_assets"] = link_sec_issuer_assets(
+            connection,
+            cache_dir=ROOT / "data" / "cache" / "sec_company_tickers",
+            user_agent=sec_user_agent,
+            timeout=timeout,
+        )
+    else:
+        result["sec_issuer_assets"] = {
+            "selected": 0,
+            "mapped": 0,
+            "market_enabled": 0,
+            "errors": ["missing_SEC_USER_AGENT"],
+        }
 
     today = dt.datetime.now(dt.timezone.utc).date()
-    scheduled = schedule_jobs(connection, freshness_days=3, today=today)
+    scheduled = schedule_jobs(connection, freshness_days=14, today=today)
     followups_before = schedule_followup_jobs(connection)
     api_key = os.environ.get("TWELVE_DATA_API_KEY", "").strip()
     # Binance public crypto observations require no credentials and must still
@@ -241,6 +268,9 @@ def run_cycle(
     market["followups_scheduled"] = followups_before + schedule_followup_jobs(connection)
     result["market"] = market
 
+    result["outbox_expired_stale"] = expire_stale_pending(
+        connection, max_age_hours=24
+    )
     result["outbox_inserted"] = enqueue_verified_alerts(
         connection, freshness_days=3, today=today
     )

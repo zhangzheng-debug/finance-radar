@@ -3,11 +3,13 @@ param(
     [Parameter(Mandatory = $true)][string]$Stamp,
     [Parameter(Mandatory = $true)][string]$ExpectedSha256,
     [Parameter(Mandatory = $true)][string]$RequiredRelease,
-    [string]$SshHost = "root@167.172.69.16",
+    [string]$SshHost = "ubuntu@18.208.34.152",
     [string]$IdentityFile = "C:\Users\MR\.ssh1\id_ed25519"
 )
 
 $ErrorActionPreference = "Stop"
+$remoteUser = ($SshHost -split "@", 2)[0]
+$remotePrivilege = if ($remoteUser -eq "root") { "" } else { "sudo " }
 if ($Stamp -notmatch '^[0-9]{8}T[0-9]{6}Z$' -or $RequiredRelease -notmatch '^[0-9]{8}T[0-9]{6}Z$') {
     throw "invalid stamp or release id"
 }
@@ -77,7 +79,7 @@ $verification = [ordered]@{
     archive_sha256 = $actualSha256
     round_trip_sha256 = $roundTripSha256
     round_trip_match = $true
-    remote_archive = "/tmp/finance-radar-migration-$Stamp.tgz"
+    remote_archive = "/var/tmp/finance-radar-migration-$Stamp.tgz"
     local_archive = $encrypted
     encrypted_at_rest = $true
     key_file = $passphrase
@@ -91,13 +93,36 @@ $verification = [ordered]@{
 }
 $verification | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination "offhost-verification.json") -Encoding UTF8
 
+$publicStatus = [ordered]@{
+    schema_version = 1
+    status = "VERIFIED"
+    verified_at = $verification.created_at
+    backup_stamp = $Stamp
+    archive_sha256 = $actualSha256
+    full_restore_verified = $true
+    encrypted_at_rest = $true
+    archive_entries = @($listing).Count
+}
+$publicStatusPath = Join-Path $destination "offhost-status.json"
+$publicStatus | ConvertTo-Json | Set-Content -LiteralPath $publicStatusPath -Encoding UTF8
+$remoteStatus = "/tmp/finance-radar-offhost-status-$Stamp.json"
+& scp -i $IdentityFile $publicStatusPath "${SshHost}:$remoteStatus"
+if ($LASTEXITCODE -ne 0) {
+    throw "could not stage the public off-host verification status"
+}
+& ssh -i $IdentityFile $SshHost `
+    "${remotePrivilege}install -d -m 0755 /var/www/finance-radar-terminal && ${remotePrivilege}install -m 0644 '$remoteStatus' /var/www/finance-radar-terminal/offhost-status.json && rm -f -- '$remoteStatus'"
+if ($LASTEXITCODE -ne 0) {
+    throw "could not publish the public off-host verification status"
+}
+
 # Paths are fixed, absolute children of the verified destination.
 Remove-Item -LiteralPath $roundTrip -Force
 Remove-Item -LiteralPath $plain -Force
 
-$remoteStage = "/tmp/finance-radar-migration-$Stamp"
+$remoteStage = "/var/tmp/finance-radar-migration-$Stamp"
 $remoteArchive = "$remoteStage.tgz"
-& ssh -i $IdentityFile $SshHost "rm -rf -- '$remoteStage' && rm -f -- '$remoteArchive'"
+& ssh -i $IdentityFile $SshHost "${remotePrivilege}rm -rf -- '$remoteStage' && ${remotePrivilege}rm -f -- '$remoteArchive'"
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "local encrypted copy is verified, but remote temporary cleanup failed"
 }

@@ -3,9 +3,13 @@ set -euo pipefail
 umask 077
 
 STAMP=${1:-$(date -u +%Y%m%dT%H%M%SZ)}
-STAGE="/tmp/finance-radar-migration-$STAMP"
-ARCHIVE="/tmp/finance-radar-migration-$STAMP.tgz"
+STAGE_ROOT=${FINANCE_RADAR_BACKUP_STAGE_ROOT:-/var/tmp}
+STAGE="$STAGE_ROOT/finance-radar-migration-$STAMP"
+ARCHIVE="$STAGE_ROOT/finance-radar-migration-$STAMP.tgz"
 BASE=/opt/finance-radar
+
+[ "$(id -u)" -eq 0 ] || { printf 'run as root\n' >&2; exit 2; }
+[ -d "$STAGE_ROOT" ] || { printf 'stage root missing: %s\n' "$STAGE_ROOT" >&2; exit 2; }
 
 [ ! -e "$STAGE" ] || { printf 'stage already exists: %s\n' "$STAGE" >&2; exit 2; }
 [ ! -e "$ARCHIVE" ] || { printf 'archive already exists: %s\n' "$ARCHIVE" >&2; exit 2; }
@@ -13,7 +17,8 @@ install -d -m 0700 \
     "$STAGE/shared/data" \
     "$STAGE/shared/reports" \
     "$STAGE/config/etc/systemd/system" \
-    "$STAGE/config/etc/nginx"
+    "$STAGE/config/etc/nginx" \
+    "$STAGE/var/www"
 
 # First create the normal verified ledger backup and restore drill.
 systemctl start finance-radar-backup.service
@@ -36,6 +41,7 @@ fi
 # between directory enumeration and copy, so the two live databases are
 # deliberately excluded here and replaced with online snapshots below.
 tar -C "$BASE/shared/data" \
+    --exclude='./operational_backups' \
     --exclude='./finance_radar.sqlite3' \
     --exclude='./finance_radar.sqlite3-*' \
     --exclude='./finance_radar_operations.sqlite3' \
@@ -43,6 +49,9 @@ tar -C "$BASE/shared/data" \
     -cf - . \
     | tar -C "$STAGE/shared/data" -xf -
 cp -a "$BASE/shared/reports/." "$STAGE/shared/reports/"
+if [ -d /var/www/finance-radar-terminal ]; then
+    cp -a /var/www/finance-radar-terminal "$STAGE/var/www/"
+fi
 
 # Replace copied live databases with transactionally consistent SQLite snapshots.
 "$BASE/venv/bin/python" - "$STAGE" <<'PY'
@@ -103,7 +112,7 @@ du -ah "$BASE/shared" "$BASE/releases" ${BASE}/evidence-llm 2>/dev/null \
         > MANIFEST.sha256
 )
 
-tar -czf "$ARCHIVE" -C /tmp "finance-radar-migration-$STAMP"
+tar -czf "$ARCHIVE" -C "$STAGE_ROOT" "finance-radar-migration-$STAMP"
 chmod 0600 "$ARCHIVE"
 sha256sum "$ARCHIVE"
 stat -c 'bytes=%s' "$ARCHIVE"

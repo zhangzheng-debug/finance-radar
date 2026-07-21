@@ -126,10 +126,14 @@ class LedgerRepository:
         with closing(self.connect()) as connection:
             sources = [dict(row) for row in connection.execute("SELECT * FROM sources ORDER BY authority_tier, name")]
             cursors = [dict(row) for row in connection.execute("SELECT * FROM source_cursors ORDER BY source_id, cursor_type")]
-            observation_counts = {
-                row["source_id"]: row["n"]
+            observation_stats = {
+                row["source_id"]: {
+                    "count": int(row["n"]),
+                    "latest": row["latest"],
+                }
                 for row in connection.execute(
-                    "SELECT source_id, COUNT(*) AS n FROM raw_observations GROUP BY source_id"
+                    """SELECT source_id,COUNT(*) AS n,MAX(local_received_at) AS latest
+                       FROM raw_observations GROUP BY source_id"""
                 )
             }
         by_source: dict[str, list[dict[str, Any]]] = {}
@@ -139,10 +143,15 @@ class LedgerRepository:
         for source in sources:
             source_cursors = by_source.get(source["source_id"], [])
             latest = max(source_cursors, key=lambda item: item.get("updated_at") or "", default=None)
-            source["observations"] = observation_counts.get(source["source_id"], 0)
-            source["cursor_status"] = latest.get("status") if latest else "UNOBSERVED"
+            stats = observation_stats.get(source["source_id"], {"count": 0, "latest": None})
+            source["observations"] = stats["count"]
+            source["cursor_status"] = (
+                latest.get("status")
+                if latest
+                else "STATIC_IMPORTED" if stats["count"] else "REGISTERED_ONLY"
+            )
             source["last_polled_at"] = latest.get("last_polled_at") if latest else None
-            source["last_success_at"] = latest.get("last_success_at") if latest else None
+            source["last_success_at"] = latest.get("last_success_at") if latest else stats["latest"]
             source["last_error"] = latest.get("last_error") if latest else None
             source["cursors"] = source_cursors
             result.append(source)

@@ -162,6 +162,68 @@ def pending_rows(connection: Any) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def expire_stale_pending(
+    connection: Any,
+    *,
+    max_age_hours: float = 24.0,
+    now: dt.datetime | None = None,
+) -> int:
+    """Close unsent rows that are too old for a real-time alert channel."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    cutoff = now - dt.timedelta(hours=max(0.0, float(max_age_hours)))
+    before = connection.total_changes
+    connection.execute(
+        """UPDATE alert_outbox
+           SET status='EXPIRED_STALE',
+               last_error='expired before Telegram delivery cutover; never sent'
+           WHERE status IN ('PENDING','RETRY') AND datetime(created_at)<=datetime(?)""",
+        (cutoff.isoformat(),),
+    )
+    expired = connection.total_changes - before
+    connection.commit()
+    return expired
+
+
+def enqueue_operational_test(connection: Any) -> int:
+    """Create one audited, idempotent notification-chain acceptance message."""
+    event = connection.execute(
+        """SELECT event_id,current_version FROM canonical_events
+           WHERE status='verified' AND no_trading=1
+           ORDER BY last_updated_at DESC,event_id LIMIT 1"""
+    ).fetchone()
+    if event is None:
+        raise RuntimeError("No verified event is available for the operational test foreign key")
+    web_base = os.getenv("FINANCE_RADAR_WEB_URL", "http://127.0.0.1:8501").rstrip("/")
+    text = "\n".join(
+        [
+            "Finance Radar｜AWS 通知链路验收",
+            "采集、证据账本、只读 API、网页终端与 Telegram 出站链路均已连通。",
+            f"终端：{web_base}/",
+            "边界：情报与人工复核用途；无下单、仓位、余额或交易执行能力。",
+        ]
+    )
+    outbox_id = stable_id(
+        "OUTBOX", event["event_id"], str(event["current_version"]), "operational_cutover_test"
+    )
+    before = connection.total_changes
+    connection.execute(
+        """INSERT OR IGNORE INTO alert_outbox(
+           outbox_id,event_id,event_version,message_type,status,payload_json,
+           created_at,sent_at,external_message_id,last_error
+           ) VALUES (?,?,?,'operational_cutover_test','PENDING',?,?,NULL,NULL,NULL)""",
+        (
+            outbox_id,
+            event["event_id"],
+            event["current_version"],
+            stable_json({"text": text, "no_trading": True, "kind": "cutover_acceptance"}),
+            utc_now(),
+        ),
+    )
+    inserted = connection.total_changes - before
+    connection.commit()
+    return inserted
+
+
 def http_post(url: str, data: dict[str, str], timeout: float) -> dict[str, Any]:
     body = urllib.parse.urlencode(data).encode("utf-8")
     request = urllib.request.Request(url, data=body, method="POST")
@@ -370,6 +432,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV)
     parser.add_argument("--freshness-days", type=int, default=3)
     parser.add_argument("--enqueue", action="store_true")
+    parser.add_argument("--enqueue-test", action="store_true")
+    parser.add_argument("--expire-stale-hours", type=float)
     parser.add_argument("--probe", action="store_true")
     parser.add_argument("--send", action="store_true", help="perform external Telegram writes")
     parser.add_argument(
@@ -389,6 +453,12 @@ def main() -> int:
     load_dotenv(args.env_file)
     connection = open_ledger(args.db)
     try:
+        if args.expire_stale_hours is not None:
+            expired = expire_stale_pending(
+                connection,
+                max_age_hours=args.expire_stale_hours,
+            )
+            print(f"Expired stale pending alerts: {expired}")
         if args.enqueue:
             inserted = enqueue_verified_alerts(
                 connection,
@@ -398,6 +468,9 @@ def main() -> int:
             print(f"Outbox gate complete: inserted={inserted}")
             refreshed = refresh_pending_payloads(connection)
             print(f"Pending payload refresh: updated={refreshed}")
+        if args.enqueue_test:
+            inserted = enqueue_operational_test(connection)
+            print(f"Operational test enqueued: inserted={inserted}")
         if args.probe or args.send or args.cleanup_duplicates:
             token, chat_id = require_bot_config()
             client = TelegramBotClient(token)
@@ -415,7 +488,10 @@ def main() -> int:
                 deleted, errors = cleanup_duplicate_deliveries(connection, client, chat_id)
                 print(f"Telegram duplicate cleanup: deleted={deleted} errors={errors}")
                 return 1 if errors else 0
-        if args.dry_run or not (args.enqueue or args.probe or args.send):
+        if args.dry_run or not (
+            args.enqueue or args.enqueue_test or args.probe or args.send
+            or args.expire_stale_hours is not None
+        ):
             rows = pending_rows(connection)
             print(f"Pending alerts: {len(rows)}")
             for row in rows:

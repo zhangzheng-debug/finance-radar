@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "version": "2026.07.22.1",
+  "tag": "v2026.07.22.1",
+  "visibility": "private",
+  "application_release": "20260721T184054Z",
+  "migration_snapshot": "20260721T185507Z",
+  "scheduled_task_validation": {
+    "task": "FinanceRadar-AWS-Offhost-Backup",
+    "last_result": 0,
+    "next_run_local": "2026-07-22T03:30:00+08:00"
+  },
+  "assets": [
+    {
+      "name": "finance-radar-migration-20260721T185507Z.tgz.aesgcm",
+      "role": "encrypted_full_aws_recovery",
+      "bytes": 779640430,
+      "sha256": "24a9affddc0f95ad5de23b54eda3ae883276242862dba9e7217dab2ca894b29b",
+      "plaintext_sha256_after_authenticated_decryption": "f04d4407bc86b7286ba54974355c4e6e62a0fd8c6169cf0ca8e192b8cff1ebc7",
+      "full_restore_verified": true,
+      "archive_entries": 14353
+    }
+  ],
+  "excluded_secrets": [
+    "environment files",
+    "backup passphrase",
+    "Telegram sessions and tokens",
+    "SSH and TLS private keys",
+    "broker and exchange credentials"
+  ]
+}

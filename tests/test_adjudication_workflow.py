@@ -234,5 +234,5 @@ def test_api_exposes_guarded_queue_and_review_contract(workflow) -> None:
         assert response.status_code == 200
         assert response.json()["data"]["target_label_submitted"] is False
         health = client.get("/api/v1/health").json()["data"]
-        assert health["operations"]["schema_version"] == 3
+        assert health["operations"]["schema_version"] == 4
         assert health["operations"]["counts"]["adjudication_samples"] == 1

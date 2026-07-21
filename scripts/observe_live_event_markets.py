@@ -568,7 +568,7 @@ def main() -> int:
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
-    parser.add_argument("--freshness-days", type=int, default=3)
+    parser.add_argument("--freshness-days", type=int, default=14)
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--schedule-only", action="store_true")
     args = parser.parse_args()

@@ -98,3 +98,5 @@ Primary public endpoint:
 The original `https://sg.zb1og.cn/radar/` route is retained, but Cloudflare may require a human challenge. The direct endpoint uses a Let's Encrypt certificate and Certbot renewal hook. Every Nginx installer validates with `nginx -t`, retains a timestamped rollback copy, and restores it automatically if reload fails. Existing xray listeners and the trading project remain untouched.
 
 For a manual Telegram preview on this VPS, source `/etc/finance-radar.env` before running `python -m app.workers.notifier --once`; otherwise a standalone SSH shell does not inherit the public Web URL used by systemd. The preview refreshes only `PENDING/RETRY` payloads and never sends without `--send`.
+
+For an audited AWS notification cutover, install `deployment/systemd/telegram_admin.sh`, expire the pre-cutover backlog, enqueue the idempotent operational test, and run `--probe --send`. Only after that succeeds should `finance-radar-worker-send.conf` be installed as a systemd drop-in. The worker still applies a 24-hour stale-outbox cutoff before every delivery cycle.
