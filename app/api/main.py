@@ -4,6 +4,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from datetime import datetime, timezone
+from pathlib import Path
 from threading import Lock
 from typing import Any, Callable, Literal
 
@@ -15,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from app import __version__
 from app.config import Settings
-from app.models import RiskRouter
+from app.models import RiskRouter, derive_evidence_context
 from app.services import AdjudicationService, EvidenceAgent, LocalEvidenceModelProvider, ReplayService
 from app.services.replay import ReplayCaseNotFound
 from app.storage import EvidenceObjectStore, LedgerRepository, OperationsRepository
@@ -193,8 +194,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
-        if settings.admin_token and x_admin_token != settings.admin_token:
+        if not settings.admin_token:
+            raise HTTPException(
+                503,
+                {
+                    "code": "ADMIN_MUTATIONS_DISABLED",
+                    "message": "admin token is not configured; all mutation endpoints are disabled",
+                },
+            )
+        if x_admin_token != settings.admin_token:
             raise HTTPException(403, {"code": "ADMIN_TOKEN_REQUIRED", "message": "valid X-Admin-Token required"})
+
+    def public_backup_status(value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        result = dict(value)
+        if result.get("backup_path"):
+            result["backup_path"] = Path(str(result["backup_path"])).name
+        return result
+
+    def public_health_paths(value: dict[str, Any]) -> dict[str, Any]:
+        result = dict(value)
+        if result.get("database"):
+            result["database"] = Path(str(result["database"])).name
+        if "latest_backup" in result:
+            result["latest_backup"] = public_backup_status(result.get("latest_backup"))
+        return result
 
     def event_or_404(event_id: str) -> dict[str, Any]:
         event = ledger.event_detail(event_id)
@@ -217,8 +242,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/v1/health")
     def health(request: Request):
         try:
-            ledger_health = ledger.health()
-            ops_health = operations.health()
+            ledger_health = public_health_paths(ledger.health())
+            ops_health = public_health_paths(operations.health())
             model_health = router.status()
             status = "ok" if ledger_health["status"] == ops_health["status"] == "ok" else "degraded"
             return envelope(
@@ -257,7 +282,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data["demo_mode"] = operations.demo_mode(settings.demo_mode)
         latest_worker = operations.latest_worker_cycle()
         data["latest_worker_cycle"] = latest_worker
-        data["latest_backup"] = operations.latest_backup()
+        data["latest_backup"] = public_backup_status(operations.latest_backup())
         data["timing"] = {
             "latest_event_age_seconds": elapsed_seconds(data.get("last_event_update")),
             "worker_cycle_duration_seconds": elapsed_seconds(
@@ -279,6 +304,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/v1/evidence/archive")
     def evidence_archive(request: Request):
         data = operations.evidence_archive_summary()
+        eligibility = ledger.evidence_snapshot_eligibility()
+        eligible_pairs = ledger.evidence_snapshot_eligible_pairs()
+        archived_pairs = operations.source_snapshot_pairs()
+        failure_pairs = operations.source_snapshot_failure_pairs()
+        eligible = int(eligibility["eligible_links"])
+        archived = len(eligible_pairs & archived_pairs)
+        terminal_policy = len(eligible_pairs & failure_pairs["terminal_policy"])
+        retry_pending = len(eligible_pairs & failure_pairs["retry_pending"])
+        archiveable = max(0, eligible - terminal_policy)
+        data["coverage"] = {
+            **eligibility,
+            "archived_links": archived,
+            "archiveable_links": archiveable,
+            "terminal_policy_exclusions": terminal_policy,
+            "retry_pending_links": retry_pending,
+            "missing_links": max(0, archiveable - archived),
+            "coverage_pct": round(100.0 * archived / archiveable, 2) if archiveable else 100.0,
+            "worker_batch_size": 8,
+        }
         for item in data["recent_objects"]:
             item["integrity_verified"] = evidence_object_store.verify(
                 item["relative_path"], item["object_sha256"]
@@ -319,17 +363,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data = event_or_404(event_id)
         evidence = ledger.event_evidence(event_id)
         facts = data.get("current_version", {}).get("facts", {}) if data.get("current_version") else {}
+        preferred_source = data.get("preferred_source") or {}
         text = "\n".join(
             [
                 data["event"].get("company_name") or "",
-                data["event"].get("event_family") or "",
-                data["event"].get("event_type") or "",
+                preferred_source.get("title") or facts.get("source_title") or "",
+                preferred_source.get("summary") or facts.get("source_summary") or "",
                 facts.get("evidence_summary") or "",
                 *[(item.get("evidence_passage") or "") for item in evidence[:5]],
             ]
         )
         data["evidence_count"] = len(evidence)
-        data["model_shadow_output"] = router.predict(text)
+        evidence_context = derive_evidence_context(evidence)
+        data["model_shadow_output"] = router.predict(text, evidence_context=evidence_context)
+        data["model_input_contract"] = {
+            "uses_source_content": True,
+            "uses_evidence_passages": True,
+            "uses_structured_evidence_state": True,
+            "excludes_event_taxonomy_shortcuts": True,
+            "shadow_only": True,
+        }
         data["no_trading_banner"] = "Intelligence and review only. No execution capability is present."
         return envelope(request, data)
 

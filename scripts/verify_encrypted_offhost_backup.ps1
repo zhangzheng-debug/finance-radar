@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Stamp,
     [Parameter(Mandatory = $true)][string]$ExpectedSha256,
     [Parameter(Mandatory = $true)][string]$RequiredRelease,
-    [string]$SshHost = "root@167.172.69.16",
+    [string]$SshHost = "ubuntu@18.208.34.152",
     [string]$IdentityFile = "C:\Users\MR\.ssh1\id_ed25519",
     [switch]$SkipRemoteCleanup
 )
@@ -47,8 +47,9 @@ try {
     if (-not ($listing | Where-Object { $_ -like "*$releaseNeedle*" } | Select-Object -First 1)) {
         throw "required release missing from archive"
     }
-    if (-not ($listing | Where-Object { $_ -like "*risk_router_external_blind_v1_report.json" } | Select-Object -First 1)) {
-        throw "external blind report missing from archive"
+    $blindNeedle = "releases/$RequiredRelease/artifacts/risk_router_external_blind_v3_report.json"
+    if (-not ($listing | Where-Object { $_ -like "*$blindNeedle" } | Select-Object -First 1)) {
+        throw "external blind v3 report missing from accepted release"
     }
     if (-not ($listing | Where-Object { $_ -like "*releases/$RequiredRelease/scripts/official_event_collector.py" } | Select-Object -First 1)) {
         throw "current official source collector missing from archive"

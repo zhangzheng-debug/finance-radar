@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "adjudicator": "codex_gpt5_evidence_policy_v1",
+  "reviewer_type": "AI_RUBRIC_ADJUDICATOR_NOT_HUMAN",
+  "description": "Narrow evidence-hash-pinned AI adjudications for official filings whose decisive language is too contextual for the deterministic rubric. These entries are auditable AI labels, not human labels.",
+  "overrides": [
+    {
+      "event_id": "FR-LIVE-899daf0c8b05f8d1bb96f1f2c5348521",
+      "evidence_sha256": "e9fdf6b3e626bde65ad9a83b519064e9721dd54c2ddd9c06bfe43c64f3b57ba5",
+      "label": "RISK_REVIEW",
+      "axes": {
+        "materiality": "MATERIAL_ADVERSE",
+        "polarity": "ADVERSE",
+        "evidence_state": "PRIMARY_SUPPORTED"
+      },
+      "reason_codes": [
+        "going_concern_dependency_on_unassured_financing",
+        "total_investment_loss_explicit"
+      ],
+      "rationale": "The issuer's Form 10-Q states that continued operation depends on obtaining additional shareholder, debt, or equity financing, gives no assurance that financing will be available, and explicitly warns that investors could lose their entire investment.",
+      "adjudication_confidence": 0.99,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-eed9151c62729747422910a77daea675",
+      "evidence_sha256": "1ac8fff44bc7c34fcb5bb348913bee91a7c8b0989f567c1639fbc92b29d45caf",
+      "label": "ABSTAIN",
+      "axes": {
+        "materiality": "UNCLEAR",
+        "polarity": "MIXED",
+        "evidence_state": "CONFLICTED"
+      },
+      "reason_codes": [
+        "discovery_primary_semantic_mismatch"
+      ],
+      "rationale": "The discovery headline concerns political-prisoner executions, while the attached MARAD passage concerns threats to commercial shipping. Both may be adverse, but they are not the same event and therefore must not be used as a decision-grade paired example.",
+      "adjudication_confidence": 0.99,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-ccc3fe6f8d15c0c2ac50865b08021e31",
+      "evidence_sha256": "51d9ed232d0c59f417d8cd75371dfb4d6cfc7c3bd9cb5dcffe06ef8874f2ef83",
+      "label": "NON_TARGET",
+      "axes": {
+        "materiality": "NOT_MATERIAL_ADVERSE",
+        "polarity": "NEUTRAL",
+        "evidence_state": "PRIMARY_SUPPORTED"
+      },
+      "reason_codes": [
+        "whistleblower_award_administration"
+      ],
+      "rationale": "The current CFTC event is the payment of whistleblower awards. The referenced fraud belongs to the underlying resolved enforcement action and must not turn the award announcement itself into a new adverse event.",
+      "adjudication_confidence": 0.99,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-7d6eb3296bc9b2f721ec1e853cb20d47",
+      "evidence_sha256": "4b9f9a744aa332061a52a44667c72b18703fe4f7bddac145561f478cda8438bc",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["routine_sponsor_working_capital_note"],
+      "rationale": "The current event is an additional non-interest-bearing sponsor advance under an existing SPAC working-capital note, not a realized distress or loss event.",
+      "adjudication_confidence": 0.98,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-156019dd251cdc6f8f10e5f3ae6f24e3",
+      "evidence_sha256": "e87d597ec3cebfad6cea5689eec7ab47a0a37b57df4f90a9f42565fdd37ce578",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["regulatory_policy_rescission"],
+      "rationale": "The announcement changes CFTC settlement policy and does not impose a new charge, penalty, or adverse order on a market participant.",
+      "adjudication_confidence": 0.99,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-b62d45c712c46a85b9894f2f26c706a5",
+      "evidence_sha256": "2ec8c60e67b6b9334680af1f8cbffa9742f062edb0b9560534fe2afa7865bc3f",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["enforcement_action_terminated"],
+      "rationale": "The current Federal Reserve action terminates an earlier cease-and-desist order; it does not create a new adverse obligation.",
+      "adjudication_confidence": 0.99,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-24f3d7e2b07a1a436998f1a80c53a0f8",
+      "evidence_sha256": "555275afc38e6307f270aaf940fba200ff35499aa51359f71a910d18767ecc17",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["routine_official_statistics_release"],
+      "rationale": "This is a scheduled BLS JOLTS statistical release, not a discrete adverse issuer or enforcement event.",
+      "adjudication_confidence": 0.99,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-88d517967ab0d66c9520d18c2176a77d",
+      "evidence_sha256": "0cd8341a02094da26f6b01908344dfde916cfe99ede6b71f4795c6e14be5be19",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["routine_equity_plan_administration"],
+      "rationale": "The compensation committee reduced an inducement-plan share reserve; this is routine plan administration without a material adverse event.",
+      "adjudication_confidence": 0.98,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-3bcfcf7ccd57a823f708b9a562669ea4",
+      "evidence_sha256": "1aa6f926a74fce7fdef6feb5435bfade497a87d387b836afa6f1aa4bd85b9d04",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["routine_employee_equity_grant"],
+      "rationale": "The issuer granted a small aggregate number of employee warrants under its articles; no material adverse consequence is stated.",
+      "adjudication_confidence": 0.98,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-ac187ecc06e8e3438dc0ff3d824012d1",
+      "evidence_sha256": "f9eff8486684cfda6ecde755baa68aba7d767ab8740d6c73a37c74147c9824d7",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["routine_policy_meeting_minutes"],
+      "rationale": "The Board released minutes of scheduled discount-rate meetings; this is routine policy transparency rather than a new adverse action.",
+      "adjudication_confidence": 0.99,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-d055a25c10ca6049d8e7f604de76a98b",
+      "evidence_sha256": "80f36f37b9f7b7da0200cb83b5bfcab568fb80aab20a45071c5d46119d8b19ea",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["ordinary_debt_financing"],
+      "rationale": "The issuer completed a disclosed convertible senior notes financing with the option exercised in full; the evidence states financing terms, not a default or distress event.",
+      "adjudication_confidence": 0.96,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-d3af48ba63cc4764bc636d0fe8f41d22",
+      "evidence_sha256": "f0a028e809c7fe442675a1c31236df6e3fcaf124658d9d3d8e0fef07a45a37a6",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["regulatory_comment_on_proposal"],
+      "rationale": "The FTC endorsed a state-court accreditation proposal; it did not impose an adverse order or penalty on an issuer.",
+      "adjudication_confidence": 0.99,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-31499ddc3bbfef97efc88e95d2e2a6e5",
+      "evidence_sha256": "52039773e050ac2a9eaf222d63bd8f6603340e95b7db7e53c7c2af6301323703",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["ordinary_refinancing"],
+      "rationale": "The company completed a planned CLO reset refinancing and disclosed the new tranches; no default, loss, or adverse action is stated.",
+      "adjudication_confidence": 0.97,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-409f4d052786f13c9e7658b8f53cd348",
+      "evidence_sha256": "a7b0db0d487d5ad3e87ea066979c7853d5868d87cae9c7816ca991c52905a9c1",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "POSITIVE", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["positive_operating_results"],
+      "rationale": "The issuer reported record throughput, positive profit and cash-flow measures, and stronger operating performance.",
+      "adjudication_confidence": 0.99,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-63557e7f435a71e64345394fe4d3a28e",
+      "evidence_sha256": "7358b07fc9b4448eac365273e6b8e03c16e360ad14eaa3b028430c471180e180",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["routine_pro_forma_merger_disclosure"],
+      "rationale": "The amendment supplies pro forma statements for a previously disclosed merger; it is not a new adverse event.",
+      "adjudication_confidence": 0.98,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-6819b82295413df26cb1858d9318a1aa",
+      "evidence_sha256": "5f34ba928a06cb6434de42f4928673c572f4c638b877339202c9909227e115cf",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "NEUTRAL", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["ordinary_mixed_annual_results"],
+      "rationale": "Nike's annual report presents mixed but ordinary operating results without an explicit material adverse event under this router's policy.",
+      "adjudication_confidence": 0.96,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-71b204f6eb360068517ac4e686f37125",
+      "evidence_sha256": "33983d82c6667a00bd0bcef00c5d422f25104dcd3e98ca6c63e76a45fe45ecc6",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "POSITIVE", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["positive_production_and_liquidity_update"],
+      "rationale": "The issuer reported record gold sales, revenue and a strong cash and securities balance.",
+      "adjudication_confidence": 0.99,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-b30e2aaaa4d1b84de61263249c68d239",
+      "evidence_sha256": "d157f454443de12353e423423f10d8d00ab18496ff53d80f321f7bc152a8f427",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "POSITIVE", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["positive_operating_kpis"],
+      "rationale": "The preliminary operating KPIs show year-over-year growth in the disclosed activity measures without an adverse event.",
+      "adjudication_confidence": 0.98,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    },
+    {
+      "event_id": "FR-LIVE-da4be06f465d209959056effc8f0de6c",
+      "evidence_sha256": "3ef095c67f3db89d54653477287e61b483009805fbbc667704696f22a23cdc89",
+      "label": "NON_TARGET",
+      "axes": {"materiality": "NOT_MATERIAL_ADVERSE", "polarity": "POSITIVE", "evidence_state": "PRIMARY_SUPPORTED"},
+      "reason_codes": ["favorable_credit_facility_amendment"],
+      "rationale": "The issuer increased and extended its revolving facility while lowering the margin range, with no amount drawn; this is not an adverse credit event.",
+      "adjudication_confidence": 0.99,
+      "reviewed_at": "2026-07-22T00:00:00Z"
+    }
+  ]
+}

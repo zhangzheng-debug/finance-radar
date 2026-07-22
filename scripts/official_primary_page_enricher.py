@@ -40,6 +40,11 @@ SUPPORTED_SOURCES = {
     "sec_litigation_releases",
     "sec_trading_suspensions",
     "fdic_press_releases",
+    "federal_reserve_press",
+    "ecb_press",
+    "ecb_statistical_press",
+    "eia_press",
+    "nvidia_official_news",
 }
 
 SOURCE_HOST_SUFFIXES = {
@@ -49,6 +54,11 @@ SOURCE_HOST_SUFFIXES = {
     "sec_litigation_releases": ("sec.gov",),
     "sec_trading_suspensions": ("sec.gov",),
     "fdic_press_releases": ("fdic.gov", "govdelivery.com"),
+    "federal_reserve_press": ("federalreserve.gov",),
+    "ecb_press": ("ecb.europa.eu",),
+    "ecb_statistical_press": ("ecb.europa.eu",),
+    "eia_press": ("eia.gov",),
+    "nvidia_official_news": ("nvidia.com",),
 }
 
 KEYWORDS_BY_EVENT_TYPE = {
@@ -139,6 +149,31 @@ KEYWORDS_BY_EVENT_TYPE = {
         "prompt corrective action",
         "prohibition order",
     ),
+    "monetary_policy": (
+        "monetary policy",
+        "interest rates",
+        "deposit facility",
+        "governing council",
+        "inflation",
+        "rate decision",
+        "policy rates",
+    ),
+    "earnings_or_guidance": (
+        "revenue",
+        "earnings",
+        "guidance",
+        "quarter",
+        "fiscal year",
+        "operating income",
+    ),
+    "energy_supply_update": (
+        "production",
+        "inventory",
+        "supply",
+        "crude oil",
+        "natural gas",
+        "refinery",
+    ),
 }
 
 BOILERPLATE = re.compile(
@@ -202,7 +237,19 @@ def document_text(payload: bytes, url: str) -> str:
 
 
 def host_allowed(source_id: str, url: str) -> bool:
-    host = (urllib.parse.urlsplit(url).hostname or "").casefold()
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return False
+    if (
+        parsed.scheme.casefold() != "https"
+        or parsed.username
+        or parsed.password
+        or port not in {None, 443}
+    ):
+        return False
+    host = (parsed.hostname or "").casefold().rstrip(".")
     return any(
         host == suffix or host.endswith(f".{suffix}")
         for suffix in SOURCE_HOST_SUFFIXES.get(source_id, ())
@@ -214,7 +261,7 @@ def fetch_page(url: str, user_agent: str, timeout: float) -> FetchResult:
         url,
         headers={
             "User-Agent": user_agent,
-            "Accept": "text/html,application/xhtml+xml,text/plain",
+            "Accept": "text/html,application/xhtml+xml,text/plain,application/pdf;q=0.9",
             "Accept-Encoding": "identity",
         },
     )
@@ -308,6 +355,34 @@ def pending_rows(connection: Any, *, limit: int, refresh: bool = False) -> list[
     ).fetchall()
 
 
+def advance_existing_evidence_jobs(connection: Any) -> int:
+    """Repair stale state when official evidence already exists in the ledger."""
+    placeholders = ",".join("?" for _ in SUPPORTED_SOURCES)
+    rows = connection.execute(
+        f"""SELECT DISTINCT e.event_id
+            FROM canonical_events e
+            JOIN pipeline_jobs j ON j.event_id=e.event_id
+            JOIN event_evidence ev ON ev.event_id=e.event_id
+            JOIN raw_observations r ON r.observation_id=ev.observation_id
+            WHERE e.status='candidate'
+              AND j.job_type='live_primary_evidence_review'
+              AND j.status='PENDING_PRIMARY_EVIDENCE'
+              AND r.source_id IN ({placeholders})""",
+        tuple(sorted(SUPPORTED_SOURCES)),
+    ).fetchall()
+    now = utc_now()
+    for row in rows:
+        connection.execute(
+            """UPDATE pipeline_jobs
+               SET status='PENDING_EVIDENCE_REVIEW',last_error=NULL,updated_at=?
+               WHERE event_id=? AND job_type='live_primary_evidence_review'
+                 AND status='PENDING_PRIMARY_EVIDENCE'""",
+            (now, row["event_id"]),
+        )
+    connection.commit()
+    return len(rows)
+
+
 def cache_path(cache_dir: Path, url: str) -> Path:
     return cache_dir / f"{hashlib.sha256(url.encode('utf-8')).hexdigest()}.html"
 
@@ -331,6 +406,7 @@ def enrich(
         "link_only": 0,
         "errors": [],
         "by_type": {},
+        "jobs_advanced": advance_existing_evidence_jobs(connection),
     }
     rows = pending_rows(connection, limit=limit, refresh=refresh)
     result["selected"] = len(rows)
@@ -402,6 +478,14 @@ def enrich(
                 now,
             ),
         )
+        advanced = connection.execute(
+            """UPDATE pipeline_jobs
+               SET status='PENDING_EVIDENCE_REVIEW',last_error=NULL,updated_at=?
+               WHERE event_id=? AND job_type='live_primary_evidence_review'
+                 AND status='PENDING_PRIMARY_EVIDENCE'""",
+            (now, row["event_id"]),
+        ).rowcount
+        result["jobs_advanced"] += int(advanced)
         result["inserted"] += 1
         result["passages"] += int(bool(passage.text))
         result["link_only"] += int(not passage.text)
@@ -419,6 +503,7 @@ def write_report(path: Path, result: dict[str, Any]) -> None:
         f"- Evidence rows inserted: `{result['inserted']}`",
         f"- Relevant passages extracted: `{result['passages']}`",
         f"- Link-only rows: `{result['link_only']}`",
+        f"- Review jobs advanced: `{result.get('jobs_advanced', 0)}`",
         f"- Errors: `{len(result['errors'])}`",
         "- Safety: extracted text is review-only; status and severity are never auto-promoted.",
         "",

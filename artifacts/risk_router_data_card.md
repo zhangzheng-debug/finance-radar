@@ -1,11 +1,8 @@
 # Finance Radar Risk Router Data Card
 
-- Rows: 897
-- Labels: `{"NON_TARGET":351,"RISK_REVIEW":546}`
-- Structured manifest: `risk_router_training_manifest.jsonl`
-- Label task: adverse material risk routing
-- Label source: imported adjudication
-- Group split: time-prioritized connected issuer/event-chain groups
-- Train/test rows: 672/225
-- Post-event market features: prohibited
-- Favorable and neutral controls remain non-target examples; the corpus is not adverse-only.
+- Development rows: `139` `{'RISK_REVIEW': 84, 'NON_TARGET': 55}`
+- Blind-v3 rows: `80` `{'ABSTAIN': 20, 'NON_TARGET': 30, 'RISK_REVIEW': 30}`
+- Development/blind overlap: `0`
+- AI rubric adjudications are explicitly not human labels.
+- ABSTAIN is determined by structured evidence state, not guessed from prose.
+- Post-event market and trading/account fields are prohibited.

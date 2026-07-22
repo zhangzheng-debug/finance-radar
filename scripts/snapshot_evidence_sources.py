@@ -31,6 +31,14 @@ DEFAULT_REPORT_JSON = ROOT / "reports" / "evidence_source_snapshots_latest.json"
 DEFAULT_REPORT_MD = ROOT / "reports" / "evidence_source_snapshots_latest.md"
 DEFAULT_CACHE = ROOT / "data" / "cache" / "official_primary_pages"
 MAX_SNAPSHOT_BYTES = 10 * 1024 * 1024
+TERMINAL_VALUE_ERROR_MARKERS = (
+    "evidence object exceeds",
+    "redirected outside registered official source domain",
+    "unsupported evidence content type",
+    "invalid json evidence object",
+    "binary payload declared as text/plain",
+    "non-utf-8 payload declared as text/plain",
+)
 
 # A source id must be known by the collector and the final URL must remain on
 # its registered official domain. This is deliberately narrower than accepting
@@ -233,6 +241,8 @@ def archive_pending(
         "by_mime": {},
         "errors": [],
         "deferred_failures": 0,
+        "terminal_policy_failures": 0,
+        "failure_state_migrations": 0,
         "policy": {
             "official_source_allowlist": True,
             "https_only": True,
@@ -254,6 +264,23 @@ def archive_pending(
     )
     failure_state = failure_state if isinstance(failure_state, dict) else {}
     failure_state_changed = False
+    for failure_id, item in list(failure_state.items()):
+        if (
+            isinstance(item, dict)
+            and item.get("terminal_policy") is not True
+            and any(
+                marker in str(item.get("last_error", "")).casefold()
+                for marker in TERMINAL_VALUE_ERROR_MARKERS
+            )
+        ):
+            failure_state[failure_id] = {
+                **item,
+                "retry_after": None,
+                "terminal_policy": True,
+                "failure_category": "POLICY_CONTENT_LIMIT",
+            }
+            failure_state_changed = True
+            result["failure_state_migrations"] += 1
     now = datetime.now(timezone.utc)
     batch_size = max(100, limit * 25)
     scan_offset = 0
@@ -275,7 +302,30 @@ def archive_pending(
             source_id = str(row["source_id"])
             failure_id = f"{row['event_id']}:{row['evidence_id']}"
             prior_failure = failure_state.get(failure_id, {})
+            legacy_terminal = (
+                prior_failure.get("source_url") == original_url
+                and prior_failure.get("terminal_policy") is not True
+                and any(
+                    marker in str(prior_failure.get("last_error", "")).casefold()
+                    for marker in TERMINAL_VALUE_ERROR_MARKERS
+                )
+            )
+            if legacy_terminal:
+                prior_failure = {
+                    **prior_failure,
+                    "retry_after": None,
+                    "terminal_policy": True,
+                    "failure_category": "POLICY_CONTENT_LIMIT",
+                }
+                failure_state[failure_id] = prior_failure
+                failure_state_changed = True
             retry_at = datetime.fromisoformat(str(prior_failure.get("retry_after", "")).replace("Z", "+00:00")) if prior_failure.get("retry_after") else None
+            if (
+                prior_failure.get("source_url") == original_url
+                and prior_failure.get("terminal_policy") is True
+            ):
+                result["terminal_policy_failures"] += 1
+                continue
             if (
                 prior_failure.get("source_url") == original_url
                 and retry_at is not None
@@ -286,6 +336,17 @@ def archive_pending(
             url = canonical_source_url(source_id, original_url)
             if url is None or not host_allowed(source_id, url):
                 result["policy_skipped"] += 1
+                result["terminal_policy_failures"] += 1
+                failure_state[failure_id] = {
+                    "source_url": original_url,
+                    "attempts": int(prior_failure.get("attempts", 0)),
+                    "last_error": f"URL outside registered source domain {source_id}",
+                    "last_attempt_at": now.isoformat(),
+                    "retry_after": None,
+                    "terminal_policy": True,
+                    "failure_category": "URL_POLICY",
+                }
+                failure_state_changed = True
                 if len(result["policy_skip_examples"]) < 10:
                     result["policy_skip_examples"].append(
                         f"{row['evidence_id']}: URL outside registered source domain {source_id}"
@@ -323,17 +384,43 @@ def archive_pending(
                 )
             except (OSError, RuntimeError, ValueError, urllib.error.URLError) as exc:
                 attempts = int(prior_failure.get("attempts", 0)) + 1
-                retry_hours = min(168, 24 if isinstance(exc, urllib.error.HTTPError) and exc.code in {401, 403, 404} else 2 ** min(attempts, 7))
+                error_text = f"{type(exc).__name__}: {str(exc)[:240]}"
+                normalized_error = str(exc).casefold()
+                terminal_policy = isinstance(exc, ValueError) and any(
+                    marker in normalized_error for marker in TERMINAL_VALUE_ERROR_MARKERS
+                )
+                terminal_access = (
+                    isinstance(exc, urllib.error.HTTPError)
+                    and exc.code in {401, 403, 404}
+                    and attempts >= 3
+                )
+                terminal = terminal_policy or terminal_access
+                retry_hours = min(
+                    168,
+                    24
+                    if isinstance(exc, urllib.error.HTTPError) and exc.code in {401, 403, 404}
+                    else 2 ** min(attempts, 7),
+                )
                 failure_state[failure_id] = {
                     "source_url": original_url,
                     "attempts": attempts,
-                    "last_error": f"{type(exc).__name__}: {str(exc)[:240]}",
+                    "last_error": error_text,
                     "last_attempt_at": now.isoformat(),
-                    "retry_after": (now + timedelta(hours=retry_hours)).isoformat(),
+                    "retry_after": None if terminal else (now + timedelta(hours=retry_hours)).isoformat(),
+                    "terminal_policy": terminal,
+                    "failure_category": (
+                        "POLICY_CONTENT_LIMIT"
+                        if terminal_policy
+                        else "ACCESS_UNAVAILABLE"
+                        if terminal_access
+                        else "RETRYABLE_FETCH"
+                    ),
                 }
                 failure_state_changed = True
+                if terminal:
+                    result["terminal_policy_failures"] += 1
                 result["errors"].append(
-                    f"{row['evidence_id']}: {type(exc).__name__}: {str(exc)[:240]}"
+                    f"{row['evidence_id']}: {error_text}"
                 )
                 continue
             if failure_id in failure_state:
@@ -364,6 +451,8 @@ def write_report(json_path: Path, markdown_path: Path, result: dict[str, Any]) -
         f"- Cache hits / network fetches: `{result['cache_hits']}` / `{result['network_fetches']}`",
         f"- New archived bytes: `{result['archived_bytes']}`",
         f"- Persistently deferred failed links: `{result.get('deferred_failures', 0)}`",
+        f"- Terminal policy/access exclusions: `{result.get('terminal_policy_failures', 0)}`",
+        f"- Legacy failure states migrated: `{result.get('failure_state_migrations', 0)}`",
         "- Boundary: registered official domains, safe HTTP-to-HTTPS canonicalization, redirect revalidation, 10 MiB cap, no auto-verification, no model feature use and no trading.",
         "",
         "## MIME types",

@@ -1,24 +1,48 @@
 {
   "schema_version": 1,
-  "version": "2026.07.22.1",
-  "tag": "v2026.07.22.1",
+  "version": "2026.07.22.2",
+  "tag": "v2026.07.22.2",
   "visibility": "private",
-  "application_release": "20260721T184054Z",
-  "migration_snapshot": "20260721T185507Z",
+  "application_release": "20260722T084500Z",
+  "migration_snapshot": "20260722T084527Z",
+  "model": {
+    "version": "risk-router-v4-c82cfde20465",
+    "mode": "SHADOW",
+    "no_trading": true,
+    "external_blind_report": "risk_router_external_blind_v3_report.json",
+    "external_blind_gate_pass": true,
+    "promotion_decision": "QUALIFIED_SHADOW"
+  },
+  "restored_counts": {
+    "canonical_events": 1872,
+    "event_evidence": 3101,
+    "worker_cycles": 1162,
+    "evidence_objects": 2236
+  },
   "scheduled_task_validation": {
     "task": "FinanceRadar-AWS-Offhost-Backup",
     "last_result": 0,
-    "next_run_local": "2026-07-22T03:30:00+08:00"
+    "last_run_utc": "2026-07-21T19:30:00Z",
+    "next_run_local": "2026-07-23T03:30:00+08:00"
   },
   "assets": [
     {
-      "name": "finance-radar-migration-20260721T185507Z.tgz.aesgcm",
+      "name": "finance-radar-migration-20260722T084527Z.tgz.aesgcm",
       "role": "encrypted_full_aws_recovery",
-      "bytes": 779640430,
-      "sha256": "24a9affddc0f95ad5de23b54eda3ae883276242862dba9e7217dab2ca894b29b",
-      "plaintext_sha256_after_authenticated_decryption": "f04d4407bc86b7286ba54974355c4e6e62a0fd8c6169cf0ca8e192b8cff1ebc7",
+      "bytes": 867634922,
+      "sha256": "9caeec6a73fcbc54eaa575db1417cef4a8aaa23ba9b8b124fdf187d678437f2f",
+      "plaintext_sha256_after_authenticated_decryption": "bf554e45178441c889c4c5d4c5f5be68ca14d883e860e7b7f7aab319aad874e3",
       "full_restore_verified": true,
-      "archive_entries": 14353
+      "archive_entries": 20807
+    },
+    {
+      "name": "risk-router-v4-c82cfde20465.joblib",
+      "role": "qualified_shadow_model_artifact",
+      "bytes": 232883,
+      "sha256": "1f1d2c1bbfeaf2fd22280474787b89c717646d4dd651472fca57514f1a0d695d",
+      "external_blind_gate_pass": true,
+      "promotion_decision": "QUALIFIED_SHADOW",
+      "no_trading": true
     }
   ],
   "excluded_secrets": [

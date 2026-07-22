@@ -27,6 +27,14 @@ DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
 DEFAULT_ENV = ROOT / ".env"
 DEFAULT_REPORT = ROOT / "reports" / "sec_filing_enrichment_latest.md"
 SEC_BASE = "https://www.sec.gov"
+ADMINISTRATIVE_NON_EVENT_TYPES = {
+    "routine_nav_and_leverage_update",
+    "routine_board_committee_appointment",
+    "equity_incentive_plan_share_reserve_reduction",
+    "routine_nt_10q_extension_request",
+    "auditor_change_without_disagreement",
+    "pro_forma_merger_financial_statement_amendment",
+}
 
 
 @dataclass(frozen=True)
@@ -648,6 +656,206 @@ def refine_event(connection: Any, row: Any, classification: Classification) -> b
     return True
 
 
+def _reject_sec_noise_event(connection: Any, row: Any, *, reason: str, now: str) -> bool:
+    if str(row["event_status"]) != "candidate":
+        return False
+    version_row = connection.execute(
+        "SELECT facts_json FROM event_versions WHERE event_id=? AND version=?",
+        (row["event_id"], row["current_version"]),
+    ).fetchone()
+    try:
+        facts = json.loads(version_row["facts_json"]) if version_row else {}
+    except (json.JSONDecodeError, TypeError):
+        facts = {}
+    facts["sec_semantic_filter"] = {
+        "reason": reason,
+        "parsed_primary_document": True,
+        "raw_observation_preserved": True,
+        "filtered_at": now,
+    }
+    new_version = int(row["current_version"]) + 1
+    connection.execute(
+        """INSERT INTO event_versions(
+           event_id,version,changed_at,status,label_status,event_family,event_type,
+           manual_grade,facts_json,change_reason
+           ) VALUES (?,?,?,'rejected','rejected',?,?,?,?,?)""",
+        (
+            row["event_id"],
+            new_version,
+            now,
+            row["event_family"],
+            row["event_type"],
+            row["manual_grade"],
+            stable_json(facts),
+            reason,
+        ),
+    )
+    connection.execute(
+        """UPDATE canonical_events
+           SET current_version=?,status='rejected',label_status='rejected',last_updated_at=?
+           WHERE event_id=? AND status='candidate'""",
+        (new_version, now, row["event_id"]),
+    )
+    return True
+
+
+def materialize_parsed_enrichment_evidence(connection: Any) -> dict[str, int]:
+    """Bridge parsed SEC primary documents into the canonical evidence state machine."""
+    rows = connection.execute(
+        """SELECT e.event_id,e.current_version,e.status AS event_status,e.event_family,
+                  e.event_type,e.manual_grade,r.observation_id,r.source_published_at,
+                  r.canonical_url,r.raw_json,x.form,x.filing_index_url,
+                  x.primary_document_url,x.evidence_excerpt,x.matched_event_type,
+                  x.matched_keywords_json,x.confidence
+           FROM sec_filing_enrichments x
+           JOIN canonical_events e ON e.event_id=x.event_id
+           JOIN latest_source_content r ON r.observation_id=x.observation_id
+           WHERE x.status='PARSED'"""
+    ).fetchall()
+    result = {
+        "parsed_rows": len(rows),
+        "evidence_inserted": 0,
+        "evidence_updated": 0,
+        "evidence_unchanged": 0,
+        "reviewed_status_preserved": 0,
+        "jobs_advanced": 0,
+        "semantic_noise_rejected": 0,
+    }
+    now = utc_now()
+    for row in rows:
+        try:
+            payload = json.loads(row["raw_json"])
+        except json.JSONDecodeError:
+            payload = {}
+        item = payload.get("item") if isinstance(payload, dict) else None
+        item_codes = item.get("items") if isinstance(item, dict) else []
+        if not isinstance(item_codes, list):
+            item_codes = []
+        try:
+            keywords = json.loads(row["matched_keywords_json"] or "[]")
+        except json.JSONDecodeError:
+            keywords = []
+        if not isinstance(keywords, list):
+            keywords = []
+        evidence_url = str(
+            row["primary_document_url"]
+            or row["filing_index_url"]
+            or row["canonical_url"]
+            or ""
+        )
+        evidence_id = stable_id("EVID", str(row["event_id"]), str(row["observation_id"]))
+        excerpt = str(row["evidence_excerpt"] or "").strip()
+        filing_date = str(row["source_published_at"] or "")[:10] or None
+        items_text = ";".join(str(code) for code in item_codes)
+        keywords_text = ";".join(str(keyword) for keyword in keywords)
+        passage_score = max(0, min(100, round(float(row["confidence"] or 0) * 100)))
+        evidence_status = (
+            "machine_extracted_unreviewed" if excerpt else "link_only_no_relevant_passage"
+        )
+        existing = connection.execute(
+            """SELECT evidence_url,filing_date,form,items,evidence_passage,
+                      matched_keywords,passage_score,evidence_status,auto_verification_allowed
+               FROM event_evidence WHERE event_id=? AND observation_id=?""",
+            (row["event_id"], row["observation_id"]),
+        ).fetchone()
+        machine_statuses = {"machine_extracted_unreviewed", "link_only_no_relevant_passage"}
+        if existing is not None and str(existing["evidence_status"]) not in machine_statuses:
+            result["reviewed_status_preserved"] += 1
+        else:
+            desired = (
+                evidence_url,
+                filing_date,
+                str(row["form"] or ""),
+                items_text,
+                excerpt,
+                keywords_text,
+                passage_score,
+                evidence_status,
+                0,
+            )
+            current = None
+            if existing is not None:
+                current = (
+                    str(existing["evidence_url"] or ""),
+                    existing["filing_date"],
+                    str(existing["form"] or ""),
+                    str(existing["items"] or ""),
+                    str(existing["evidence_passage"] or ""),
+                    str(existing["matched_keywords"] or ""),
+                    existing["passage_score"],
+                    str(existing["evidence_status"]),
+                    int(existing["auto_verification_allowed"]),
+                )
+            if current == desired:
+                result["evidence_unchanged"] += 1
+            else:
+                connection.execute(
+                    """INSERT INTO event_evidence(
+                       evidence_id,event_id,observation_id,evidence_url,filing_date,form,items,
+                       evidence_passage,matched_keywords,passage_score,evidence_status,
+                       auto_verification_allowed,created_at,updated_at
+                       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?)
+                       ON CONFLICT(event_id,observation_id) DO UPDATE SET
+                           evidence_url=excluded.evidence_url,
+                           filing_date=excluded.filing_date,
+                           form=excluded.form,
+                           items=excluded.items,
+                           evidence_passage=excluded.evidence_passage,
+                           matched_keywords=excluded.matched_keywords,
+                           passage_score=excluded.passage_score,
+                           evidence_status=excluded.evidence_status,
+                           auto_verification_allowed=0,
+                           updated_at=excluded.updated_at""",
+                    (
+                        evidence_id,
+                        row["event_id"],
+                        row["observation_id"],
+                        evidence_url,
+                        filing_date,
+                        row["form"],
+                        items_text,
+                        excerpt,
+                        keywords_text,
+                        passage_score,
+                        evidence_status,
+                        now,
+                        now,
+                    ),
+                )
+                result["evidence_inserted" if existing is None else "evidence_updated"] += 1
+
+        matched_type = str(row["matched_event_type"] or "")
+        semantic_noise = matched_type in ADMINISTRATIVE_NON_EVENT_TYPES or (
+            str(row["event_type"]) == "sec_material_filing" and not matched_type
+        )
+        if semantic_noise:
+            reason = (
+                f"sec_primary_semantic_non_event:{matched_type}"
+                if matched_type
+                else "sec_primary_semantic_non_event:no_scoped_event_match"
+            )
+            if _reject_sec_noise_event(connection, row, reason=reason, now=now):
+                result["semantic_noise_rejected"] += 1
+            cursor = connection.execute(
+                """UPDATE pipeline_jobs
+                   SET status='COMPLETED_DISCOVERY_FILTERED',last_error=?,updated_at=?
+                   WHERE event_id=? AND job_type='live_primary_evidence_review'
+                     AND status='PENDING_PRIMARY_EVIDENCE'""",
+                (reason, now, row["event_id"]),
+            )
+        else:
+            cursor = connection.execute(
+                """UPDATE pipeline_jobs
+                   SET status='PENDING_EVIDENCE_REVIEW',last_error=NULL,updated_at=?
+                   WHERE event_id=? AND job_type='live_primary_evidence_review'
+                     AND status='PENDING_PRIMARY_EVIDENCE'""",
+                (now, row["event_id"]),
+            )
+        result["jobs_advanced"] += cursor.rowcount
+    connection.commit()
+    return result
+
+
 def pending_rows(connection: Any, *, limit: int, refresh_parsed: bool = False) -> list[Any]:
     enrichment_filter = (
         "(x.observation_id IS NULL OR x.status='PARSED' OR (x.status='ERROR' AND x.attempts<3))"
@@ -771,6 +979,9 @@ def write_report(path: Path, result: dict[str, Any], connection: Any) -> None:
         f"- Negated old machine matches repaired: `{result.get('negated_match_repairs', 0)}`",
         f"- Stored semantic classifications repaired: `{result.get('semantic_reclassifications', 0)}`",
         f"- Errors: `{result['errors']}`",
+        f"- Parsed SEC rows materialized as evidence: `{result.get('evidence_materialization', {}).get('evidence_inserted', 0)}`",
+        f"- Evidence jobs advanced: `{result.get('evidence_materialization', {}).get('jobs_advanced', 0)}`",
+        f"- Parsed generic/administrative filings filtered: `{result.get('evidence_materialization', {}).get('semantic_noise_rejected', 0)}`",
         f"- Ledger status totals: `{json.dumps(statuses, sort_keys=True)}`",
         "- Safety: document text may refine a candidate type but cannot verify severity or enable trading.",
         "",
@@ -806,6 +1017,7 @@ def main() -> int:
         )
         result["negated_match_repairs"] = repair_negated_enrichment_matches(connection)
         result["semantic_reclassifications"] = reclassify_parsed_enrichments(connection)
+        result["evidence_materialization"] = materialize_parsed_enrichment_evidence(connection)
         write_report(args.report, result, connection)
     finally:
         connection.close()

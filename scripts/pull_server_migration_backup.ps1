@@ -131,6 +131,7 @@ $roundTripSha256 = $null
 $roundTripMatch = $false
 $fullRestoreReport = $null
 $fullRestoreVerified = $false
+$restoreAudit = $null
 if (-not $KeepPlaintext) {
     $encryptedArchive = "$plainArchive.aesgcm"
     if ($env:FINANCE_RADAR_BACKUP_PASSPHRASE) {
@@ -167,6 +168,7 @@ if (-not $KeepPlaintext) {
         Remove-Item -LiteralPath $plainArchive -Force
         throw "full isolated migration restore audit failed"
     }
+    $restoreAudit = Get-Content -Raw -LiteralPath $fullRestoreReport | ConvertFrom-Json
     $fullRestoreMarkdown = [System.IO.Path]::ChangeExtension($fullRestoreReport, ".md")
     $latestRestoreJson = Join-Path $repoRoot "reports\migration_full_restore_latest.json"
     $latestRestoreMarkdown = Join-Path $repoRoot "reports\migration_full_restore_latest.md"
@@ -187,6 +189,13 @@ $verification = [ordered]@{
     full_restore_verified = $fullRestoreVerified
     full_restore_report = $fullRestoreReport
     full_restore_markdown = if ($fullRestoreReport) { [System.IO.Path]::ChangeExtension($fullRestoreReport, ".md") } else { $null }
+    model_version = if ($restoreAudit) { $restoreAudit.release.risk_router_model_version } else { $null }
+    model_artifact_sha256 = if ($restoreAudit) { $restoreAudit.release.risk_router_artifact_sha256 } else { $null }
+    external_blind_report = if ($restoreAudit) { $restoreAudit.release.external_blind_report } else { $null }
+    external_blind_gate_pass = if ($restoreAudit) { [bool]$restoreAudit.release.external_blind_gate_pass } else { $false }
+    external_blind_promotion = if ($restoreAudit) { $restoreAudit.release.external_blind_promotion } else { $null }
+    ledger_events = if ($restoreAudit) { [int]$restoreAudit.ledger_restore.counts.canonical_events } else { $null }
+    ledger_evidence = if ($restoreAudit) { [int]$restoreAudit.ledger_restore.counts.event_evidence } else { $null }
     archive_entries = @($archiveListing).Count
     remote_archive = $remoteArchive
     local_archive = if ($encryptedArchive) { $encryptedArchive } else { $plainArchive }
@@ -198,7 +207,7 @@ $verification = [ordered]@{
 $verification | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination "offhost-verification.json") -Encoding UTF8
 
 $publicStatus = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     status = "VERIFIED"
     verified_at = $verification.created_at
     backup_stamp = $stamp
@@ -206,6 +215,12 @@ $publicStatus = [ordered]@{
     full_restore_verified = [bool]$fullRestoreVerified
     encrypted_at_rest = [bool]$encryptedArchive
     archive_entries = @($archiveListing).Count
+    required_release = $requiredRelease
+    model_version = $verification.model_version
+    external_blind_gate_pass = $verification.external_blind_gate_pass
+    external_blind_promotion = $verification.external_blind_promotion
+    ledger_events = $verification.ledger_events
+    ledger_evidence = $verification.ledger_evidence
 }
 $publicStatusPath = Join-Path $destination "offhost-status.json"
 $publicStatus | ConvertTo-Json | Set-Content -LiteralPath $publicStatusPath -Encoding UTF8

@@ -81,7 +81,7 @@ cycle_duration = timing.get("worker_cycle_duration_seconds")
 status_strip(
     [
         ("事件", f"{counts['canonical_events']:,}", ""),
-        ("已核验", f"{event_status.get('verified', 0):,}", "ok"),
+        ("证据核验", f"{event_status.get('verified', 0):,}", "ok"),
         ("待复核", f"{overview['review_queue']:,}", "watch" if overview["review_queue"] else "ok"),
         ("证据边", f"{counts['event_evidence']:,}", ""),
         ("最新事件", f"{event_age / 60:.1f} min" if event_age is not None else "—", ""),
@@ -105,10 +105,10 @@ with left:
         st.info("暂无事件。")
 
 with right:
-    section_header("人工工作队列", "HUMAN IN THE LOOP")
+    section_header("系统复核队列", "EVIDENCE REVIEW")
     st.markdown(
         '<div class="queue-card">'
-        '<div class="queue-card-label">等待人工判断</div>'
+        '<div class="queue-card-label">等待证据或规则复核</div>'
         f'<div class="queue-card-value">{overview["review_queue"]:,}</div>'
         '<div class="queue-card-copy">模型只做 shadow 分流；无充分证据的事件不会自动升级。</div>'
         '</div>',
@@ -117,9 +117,9 @@ with right:
     st.page_link("pages/1_Event_Intelligence.py", label="打开事件工作台")
     pulse_grid(
         [
-            ("已核验", f"{event_status.get('verified', 0):,}", "ok"),
+            ("证据核验", f"{event_status.get('verified', 0):,}", "ok"),
             ("候选", f"{event_status.get('candidate', 0):,}", "watch"),
-            ("弱证据", f"{event_status.get('weak', 0):,}", "watch"),
+            ("证据不足", f"{event_status.get('weak', 0):,}", "watch"),
             ("已拒绝", f"{event_status.get('rejected', 0):,}", ""),
         ]
     )

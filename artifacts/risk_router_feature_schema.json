@@ -1,19 +1,31 @@
 {
-  "schema_version": 1,
-  "input": "UTF-8 event and exact-evidence text",
-  "features": [
+  "schema_version": 4,
+  "architecture": "structured_evidence_gate_plus_binary_semantic_router_v1",
+  "structured_input": [
+    "evidence_state",
+    "exact_evidence_text"
+  ],
+  "semantic_features": [
     "word TF-IDF 1-2 grams",
     "character TF-IDF 3-5 grams"
   ],
-  "excluded": [
-    "event status and label status",
-    "manual grade and training role",
-    "post-event prices, returns and event_market_metrics"
-  ],
-  "output": [
+  "policy_gate": "semantic-policy-gate-v1",
+  "outputs": [
     "RISK_REVIEW",
     "NON_TARGET",
     "ABSTAIN"
   ],
-  "post_event_market_features_allowed": false
+  "abstain_owner": "structured evidence gate",
+  "prohibited": [
+    "event status",
+    "manual grade",
+    "event taxonomy shortcut",
+    "source identity shortcut",
+    "post-event price",
+    "return",
+    "position",
+    "order",
+    "account data"
+  ],
+  "no_trading": true
 }

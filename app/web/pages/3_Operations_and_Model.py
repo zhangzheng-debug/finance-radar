@@ -38,6 +38,9 @@ no_trading_banner()
 latest_cycle = health["operations"].get("latest_worker_cycle")
 latest_backup = health["operations"].get("latest_backup")
 runtime_window = health["operations"].get("worker_window_24h") or {}
+latest_result = latest_cycle.get("result", {}) if latest_cycle else {}
+telegram_result = latest_result.get("telegram") or {}
+telegram_enabled = bool((latest_result.get("process") or {}).get("telegram_send_enabled"))
 source_states = [source_health_state(item) for item in sources]
 source_errors = sum(1 for _, state in source_states if state == "ERROR")
 status_strip(
@@ -47,6 +50,11 @@ status_strip(
         ("Worker", latest_cycle.get("status") if latest_cycle else "NO DATA", "ok" if latest_cycle and latest_cycle.get("status") == "SUCCESS" else "watch"),
         ("24小时窗口", f"{runtime_window.get('status', 'NO DATA')} · {float(runtime_window.get('observed_hours') or 0):.1f}h", "ok" if runtime_window.get("complete") else "watch"),
         ("来源异常", source_errors, "risk" if source_errors else "ok"),
+        (
+            "Telegram",
+            f"{'READY' if telegram_enabled else 'DRY'} · err={int(telegram_result.get('errors') or 0)}",
+            "ok" if telegram_enabled and not telegram_result.get("errors") else "watch",
+        ),
         (
             "证据存档",
             f"{int(evidence_archive.get('source_snapshots') or 0)} raw" if evidence_archive else "N/A",
@@ -98,6 +106,7 @@ with tab_market:
         boundary = market_capabilities["boundary"]
         if boundary.get("read_only") and boundary.get("no_trading"):
             st.success("行情链路为只读事件后审计：不使用账户数据，不存在订单端点，不进入模型训练特征。")
+        st.info("这些是事件触发的审计快照，不是连续实时报价流；能力状态与最近快照新鲜度分开显示。")
         provider_rows = []
         for item in market_capabilities["providers"]:
             windows = item.get("observation_windows") or {}
@@ -119,6 +128,9 @@ with tab_market:
                     "pending_jobs": item["pending_jobs"],
                     "snapshots": item["snapshots"],
                     "last_snapshot": item["last_snapshot_at"],
+                    "freshness": item.get("freshness_status"),
+                    "age_seconds": item.get("snapshot_age_seconds"),
+                    "continuous_feed": item.get("continuous_feed", False),
                     "last_error": item["last_error"],
                     "horizon_windows": window_summary,
                 }
@@ -140,13 +152,19 @@ with tab_evidence:
     if evidence_archive is None:
         st.warning("当前 API 尚未提供原始证据存档清单；事件精确引文仍可使用。")
     else:
-        archive_cols = st.columns(4)
+        archive_cols = st.columns(5)
         archive_cols[0].metric("证据对象", int(evidence_archive.get("objects") or 0))
         archive_cols[1].metric("原始页面/PDF", int(evidence_archive.get("source_snapshots") or 0))
         archive_cols[2].metric("精确引文", int(evidence_archive.get("exact_excerpts") or 0))
         archive_cols[3].metric(
             "存档体积",
             f"{float(evidence_archive.get('archived_bytes') or 0) / 1024 / 1024:.2f} MiB",
+        )
+        coverage = evidence_archive.get("coverage") or {}
+        archive_cols[4].metric(
+            "官方证据覆盖",
+            f"{float(coverage.get('coverage_pct') or 0):.1f}%",
+            f"剩余 {int(coverage.get('missing_links') or 0)} · 策略排除 {int(coverage.get('terminal_policy_exclusions') or 0)}",
         )
         integrity_failures = int(evidence_archive.get("integrity_failures_in_recent_sample") or 0)
         if integrity_failures:
@@ -155,6 +173,11 @@ with tab_evidence:
             st.success("最近证据对象均已重新计算 SHA-256 并通过完整性核验。")
         else:
             st.info("对象存储已启用；尚未归档原始官方页面。")
+        if int(coverage.get("missing_links") or 0):
+            st.info(
+                f"归档 worker 正以每轮 {int(coverage.get('worker_batch_size') or 0)} 条追赶；"
+                "剩余项继续后台处理，不影响现有证据边使用。"
+            )
         recent_objects = evidence_archive.get("recent_objects") or []
         if recent_objects:
             st.dataframe(

@@ -91,6 +91,11 @@ class OfficialPrimaryPageEnricherTests(unittest.TestCase):
         self.assertIn("serious injuries or deaths", evidence["evidence_passage"])
         self.assertEqual(evidence["evidence_status"], "machine_extracted_unreviewed")
         self.assertEqual(evidence["auto_verification_allowed"], 0)
+        job = self.connection.execute(
+            "SELECT status FROM pipeline_jobs WHERE event_id=?", (event_id,)
+        ).fetchone()
+        self.assertEqual(job["status"], "PENDING_EVIDENCE_REVIEW")
+        self.assertEqual(result["jobs_advanced"], 1)
         event = self.connection.execute(
             "SELECT status,label_status,manual_grade FROM canonical_events WHERE event_id=?",
             (event_id,),
@@ -148,6 +153,55 @@ class OfficialPrimaryPageEnricherTests(unittest.TestCase):
         evidence = self.connection.execute("SELECT * FROM event_evidence").fetchone()
         self.assertEqual(evidence["evidence_passage"], "")
         self.assertEqual(evidence["evidence_status"], "link_only_no_relevant_passage")
+
+    def test_existing_official_evidence_repairs_stale_pending_job(self) -> None:
+        event_id = self.add_candidate(
+            source_id="fda_medwatch",
+            title="Heart Pump Recall: Example removes affected devices",
+            url="https://www.fda.gov/existing-evidence",
+        )
+        observation_id = self.connection.execute(
+            "SELECT observation_id FROM event_observations WHERE event_id=?", (event_id,)
+        ).fetchone()[0]
+        now = utc_now()
+        self.connection.execute(
+            """INSERT INTO event_evidence VALUES (
+               'existing-evidence',?,?, 'https://www.fda.gov/existing-evidence',
+               '2026-07-15','fda_medwatch','', 'official recall passage','recall',8,
+               'machine_extracted_unreviewed',0,?,?)""",
+            (event_id, observation_id, now, now),
+        )
+        self.connection.commit()
+
+        advanced = enricher.advance_existing_evidence_jobs(self.connection)
+
+        job = self.connection.execute(
+            "SELECT status FROM pipeline_jobs WHERE event_id=?", (event_id,)
+        ).fetchone()
+        event = self.connection.execute(
+            "SELECT status,label_status,manual_grade FROM canonical_events WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        self.assertEqual(advanced, 1)
+        self.assertEqual(job["status"], "PENDING_EVIDENCE_REVIEW")
+        self.assertEqual(tuple(event), ("candidate", "candidate", None))
+
+    def test_extended_official_hosts_require_https(self) -> None:
+        self.assertTrue(
+            enricher.host_allowed(
+                "ecb_press", "https://www.ecb.europa.eu/press/pr/date/2026/html/example.en.html"
+            )
+        )
+        self.assertTrue(
+            enricher.host_allowed(
+                "federal_reserve_press", "https://www.federalreserve.gov/newsevents/example.htm"
+            )
+        )
+        self.assertFalse(
+            enricher.host_allowed(
+                "ecb_press", "http://www.ecb.europa.eu/press/pr/date/2026/html/example.en.html"
+            )
+        )
 
     def test_material_facts_outrank_keyword_heavy_page_title(self) -> None:
         self.add_candidate(

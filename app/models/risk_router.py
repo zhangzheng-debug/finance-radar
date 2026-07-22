@@ -8,6 +8,9 @@ from typing import Any
 
 import joblib
 
+from .risk_scope_gate import GATE_VERSION, assess_risk_scope
+from .semantic_policy_gate import SEMANTIC_POLICY_VERSION, assess_semantic_policy
+
 
 NEGATIVE_TERMS = {
     "bankruptcy", "chapter 11", "delisting", "suspension", "default", "recall",
@@ -18,6 +21,45 @@ POSITIVE_TERMS = {
     "approval", "beat estimates", "record revenue", "dividend", "buyback",
     "partnership", "contract award", "upgrade", "profit growth", "guidance raised",
 }
+
+EVIDENCE_GATE_VERSION = "structured-evidence-gate-v1"
+MACHINE_PRIMARY_SOURCES = {
+    "bls_key_indicators", "cftc_enforcement", "ecb_press", "ecb_statistical_press",
+    "fda_medwatch", "fdic_press_releases", "federal_reserve_press", "ftc_press",
+    "sec_litigation_releases", "sec_trading_suspensions",
+}
+
+
+def derive_evidence_context(evidence: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize decision-grade evidence without event taxonomy or market outcomes."""
+    statuses = {str(item.get("evidence_status") or "") for item in evidence}
+    if statuses & {"contradicted_by_primary", "conflicted", "rejected_primary"}:
+        state = "CONFLICTED"
+        reasons = ["contradictory_primary_evidence"]
+    elif statuses & {"confirmed_primary", "accepted_manual_primary_evidence"}:
+        state = "PRIMARY_SUPPORTED_REVIEWED"
+        reasons = ["reviewed_primary_exact_passage"]
+    elif any(
+        str(item.get("evidence_status") or "") == "machine_extracted_unreviewed"
+        and str(item.get("source_id") or "") in MACHINE_PRIMARY_SOURCES
+        and str(item.get("authority_tier") or "").startswith(("P0", "P1"))
+        and 60 <= len(" ".join(str(item.get("evidence_passage") or "").split())) <= 6000
+        for item in evidence
+    ):
+        state = "PRIMARY_SUPPORTED_MACHINE_OFFICIAL"
+        reasons = ["official_primary_machine_exact_passage"]
+    elif any(str(item.get("authority_tier") or "").startswith("P2") for item in evidence):
+        state = "DISCOVERY_ONLY"
+        reasons = ["discovery_only_evidence"]
+    else:
+        state = "INSUFFICIENT"
+        reasons = ["no_decision_grade_primary_passage"]
+    return {
+        "version": EVIDENCE_GATE_VERSION,
+        "state": state,
+        "reason_codes": reasons,
+        "evidence_count": len(evidence),
+    }
 
 
 class RiskRouter:
@@ -46,21 +88,63 @@ class RiskRouter:
             return "NON_TARGET", confidence, {"RISK_REVIEW": 1 - confidence, "NON_TARGET": confidence}
         return "ABSTAIN", 0.5, {"RISK_REVIEW": 0.5, "NON_TARGET": 0.5}
 
-    def predict(self, text: str) -> dict[str, Any]:
+    def predict(self, text: str, evidence_context: dict[str, Any] | None = None) -> dict[str, Any]:
         started = time.perf_counter()
         text = " ".join((text or "").split())[:20000]
         input_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        scope_gate = assess_risk_scope(text)
         normalized = text.lower()
         negative_hits = sum(term in normalized for term in NEGATIVE_TERMS)
         positive_hits = sum(term in normalized for term in POSITIVE_TERMS)
-        # The training corpus is downside-risk specialized. A transparent polarity
-        # guard prevents clearly positive news from being forced into that ontology.
-        if positive_hits >= 2 and negative_hits == 0:
-            confidence = min(0.68 + 0.05 * positive_hits, 0.93)
+        model_version = str(self.bundle.get("model_version")) if self.bundle else "risk-router-keyword-fallback-v1"
+        architecture = str(self.bundle.get("architecture") or "legacy_text_router") if self.bundle else "legacy_text_router"
+        evidence_gate = evidence_context or {
+            "version": EVIDENCE_GATE_VERSION,
+            "state": "NOT_PROVIDED",
+            "reason_codes": ["legacy_call_without_structured_evidence"],
+            "evidence_count": None,
+        }
+        evidence_primary = str(evidence_gate.get("state") or "").startswith("PRIMARY_SUPPORTED")
+        if architecture == "structured_evidence_gate_plus_binary_semantic_router_v1" and not evidence_primary:
+            confidence = 1.0
+            label = "ABSTAIN"
+            probability_map = {"RISK_REVIEW": 0.0, "NON_TARGET": 0.0, "ABSTAIN": 1.0}
+            runtime = "structured_evidence_gate"
+        elif architecture == "structured_evidence_gate_plus_binary_semantic_router_v1":
+            semantic_policy = assess_semantic_policy(text)
+            if semantic_policy.decision != "DEFER_TO_MODEL":
+                label = semantic_policy.decision
+                confidence = 0.99
+                probability_map = {
+                    "RISK_REVIEW": 0.99 if label == "RISK_REVIEW" else 0.01,
+                    "NON_TARGET": 0.99 if label == "NON_TARGET" else 0.01,
+                }
+                runtime = "semantic_policy_gate"
+            elif self.bundle:
+                pipeline = self.bundle["pipeline"]
+                probabilities = pipeline.predict_proba([text])[0]
+                classes = [str(item) for item in pipeline.classes_]
+                probability_map = {item_label: float(value) for item_label, value in zip(classes, probabilities)}
+                risk_probability = probability_map.get("RISK_REVIEW", 0.0)
+                semantic_threshold = float(self.bundle.get("semantic_risk_threshold", 0.5))
+                label = "RISK_REVIEW" if risk_probability >= semantic_threshold else "NON_TARGET"
+                confidence = probability_map[label]
+                runtime = "trained_semantic_artifact"
+            else:  # pragma: no cover
+                label, confidence, probability_map = self._fallback(text)
+                runtime = "fallback"
+        elif scope_gate.decision in {"REJECT_NOISE", "REJECT_NON_TARGET"}:
+            confidence = 0.94 if scope_gate.decision == "REJECT_NOISE" else min(
+                0.68 + 0.05 * max(positive_hits, len(scope_gate.positive_cues)), 0.93
+            )
             label = "NON_TARGET"
             probability_map = {"RISK_REVIEW": 1 - confidence, "NON_TARGET": confidence}
-            model_version = str(self.bundle.get("model_version")) if self.bundle else "risk-router-keyword-fallback-v1"
-            runtime = "positive_polarity_guardrail"
+            runtime = "scope_guardrail"
+        elif scope_gate.decision in {"ABSTAIN_INSUFFICIENT", "ADMIT_CONTEXT"}:
+            confidence = 0.5
+            label = "ABSTAIN"
+            probability_map = {"RISK_REVIEW": 0.5, "NON_TARGET": 0.5}
+            runtime = "scope_guardrail"
         elif self.bundle:
             pipeline = self.bundle["pipeline"]
             probabilities = pipeline.predict_proba([text])[0]
@@ -69,12 +153,22 @@ class RiskRouter:
             best_label = max(probability_map, key=probability_map.get)
             confidence = probability_map[best_label]
             threshold = float(self.bundle.get("abstain_threshold", 0.62))
-            label = best_label if confidence >= threshold else "ABSTAIN"
-            model_version = str(self.bundle.get("model_version", "risk-router-unknown"))
+            risk_floor = self.bundle.get("risk_rescue_floor")
+            risk_margin = self.bundle.get("risk_rescue_margin")
+            risk_probability = probability_map.get("RISK_REVIEW", 0.0)
+            if (
+                risk_floor is not None
+                and risk_margin is not None
+                and risk_probability >= float(risk_floor)
+                and risk_probability >= confidence - float(risk_margin)
+            ):
+                label = "RISK_REVIEW"
+                confidence = risk_probability
+            else:
+                label = best_label if best_label == "ABSTAIN" or confidence >= threshold else "ABSTAIN"
             runtime = "trained_artifact"
         else:
             label, confidence, probability_map = self._fallback(text)
-            model_version = "risk-router-keyword-fallback-v1"
             runtime = "fallback"
         latency_ms = (time.perf_counter() - started) * 1000
         return {
@@ -83,6 +177,9 @@ class RiskRouter:
             "probabilities": {key: round(value, 6) for key, value in probability_map.items()},
             "model_version": model_version,
             "runtime": runtime,
+            "scope_gate": scope_gate.as_dict(),
+            "evidence_gate": evidence_gate,
+            "architecture": architecture,
             "shadow": True,
             "no_trading": True,
             "input_sha256": input_hash,
@@ -107,7 +204,17 @@ class RiskRouter:
             except (OSError, json.JSONDecodeError):
                 robustness = None
         external_blind: dict[str, Any] | None = None
-        external_blind_path = self.artifact_path.with_name("risk_router_external_blind_v1_report.json")
+        external_blind_path = next(
+            (
+                path for path in (
+                    self.artifact_path.with_name("risk_router_external_blind_v3_report.json"),
+                    self.artifact_path.with_name("risk_router_external_blind_v2_report.json"),
+                    self.artifact_path.with_name("risk_router_external_blind_v1_report.json"),
+                )
+                if path.is_file()
+            ),
+            self.artifact_path.with_name("risk_router_external_blind_v3_report.json"),
+        )
         if external_blind_path.is_file():
             try:
                 report = json.loads(external_blind_path.read_text(encoding="utf-8"))
@@ -127,6 +234,10 @@ class RiskRouter:
                         "training_dataset_sha256",
                         "overlap_audit",
                         "metrics",
+                        "direct_metrics",
+                        "runtime_metrics",
+                        "full_layered_metrics",
+                        "semantic_substantive_metrics",
                         "source_metrics",
                         "thresholds",
                         "gates",
@@ -135,6 +246,12 @@ class RiskRouter:
                         "no_trading",
                     )
                 }
+                if external_blind.get("metrics") is None:
+                    external_blind["metrics"] = (
+                        report.get("full_layered_metrics")
+                        or report.get("direct_metrics")
+                        or report.get("runtime_metrics")
+                    )
             except (OSError, json.JSONDecodeError):
                 external_blind = None
         return {
@@ -142,7 +259,25 @@ class RiskRouter:
             "artifact_path": str(self.artifact_path),
             "artifact_sha256": artifact_hash,
             "model_version": self.bundle.get("model_version") if self.bundle else "risk-router-keyword-fallback-v1",
+            "architecture": self.bundle.get("architecture") if self.bundle else "legacy_text_router",
             "abstain_threshold": self.bundle.get("abstain_threshold") if self.bundle else 0.62,
+            "risk_rescue_floor": self.bundle.get("risk_rescue_floor") if self.bundle else None,
+            "risk_rescue_margin": self.bundle.get("risk_rescue_margin") if self.bundle else None,
+            "semantic_risk_threshold": self.bundle.get("semantic_risk_threshold") if self.bundle else None,
+            "structured_evidence_gate": {
+                "version": EVIDENCE_GATE_VERSION,
+                "required_for_v4": True,
+            },
+            "semantic_policy_gate": {
+                "version": SEMANTIC_POLICY_VERSION,
+                "enforced_for_v4": True,
+            },
+            "operational_scope_gate": {
+                "version": GATE_VERSION,
+                "enforced": True,
+                "purpose": "reject noise and abstain outside the downside-risk input contract",
+                "artifact_unchanged": True,
+            },
             "shadow": True,
             "no_trading": True,
             "load_error": self.load_error,

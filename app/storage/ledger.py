@@ -3,8 +3,30 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+EVIDENCE_SNAPSHOT_SOURCE_IDS = (
+    "bls_key_indicators",
+    "cftc_enforcement",
+    "ecb_press",
+    "ecb_statistical_press",
+    "eia_press",
+    "fda_medwatch",
+    "fdic_press_releases",
+    "federal_reserve",
+    "federal_reserve_press",
+    "ftc_press",
+    "nvidia_official_news",
+    "sec_current_filings",
+    "sec_edgar",
+    "sec_litigation_releases",
+    "sec_trading_suspensions",
+    "us_marad",
+    "us_treasury",
+)
 
 
 def _dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -182,11 +204,15 @@ class LedgerRepository:
             params.append(source)
         if query:
             where.append(
-                "LOWER(COALESCE(e.company_name,'') || ' ' || COALESCE(e.ticker_at_event,'') || ' ' || "
+                "(LOWER(COALESCE(e.company_name,'') || ' ' || COALESCE(e.ticker_at_event,'') || ' ' || "
                 "e.event_type || ' ' || COALESCE(e.event_family,'') || ' ' || "
-                "COALESCE(e.discovery_source,'') || ' ' || e.event_id) LIKE ?"
+                "COALESCE(e.discovery_source,'') || ' ' || e.event_id) LIKE ? OR EXISTS ("
+                "SELECT 1 FROM event_observations qeo JOIN latest_source_content qr "
+                "ON qr.observation_id=qeo.observation_id WHERE qeo.event_id=e.event_id "
+                "AND qeo.relation_type!='filtered_aggregated_noise' "
+                "AND LOWER(COALESCE(qr.title,'') || ' ' || COALESCE(qr.summary,'')) LIKE ?))"
             )
-            params.append(f"%{query.lower()}%")
+            params.extend([f"%{query.lower()}%", f"%{query.lower()}%"])
         where_sql = " WHERE " + " AND ".join(where) if where else ""
         base = f"""
             FROM canonical_events e
@@ -200,7 +226,17 @@ class LedgerRepository:
                        (SELECT COUNT(*) FROM event_evidence x WHERE x.event_id=e.event_id) AS evidence_count,
                        (SELECT severity_grade FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS severity_grade,
                        (SELECT credibility_tier FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS credibility_tier,
-                       (SELECT evidence_passage FROM event_evidence x WHERE x.event_id=e.event_id AND evidence_passage IS NOT NULL ORDER BY passage_score DESC, updated_at DESC LIMIT 1) AS evidence_excerpt
+                       (SELECT evidence_passage FROM event_evidence x WHERE x.event_id=e.event_id AND evidence_passage IS NOT NULL ORDER BY passage_score DESC, updated_at DESC LIMIT 1) AS evidence_excerpt,
+                       (SELECT r.title FROM event_observations eo
+                        JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                        WHERE eo.event_id=e.event_id
+                          AND eo.relation_type!='filtered_aggregated_noise'
+                        ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_title,
+                       (SELECT r.summary FROM event_observations eo
+                        JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                        WHERE eo.event_id=e.event_id
+                          AND eo.relation_type!='filtered_aggregated_noise'
+                        ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_summary
                 """
                 + base
                 + " ORDER BY e.event_date DESC, e.last_updated_at DESC LIMIT ? OFFSET ?",
@@ -296,6 +332,18 @@ class LedgerRepository:
                     (event_id,),
                 )
             ]
+            preferred_source = _dict(
+                connection.execute(
+                    """SELECT r.title,r.summary,r.source_id,r.source_published_at,
+                              r.local_received_at,eo.observation_id,eo.relation_type
+                       FROM event_observations eo
+                       JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                       WHERE eo.event_id=?
+                         AND eo.relation_type!='filtered_aggregated_noise'
+                       ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1""",
+                    (event_id,),
+                ).fetchone()
+            )
         return {
             "event": event,
             "current_version": version,
@@ -304,6 +352,7 @@ class LedgerRepository:
             "market_metrics": metrics,
             "market_snapshots": snapshots,
             "market_jobs": market_jobs,
+            "preferred_source": preferred_source,
         }
 
     def market_capabilities(self) -> dict[str, Any]:
@@ -315,6 +364,7 @@ class LedgerRepository:
                 "asset_classes": ["crypto"],
                 "access": "PUBLIC_NONE_AUTH",
                 "deployment": "SERVER_DIRECT",
+                "activity_scope": "EVENT_TRIGGERED_SNAPSHOTS",
             },
             "twelve_data": {
                 "name": "Twelve Data",
@@ -322,6 +372,7 @@ class LedgerRepository:
                 "asset_classes": ["equity", "etf", "fx", "commodity_proxy"],
                 "access": "API_KEY_MARKET_DATA_ONLY",
                 "deployment": "SERVER_DIRECT",
+                "activity_scope": "EVENT_TRIGGERED_SNAPSHOTS",
             },
             "ibkr_tws_readonly": {
                 "name": "IBKR TWS Read-Only",
@@ -329,6 +380,7 @@ class LedgerRepository:
                 "asset_classes": ["equity", "fx", "futures"],
                 "access": "LOCAL_TWS_READ_ONLY",
                 "deployment": "OPERATOR_DESKTOP",
+                "activity_scope": "LOCAL_CAPABILITY_PROBE",
             },
         }
         with closing(self.connect()) as connection:
@@ -378,6 +430,7 @@ class LedgerRepository:
             statuses[row["status"]] = int(row["count"])
 
         providers = []
+        observed_at = datetime.now(timezone.utc)
         for provider_id, definition in registry.items():
             jobs = job_rows.get(provider_id, {})
             snapshots = snapshot_rows.get(provider_id, {})
@@ -394,6 +447,23 @@ class LedgerRepository:
                 status = "PENDING"
             else:
                 status = "UNOBSERVED"
+            last_snapshot_at = snapshots.get("last_snapshot_at")
+            snapshot_age_seconds: int | None = None
+            if last_snapshot_at:
+                parsed = datetime.fromisoformat(str(last_snapshot_at).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                snapshot_age_seconds = max(0, int((observed_at - parsed.astimezone(timezone.utc)).total_seconds()))
+            if provider_id == "ibkr_tws_readonly":
+                freshness_status = "NOT_APPLICABLE_LOCAL_PROBE"
+            elif snapshot_age_seconds is None:
+                freshness_status = "NO_CAPTURE"
+            elif snapshot_age_seconds <= 15 * 60:
+                freshness_status = "FRESH_CAPTURE"
+            elif snapshot_age_seconds <= 24 * 60 * 60:
+                freshness_status = "RECENT_EVENT_CAPTURE"
+            else:
+                freshness_status = "STALE_EVENT_CAPTURE"
             providers.append(
                 {
                     "provider_id": provider_id,
@@ -403,7 +473,10 @@ class LedgerRepository:
                     "completed_jobs": completed,
                     "pending_jobs": pending,
                     "snapshots": int(snapshots.get("snapshots") or 0),
-                    "last_snapshot_at": snapshots.get("last_snapshot_at"),
+                    "last_snapshot_at": last_snapshot_at,
+                    "snapshot_age_seconds": snapshot_age_seconds,
+                    "freshness_status": freshness_status,
+                    "continuous_feed": False,
                     "last_error": latest_errors.get(provider_id),
                     "observation_windows": window_status.get(provider_id, {}),
                     "read_only": True,
@@ -423,6 +496,8 @@ class LedgerRepository:
                 "windows": ["t_plus_5m", "t_plus_30m", "t_plus_1d"],
                 "missed_window_behavior": "record_MISSED_WINDOW_without_latest_quote_substitution",
                 "return_metric_scope": "post_event_audit_only",
+                "continuous_quote_feed": False,
+                "freshness_disclosure": "provider capability and event-triggered snapshot freshness are reported separately",
             },
             "boundary": {
                 "read_only": True,
@@ -431,6 +506,25 @@ class LedgerRepository:
                 "post_event_audit_only": True,
                 "allowed_as_model_feature": False,
             },
+        }
+
+    def evidence_snapshot_eligible_pairs(self) -> set[tuple[str, str]]:
+        placeholders = ",".join("?" for _ in EVIDENCE_SNAPSHOT_SOURCE_IDS)
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                f"""SELECT DISTINCT ev.event_id,ev.evidence_id
+                    FROM event_evidence ev
+                    JOIN raw_observations r ON r.observation_id=ev.observation_id
+                    WHERE r.source_id IN ({placeholders})
+                      AND ev.evidence_url IS NOT NULL AND TRIM(ev.evidence_url)!=''""",
+                EVIDENCE_SNAPSHOT_SOURCE_IDS,
+            ).fetchall()
+        return {(str(row["event_id"]), str(row["evidence_id"])) for row in rows}
+
+    def evidence_snapshot_eligibility(self) -> dict[str, Any]:
+        return {
+            "eligible_links": len(self.evidence_snapshot_eligible_pairs()),
+            "policy": "registered_official_sources_with_nonempty_evidence_url",
         }
 
     def event_evidence(self, event_id: str) -> list[dict[str, Any]]:

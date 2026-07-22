@@ -1,0 +1,107 @@
+{
+  "schema_version": 3,
+  "model_name": "Finance Radar Evidence-First Risk Router",
+  "model_version": "risk-router-v3-240814bae596",
+  "artifact_sha256": "3d5b732cefd0c95fd335895c2addd53684079b2a6320ba08460718ccb2c21d95",
+  "trained_at": "2026-07-22T08:11:27.239220+00:00",
+  "task": "Route evidence-stage event text to RISK_REVIEW, NON_TARGET, or ABSTAIN.",
+  "intended_use": "Shadow-mode queue prioritization behind evidence and event-truth gates.",
+  "label_provenance": "AI_RUBRIC_ADJUDICATOR_NOT_HUMAN",
+  "human_labels_claimed": false,
+  "features": [
+    "word TF-IDF 1-2 grams",
+    "character TF-IDF 3-5 grams"
+  ],
+  "estimator": "sigmoid-calibrated class-balanced logistic regression",
+  "development_evaluation": {
+    "strategy": "development_grouped_5_fold_out_of_fold",
+    "rows": 544,
+    "label_counts": {
+      "ABSTAIN": 400,
+      "NON_TARGET": 60,
+      "RISK_REVIEW": 84
+    },
+    "metrics": {
+      "accuracy": 0.9577205882352942,
+      "macro_f1": 0.9316735521900591,
+      "risk_recall": 0.8571428571428571,
+      "risk_precision": 0.96,
+      "non_target_recall": 0.9,
+      "non_target_false_risk_rate": 0.016666666666666666,
+      "all_non_risk_false_risk_rate": 0.006521739130434782,
+      "abstain_recall": 0.9875,
+      "abstain_precision": 0.9610705596107056,
+      "classification_report": {
+        "RISK_REVIEW": {
+          "precision": 0.96,
+          "recall": 0.8571428571428571,
+          "f1-score": 0.9056603773584906,
+          "support": 84.0
+        },
+        "NON_TARGET": {
+          "precision": 0.9310344827586207,
+          "recall": 0.9,
+          "f1-score": 0.9152542372881356,
+          "support": 60.0
+        },
+        "ABSTAIN": {
+          "precision": 0.9610705596107056,
+          "recall": 0.9875,
+          "f1-score": 0.9741060419235512,
+          "support": 400.0
+        },
+        "accuracy": 0.9577205882352942,
+        "macro avg": {
+          "precision": 0.9507016807897753,
+          "recall": 0.9148809523809524,
+          "f1-score": 0.9316735521900591,
+          "support": 544.0
+        },
+        "weighted avg": {
+          "precision": 0.9575924500180139,
+          "recall": 0.9577205882352942,
+          "f1-score": 0.957046218207393,
+          "support": 544.0
+        }
+      },
+      "confusion_matrix": [
+        [
+          72,
+          1,
+          11
+        ],
+        [
+          1,
+          54,
+          5
+        ],
+        [
+          2,
+          3,
+          395
+        ]
+      ]
+    },
+    "gate_pass": true
+  },
+  "blind_evaluation": {
+    "freeze_id": "external-blind-v2-35fe0a851d63",
+    "dataset_sha256": "35fe0a851d63f2f34f2d25210cff07ce476c1c95b5eb148f32f0a94d64b323b2",
+    "status": "RESERVED_NOT_EVALUATED"
+  },
+  "limitations": [
+    "AI rubric labels are auditable but are not a substitute for independent human double adjudication.",
+    "The model prioritizes material adverse risk and is not a general sentiment or return model.",
+    "Source, issuer and language drift require ongoing shadow monitoring.",
+    "ABSTAIN is a first-class output; it must not be silently converted to verified or rejected."
+  ],
+  "explicit_non_uses": [
+    "trading or order execution",
+    "return prediction",
+    "position sizing",
+    "automatic event verification",
+    "automatic factual finality"
+  ],
+  "no_trading": true,
+  "shadow": true
+}

@@ -38,6 +38,11 @@ LOCAL_EVIDENCE_MODEL_PATH = "evidence-llm/models/qwen2.5-0.5b-instruct-q4_k_m.gg
 LOCAL_EVIDENCE_MODEL_SHA256 = (
     "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"
 )
+BLIND_REPORT_FILENAMES = (
+    "risk_router_external_blind_v3_report.json",
+    "risk_router_external_blind_v2_report.json",
+    "risk_router_external_blind_v1_report.json",
+)
 LEDGER_TABLES = (
     "sources",
     "raw_observations",
@@ -246,6 +251,15 @@ def audit_archive(
         regular_file_count = 0
         unpacked_bytes = 0
         nginx_config_count = 0
+        release_artifacts = f"releases/{expected_release}/artifacts"
+        capture_names = {
+            "CURRENT_RELEASE.txt",
+            "MANIFEST.sha256",
+            f"releases/{expected_release}/scripts/official_event_collector.py",
+            f"{release_artifacts}/risk_router_model_card.json",
+            f"{release_artifacts}/risk_router.sha256",
+            *(f"{release_artifacts}/{name}" for name in BLIND_REPORT_FILENAMES),
+        }
         with tarfile.open(plain_archive, mode="r:gz") as archive:
             for member in archive:
                 member_count += 1
@@ -277,12 +291,7 @@ def audit_archive(
                     output_path = restored_ledger
                 elif relative_name == "shared/data/finance_radar_operations.sqlite3":
                     output_path = restored_operations
-                capture = relative_name in {
-                    "CURRENT_RELEASE.txt",
-                    "MANIFEST.sha256",
-                    f"releases/{expected_release}/scripts/official_event_collector.py",
-                    f"releases/{expected_release}/artifacts/risk_router_external_blind_v1_report.json",
-                }
+                capture = relative_name in capture_names
                 if output_path is not None:
                     with output_path.open("wb") as output:
                         digest, captured = _stream_regular_file(source, output=output, capture=capture)
@@ -315,11 +324,22 @@ def audit_archive(
             raise ValueError(
                 f"CURRENT_RELEASE mismatch: expected {expected_current!r}, got {current_release_raw!r}"
             )
+        available_blind_paths = [
+            f"{release_artifacts}/{name}"
+            for name in BLIND_REPORT_FILENAMES
+            if f"{release_artifacts}/{name}" in seen
+        ]
+        if not available_blind_paths:
+            raise ValueError("no supported external-blind report is present in the accepted release")
+        blind_path = available_blind_paths[0]
         required_files = [
             f"releases/{expected_release}/app/api/main.py",
             f"releases/{expected_release}/app/web/Home.py",
             f"releases/{expected_release}/scripts/official_event_collector.py",
-            f"releases/{expected_release}/artifacts/risk_router_external_blind_v1_report.json",
+            blind_path,
+            f"{release_artifacts}/risk_router.joblib",
+            f"{release_artifacts}/risk_router.sha256",
+            f"{release_artifacts}/risk_router_model_card.json",
             f"releases/{expected_release}/requirements.txt",
             "shared/data/finance_radar.sqlite3",
             "shared/data/finance_radar_operations.sqlite3",
@@ -361,14 +381,39 @@ def audit_archive(
         if not all(collector_sources.values()):
             raise ValueError(f"new official source registry incomplete: {collector_sources}")
 
-        blind_path = (
-            f"releases/{expected_release}/artifacts/risk_router_external_blind_v1_report.json"
-        )
         blind = json.loads(captures[blind_path])
         blind_promotion = blind.get("promotion_decision")
         blind_gate_pass = blind.get("gate_pass")
-        if blind_promotion != "REMAIN_SHADOW" or blind_gate_pass is not False:
-            raise ValueError("external-blind governance guard is not preserved")
+        blind_generation = next(
+            version for version in ("v3", "v2", "v1") if f"_{version}_report.json" in blind_path
+        )
+        if blind_generation == "v3":
+            if blind_promotion != "QUALIFIED_SHADOW" or blind_gate_pass is not True:
+                raise ValueError("external-blind-v3 qualification is not preserved")
+        elif blind_promotion != "REMAIN_SHADOW" or blind_gate_pass is not False:
+            raise ValueError("legacy external-blind failure guard is not preserved")
+        if blind.get("no_trading") is not True:
+            raise ValueError("external-blind report does not preserve the no-trading boundary")
+        if blind_generation == "v3" and blind.get("shadow") is not True:
+            raise ValueError("qualified model is not explicitly constrained to SHADOW")
+
+        model_path = f"{release_artifacts}/risk_router.joblib"
+        model_card_path = f"{release_artifacts}/risk_router_model_card.json"
+        model_sha_path = f"{release_artifacts}/risk_router.sha256"
+        model_card = json.loads(captures[model_card_path])
+        declared_sha = captures[model_sha_path].decode("utf-8").strip().split()[0].lower()
+        model_sha = hashes[model_path]
+        blind_sha = str(blind.get("model_artifact_sha256") or "").lower()
+        card_sha = str(model_card.get("artifact_sha256") or "").lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", declared_sha):
+            raise ValueError("risk-router SHA-256 declaration is invalid")
+        if len({model_sha, declared_sha, blind_sha, card_sha}) != 1:
+            raise ValueError("risk-router artifact, declaration, blind report and model card hashes differ")
+        model_version = str(model_card.get("model_version") or "")
+        if model_version != str(blind.get("model_version") or ""):
+            raise ValueError("risk-router model version differs between card and blind report")
+        if model_card.get("no_trading") is not True or model_card.get("shadow") is not True:
+            raise ValueError("risk-router model card does not preserve SHADOW/no-trading")
 
         if not restored_ledger.is_file() or not restored_operations.is_file():
             raise ValueError("isolated SQLite restore files were not produced")
@@ -404,8 +449,15 @@ def audit_archive(
             "release": {
                 "required_files_present": True,
                 "official_source_registry": collector_sources,
+                "external_blind_report": PurePosixPath(blind_path).name,
+                "external_blind_generation": blind_generation,
                 "external_blind_gate_pass": blind_gate_pass,
                 "external_blind_promotion": blind_promotion,
+                "risk_router_model_version": model_version,
+                "risk_router_artifact_sha256": model_sha,
+                "risk_router_hash_chain_match": True,
+                "shadow": True,
+                "no_trading": True,
             },
             "local_evidence_model": {
                 "required_by_release": model_required,
@@ -449,6 +501,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     ledger = payload["ledger_restore"]
     operations = payload["operations_restore"]
     boundaries = payload["boundaries"]
+    release = payload["release"]
     snapshot = Path(payload["encrypted_archive"]).parent.name
     lines = [
         "# Encrypted migration archive — full isolated restore audit",
@@ -472,6 +525,13 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Ledger: Schema {ledger['schema_version']}; quick/integrity `{ledger['quick_check']}` / `{ledger['integrity_check']}`; {ledger['counts']['canonical_events']:,} events and {ledger['counts']['event_evidence']:,} evidence rows.",
         f"- Operations: Schema {operations['schema_version']}; quick/integrity `{operations['quick_check']}` / `{operations['integrity_check']}`; {operations['counts']['worker_cycles']:,} worker cycles and {operations['counts']['backup_runs']:,} backup runs.",
         "- Both databases were opened read-only/immutable during the audit.",
+        "",
+        "## Shadow model recovery proof",
+        "",
+        f"- Model: `{release['risk_router_model_version']}`.",
+        f"- Blind report: `{release['external_blind_report']}`; gate `{release['external_blind_gate_pass']}`; decision `{release['external_blind_promotion']}`.",
+        f"- Artifact/card/report SHA-256 chain matched: `{release['risk_router_hash_chain_match']}`.",
+        f"- SHADOW / no-trading: `{release['shadow']}` / `{release['no_trading']}`.",
         "",
         "## Safety boundaries",
         "",

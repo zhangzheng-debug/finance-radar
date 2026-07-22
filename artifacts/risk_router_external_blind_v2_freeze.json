@@ -1,0 +1,51 @@
+{
+  "schema_version": 2,
+  "freeze_id": "external-blind-v2-35fe0a851d63",
+  "frozen_at": "2026-07-22T08:09:36.558832+00:00",
+  "dataset_sha256": "35fe0a851d63f2f34f2d25210cff07ce476c1c95b5eb148f32f0a94d64b323b2",
+  "rows": 80,
+  "label_counts": {
+    "ABSTAIN": 20,
+    "RISK_REVIEW": 30,
+    "NON_TARGET": 30
+  },
+  "source_counts": {
+    "opennews_free": 9,
+    "sec_litigation_releases": 7,
+    "fda_medwatch": 6,
+    "sec_edgar": 37,
+    "external_official_primary": 1,
+    "cftc_enforcement": 3,
+    "ftc_press": 2,
+    "federal_reserve": 1,
+    "ecb_statistical_press": 1,
+    "bls_key_indicators": 3,
+    "us_marad": 1,
+    "federal_reserve_press": 2,
+    "sec_current_filings": 1,
+    "ecb_press": 3,
+    "fdic_press_releases": 2,
+    "dvids_centcom_public_affairs": 1
+  },
+  "blind_min_event_date": "2025-01-01",
+  "adjudication_policy_sha256": "828d5df53c1d66db10da980b8895b22a8a3d774984c509a9ad6341120d2d27a1",
+  "adjudicator": "codex_gpt5_evidence_policy_v1",
+  "reviewer_type": "AI_RUBRIC_ADJUDICATOR_NOT_HUMAN",
+  "human_labels_claimed": false,
+  "label_policy_locked_before_inference": true,
+  "predictions_present": false,
+  "training_dataset_path": "risk_router_v3_ai_adjudications_dev.jsonl",
+  "overlap_rules": {
+    "event_and_sample_id_disjoint": true,
+    "entity_group_disjoint_with_blind": true,
+    "blind_internal_entity_duplicate_count": 0,
+    "blind_internal_near_duplicate_count": 0,
+    "near_duplicate_prefix_hash_disjoint": true
+  },
+  "minimums": {
+    "RISK_REVIEW": 30,
+    "NON_TARGET": 30,
+    "ABSTAIN": 20
+  },
+  "no_trading": true
+}

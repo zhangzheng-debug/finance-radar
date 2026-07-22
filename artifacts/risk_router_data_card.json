@@ -1,84 +1,41 @@
 {
-  "schema_version": 1,
-  "dataset": {
-    "rows": 897,
+  "schema_version": 4,
+  "label_provenance": "AI_RUBRIC_ADJUDICATOR_NOT_HUMAN",
+  "human_labels_claimed": false,
+  "development": {
+    "rows": 139,
     "label_counts": {
-      "RISK_REVIEW": 546,
-      "NON_TARGET": 351
+      "RISK_REVIEW": 84,
+      "NON_TARGET": 55
     },
-    "top_event_families": {
-      "distress_equity_death": 68,
-      "equity_dilution": 65,
-      "listing_compliance": 54,
-      "listing_status": 47,
-      "delisting_or_suspension": 45,
-      "corporate_action_merger": 40,
-      "source_metadata_control": 39,
-      "fundamental_metric_control": 38,
-      "identity_control": 31,
-      "spac_lifecycle": 31,
-      "dilution_recapitalization": 29,
-      "price_dislocation_control": 27,
-      "listing_remediation": 23,
-      "regulatory_enforcement": 17,
-      "bankruptcy_reorganization": 16,
-      "equity_structure": 15,
-      "voluntary_listing_exit": 14,
-      "liquidity_and_financing_risk": 12,
-      "capital_structure": 12,
-      "product_safety": 11
-    },
-    "dataset_sha256": "e1ce020d344534485c09593d23ca7b0ae1cb17f4490ca5ab4cab3a557884e01f",
-    "label_definition": {
-      "RISK_REVIEW": "currently verified historical downside-risk event",
-      "NON_TARGET": "adjudicated rejected candidate or control"
-    },
-    "train_rows": 672,
-    "test_rows": 225,
-    "split": {
-      "strategy": "deterministic recent connected-group holdout",
-      "grouping": "connected components of issuer_key and event_chain_id",
-      "target_test_fraction": 0.25,
-      "actual_test_fraction": 0.2508361204013378,
-      "train_rows": 672,
-      "test_rows": 225,
-      "train_label_counts": {
-        "RISK_REVIEW": 392,
-        "NON_TARGET": 280
-      },
-      "test_label_counts": {
-        "RISK_REVIEW": 154,
-        "NON_TARGET": 71
-      },
-      "train_date_range": [
-        "2020-01-31",
-        "2026-04-24"
-      ],
-      "test_date_range": [
-        "2022-02-07",
-        "2026-07-15"
-      ],
-      "issuer_overlap_count": 0,
-      "event_chain_overlap_count": 0
-    },
-    "excluded_fields": [
-      "event status and label status",
-      "manual grade and training role",
-      "post-event prices, returns and event_market_metrics"
-    ]
+    "dataset_sha256": "c82cfde20465f70ab98b60eea7415d5153a2e72cc391bec12dd3f21abb877bc8"
   },
-  "training_contract": {
-    "training_eligible": "boolean",
-    "exclusion_reason": "nullable enum",
-    "label_task": "risk_routing",
-    "label_source": "imported adjudication",
-    "label_version": "risk-routing-v1"
+  "external_blind_v3": {
+    "rows": 80,
+    "label_counts": {
+      "ABSTAIN": 20,
+      "NON_TARGET": 30,
+      "RISK_REVIEW": 30
+    },
+    "source_counts": {
+      "sec_edgar": 38,
+      "federal_reserve_press": 8,
+      "external_official_primary": 16,
+      "sec_litigation_releases": 3,
+      "opennews_free": 9,
+      "fda_medwatch": 3,
+      "ftc_press": 1,
+      "bls_key_indicators": 1,
+      "cftc_enforcement": 1
+    },
+    "dataset_sha256": "7e5eac882b03594751a6c01d88fe286c110ac49df87c2d3b8665cf88cd1d0598",
+    "overlap_audit": {
+      "event_id": 0,
+      "entity_group": 0,
+      "event_chain_group": 0,
+      "text_sha256": 0
+    }
   },
-  "limitations": [
-    "The dataset is intentionally rich in negative events and controls, so this is not a general financial-sentiment model.",
-    "Historical labels reflect the current evidence policy and can contain adjudication noise.",
-    "Issuer, source and event-family language may shift over time; drift monitoring is required.",
-    "The model is only a queueing aid; evidence and finality gates remain authoritative."
-  ],
+  "predecessor_blind_v2_failure_preserved": true,
   "no_trading": true
 }

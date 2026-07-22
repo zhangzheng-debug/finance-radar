@@ -59,7 +59,7 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert not page.exception
     assert "实时事件流" in rendered
     assert "Example Holdings" in rendered
-    assert "等待人工判断" in rendered
+    assert "等待证据或规则复核" in rendered
     assert "硬边界审计 0 违规" in rendered
     assert "UTC" in rendered
     assert any(item.label == "全终端检索" for item in page.text_input)

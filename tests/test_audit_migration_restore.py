@@ -68,7 +68,12 @@ def _operations(path: Path) -> None:
         connection.commit()
 
 
-def _fixture(tmp_path: Path, *, tamper_after_manifest: bool = False) -> tuple[Path, Path, str]:
+def _fixture(
+    tmp_path: Path,
+    *,
+    tamper_after_manifest: bool = False,
+    wrong_model_hash: bool = False,
+) -> tuple[Path, Path, str]:
     root = tmp_path / f"finance-radar-migration-{STAMP}"
     release = root / "releases" / RELEASE
     _write(root / "CURRENT_RELEASE.txt", f"/opt/finance-radar/releases/{RELEASE}\n")
@@ -79,8 +84,33 @@ def _fixture(tmp_path: Path, *, tamper_after_manifest: bool = False) -> tuple[Pa
         "ecb_press ecb_statistical_press eia_press nvidia_official_news\n",
     )
     _write(
-        release / "artifacts/risk_router_external_blind_v1_report.json",
-        json.dumps({"gate_pass": False, "promotion_decision": "REMAIN_SHADOW"}),
+        release / "artifacts/risk_router_external_blind_v3_report.json",
+        json.dumps(
+            {
+                "gate_pass": True,
+                "promotion_decision": "QUALIFIED_SHADOW",
+                "model_version": "risk-router-v4-test",
+                "model_artifact_sha256": hashlib.sha256(
+                    b"wrong-model" if wrong_model_hash else b"model"
+                ).hexdigest(),
+                "no_trading": True,
+                "shadow": True,
+            }
+        ),
+    )
+    (release / "artifacts/risk_router.joblib").write_bytes(b"model")
+    model_sha = hashlib.sha256(b"model").hexdigest()
+    _write(release / "artifacts/risk_router.sha256", f"{model_sha}  risk_router.joblib\n")
+    _write(
+        release / "artifacts/risk_router_model_card.json",
+        json.dumps(
+            {
+                "model_version": "risk-router-v4-test",
+                "artifact_sha256": model_sha,
+                "shadow": True,
+                "no_trading": True,
+            }
+        ),
     )
     _write(release / "requirements.txt", "fastapi\n")
     _write(root / "config/etc/finance-radar.env", "SECRET=not-logged\n")
@@ -129,17 +159,33 @@ def test_full_encrypted_migration_restore_audit(tmp_path: Path) -> None:
         "market_feature_leakage_violations": 0,
     }
     assert result["operations_restore"]["schema_version"] == 4
-    assert result["release"]["external_blind_promotion"] == "REMAIN_SHADOW"
+    assert result["release"]["external_blind_generation"] == "v3"
+    assert result["release"]["external_blind_gate_pass"] is True
+    assert result["release"]["external_blind_promotion"] == "QUALIFIED_SHADOW"
+    assert result["release"]["risk_router_hash_chain_match"] is True
     assert result["temporary_workspace_cleaned"] is True
     markdown = render_markdown(result)
     assert "Result: **PASS**" in markdown
     assert f"Accepted release: `{RELEASE}`" in markdown
     assert "Trading project included: `False`" in markdown
+    assert "risk-router-v4-test" in markdown
+    assert "Artifact/card/report SHA-256 chain matched: `True`" in markdown
 
 
 def test_restore_audit_rejects_manifest_mismatch(tmp_path: Path) -> None:
     encrypted, passphrase, expected_sha256 = _fixture(tmp_path, tamper_after_manifest=True)
     with pytest.raises(ValueError, match="manifest verification failed"):
+        audit_archive(
+            encrypted,
+            passphrase,
+            expected_release=RELEASE,
+            expected_sha256=expected_sha256,
+        )
+
+
+def test_restore_audit_rejects_model_governance_hash_mismatch(tmp_path: Path) -> None:
+    encrypted, passphrase, expected_sha256 = _fixture(tmp_path, wrong_model_hash=True)
+    with pytest.raises(ValueError, match="artifact, declaration, blind report and model card hashes differ"):
         audit_archive(
             encrypted,
             passphrase,

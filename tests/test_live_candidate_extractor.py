@@ -137,7 +137,7 @@ class LiveCandidateExtractorTests(unittest.TestCase):
             1,
         )
 
-    def test_semantic_gate_retracts_review_job_without_rejecting_event(self) -> None:
+    def test_semantic_gate_reaudits_completed_review_job_and_audits_rejection(self) -> None:
         now = utc_now()
         self.add_observation(
             "legacy-commentary",
@@ -161,7 +161,7 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         self.connection.execute(
             """INSERT INTO pipeline_jobs VALUES (
                'legacy-job','legacy-event','live_primary_evidence_review',
-               'PENDING_PRIMARY_EVIDENCE',50,0,?,NULL,'{}',?,?)""",
+               'COMPLETED_DISCOVERY_FILTERED',50,0,?,NULL,'{}',?,?)""",
             (now, now, now),
         )
         self.connection.commit()
@@ -175,11 +175,81 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         ).fetchone()
 
         self.assertEqual(retracted, 1)
-        self.assertEqual(event["status"], "candidate")
-        self.assertEqual(event["label_status"], "candidate")
+        self.assertEqual(event["status"], "rejected")
+        self.assertEqual(event["label_status"], "rejected")
         self.assertIsNone(event["manual_grade"])
         self.assertEqual(job["status"], "COMPLETED_DISCOVERY_FILTERED")
         self.assertIn("semantic_gate", job["last_error"])
+        version = self.connection.execute(
+            "SELECT facts_json,change_reason FROM event_versions WHERE event_id='legacy-event' AND version=2"
+        ).fetchone()
+        self.assertIn("raw_observations_preserved", version["facts_json"])
+        self.assertIn("semantic_gate", version["change_reason"])
+        relation = self.connection.execute(
+            "SELECT relation_type FROM event_observations WHERE event_id='legacy-event'"
+        ).fetchone()
+        self.assertEqual(relation["relation_type"], "filtered_aggregated_noise")
+
+    def test_mixed_cluster_filters_noise_observation_but_keeps_valid_event(self) -> None:
+        now = utc_now()
+        valid_title = "Strait of Hormuz blockade disrupts oil shipping"
+        noise_title = "Live: Officials testify about the war with Iran"
+        for external_id, title in (("mixed-valid", valid_title), ("mixed-noise", noise_title)):
+            self.add_observation(
+                external_id,
+                title,
+                f"https://example.test/{external_id}",
+                raw_json=json.dumps({"item": {"title": title, "coins": ["BTC"]}}),
+            )
+
+        self.connection.execute(
+            """INSERT INTO canonical_events VALUES (
+               'mixed-event',1,'candidate','candidate','geopolitical','conflict_or_blockade',
+               '2026-07-15',?,?,NULL,NULL,NULL,NULL,'B_P2_discovery_only','opennews_free',1)""",
+            (now, now),
+        )
+        self.connection.execute(
+            """INSERT INTO event_versions VALUES (
+               'mixed-event',1,?,'candidate','candidate','geopolitical','conflict_or_blockade',
+               NULL,'{}','legacy_import')""",
+            (now,),
+        )
+        for external_id in ("mixed-valid", "mixed-noise"):
+            self.connection.execute(
+                "INSERT INTO event_observations VALUES (?,?,?,?)",
+                (
+                    "mixed-event",
+                    stable_id("OBS", "opennews_free", external_id),
+                    "aggregated_discovery_candidate",
+                    now,
+                ),
+            )
+        self.connection.execute(
+            """INSERT INTO pipeline_jobs VALUES (
+               'mixed-job','mixed-event','live_primary_evidence_review',
+               'PENDING_PRIMARY_EVIDENCE',50,0,?,NULL,'{}',?,?)""",
+            (now, now, now),
+        )
+        self.connection.commit()
+
+        retracted = extractor.retract_filtered_opennews_candidates(self.connection)
+
+        event = self.connection.execute(
+            "SELECT status FROM canonical_events WHERE event_id='mixed-event'"
+        ).fetchone()
+        relations = {
+            row["external_id"]: row["relation_type"]
+            for row in self.connection.execute(
+                """SELECT r.external_id,eo.relation_type
+                   FROM event_observations eo JOIN raw_observations r
+                     ON r.observation_id=eo.observation_id
+                   WHERE eo.event_id='mixed-event'"""
+            ).fetchall()
+        }
+        self.assertEqual(retracted, 0)
+        self.assertEqual(event["status"], "candidate")
+        self.assertEqual(relations["mixed-valid"], "aggregated_discovery_candidate")
+        self.assertEqual(relations["mixed-noise"], "filtered_aggregated_noise")
 
     def test_opennews_duplicate_attaches_to_verified_primary_without_auto_reject(self) -> None:
         now = utc_now()
@@ -274,6 +344,261 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         result = extractor.process_pending(self.connection, limit=10)
         self.assertEqual(result["candidates"], 0)
         self.assertEqual(result["no_candidate"], 4)
+
+    def test_live_roundup_ai_benchmark_hack_and_fed_name_collision_are_scope_filtered(self) -> None:
+        fixtures = (
+            (
+                "iran-live",
+                "Live: Officials testify about the US war with Iran. Here's what happened today",
+                ["BTC", "CL"],
+            ),
+            (
+                "ai-benchmark",
+                "OpenAI Models Escaped Locked Test Environment, Hacked Hugging Face to Cheat on Benchmark",
+                ["WLD", "OPENAI"],
+            ),
+            (
+                "fed-name",
+                "The Fed rang the alarm about Anthropic's Mythos AI model",
+                ["XYZ-SP500"],
+            ),
+        )
+        for external_id, title, coins in fixtures:
+            self.add_observation(
+                external_id,
+                title,
+                f"https://example.test/{external_id}",
+                raw_json=json.dumps({"item": {"title": title, "coins": coins}}),
+            )
+        result = extractor.process_pending(self.connection, limit=10)
+        self.assertEqual(result["candidates"], 0)
+        self.assertEqual(result["scope_filtered"], 3)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0],
+            0,
+        )
+
+    def test_specific_policy_action_and_exchange_hack_remain_admitted(self) -> None:
+        fixtures = (
+            (
+                "rate-action",
+                "South Korea raises interest rates after an inflation surprise",
+                "https://example.test/rate-action",
+            ),
+            (
+                "exchange-hack",
+                "Watchdog begins sanctions against Upbit operator over last November's hack",
+                "https://example.test/exchange-hack",
+            ),
+        )
+        for external_id, title, url in fixtures:
+            self.add_observation(
+                external_id,
+                title,
+                url,
+                raw_json=json.dumps({"item": {"title": title, "coins": []}}),
+            )
+        result = extractor.process_pending(self.connection, limit=10)
+        self.assertEqual(result["candidates"], 2)
+        self.assertEqual(result["scope_filtered"], 0)
+
+    def test_provider_asset_tag_requires_story_level_identity(self) -> None:
+        unrelated = "Coinbase reports a security breach affecting customer records"
+        self.add_observation(
+            "unrelated-tag",
+            unrelated,
+            "https://example.test/coinbase",
+            raw_json=json.dumps({"item": {"title": unrelated, "coins": ["BTC"]}}),
+        )
+        direct = "Bitcoin exchange wallet hacked and BTC funds stolen"
+        self.add_observation(
+            "direct-tag",
+            direct,
+            "https://example.test/bitcoin",
+            raw_json=json.dumps({"item": {"title": direct, "coins": ["BTC"]}}),
+        )
+        result = extractor.process_pending(self.connection, limit=10)
+        self.assertEqual(result["candidates"], 2)
+        tickers = {
+            row["ticker_at_event"]
+            for row in self.connection.execute(
+                "SELECT ticker_at_event FROM canonical_events"
+            ).fetchall()
+        }
+        self.assertEqual(tickers, {None, "BTC"})
+
+    def test_provider_asset_tag_does_not_match_ordinary_prose_words(self) -> None:
+        fixtures = (
+            ("RED", "Tanker attacked as tensions rise in the Red Sea"),
+            ("BRIDGE", "Wanchain Cardano bridge reportedly exploited"),
+            ("STEEL", "Oil prices rise after a shipping blockade"),
+        )
+        for symbol, title in fixtures:
+            raw_json = json.dumps({"item": {"title": title, "coins": [symbol]}})
+            self.assertIsNone(extractor.extract_symbol(raw_json, title))
+
+    def test_existing_unsubstantiated_provider_asset_tag_is_repaired_with_audit_version(self) -> None:
+        title = "SK Hynix shares jump after a quarterly earnings surprise"
+        self.add_observation(
+            "legacy-skhy-tag",
+            title,
+            "https://example.test/legacy-skhy-tag",
+            raw_json=json.dumps({"item": {"title": title, "coins": ["XYZ-SKHY"]}}),
+        )
+        observation_id = stable_id("OBS", "opennews_free", "legacy-skhy-tag")
+        now = utc_now()
+        self.connection.execute(
+            """INSERT INTO canonical_events VALUES (
+               'legacy-skhy-event',1,'candidate','candidate','earnings','earnings_or_guidance',
+               '2026-07-15',?,?,NULL,'SKHY',NULL,NULL,'B_P2_discovery_only','opennews_free',1)""",
+            (now, now),
+        )
+        self.connection.execute(
+            """INSERT INTO event_versions VALUES (
+               'legacy-skhy-event',1,?,'candidate','candidate','earnings','earnings_or_guidance',
+               NULL,'{}','legacy_import')""",
+            (now,),
+        )
+        self.connection.execute(
+            "INSERT INTO event_observations VALUES (?,?,?,?)",
+            ("legacy-skhy-event", observation_id, "aggregated_discovery_candidate", now),
+        )
+        self.connection.execute(
+            """INSERT INTO pipeline_jobs VALUES (
+               'legacy-skhy-job','legacy-skhy-event','live_primary_evidence_review',
+               'PENDING_PRIMARY_EVIDENCE',50,0,?,NULL,'{}',?,?)""",
+            (now, now, now),
+        )
+        self.connection.commit()
+
+        repaired = extractor.repair_opennews_asset_tags(self.connection)
+
+        event = self.connection.execute(
+            "SELECT current_version,ticker_at_event,status FROM canonical_events "
+            "WHERE event_id='legacy-skhy-event'"
+        ).fetchone()
+        version = self.connection.execute(
+            "SELECT facts_json,change_reason FROM event_versions "
+            "WHERE event_id='legacy-skhy-event' AND version=2"
+        ).fetchone()
+        self.assertEqual(repaired, 1)
+        self.assertEqual(event["current_version"], 2)
+        self.assertIsNone(event["ticker_at_event"])
+        self.assertEqual(event["status"], "candidate")
+        self.assertIn('"previous_provider_tag":"SKHY"', version["facts_json"])
+        self.assertIn('"validated_symbol":null', version["facts_json"])
+        self.assertEqual(version["change_reason"], "opennews_asset_tag_story_validation")
+
+    def test_legacy_same_day_entity_duplicates_are_clustered_without_losing_observations(self) -> None:
+        now = utc_now()
+        stories = (
+            (
+                "legacy-sk-a",
+                "SK Hynix shares jump after earnings beat",
+                "legacy-sk-event-a",
+                "legacy-sk-job-a",
+            ),
+            (
+                "legacy-sk-b",
+                "SK 海力士公布强劲季度业绩，股价上涨",
+                "legacy-sk-event-b",
+                "legacy-sk-job-b",
+            ),
+        )
+        for external_id, title, event_id, job_id in stories:
+            self.add_observation(
+                external_id,
+                title,
+                f"https://example.test/{external_id}",
+                raw_json=json.dumps({"item": {"title": title, "coins": []}}),
+            )
+            observation_id = stable_id("OBS", "opennews_free", external_id)
+            self.connection.execute(
+                """INSERT INTO canonical_events VALUES (
+                   ?,1,'candidate','candidate','earnings','earnings_or_guidance',
+                   '2026-07-15',?,?,NULL,NULL,NULL,NULL,'B_P2_discovery_only','opennews_free',1)""",
+                (event_id, now, now),
+            )
+            self.connection.execute(
+                """INSERT INTO event_versions VALUES (
+                   ?,1,?,'candidate','candidate','earnings','earnings_or_guidance',
+                   NULL,'{}','legacy_import')""",
+                (event_id, now),
+            )
+            self.connection.execute(
+                "INSERT INTO event_observations VALUES (?,?,?,?)",
+                (event_id, observation_id, "aggregated_discovery_candidate", now),
+            )
+            self.connection.execute(
+                """INSERT INTO pipeline_jobs VALUES (
+                   ?,?,'live_primary_evidence_review','PENDING_PRIMARY_EVIDENCE',
+                   50,0,?,NULL,'{}',?,?)""",
+                (job_id, event_id, now, now, now),
+            )
+        self.connection.commit()
+
+        reconciled = extractor.reconcile_opennews_candidate_duplicates(self.connection)
+
+        active = self.connection.execute(
+            "SELECT event_id FROM canonical_events WHERE status='candidate'"
+        ).fetchall()
+        rejected = self.connection.execute(
+            "SELECT event_id,current_version FROM canonical_events WHERE status='rejected'"
+        ).fetchone()
+        support_count = self.connection.execute(
+            """SELECT COUNT(*) FROM event_observations
+               WHERE event_id=? AND relation_type='aggregated_duplicate_support'""",
+            (active[0]["event_id"],),
+        ).fetchone()[0]
+        duplicate_job = self.connection.execute(
+            "SELECT status,last_error FROM pipeline_jobs WHERE event_id=?",
+            (rejected["event_id"],),
+        ).fetchone()
+        self.assertEqual(reconciled, 1)
+        self.assertEqual(len(active), 1)
+        self.assertEqual(rejected["current_version"], 2)
+        self.assertEqual(support_count, 1)
+        self.assertEqual(duplicate_job["status"], "COMPLETED_DUPLICATE_CLUSTER")
+        self.assertIn(active[0]["event_id"], duplicate_job["last_error"])
+
+    def test_p2_backpressure_does_not_block_p0(self) -> None:
+        upsert_source(
+            self.connection,
+            source_id="sec_litigation_releases",
+            name="SEC",
+            source_type="official_primary_feed",
+            authority_tier="P0_official",
+        )
+        self.add_observation(
+            "p2-a",
+            "Example One files for Chapter 11 bankruptcy",
+            "https://example.test/p2-a",
+        )
+        self.add_observation(
+            "p2-b",
+            "Example Two files for Chapter 11 bankruptcy",
+            "https://example.test/p2-b",
+        )
+        self.add_observation(
+            "p0-sec",
+            "SEC charges Example Three with accounting fraud",
+            "https://www.sec.gov/litigation/p0-sec",
+            source_id="sec_litigation_releases",
+        )
+        result = extractor.process_pending(
+            self.connection,
+            limit=10,
+            p2_pending_cap=1,
+            p2_cycle_cap=1,
+        )
+        self.assertEqual(result["candidates"], 2)
+        self.assertEqual(result["backpressure_filtered"], 1)
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM canonical_events WHERE discovery_source='sec_litigation_releases'"
+            ).fetchone()[0],
+            1,
+        )
 
     def test_entity_action_date_clusters_different_headlines(self) -> None:
         self.add_observation(

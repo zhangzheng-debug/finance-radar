@@ -1,8 +1,10 @@
 # Backup inventory
 
-- Backup version: `2026.07.22.1`
-- Application release: `20260721T184054Z`
-- Accepted migration snapshot: `20260721T185507Z`
+- Backup version: `2026.07.22.2`
+- Application release: `20260722T084500Z`
+- Accepted migration snapshot: `20260722T084527Z`
+- Restored ledger proof: `1,872` events and `3,101` evidence rows
+- Shadow model: `risk-router-v4-c82cfde20465` (`QUALIFIED_SHADOW`, no trading)
 
 ## Stored in Git
 
@@ -15,10 +17,12 @@
 
 ## Stored in the private GitHub Release
 
-The release `v2026.07.22.1` carries the current encrypted AWS recovery asset.
+The release `v2026.07.22.2` carries the current encrypted AWS recovery asset
+and the exact qualified SHADOW model binary.
 Its encrypted and authenticated-plaintext SHA-256 hashes are recorded in
-`release/backup-20260722.json`. The preceding `v2026.07.19.1` release
-continues to carry the offline demo and reviewer evidence bundle.
+`release/backup-20260722.json`. The preceding `v2026.07.22.1` remains the
+prior AWS snapshot; `v2026.07.19.1` continues to carry the offline demo and
+reviewer evidence bundle.
 
 1. Current encrypted AWS migration snapshot: application releases, event
    history, evidence objects, reports, pinned local-model runtime/model, and
@@ -26,6 +30,8 @@ continues to carry the offline demo and reviewer evidence bundle.
    asset; it excludes the trading project, SSH material, and TLS private keys.
 2. The prior release's offline five-page demonstration and reviewer-facing
    evidence bundles remain valid supporting artifacts.
+3. The isolated restore audit verifies the blind-v3 report, model card,
+   declared SHA-256, and recovered `risk_router.joblib` as one matching chain.
 
 ## Deliberately local only
 

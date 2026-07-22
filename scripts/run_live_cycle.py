@@ -33,7 +33,9 @@ from opennews_free_collector import collect_category
 from sec_filing_enricher import (
     SecFilingClient,
     enrich_pending as enrich_sec_filings,
+    materialize_parsed_enrichment_evidence,
     repair_negated_enrichment_matches,
+    reclassify_parsed_enrichments,
 )
 from snapshot_evidence_sources import archive_pending as archive_evidence_sources
 from snapshot_evidence_sources import write_report as write_snapshot_report
@@ -160,6 +162,12 @@ def run_cycle(
     result["sec_filing_enrichment"]["negated_match_repairs"] = (
         repair_negated_enrichment_matches(connection)
     )
+    result["sec_filing_enrichment"]["semantic_reclassifications"] = (
+        reclassify_parsed_enrichments(connection)
+    )
+    result["sec_filing_enrichment"]["evidence_materialization"] = (
+        materialize_parsed_enrichment_evidence(connection)
+    )
 
     if sec_user_agent:
         result["official_primary_page_enrichment"] = enrich_official_primary_pages(
@@ -219,7 +227,7 @@ def run_cycle(
             operations,
             evidence_object_store,
             user_agent=sec_user_agent,
-            limit=4,
+            limit=8,
             timeout=timeout,
         )
         write_snapshot_report(
