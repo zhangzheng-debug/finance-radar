@@ -318,6 +318,29 @@ class OperationsRepository:
             ).fetchone()
         return row is not None
 
+    def source_snapshot_pairs(self) -> set[tuple[str, str]]:
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                """SELECT DISTINCT event_id,evidence_id
+                   FROM evidence_object_links
+                   WHERE object_kind='SOURCE_SNAPSHOT'"""
+            ).fetchall()
+        return {(str(row["event_id"]), str(row["evidence_id"])) for row in rows}
+
+    def source_snapshot_failure_pairs(self) -> dict[str, set[tuple[str, str]]]:
+        state = self.get_state("source_snapshot_failures_v1", {})
+        terminal: set[tuple[str, str]] = set()
+        retry_pending: set[tuple[str, str]] = set()
+        if not isinstance(state, dict):
+            return {"terminal_policy": terminal, "retry_pending": retry_pending}
+        for key, item in state.items():
+            if not isinstance(item, dict) or ":" not in str(key):
+                continue
+            event_id, evidence_id = str(key).split(":", 1)
+            target = terminal if item.get("terminal_policy") is True else retry_pending
+            target.add((event_id, evidence_id))
+        return {"terminal_policy": terminal, "retry_pending": retry_pending}
+
     def evidence_archive_summary(self, limit: int = 20) -> dict[str, Any]:
         with closing(self.connect()) as connection:
             totals = connection.execute(
@@ -327,7 +350,9 @@ class OperationsRepository:
             kinds = connection.execute(
                 """SELECT
                        COUNT(DISTINCT CASE WHEN object_kind='SOURCE_SNAPSHOT' THEN object_sha256 END) AS source_snapshots,
-                       COUNT(DISTINCT CASE WHEN object_kind='EXACT_EXCERPT' THEN object_sha256 END) AS exact_excerpts
+                       COUNT(DISTINCT CASE WHEN object_kind='EXACT_EXCERPT' THEN object_sha256 END) AS exact_excerpts,
+                       COUNT(DISTINCT CASE WHEN object_kind='SOURCE_SNAPSHOT'
+                                          THEN event_id || ':' || evidence_id END) AS source_snapshot_links
                    FROM evidence_object_links"""
             ).fetchone()
             by_mime = {
@@ -354,6 +379,7 @@ class OperationsRepository:
             "objects": int(totals["objects"] or 0),
             "archived_bytes": int(totals["archived_bytes"] or 0),
             "source_snapshots": int(kinds["source_snapshots"] or 0),
+            "source_snapshot_links": int(kinds["source_snapshot_links"] or 0),
             "exact_excerpts": int(kinds["exact_excerpts"] or 0),
             "by_mime": by_mime,
             "recent_objects": recent,

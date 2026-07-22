@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-07-22T08:09:36.560832+00:00",
+  "source_database": "finance_radar_20260722T072926Z.sqlite3",
+  "source_database_sha256": "ca0c9b74e8d3d38b0fbef524e44897b12aad0ea6b2d994c75ee7c5f9981b391a",
+  "policy": {
+    "schema_version": 1,
+    "task": "evidence-stage material adverse risk routing",
+    "axes": {
+      "materiality": [
+        "MATERIAL_ADVERSE",
+        "NOT_MATERIAL_ADVERSE",
+        "UNCLEAR"
+      ],
+      "polarity": [
+        "ADVERSE",
+        "POSITIVE",
+        "NEUTRAL",
+        "MIXED",
+        "UNCLEAR"
+      ],
+      "evidence_state": [
+        "PRIMARY_SUPPORTED",
+        "DISCOVERY_ONLY",
+        "CONFLICTED",
+        "INSUFFICIENT"
+      ]
+    },
+    "rules": {
+      "risk": [
+        "bankruptcy_or_receivership",
+        "going_concern_or_default",
+        "equity_cancellation_or_severe_dilution",
+        "listing_loss_or_suspension",
+        "enforcement_finality",
+        "bank_regulatory_action",
+        "fraud_or_misappropriation",
+        "product_safety_material",
+        "cyber_or_asset_loss",
+        "material_operating_harm",
+        "sanctions_or_attack"
+      ],
+      "non_target": [
+        "explicit_not_event_truth",
+        "positive_results_or_guidance",
+        "capital_return",
+        "ordinary_product_or_partnership",
+        "routine_governance",
+        "routine_statistics_or_guidance",
+        "whistleblower_award_administration",
+        "paid_transaction_or_continuity"
+      ],
+      "conflict": [
+        "allegation_denied_or_unresolved",
+        "no_harm_yet",
+        "conditional_or_expected",
+        "management_departure_or_change"
+      ]
+    },
+    "mapping": {
+      "RISK_REVIEW": "material adverse + adverse + primary supported",
+      "NON_TARGET": "not material adverse + positive/neutral + primary supported",
+      "ABSTAIN": "discovery-only, conflicted, insufficient, mixed or unclear"
+    },
+    "prohibited_learned_features": [
+      "event_family",
+      "event_type",
+      "source_id",
+      "authority_tier",
+      "event_status",
+      "manual_grade",
+      "post_event_market_data"
+    ]
+  },
+  "policy_sha256": "828d5df53c1d66db10da980b8895b22a8a3d774984c509a9ad6341120d2d27a1",
+  "adjudicator": "codex_gpt5_evidence_policy_v1",
+  "reviewer_type": "AI_RUBRIC_ADJUDICATOR_NOT_HUMAN",
+  "human_labels_claimed": false,
+  "total_rows": 1869,
+  "development_rows": 544,
+  "blind_rows": 80,
+  "development_label_counts": {
+    "ABSTAIN": 400,
+    "NON_TARGET": 60,
+    "RISK_REVIEW": 84
+  },
+  "blind_label_counts": {
+    "ABSTAIN": 20,
+    "RISK_REVIEW": 30,
+    "NON_TARGET": 30
+  },
+  "blind_source_counts": {
+    "opennews_free": 9,
+    "sec_litigation_releases": 7,
+    "fda_medwatch": 6,
+    "sec_edgar": 37,
+    "external_official_primary": 1,
+    "cftc_enforcement": 3,
+    "ftc_press": 2,
+    "federal_reserve": 1,
+    "ecb_statistical_press": 1,
+    "bls_key_indicators": 3,
+    "us_marad": 1,
+    "federal_reserve_press": 2,
+    "sec_current_filings": 1,
+    "ecb_press": 3,
+    "fdic_press_releases": 2,
+    "dvids_centcom_public_affairs": 1
+  },
+  "axis_counts": {
+    "materiality": {
+      "UNCLEAR": 1591,
+      "NOT_MATERIAL_ADVERSE": 141,
+      "MATERIAL_ADVERSE": 137
+    },
+    "polarity": {
+      "UNCLEAR": 1571,
+      "NEUTRAL": 91,
+      "ADVERSE": 137,
+      "POSITIVE": 50,
+      "MIXED": 20
+    },
+    "evidence_state": {
+      "INSUFFICIENT": 795,
+      "PRIMARY_SUPPORTED": 1054,
+      "CONFLICTED": 20
+    }
+  },
+  "reason_counts": {
+    "evidence_insufficient": 795,
+    "reviewed_candidate_invalid_or_wrong_time": 73,
+    "bankruptcy_or_receivership": 72,
+    "ordinary_product_or_partnership": 25,
+    "no_decisive_adverse_or_non_target_clause": 632,
+    "listing_loss_or_suspension": 8,
+    "equity_cancellation_or_severe_dilution": 36,
+    "reviewed_identity_or_time_mismatch": 19,
+    "material_operating_harm": 3,
+    "management_departure_or_change": 72,
+    "explicit_not_event_truth": 1,
+    "conditional_or_expected": 80,
+    "allegation_denied_or_unresolved": 10,
+    "going_concern_or_default": 15,
+    "discovery_primary_semantic_mismatch": 1,
+    "whistleblower_award_administration": 1,
+    "bank_regulatory_action": 2,
+    "enforcement_finality": 11,
+    "routine_statistics_or_guidance": 10,
+    "routine_governance": 4,
+    "no_harm_yet": 12,
+    "product_safety_material": 10,
+    "fraud_or_misappropriation": 5,
+    "capital_return": 17,
+    "positive_results_or_guidance": 9,
+    "sanctions_or_attack": 1,
+    "evidence_primary_supported": 7,
+    "going_concern_dependency_on_unassured_financing": 1,
+    "total_investment_loss_explicit": 1,
+    "paid_transaction_or_continuity": 3
+  },
+  "quality_checks": {
+    "all_rows_have_text_hash": true,
+    "all_rows_have_rationale": true,
+    "all_rows_explicitly_not_human": true,
+    "blind_minimums_met": true,
+    "blind_source_groups_gte_4": true,
+    "blind_predictions_absent": true
+  }
+}

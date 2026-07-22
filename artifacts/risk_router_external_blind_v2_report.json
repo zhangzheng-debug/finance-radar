@@ -1,0 +1,1917 @@
+{
+  "schema_version": 2,
+  "evaluation_type": "frozen_label_first_external_blind_v2_one_time",
+  "evaluated_at": "2026-07-22T08:13:04.567593+00:00",
+  "freeze_id": "external-blind-v2-35fe0a851d63",
+  "dataset_sha256": "35fe0a851d63f2f34f2d25210cff07ce476c1c95b5eb148f32f0a94d64b323b2",
+  "rows": 80,
+  "label_counts": {
+    "ABSTAIN": 20,
+    "RISK_REVIEW": 30,
+    "NON_TARGET": 30
+  },
+  "source_counts": {
+    "opennews_free": 9,
+    "sec_litigation_releases": 7,
+    "fda_medwatch": 6,
+    "sec_edgar": 37,
+    "external_official_primary": 1,
+    "cftc_enforcement": 3,
+    "ftc_press": 2,
+    "federal_reserve": 1,
+    "ecb_statistical_press": 1,
+    "bls_key_indicators": 3,
+    "us_marad": 1,
+    "federal_reserve_press": 2,
+    "sec_current_filings": 1,
+    "ecb_press": 3,
+    "fdic_press_releases": 2,
+    "dvids_centcom_public_affairs": 1
+  },
+  "label_provenance": "AI_RUBRIC_ADJUDICATOR_NOT_HUMAN",
+  "human_labels_claimed": false,
+  "model_version": "risk-router-v3-240814bae596",
+  "model_artifact_sha256": "3d5b732cefd0c95fd335895c2addd53684079b2a6320ba08460718ccb2c21d95",
+  "training_dataset_sha256": "240814bae596ec79d225c70fd2493f14ec1fc9981fb1f0689dbfcac9cfa7ea23",
+  "decision_policy": {
+    "abstain_threshold": 0.0,
+    "risk_rescue_floor": 0.15,
+    "risk_rescue_margin": 0.1,
+    "selected_on": "development OOF only"
+  },
+  "overlap_audit": {
+    "event_id": 0,
+    "entity_group": 0,
+    "event_chain_group": 0,
+    "text_sha256": 0
+  },
+  "direct_metrics": {
+    "accuracy": 0.5625,
+    "macro_f1": 0.5622042016408213,
+    "risk_recall": 0.4,
+    "risk_precision": 0.8571428571428571,
+    "non_target_recall": 0.43333333333333335,
+    "non_target_false_risk_rate": 0.06666666666666667,
+    "all_non_risk_false_risk_rate": 0.04,
+    "abstain_recall": 1.0,
+    "abstain_precision": 0.39215686274509803,
+    "classification_report": {
+      "RISK_REVIEW": {
+        "precision": 0.8571428571428571,
+        "recall": 0.4,
+        "f1-score": 0.5454545454545454,
+        "support": 30.0
+      },
+      "NON_TARGET": {
+        "precision": 0.8666666666666667,
+        "recall": 0.43333333333333335,
+        "f1-score": 0.5777777777777777,
+        "support": 30.0
+      },
+      "ABSTAIN": {
+        "precision": 0.39215686274509803,
+        "recall": 1.0,
+        "f1-score": 0.5633802816901409,
+        "support": 20.0
+      },
+      "accuracy": 0.5625,
+      "macro avg": {
+        "precision": 0.7053221288515407,
+        "recall": 0.6111111111111112,
+        "f1-score": 0.5622042016408213,
+        "support": 80.0
+      },
+      "weighted avg": {
+        "precision": 0.7444677871148458,
+        "recall": 0.5625,
+        "f1-score": 0.5620571916346564,
+        "support": 80.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        12,
+        2,
+        16
+      ],
+      [
+        2,
+        13,
+        15
+      ],
+      [
+        0,
+        0,
+        20
+      ]
+    ]
+  },
+  "runtime_metrics": {
+    "accuracy": 0.3875,
+    "macro_f1": 0.35634920634920636,
+    "risk_recall": 0.3,
+    "risk_precision": 0.9,
+    "non_target_recall": 0.1,
+    "non_target_false_risk_rate": 0.03333333333333333,
+    "all_non_risk_false_risk_rate": 0.02,
+    "abstain_recall": 0.95,
+    "abstain_precision": 0.296875,
+    "classification_report": {
+      "RISK_REVIEW": {
+        "precision": 0.9,
+        "recall": 0.3,
+        "f1-score": 0.45,
+        "support": 30.0
+      },
+      "NON_TARGET": {
+        "precision": 0.5,
+        "recall": 0.1,
+        "f1-score": 0.16666666666666666,
+        "support": 30.0
+      },
+      "ABSTAIN": {
+        "precision": 0.296875,
+        "recall": 0.95,
+        "f1-score": 0.4523809523809524,
+        "support": 20.0
+      },
+      "accuracy": 0.3875,
+      "macro avg": {
+        "precision": 0.5656249999999999,
+        "recall": 0.45,
+        "f1-score": 0.35634920634920636,
+        "support": 80.0
+      },
+      "weighted avg": {
+        "precision": 0.59921875,
+        "recall": 0.3875,
+        "f1-score": 0.3443452380952381,
+        "support": 80.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        9,
+        2,
+        19
+      ],
+      [
+        1,
+        3,
+        26
+      ],
+      [
+        0,
+        1,
+        19
+      ]
+    ]
+  },
+  "direct_source_metrics": {
+    "bls_key_indicators": {
+      "rows": 3,
+      "label_counts": {
+        "NON_TARGET": 3
+      },
+      "accuracy": 0.3333333333333333,
+      "risk_false_positive_count": 0
+    },
+    "cftc_enforcement": {
+      "rows": 3,
+      "label_counts": {
+        "NON_TARGET": 1,
+        "RISK_REVIEW": 2
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "dvids_centcom_public_affairs": {
+      "rows": 1,
+      "label_counts": {
+        "RISK_REVIEW": 1
+      },
+      "accuracy": 1.0,
+      "risk_false_positive_count": 0
+    },
+    "ecb_press": {
+      "rows": 3,
+      "label_counts": {
+        "NON_TARGET": 3
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "ecb_statistical_press": {
+      "rows": 1,
+      "label_counts": {
+        "NON_TARGET": 1
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "external_official_primary": {
+      "rows": 1,
+      "label_counts": {
+        "NON_TARGET": 1
+      },
+      "accuracy": 1.0,
+      "risk_false_positive_count": 0
+    },
+    "fda_medwatch": {
+      "rows": 6,
+      "label_counts": {
+        "RISK_REVIEW": 6
+      },
+      "accuracy": 0.6666666666666666,
+      "risk_false_positive_count": 0
+    },
+    "fdic_press_releases": {
+      "rows": 2,
+      "label_counts": {
+        "NON_TARGET": 1,
+        "RISK_REVIEW": 1
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "federal_reserve": {
+      "rows": 1,
+      "label_counts": {
+        "RISK_REVIEW": 1
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "federal_reserve_press": {
+      "rows": 2,
+      "label_counts": {
+        "ABSTAIN": 1,
+        "RISK_REVIEW": 1
+      },
+      "accuracy": 0.5,
+      "risk_false_positive_count": 0
+    },
+    "ftc_press": {
+      "rows": 2,
+      "label_counts": {
+        "RISK_REVIEW": 2
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "opennews_free": {
+      "rows": 9,
+      "label_counts": {
+        "ABSTAIN": 9
+      },
+      "accuracy": 1.0,
+      "risk_false_positive_count": 0
+    },
+    "sec_current_filings": {
+      "rows": 1,
+      "label_counts": {
+        "RISK_REVIEW": 1
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "sec_edgar": {
+      "rows": 37,
+      "label_counts": {
+        "RISK_REVIEW": 8,
+        "ABSTAIN": 9,
+        "NON_TARGET": 20
+      },
+      "accuracy": 0.6216216216216216,
+      "risk_false_positive_count": 2
+    },
+    "sec_litigation_releases": {
+      "rows": 7,
+      "label_counts": {
+        "RISK_REVIEW": 7
+      },
+      "accuracy": 0.5714285714285714,
+      "risk_false_positive_count": 0
+    },
+    "us_marad": {
+      "rows": 1,
+      "label_counts": {
+        "ABSTAIN": 1
+      },
+      "accuracy": 1.0,
+      "risk_false_positive_count": 0
+    }
+  },
+  "runtime_source_metrics": {
+    "bls_key_indicators": {
+      "rows": 3,
+      "label_counts": {
+        "NON_TARGET": 3
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "cftc_enforcement": {
+      "rows": 3,
+      "label_counts": {
+        "NON_TARGET": 1,
+        "RISK_REVIEW": 2
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "dvids_centcom_public_affairs": {
+      "rows": 1,
+      "label_counts": {
+        "RISK_REVIEW": 1
+      },
+      "accuracy": 1.0,
+      "risk_false_positive_count": 0
+    },
+    "ecb_press": {
+      "rows": 3,
+      "label_counts": {
+        "NON_TARGET": 3
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "ecb_statistical_press": {
+      "rows": 1,
+      "label_counts": {
+        "NON_TARGET": 1
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "external_official_primary": {
+      "rows": 1,
+      "label_counts": {
+        "NON_TARGET": 1
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "fda_medwatch": {
+      "rows": 6,
+      "label_counts": {
+        "RISK_REVIEW": 6
+      },
+      "accuracy": 0.5,
+      "risk_false_positive_count": 0
+    },
+    "fdic_press_releases": {
+      "rows": 2,
+      "label_counts": {
+        "NON_TARGET": 1,
+        "RISK_REVIEW": 1
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "federal_reserve": {
+      "rows": 1,
+      "label_counts": {
+        "RISK_REVIEW": 1
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "federal_reserve_press": {
+      "rows": 2,
+      "label_counts": {
+        "ABSTAIN": 1,
+        "RISK_REVIEW": 1
+      },
+      "accuracy": 0.5,
+      "risk_false_positive_count": 0
+    },
+    "ftc_press": {
+      "rows": 2,
+      "label_counts": {
+        "RISK_REVIEW": 2
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "opennews_free": {
+      "rows": 9,
+      "label_counts": {
+        "ABSTAIN": 9
+      },
+      "accuracy": 0.8888888888888888,
+      "risk_false_positive_count": 0
+    },
+    "sec_current_filings": {
+      "rows": 1,
+      "label_counts": {
+        "RISK_REVIEW": 1
+      },
+      "accuracy": 0.0,
+      "risk_false_positive_count": 0
+    },
+    "sec_edgar": {
+      "rows": 37,
+      "label_counts": {
+        "RISK_REVIEW": 8,
+        "ABSTAIN": 9,
+        "NON_TARGET": 20
+      },
+      "accuracy": 0.40540540540540543,
+      "risk_false_positive_count": 1
+    },
+    "sec_litigation_releases": {
+      "rows": 7,
+      "label_counts": {
+        "RISK_REVIEW": 7
+      },
+      "accuracy": 0.2857142857142857,
+      "risk_false_positive_count": 0
+    },
+    "us_marad": {
+      "rows": 1,
+      "label_counts": {
+        "ABSTAIN": 1
+      },
+      "accuracy": 1.0,
+      "risk_false_positive_count": 0
+    }
+  },
+  "gate_thresholds": {
+    "rows_exact": 80,
+    "risk_rows_min": 30,
+    "non_target_rows_min": 30,
+    "abstain_rows_min": 20,
+    "accuracy_min": 0.8,
+    "macro_f1_min": 0.8,
+    "risk_recall_min": 0.85,
+    "non_target_false_risk_max": 0.1,
+    "abstain_recall_min": 0.75,
+    "runtime_accuracy_min": 0.75,
+    "runtime_risk_recall_min": 0.8,
+    "overlap_max": 0
+  },
+  "gates": {
+    "rows": true,
+    "risk_rows": true,
+    "non_target_rows": true,
+    "abstain_rows": true,
+    "accuracy": false,
+    "macro_f1": false,
+    "risk_recall": false,
+    "non_target_false_risk": true,
+    "abstain_recall": true,
+    "runtime_accuracy": false,
+    "runtime_risk_recall": false,
+    "overlap": true,
+    "freeze_hash": true,
+    "development_gate": true
+  },
+  "gate_pass": false,
+  "promotion_decision": "HOLD_SHADOW",
+  "frozen_file_mutated_with_predictions": false,
+  "predictions": [
+    {
+      "row": 1,
+      "sample_id": "V3-002c528f7d8d8847c944",
+      "event_id": "FR-LIVE-42ca7861f88c94adf98e0b0037a35810",
+      "source_group": "opennews_free",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.17923047,
+        "NON_TARGET": 0.18789611,
+        "ABSTAIN": 0.63287342
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 2,
+      "sample_id": "V3-0f2a2dbabe4f0ce7eac9",
+      "event_id": "FR-LIVE-515496705861abb5d27e46e984da12c8",
+      "source_group": "sec_litigation_releases",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.54284548,
+        "NON_TARGET": 0.07680375,
+        "ABSTAIN": 0.38035076
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 3,
+      "sample_id": "V3-1071a4dd1b7e0f454790",
+      "event_id": "FR-LIVE-4d42eaecd9281eb9795dd486bce0f32b",
+      "source_group": "fda_medwatch",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.19060298,
+        "NON_TARGET": 0.04033443,
+        "ABSTAIN": 0.76906259
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 4,
+      "sample_id": "V3-164cafad6a256be99448",
+      "event_id": "FR-HIST-CAND-11160772017432132691",
+      "source_group": "sec_edgar",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "NON_TARGET",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.16390408,
+        "NON_TARGET": 0.50161359,
+        "ABSTAIN": 0.33448233
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 5,
+      "sample_id": "V3-19f52daf36030702750d",
+      "event_id": "FR-HIST-CAND-16185300028448829762",
+      "source_group": "sec_edgar",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.00504444,
+        "NON_TARGET": 0.00220298,
+        "ABSTAIN": 0.99275258
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 6,
+      "sample_id": "V3-2027883bbdab73e10bac",
+      "event_id": "FR-LIVE-803d6a7e9929864585f6020946e3c616",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.26235736,
+        "NON_TARGET": 0.21074486,
+        "ABSTAIN": 0.52689778
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 7,
+      "sample_id": "V3-229ea60e062975144b28",
+      "event_id": "FR-HIST-CAND-6985128258962483655",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.13425763,
+        "NON_TARGET": 0.42933676,
+        "ABSTAIN": 0.43640561
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 8,
+      "sample_id": "V3-23ee6b4320fa2a311701",
+      "event_id": "FR-HIST-CAND-16601263895737041812",
+      "source_group": "external_official_primary",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.00346579,
+        "NON_TARGET": 0.7638116,
+        "ABSTAIN": 0.23272262
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 9,
+      "sample_id": "V3-2790c81aa7cae0f9ff57",
+      "event_id": "FR-HIST-CAND-3914732029191464843",
+      "source_group": "sec_edgar",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.00875462,
+        "NON_TARGET": 0.04292713,
+        "ABSTAIN": 0.94831825
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 10,
+      "sample_id": "V3-2a8f92e471ec0908d8fb",
+      "event_id": "FR-HIST-CAND-6495027695820583913",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.05876556,
+        "NON_TARGET": 0.08251114,
+        "ABSTAIN": 0.8587233
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 11,
+      "sample_id": "V3-2ba68ab3453cacd46d71",
+      "event_id": "FR-LIVE-ccc3fe6f8d15c0c2ac50865b08021e31",
+      "source_group": "cftc_enforcement",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.16174438,
+        "NON_TARGET": 0.17617008,
+        "ABSTAIN": 0.66208555
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 12,
+      "sample_id": "V3-2df18cdd0eff12715ef3",
+      "event_id": "FR-LIVE-5f6abf0a559fa8bc4172e3772db630a9",
+      "source_group": "ftc_press",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.17129206,
+        "NON_TARGET": 0.02285586,
+        "ABSTAIN": 0.80585208
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 13,
+      "sample_id": "V3-3177dcd6d16a48321700",
+      "event_id": "FR-LIVE-8473fbad30faa23d6a87d1d72b4c86d3",
+      "source_group": "federal_reserve",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.08116154,
+        "NON_TARGET": 0.11962069,
+        "ABSTAIN": 0.79921778
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 14,
+      "sample_id": "V3-31f10544c53533535423",
+      "event_id": "FR-LIVE-4a0c19bf1d98e6e0791bd84fa9892d3c",
+      "source_group": "opennews_free",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.02484201,
+        "NON_TARGET": 0.11153508,
+        "ABSTAIN": 0.86362291
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 15,
+      "sample_id": "V3-32e1f3b1206ee38a370c",
+      "event_id": "FR-LIVE-996e0523e974309c0ded96c233fd6698",
+      "source_group": "ecb_statistical_press",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.01893409,
+        "NON_TARGET": 0.04053208,
+        "ABSTAIN": 0.94053383
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 16,
+      "sample_id": "V3-37a723ef7d8137dac7ef",
+      "event_id": "FR-LIVE-c8d57b64c2cc15f80d2ede40cfe36e85",
+      "source_group": "cftc_enforcement",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.34162171,
+        "NON_TARGET": 0.19641815,
+        "ABSTAIN": 0.46196014
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 17,
+      "sample_id": "V3-38c81eed37e084c32584",
+      "event_id": "FR-HIST-CAND-5563137566312220136",
+      "source_group": "sec_edgar",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.0064546,
+        "NON_TARGET": 0.0059802,
+        "ABSTAIN": 0.9875652
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 18,
+      "sample_id": "V3-3c186ac59c6804cf5abf",
+      "event_id": "FR-HIST-CAND-6995216780457357826",
+      "source_group": "sec_edgar",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.00379488,
+        "NON_TARGET": 0.02355802,
+        "ABSTAIN": 0.97264709
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 19,
+      "sample_id": "V3-3c8e607d53c4fa6a8119",
+      "event_id": "FR-HIST-CAND-1001953416798665777",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.02574632,
+        "NON_TARGET": 0.54912641,
+        "ABSTAIN": 0.42512727
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 20,
+      "sample_id": "V3-3d2c73518c3186b2787c",
+      "event_id": "FR-HIST-CAND-16671981051802220153",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.04742788,
+        "NON_TARGET": 0.39259629,
+        "ABSTAIN": 0.55997583
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 21,
+      "sample_id": "V3-3e9f107f43746d9b35cd",
+      "event_id": "FR-LIVE-3d07c284af8a25e6b254411418bccf47",
+      "source_group": "opennews_free",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.0947444,
+        "NON_TARGET": 0.3886704,
+        "ABSTAIN": 0.5165852
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 22,
+      "sample_id": "V3-4458d24f16af1e1d724a",
+      "event_id": "FR-LIVE-a05a9cab0e74d14adc1187c80b7f5c4b",
+      "source_group": "cftc_enforcement",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.25255454,
+        "NON_TARGET": 0.17852371,
+        "ABSTAIN": 0.56892175
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 23,
+      "sample_id": "V3-4b523cef12494a79ba27",
+      "event_id": "FR-HIST-CAND-1726542871695052124",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "RISK_REVIEW",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.34471586,
+        "NON_TARGET": 0.3643367,
+        "ABSTAIN": 0.29094743
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 24,
+      "sample_id": "V3-4c68f4716187c667215e",
+      "event_id": "FR-HIST-CAND-13447245534399073955",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.08817193,
+        "NON_TARGET": 0.80833814,
+        "ABSTAIN": 0.10348993
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 25,
+      "sample_id": "V3-51387c07245ff0ce7e8f",
+      "event_id": "FR-HIST-CAND-3391268008465053253",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "NON_TARGET",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.08179646,
+        "NON_TARGET": 0.84678455,
+        "ABSTAIN": 0.07141899
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 26,
+      "sample_id": "V3-51f415df5e20b523f932",
+      "event_id": "FR-LIVE-ee03e69896306f6b5d8098e91ebf3168",
+      "source_group": "sec_litigation_releases",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.28079854,
+        "NON_TARGET": 0.02329165,
+        "ABSTAIN": 0.69590982
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 27,
+      "sample_id": "V3-5265a3927b11575101a1",
+      "event_id": "FR-LIVE-450b43b68f323fa587c4dbcc5a46ecaa",
+      "source_group": "bls_key_indicators",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.21001666,
+        "NON_TARGET": 0.52875056,
+        "ABSTAIN": 0.26123278
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 28,
+      "sample_id": "V3-54a8b316424b1ee5d2e1",
+      "event_id": "FR-HIST-CAND-12481745168331563342",
+      "source_group": "sec_edgar",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.00257239,
+        "NON_TARGET": 0.00220386,
+        "ABSTAIN": 0.99522375
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 29,
+      "sample_id": "V3-55b985f632d3032e6f31",
+      "event_id": "FR-LIVE-ceb6855a0d32ab59e54442933c8c2903",
+      "source_group": "sec_litigation_releases",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.35231502,
+        "NON_TARGET": 0.00465448,
+        "ABSTAIN": 0.64303049
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 30,
+      "sample_id": "V3-586f8eba3bfb6de1faac",
+      "event_id": "FR-LIVE-eed9151c62729747422910a77daea675",
+      "source_group": "us_marad",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.06088887,
+        "NON_TARGET": 0.057627,
+        "ABSTAIN": 0.88148413
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 31,
+      "sample_id": "V3-5cca2e23f4d821ad7f08",
+      "event_id": "FR-LIVE-217fec6e08defd727c152ab0dcc3f1dc",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.0365819,
+        "NON_TARGET": 0.39886944,
+        "ABSTAIN": 0.56454865
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 32,
+      "sample_id": "V3-5d7c6c3343d77b7bda65",
+      "event_id": "FR-HIST-CAND-11706952841162024897",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.04068419,
+        "NON_TARGET": 0.6319918,
+        "ABSTAIN": 0.32732401
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 33,
+      "sample_id": "V3-5ee6049e079bbe79b05d",
+      "event_id": "FR-HIST-CAND-13735668542659656161",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.05723842,
+        "NON_TARGET": 0.48693741,
+        "ABSTAIN": 0.45582417
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 34,
+      "sample_id": "V3-65bae6fb7f9bc4adf995",
+      "event_id": "FR-LIVE-ed949794afa9b4bd588c7b5724aeb50c",
+      "source_group": "federal_reserve_press",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.18839227,
+        "NON_TARGET": 0.02823253,
+        "ABSTAIN": 0.7833752
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 35,
+      "sample_id": "V3-6727e3defe13b2065bd9",
+      "event_id": "FR-LIVE-899daf0c8b05f8d1bb96f1f2c5348521",
+      "source_group": "sec_current_filings",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.01480086,
+        "NON_TARGET": 0.00730242,
+        "ABSTAIN": 0.97789673
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 36,
+      "sample_id": "V3-67644eb10aa2daef8967",
+      "event_id": "FR-LIVE-a76a9da85f264d82e1113c946634c5a2",
+      "source_group": "bls_key_indicators",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.1434124,
+        "NON_TARGET": 0.42497915,
+        "ABSTAIN": 0.43160844
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 37,
+      "sample_id": "V3-6a1e08ea166baee36cad",
+      "event_id": "FR-LIVE-9a8988c8a34643c3c390df0e84bd27e6",
+      "source_group": "sec_litigation_releases",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.27000922,
+        "NON_TARGET": 0.09120395,
+        "ABSTAIN": 0.63878683
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 38,
+      "sample_id": "V3-6ca854c44f63f88397c0",
+      "event_id": "FR-HIST-CAND-15225749718705513988",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.01798138,
+        "NON_TARGET": 0.60649005,
+        "ABSTAIN": 0.37552857
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 39,
+      "sample_id": "V3-6d7795b7e749df2dc8d3",
+      "event_id": "FR-HIST-CAND-12042507882071609762",
+      "source_group": "sec_edgar",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "RISK_REVIEW",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.95966609,
+        "NON_TARGET": 0.00123041,
+        "ABSTAIN": 0.0391035
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 40,
+      "sample_id": "V3-70b396b20c831004c62d",
+      "event_id": "FR-HIST-CAND-11003218352509679441",
+      "source_group": "sec_edgar",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "RISK_REVIEW",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.98054958,
+        "NON_TARGET": 0.00397002,
+        "ABSTAIN": 0.0154804
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 41,
+      "sample_id": "V3-783b805722f8dbe47a39",
+      "event_id": "FR-LIVE-49d4f2502365847ac0e64cf2b80e2d66",
+      "source_group": "opennews_free",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.07335277,
+        "NON_TARGET": 0.27866207,
+        "ABSTAIN": 0.64798516
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 42,
+      "sample_id": "V3-796f7ab07bc20bc069ee",
+      "event_id": "FR-LIVE-671e727e8d1577045b2508cd4694e5d4",
+      "source_group": "ecb_press",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.05729654,
+        "NON_TARGET": 0.04099825,
+        "ABSTAIN": 0.90170521
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 43,
+      "sample_id": "V3-7aaf60e0b1700ad940bd",
+      "event_id": "FR-LIVE-33f1d04c751625bb2be3d6cb97b04545",
+      "source_group": "fdic_press_releases",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.01585,
+        "NON_TARGET": 0.02772112,
+        "ABSTAIN": 0.95642888
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 44,
+      "sample_id": "V3-7b20fdb6c5350bac2560",
+      "event_id": "FR-HIST-CAND-9055001776920896999",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "NON_TARGET",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.165226,
+        "NON_TARGET": 0.81882518,
+        "ABSTAIN": 0.01594881
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 45,
+      "sample_id": "V3-7d626b5bf11c3bd605cb",
+      "event_id": "FR-HIST-CAND-3359513550954859094",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.27951128,
+        "NON_TARGET": 0.60782387,
+        "ABSTAIN": 0.11266485
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 46,
+      "sample_id": "V3-7e49b84591ae7a2b42a4",
+      "event_id": "FR-LIVE-0268c91405ef8f72566b8eca56e66e5e",
+      "source_group": "ftc_press",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.26174238,
+        "NON_TARGET": 0.01423015,
+        "ABSTAIN": 0.72402748
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 47,
+      "sample_id": "V3-7f2f2d7f89b230a5bbbe",
+      "event_id": "FR-LIVE-0090089b4eddb98f04004bda870eec7c",
+      "source_group": "ecb_press",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.07476411,
+        "NON_TARGET": 0.03893344,
+        "ABSTAIN": 0.88630245
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 48,
+      "sample_id": "V3-81c35705dbdf6056bfc5",
+      "event_id": "FR-LIVE-06427b7e02ff440155e45e005dd2b17a",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.14500548,
+        "NON_TARGET": 0.09742523,
+        "ABSTAIN": 0.75756929
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 49,
+      "sample_id": "V3-852683801a4f1fa10bf3",
+      "event_id": "FR-HIST-CAND-16160438980135517773",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "NON_TARGET",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.25369946,
+        "NON_TARGET": 0.38556374,
+        "ABSTAIN": 0.3607368
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 50,
+      "sample_id": "V3-8590f402602ba581df5b",
+      "event_id": "FR-LIVE-b129a4664ac61b23b817e746ec54125f",
+      "source_group": "fda_medwatch",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "RISK_REVIEW",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.56021251,
+        "NON_TARGET": 0.11916562,
+        "ABSTAIN": 0.32062187
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 51,
+      "sample_id": "V3-8bd6e76c0ddd8b4ddd04",
+      "event_id": "FR-HIST-MANUAL-SEC-ITRM-20260330-NASDAQ-FINAL-DELISTING-DETERMINATION",
+      "source_group": "sec_edgar",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.17367138,
+        "NON_TARGET": 0.14435471,
+        "ABSTAIN": 0.68197392
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 52,
+      "sample_id": "V3-90613a10a376f770d540",
+      "event_id": "FR-LIVE-cf10ba8e12c7455b5f1dbc1ac8aff61b",
+      "source_group": "opennews_free",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "NON_TARGET",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.15356616,
+        "NON_TARGET": 0.04610323,
+        "ABSTAIN": 0.80033061
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "REJECT_NOISE",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 53,
+      "sample_id": "V3-9272270026812d4ab3d1",
+      "event_id": "FR-LIVE-8fe10bd11b3f46790461c266cf7112b2",
+      "source_group": "fda_medwatch",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "RISK_REVIEW",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.67441646,
+        "NON_TARGET": 0.02581906,
+        "ABSTAIN": 0.29976447
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 54,
+      "sample_id": "V3-95feb050f59d8bdaf8bc",
+      "event_id": "FR-HIST-CAND-2170418783919238226",
+      "source_group": "sec_edgar",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.0028929,
+        "NON_TARGET": 0.02237496,
+        "ABSTAIN": 0.97473214
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 55,
+      "sample_id": "V3-97d6ac5b63eccd55e7b5",
+      "event_id": "FR-HIST-CAND-8109125454942535580",
+      "source_group": "sec_edgar",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.00628211,
+        "NON_TARGET": 0.01626607,
+        "ABSTAIN": 0.97745182
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 56,
+      "sample_id": "V3-9d68d189a14478a3fb32",
+      "event_id": "FR-HIST-CAND-12812265839429506006",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.5129479,
+        "NON_TARGET": 0.36475936,
+        "ABSTAIN": 0.12229274
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 57,
+      "sample_id": "V3-a3f30c6822856bb7a1aa",
+      "event_id": "FR-HIST-CAND-16247308660761121734",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.07121307,
+        "NON_TARGET": 0.66796547,
+        "ABSTAIN": 0.26082146
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 58,
+      "sample_id": "V3-a7664abfbc6617a6bb14",
+      "event_id": "FR-LIVE-7761f80928f3f7571b90a0e4d55f96e8",
+      "source_group": "fda_medwatch",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "RISK_REVIEW",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.64208142,
+        "NON_TARGET": 0.0997127,
+        "ABSTAIN": 0.25820589
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 59,
+      "sample_id": "V3-af65c14e912d88b6c7be",
+      "event_id": "FR-LIVE-7d4c32fa1171b8f1346cbd777ffe4414",
+      "source_group": "sec_litigation_releases",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.68915887,
+        "NON_TARGET": 0.10072843,
+        "ABSTAIN": 0.2101127
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 60,
+      "sample_id": "V3-b12462db8cb123755cc6",
+      "event_id": "FR-LIVE-53157d3cec7108e88700eb97649476fd",
+      "source_group": "sec_edgar",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.40706658,
+        "NON_TARGET": 0.00891745,
+        "ABSTAIN": 0.58401597
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 61,
+      "sample_id": "V3-b544f6645a2fad06de75",
+      "event_id": "FR-LIVE-ec122510ec5a5ac26c132d51115fad34",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.14145502,
+        "NON_TARGET": 0.04065452,
+        "ABSTAIN": 0.81789047
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 62,
+      "sample_id": "V3-bbb9fc2c2b1c088bcf94",
+      "event_id": "FR-LIVE-e9d3d98dddff3956cdca719493ac1a5e",
+      "source_group": "ecb_press",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.06944687,
+        "NON_TARGET": 0.06005844,
+        "ABSTAIN": 0.87049469
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 63,
+      "sample_id": "V3-bcc2e2494e6663206e6f",
+      "event_id": "FR-LIVE-27b97a3819bea4d0743ab72686465b0d",
+      "source_group": "dvids_centcom_public_affairs",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "RISK_REVIEW",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.44203056,
+        "NON_TARGET": 0.17516525,
+        "ABSTAIN": 0.38280419
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 64,
+      "sample_id": "V3-c32e9affceaf12ea81d2",
+      "event_id": "FR-HIST-CAND-15164165033622400075",
+      "source_group": "sec_edgar",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.0027528,
+        "NON_TARGET": 0.02771342,
+        "ABSTAIN": 0.96953378
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 65,
+      "sample_id": "V3-c3e9bfb9886c5ffec952",
+      "event_id": "FR-HIST-CAND-16683881880006535978",
+      "source_group": "sec_edgar",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.01863542,
+        "NON_TARGET": 0.00824257,
+        "ABSTAIN": 0.97312201
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 66,
+      "sample_id": "V3-cb43bf9e4ce879c35b33",
+      "event_id": "FR-LIVE-d7eb36e74d8883ee98abc7c47485a70e",
+      "source_group": "sec_edgar",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.14520093,
+        "NON_TARGET": 0.52469011,
+        "ABSTAIN": 0.33010896
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 67,
+      "sample_id": "V3-d0c48353a2bd8498d1f9",
+      "event_id": "FR-LIVE-fc56e16699463e59c19f6d89951f9f84",
+      "source_group": "opennews_free",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.0544488,
+        "NON_TARGET": 0.04387821,
+        "ABSTAIN": 0.90167299
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 68,
+      "sample_id": "V3-d4cfd1c55927428fb1d7",
+      "event_id": "FR-HIST-CAND-17050219514625482731",
+      "source_group": "sec_edgar",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "NON_TARGET",
+      "runtime_prediction": "NON_TARGET",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.14180952,
+        "NON_TARGET": 0.53221618,
+        "ABSTAIN": 0.32597431
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 69,
+      "sample_id": "V3-d64565f6d47a7dfad1aa",
+      "event_id": "FR-HIST-MANUAL-SEC-PLRZ-20250521-NASDAQ-DISCRETIONARY-DELISTING-NOTICE",
+      "source_group": "sec_edgar",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.1365769,
+        "NON_TARGET": 0.16001449,
+        "ABSTAIN": 0.70340861
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 70,
+      "sample_id": "V3-da8d3bace0b18d0854af",
+      "event_id": "FR-LIVE-09c0f70ab1546896579d9eca13c5c568",
+      "source_group": "fda_medwatch",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.1410579,
+        "NON_TARGET": 0.01402624,
+        "ABSTAIN": 0.84491586
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 71,
+      "sample_id": "V3-db9d1a5e33de3a340d0a",
+      "event_id": "FR-LIVE-56b04b0708755a87a8820cd8c1280fe1",
+      "source_group": "fda_medwatch",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.61607011,
+        "NON_TARGET": 0.04019046,
+        "ABSTAIN": 0.34373942
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": false
+    },
+    {
+      "row": 72,
+      "sample_id": "V3-dba0e21339c8a867d2c3",
+      "event_id": "FR-LIVE-a0216c012ff9183b65c32dd07416cfc2",
+      "source_group": "sec_litigation_releases",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "RISK_REVIEW",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.62418038,
+        "NON_TARGET": 0.06173233,
+        "ABSTAIN": 0.31408729
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 73,
+      "sample_id": "V3-dd7d41d0ce9aafb29f5e",
+      "event_id": "FR-LIVE-dda195400096e1d7d7602c6341eb516d",
+      "source_group": "fdic_press_releases",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.11403206,
+        "NON_TARGET": 0.01046927,
+        "ABSTAIN": 0.87549867
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 74,
+      "sample_id": "V3-df5f0f5468b1baacbd48",
+      "event_id": "FR-LIVE-5433b32c08256cf2cbfb5b10e035f354",
+      "source_group": "bls_key_indicators",
+      "expected_label": "NON_TARGET",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.1159229,
+        "NON_TARGET": 0.08183408,
+        "ABSTAIN": 0.80224302
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 75,
+      "sample_id": "V3-ebffe61450d4afbd6764",
+      "event_id": "FR-LIVE-626f7dbb9fbd50c2ac26c5ef379cb5f6",
+      "source_group": "opennews_free",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.12912721,
+        "NON_TARGET": 0.10883478,
+        "ABSTAIN": 0.76203801
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 76,
+      "sample_id": "V3-ef3d5272a85409b8f799",
+      "event_id": "FR-LIVE-789e54e20493e3bc1eef9225223d083b",
+      "source_group": "opennews_free",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.11710619,
+        "NON_TARGET": 0.08520037,
+        "ABSTAIN": 0.79769344
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 77,
+      "sample_id": "V3-f0984ada4d182de33b9a",
+      "event_id": "FR-LIVE-8010a80d768e8d45ebaf2d16badd8e5c",
+      "source_group": "sec_litigation_releases",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "RISK_REVIEW",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.5055974,
+        "NON_TARGET": 0.3568552,
+        "ABSTAIN": 0.1375474
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 78,
+      "sample_id": "V3-f127c8fda6c9bcc5df0a",
+      "event_id": "FR-HIST-MANUAL-SEC-QVCGA-20260416-CHAPTER11-OLD-COMMON-CANCEL-NO-CONSIDERATION",
+      "source_group": "sec_edgar",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "RISK_REVIEW",
+      "runtime_prediction": "RISK_REVIEW",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.9202646,
+        "NON_TARGET": 0.00335411,
+        "ABSTAIN": 0.07638129
+      },
+      "runtime": "trained_artifact",
+      "scope_gate_decision": "ADMIT_RISK_SCOPE",
+      "direct_correct": true,
+      "runtime_correct": true
+    },
+    {
+      "row": 79,
+      "sample_id": "V3-f1bb6b769ae7452d91f0",
+      "event_id": "FR-LIVE-5150c374814384d323f91ce9db010631",
+      "source_group": "federal_reserve_press",
+      "expected_label": "RISK_REVIEW",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.1147488,
+        "NON_TARGET": 0.03194653,
+        "ABSTAIN": 0.85330467
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": false,
+      "runtime_correct": false
+    },
+    {
+      "row": 80,
+      "sample_id": "V3-ff12324aeaff47c34737",
+      "event_id": "FR-LIVE-d40a816931e72fb184728eb5bb665be5",
+      "source_group": "opennews_free",
+      "expected_label": "ABSTAIN",
+      "direct_prediction": "ABSTAIN",
+      "runtime_prediction": "ABSTAIN",
+      "direct_probabilities": {
+        "RISK_REVIEW": 0.05919288,
+        "NON_TARGET": 0.2309371,
+        "ABSTAIN": 0.70987003
+      },
+      "runtime": "scope_guardrail",
+      "scope_gate_decision": "ADMIT_CONTEXT",
+      "direct_correct": true,
+      "runtime_correct": true
+    }
+  ],
+  "no_trading": true,
+  "shadow": true
+}

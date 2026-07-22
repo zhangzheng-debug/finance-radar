@@ -230,6 +230,12 @@ class SecFilingEnricherTests(unittest.TestCase):
                 "INSERT INTO event_observations VALUES ('evt',?,'official_primary_candidate',?)",
                 (observation_id, now),
             )
+            connection.execute(
+                """INSERT INTO pipeline_jobs VALUES (
+                   'job','evt','live_primary_evidence_review','PENDING_PRIMARY_EVIDENCE',
+                   90,0,?,NULL,'{}',?,?)""",
+                (now, now, now),
+            )
             connection.commit()
             client = FakeClient(
                 {
@@ -239,11 +245,25 @@ class SecFilingEnricherTests(unittest.TestCase):
                 }
             )
             result = enricher.enrich_pending(connection, client, limit=5)
+            materialized = enricher.materialize_parsed_enrichment_evidence(connection)
+            materialized_again = enricher.materialize_parsed_enrichment_evidence(connection)
             event = connection.execute("SELECT * FROM canonical_events").fetchone()
             enrichment = connection.execute("SELECT * FROM sec_filing_enrichments").fetchone()
+            evidence = connection.execute("SELECT * FROM event_evidence").fetchone()
+            job = connection.execute("SELECT * FROM pipeline_jobs").fetchone()
             versions = connection.execute("SELECT COUNT(*) FROM event_versions").fetchone()[0]
             ordinary_pending = enricher.pending_rows(connection, limit=5)
             refresh_pending = enricher.pending_rows(connection, limit=5, refresh_parsed=True)
+            connection.execute(
+                """UPDATE event_evidence
+                   SET evidence_status='confirmed_primary',evidence_passage='human reviewed passage'"""
+            )
+            connection.execute(
+                "UPDATE sec_filing_enrichments SET evidence_excerpt='later machine passage'"
+            )
+            connection.commit()
+            preserved = enricher.materialize_parsed_enrichment_evidence(connection)
+            reviewed_evidence = connection.execute("SELECT * FROM event_evidence").fetchone()
             connection.close()
         self.assertEqual(result["parsed"], 1)
         self.assertEqual(result["refined"], 1)
@@ -252,9 +272,104 @@ class SecFilingEnricherTests(unittest.TestCase):
         self.assertEqual(event["current_version"], 2)
         self.assertEqual(enrichment["status"], "PARSED")
         self.assertEqual(enrichment["no_trading"], 1)
+        self.assertEqual(materialized["evidence_inserted"], 1)
+        self.assertEqual(materialized["evidence_updated"], 0)
+        self.assertEqual(materialized["jobs_advanced"], 1)
+        self.assertEqual(materialized_again["evidence_inserted"], 0)
+        self.assertEqual(materialized_again["evidence_updated"], 0)
+        self.assertEqual(materialized_again["evidence_unchanged"], 1)
+        self.assertEqual(materialized_again["jobs_advanced"], 0)
+        self.assertEqual(preserved["reviewed_status_preserved"], 1)
+        self.assertEqual(preserved["evidence_updated"], 0)
+        self.assertEqual(reviewed_evidence["evidence_status"], "confirmed_primary")
+        self.assertEqual(reviewed_evidence["evidence_passage"], "human reviewed passage")
+        self.assertEqual(evidence["evidence_status"], "machine_extracted_unreviewed")
+        self.assertEqual(evidence["auto_verification_allowed"], 0)
+        self.assertEqual(job["status"], "PENDING_EVIDENCE_REVIEW")
         self.assertEqual(versions, 2)
         self.assertEqual(ordinary_pending, [])
         self.assertEqual(len(refresh_pending), 1)
+
+    def test_parsed_generic_sec_filing_is_evidenced_then_semantically_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            connection = open_ledger(Path(directory) / "db.sqlite3")
+            now = utc_now()
+            connection.execute(
+                """INSERT INTO sources VALUES (
+                   'sec_current_filings','SEC','official_primary_feed','P0_official',1,1,?,?)""",
+                (now, now),
+            )
+            raw_json = json.dumps({"item": {"form": "8-K", "items": ["8.01"]}})
+            observation_id = stable_id("OBS", "sec_current_filings", "generic")
+            connection.execute(
+                """INSERT INTO raw_observations VALUES (
+                   ?,'sec_current_filings','generic','2026-07-15',?,'8-K Example','Item 8.01',
+                   'https://www.sec.gov/Archives/generic/index.htm',?,?,'captured')""",
+                (observation_id, now, hashlib.sha256(raw_json.encode()).hexdigest(), raw_json),
+            )
+            connection.execute(
+                """INSERT INTO canonical_events VALUES (
+                   'generic-event',1,'candidate','candidate','regulatory_filing','sec_material_filing',
+                   '2026-07-15',?,?,NULL,NULL,'Example Corp',NULL,'A_P0','sec_current_filings',1)""",
+                (now, now),
+            )
+            connection.execute(
+                """INSERT INTO event_versions VALUES (
+                   'generic-event',1,?,'candidate','candidate','regulatory_filing','sec_material_filing',
+                   NULL,'{}','live_rule_candidate')""",
+                (now,),
+            )
+            connection.execute(
+                "INSERT INTO event_observations VALUES ('generic-event',?,'official_primary_candidate',?)",
+                (observation_id, now),
+            )
+            connection.execute(
+                """INSERT INTO pipeline_jobs VALUES (
+                   'generic-job','generic-event','live_primary_evidence_review',
+                   'PENDING_PRIMARY_EVIDENCE',90,0,?,NULL,'{}',?,?)""",
+                (now, now, now),
+            )
+            connection.execute(
+                """INSERT INTO sec_filing_enrichments(
+                   enrichment_id,event_id,observation_id,accession_number,form,
+                   filing_index_url,primary_document_url,documents_json,evidence_excerpt,
+                   text_sha256,matched_event_family,matched_event_type,matched_keywords_json,
+                   confidence,status,attempts,last_error,fetched_at,updated_at,read_only,no_trading
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'PARSED',1,NULL,?,?,1,1)""",
+                (
+                    "generic-enrichment",
+                    "generic-event",
+                    observation_id,
+                    "0000000000-26-000002",
+                    "8-K",
+                    "https://www.sec.gov/Archives/generic/index.htm",
+                    "https://www.sec.gov/Archives/generic/main.htm",
+                    "[]",
+                    "The company announced an ordinary administrative update.",
+                    hashlib.sha256(b"ordinary").hexdigest(),
+                    None,
+                    None,
+                    "[]",
+                    0.0,
+                    now,
+                    now,
+                ),
+            )
+            connection.commit()
+            result = enricher.materialize_parsed_enrichment_evidence(connection)
+            event = connection.execute(
+                "SELECT status,label_status,current_version FROM canonical_events"
+            ).fetchone()
+            job = connection.execute("SELECT status,last_error FROM pipeline_jobs").fetchone()
+            evidence_count = connection.execute("SELECT COUNT(*) FROM event_evidence").fetchone()[0]
+            connection.close()
+        self.assertEqual(result["semantic_noise_rejected"], 1)
+        self.assertEqual(event["status"], "rejected")
+        self.assertEqual(event["label_status"], "rejected")
+        self.assertEqual(event["current_version"], 2)
+        self.assertEqual(job["status"], "COMPLETED_DISCOVERY_FILTERED")
+        self.assertIn("no_scoped_event_match", job["last_error"])
+        self.assertEqual(evidence_count, 1)
 
 
 if __name__ == "__main__":

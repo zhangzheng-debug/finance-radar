@@ -8,15 +8,20 @@ import hashlib
 import html
 import json
 import re
+import sys
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.models.risk_scope_gate import assess_risk_scope
 from event_ledger import open_ledger, stable_id, stable_json, utc_now
 
 
-ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
 DEFAULT_REPORT = ROOT / "reports" / "live_candidate_extraction_latest.md"
 
@@ -118,6 +123,9 @@ FDIC_REGULATORY_TRIGGER = re.compile(
 
 ENTITY_PATTERNS = (
     ("ostium", re.compile(r"\bostium\b", re.I)),
+    ("sk_hynix", re.compile(r"\b(?:sk\s*hynix|skhy)\b|SK\s*海力士", re.I)),
+    ("openai", re.compile(r"\bopenai\b", re.I)),
+    ("hugging_face", re.compile(r"\bhugging\s*face\b|\bhuggingface\b", re.I)),
     ("iran", re.compile(r"\biran(?:ian)?\b", re.I)),
     ("russia", re.compile(r"\brussia(?:n)?\b", re.I)),
     ("ecb", re.compile(r"\b(?:ecb|european central bank)\b", re.I)),
@@ -127,6 +135,7 @@ ENTITY_PATTERNS = (
     ("coinbase", re.compile(r"\bcoinbase\b", re.I)),
 )
 CROSS_SOURCE_CLUSTER_ENTITIES = {"ostium", "binance", "coinbase"}
+CANDIDATE_CLUSTER_ENTITIES = {"ostium", "sk_hynix", "openai", "hugging_face"}
 
 OPENNEWS_NON_EVENT_GENRE = re.compile(
     r"\b(?:research\s+primer|commissioned\s+by|market\s+wrap|what\s+to\s+know|"
@@ -151,6 +160,73 @@ OPENNEWS_NON_NEGATIVE_CONTROL = re.compile(
     r"\bmaintain(?:s|ed|ing)?\b.{0,100}\b(?:cost|production|revenue|earnings)?\s*guidance\b",
     re.I,
 )
+OPENNEWS_LIVE_OR_ROUNDUP = re.compile(
+    r"^\s*(?:live|liveblog|live\s+updates?)\s*[:\-]|\b(?:here(?:'|’)?s\s+what\s+happened\s+today|"
+    r"what\s+happened\s+today|daily\s+roundup|news\s+roundup|week\s+in\s+review)\b",
+    re.I,
+)
+OPENNEWS_MONETARY_ACTION = re.compile(
+    r"\b(?:rate\s+(?:cut|hike|decision)|cuts?|raise[sd]?|hikes?|holds?|keeps?)\s+"
+    r"(?:the\s+)?(?:(?:policy|interest)\s+)?rates?\b|\b(?:policy\s+meeting|meeting\s+minutes|"
+    r"quantitative\s+(?:easing|tightening)|bond\s+purchases?|reserve\s+requirement)\b|"
+    r"降息|加息|利率决议|会议纪要",
+    re.I,
+)
+OPENNEWS_FINANCIAL_TRANSMISSION = re.compile(
+    r"\b(?:sanctions?|tariffs?|export\s+controls?|shipping|freight|oil|gas|lng|"
+    r"strait|blockade|supply\s+disruption|market\s+clos(?:e[sd]?|ure)|capital\s+controls?)\b|"
+    r"制裁|关税|出口管制|航运|油价|天然气|封锁|供应中断|休市",
+    re.I,
+)
+OPENNEWS_OPERATIONAL_SECURITY = re.compile(
+    r"\b(?:security\s+breach|data\s+breach|cyberattack|ransomware)\b|"
+    r"\b(?:(?:exchange|operator|protocol|bridge|wallet|vault|funds?|tokens?|accounts?|data|network|"
+    r"service|company|startup)\b.{0,90}\b(?:hack(?:ed|ing)?|exploit(?:ed|ing)?|breach|"
+    r"drain(?:ed|ing)?)\b|(?:hack(?:ed|ing)?|exploit(?:ed|ing)?|breach|drain(?:ed|ing)?)\b"
+    r".{0,90}(?:\$\s?\d[\d.,]*\s*(?:[mkb]|million|billion)?|million|billion|"
+    r"funds?|tokens?|accounts?|data|network|service))\b|"
+    r"黑客攻击|资金被盗|数据泄露",
+    re.I,
+)
+OPENNEWS_INVALID_ASSET_TAGS = {"OPENAI"}
+OPENNEWS_ASSET_ALIASES = {
+    "BTC": ("bitcoin",),
+    "ETH": ("ethereum", "ether"),
+    "SOL": ("solana",),
+    "WLD": ("worldcoin",),
+    "BNB": ("binance coin",),
+    "XRP": ("xrp", "ripple"),
+    "DOGE": ("dogecoin",),
+    "CL": ("crude oil", "wti", "oil futures"),
+}
+DEFAULT_P2_PENDING_CAP = 200
+DEFAULT_P2_CYCLE_CAP = 25
+DEFAULT_P2_STALE_HOURS = 48
+
+
+@dataclass(frozen=True)
+class DiscoveryAdmission:
+    admitted: bool
+    decision: str
+    reasons: tuple[str, ...]
+
+
+def opennews_admission(row: Any, matched: EventRule) -> DiscoveryAdmission:
+    discovery_text = opennews_discovery_text(row)
+    if not discovery_text:
+        return DiscoveryAdmission(False, "REJECT_NOISE", ("not_a_headline_event",))
+    if OPENNEWS_LIVE_OR_ROUNDUP.search(discovery_text):
+        return DiscoveryAdmission(False, "REJECT_NOISE", ("live_or_roundup_genre",))
+    scope = assess_risk_scope(discovery_text)
+    if scope.decision == "REJECT_NOISE":
+        return DiscoveryAdmission(False, scope.decision, tuple(scope.reason_codes))
+    if matched.event_type == "monetary_policy" and not OPENNEWS_MONETARY_ACTION.search(discovery_text):
+        return DiscoveryAdmission(False, "REJECT_NOISE", ("central_bank_mention_without_policy_action",))
+    if matched.event_type == "conflict_or_blockade" and not OPENNEWS_FINANCIAL_TRANSMISSION.search(discovery_text):
+        return DiscoveryAdmission(False, "ADMIT_CONTEXT", ("geopolitical_story_without_financial_transmission",))
+    if matched.event_type == "hack_or_exploit" and not OPENNEWS_OPERATIONAL_SECURITY.search(discovery_text):
+        return DiscoveryAdmission(False, "REJECT_NOISE", ("hack_metaphor_or_non_operational_incident",))
+    return DiscoveryAdmission(True, "ADMIT_EVENT_CANDIDATE", ("bounded_event_rule",))
 
 
 def opennews_discovery_text(row: Any) -> str | None:
@@ -255,6 +331,24 @@ def classify_observation(row: Any) -> EventRule | None:
     return SEC_GENERIC_RULE
 
 
+def _opennews_coin_tags(raw_json: str) -> list[str]:
+    try:
+        payload = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return []
+    item = payload.get("item") if isinstance(payload, dict) else None
+    coins = item.get("coins") if isinstance(item, dict) else None
+    if not isinstance(coins, list):
+        return []
+    result: list[str] = []
+    for coin in coins:
+        value = coin.get("symbol") if isinstance(coin, dict) else coin
+        value = str(value or "").strip().upper()
+        if value:
+            result.append(value)
+    return result
+
+
 def canonicalize_url(value: str | None) -> str | None:
     if not value:
         return None
@@ -288,7 +382,7 @@ def live_event_id(row: Any, matched: EventRule) -> str:
     event_date = (row["source_published_at"] or row["local_received_at"])[:10]
     if str(row["authority_tier"]).startswith("P0") and row["canonical_url"]:
         key = f"{canonicalize_url(row['canonical_url']) or title_key}|{event_date}"
-    elif entity:
+    elif entity in CANDIDATE_CLUSTER_ENTITIES:
         key = f"{matched.event_type}|{entity}|{event_date}"
     elif row["canonical_url"]:
         key = f"{canonicalize_url(row['canonical_url']) or title_key}|{event_date}"
@@ -311,7 +405,8 @@ def existing_story_event_id(connection: Any, row: Any, matched: EventRule) -> st
            JOIN event_observations eo ON eo.event_id=e.event_id
            JOIN latest_source_content r ON r.observation_id=eo.observation_id
            JOIN sources s ON s.source_id=r.source_id
-           WHERE e.event_date=? AND e.event_type=?
+           WHERE e.status='candidate' AND e.event_date=? AND e.event_type=?
+             AND eo.relation_type!='filtered_aggregated_noise'
              AND r.canonical_url IS NOT NULL
              AND s.authority_tier NOT LIKE 'P0%'
            ORDER BY e.first_seen_at,e.event_id""",
@@ -324,19 +419,22 @@ def existing_story_event_id(connection: Any, row: Any, matched: EventRule) -> st
 
 
 def retract_filtered_opennews_candidates(connection: Any) -> int:
-    """Close review jobs for P2-only candidates that no longer pass discovery rules."""
+    """Continuously audit every active OpenNews candidate against current rules.
+
+    Raw observations and their ledger edges remain available for audit.  An
+    observation that no longer passes is marked as filtered so it cannot become
+    the displayed headline or model input for a mixed, still-valid event.
+    """
     rows = connection.execute(
         """SELECT e.event_id,r.source_id,r.source_published_at,r.local_received_at,
-                  r.title,r.summary,r.canonical_url,r.raw_json,s.authority_tier
+                  r.observation_id,r.title,r.summary,r.canonical_url,r.raw_json,
+                  s.authority_tier,eo.relation_type
            FROM canonical_events e
-           JOIN pipeline_jobs j ON j.event_id=e.event_id
            JOIN event_observations eo ON eo.event_id=e.event_id
            JOIN latest_source_content r ON r.observation_id=eo.observation_id
            JOIN sources s ON s.source_id=r.source_id
            WHERE e.status='candidate'
              AND e.discovery_source='opennews_free'
-             AND j.job_type='live_primary_evidence_review'
-             AND j.status='PENDING_PRIMARY_EVIDENCE'
            ORDER BY e.event_id"""
     ).fetchall()
     by_event: dict[str, list[Any]] = {}
@@ -345,23 +443,51 @@ def retract_filtered_opennews_candidates(connection: Any) -> int:
     now = utc_now()
     retracted = 0
     for event_id, observations in by_event.items():
-        has_primary_source = any(
-            str(row["authority_tier"]).startswith(("P0", "P1"))
-            for row in observations
-        )
-        still_matches = any(classify_observation(row) is not None for row in observations)
-        if has_primary_source or still_matches:
+        has_primary_source = False
+        admitted_observation = False
+        for row in observations:
+            if str(row["authority_tier"]).startswith(("P0", "P1")):
+                has_primary_source = True
+                continue
+            matched = classify_observation(row)
+            admitted = matched is not None and (
+                str(row["source_id"]) != "opennews_free"
+                or opennews_admission(row, matched).admitted
+            )
+            if admitted:
+                admitted_observation = True
+                if str(row["relation_type"]) == "filtered_aggregated_noise":
+                    connection.execute(
+                        """UPDATE event_observations
+                           SET relation_type='aggregated_discovery_candidate',linked_at=?
+                           WHERE event_id=? AND observation_id=?""",
+                        (now, event_id, row["observation_id"]),
+                    )
+            elif str(row["source_id"]) == "opennews_free":
+                connection.execute(
+                    """UPDATE event_observations
+                       SET relation_type='filtered_aggregated_noise',linked_at=?
+                       WHERE event_id=? AND observation_id=?""",
+                    (now, event_id, row["observation_id"]),
+                )
+        if has_primary_source or admitted_observation:
             continue
-        cursor = connection.execute(
+        connection.execute(
             """UPDATE pipeline_jobs
                SET status='COMPLETED_DISCOVERY_FILTERED',
                    last_error='aggregated_story_no_longer_passes_event_semantic_gate',
                    updated_at=?
                WHERE event_id=? AND job_type='live_primary_evidence_review'
-                 AND status='PENDING_PRIMARY_EVIDENCE'""",
+                 AND status!='COMPLETED_DUPLICATE_CLUSTER'""",
             (now, event_id),
         )
-        retracted += cursor.rowcount
+        filtered = _filter_candidate_event(
+            connection,
+            event_id,
+            reason="aggregated_story_no_longer_passes_event_semantic_gate",
+            now=now,
+        )
+        retracted += int(filtered)
     connection.commit()
     return retracted
 
@@ -375,6 +501,7 @@ def reconcile_verified_opennews_duplicates(connection: Any) -> int:
            JOIN event_observations eo ON eo.event_id=e.event_id
            JOIN latest_source_content r ON r.observation_id=eo.observation_id
            WHERE e.status='candidate' AND e.discovery_source='opennews_free'
+             AND eo.relation_type!='filtered_aggregated_noise'
              AND j.job_type='live_primary_evidence_review'
              AND j.status='PENDING_PRIMARY_EVIDENCE'
            ORDER BY e.event_id"""
@@ -426,20 +553,98 @@ def reconcile_verified_opennews_duplicates(connection: Any) -> int:
     return len(reconciled_events)
 
 
-def extract_symbol(raw_json: str) -> str | None:
-    try:
-        payload = json.loads(raw_json)
-    except json.JSONDecodeError:
-        return None
-    item = payload.get("item") if isinstance(payload, dict) else None
-    if not isinstance(item, dict):
-        return None
-    coins = item.get("coins")
-    if isinstance(coins, list) and coins:
-        first = coins[0]
-        if isinstance(first, dict):
-            return str(first.get("symbol") or "").strip() or None
-        return str(first).strip() or None
+def reconcile_opennews_candidate_duplicates(connection: Any) -> int:
+    """Collapse same-day, same-action duplicates for a narrow entity allow-list."""
+    rows = connection.execute(
+        """SELECT e.event_id,e.event_type,e.event_date,e.first_seen_at,
+                  r.observation_id,r.title,r.summary,
+                  (SELECT COUNT(*) FROM event_evidence x WHERE x.event_id=e.event_id) AS evidence_count
+           FROM canonical_events e
+           JOIN pipeline_jobs j ON j.event_id=e.event_id
+           JOIN event_observations eo ON eo.event_id=e.event_id
+           JOIN latest_source_content r ON r.observation_id=eo.observation_id
+           WHERE e.status='candidate' AND e.discovery_source='opennews_free'
+             AND eo.relation_type!='filtered_aggregated_noise'
+             AND j.job_type='live_primary_evidence_review'
+             AND j.status='PENDING_PRIMARY_EVIDENCE'
+           ORDER BY e.first_seen_at,e.event_id,r.local_received_at"""
+    ).fetchall()
+    groups: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = {}
+    for row in rows:
+        entity = recognized_entity(f"{row['title']}\n{row['summary']}")
+        if entity not in CANDIDATE_CLUSTER_ENTITIES:
+            continue
+        key = (str(row["event_type"]), str(row["event_date"]), str(entity))
+        event = groups.setdefault(key, {}).setdefault(
+            str(row["event_id"]),
+            {
+                "event_id": str(row["event_id"]),
+                "first_seen_at": str(row["first_seen_at"]),
+                "evidence_count": int(row["evidence_count"] or 0),
+                "observation_ids": [],
+            },
+        )
+        event["observation_ids"].append(str(row["observation_id"]))
+    now = utc_now()
+    reconciled = 0
+    for events in groups.values():
+        if len(events) < 2:
+            continue
+        ordered = sorted(
+            events.values(),
+            key=lambda item: (-item["evidence_count"], item["first_seen_at"], item["event_id"]),
+        )
+        primary = ordered[0]
+        for duplicate in ordered[1:]:
+            for observation_id in duplicate["observation_ids"]:
+                connection.execute(
+                    """INSERT OR IGNORE INTO event_observations(
+                       event_id,observation_id,relation_type,linked_at
+                       ) VALUES (?,?,'aggregated_duplicate_support',?)""",
+                    (primary["event_id"], observation_id, now),
+                )
+            connection.execute(
+                """UPDATE pipeline_jobs
+                   SET status='COMPLETED_DUPLICATE_CLUSTER',last_error=?,updated_at=?
+                   WHERE event_id=? AND job_type='live_primary_evidence_review'
+                     AND status='PENDING_PRIMARY_EVIDENCE'""",
+                (
+                    f"duplicate_of_candidate_event:{primary['event_id']}",
+                    now,
+                    duplicate["event_id"],
+                ),
+            )
+            _filter_candidate_event(
+                connection,
+                duplicate["event_id"],
+                reason=f"duplicate_of_candidate_event:{primary['event_id']}",
+                now=now,
+            )
+            reconciled += 1
+    connection.commit()
+    return reconciled
+
+
+def extract_symbol(raw_json: str, source_text: str = "") -> str | None:
+    """Return an OpenNews asset only when the story itself identifies it.
+
+    Provider tags are useful retrieval hints, but they are not reliable evidence
+    that the tagged asset is the subject of a story.
+    """
+    original = html.unescape(source_text)
+    normalized = " ".join(original.casefold().split())
+    for provider_symbol in _opennews_coin_tags(raw_json):
+        symbol = provider_symbol.removeprefix("XYZ-")
+        if symbol in OPENNEWS_INVALID_ASSET_TAGS or not symbol:
+            continue
+        # A bare provider tag is only corroborated by a case-sensitive ticker
+        # token.  This prevents ordinary prose such as "Red Sea" or "bridge"
+        # from being promoted to the unrelated RED/BRIDGE assets.
+        if re.search(rf"(?<![A-Za-z0-9]){re.escape(symbol)}(?:\.[A-Z]{{1,4}})?(?![A-Za-z0-9])", original):
+            return symbol
+        aliases = OPENNEWS_ASSET_ALIASES.get(symbol, ())
+        if any(re.search(rf"\b{re.escape(alias)}\b", normalized) for alias in aliases):
+            return symbol
     return None
 
 
@@ -462,7 +667,234 @@ def provisional_grade_cap(authority_tier: str) -> str:
     return "B_P2_discovery_only"
 
 
-def process_pending(connection: Any, *, limit: int) -> dict[str, Any]:
+def _filter_candidate_event(connection: Any, event_id: str, *, reason: str, now: str) -> bool:
+    event = connection.execute(
+        "SELECT * FROM canonical_events WHERE event_id=?", (event_id,)
+    ).fetchone()
+    if event is None or str(event["status"]) != "candidate":
+        return False
+    version_row = connection.execute(
+        "SELECT facts_json FROM event_versions WHERE event_id=? AND version=?",
+        (event_id, event["current_version"]),
+    ).fetchone()
+    try:
+        facts = json.loads(version_row["facts_json"]) if version_row else {}
+    except (json.JSONDecodeError, TypeError):
+        facts = {}
+    facts["discovery_filter"] = {
+        "reason": reason,
+        "filtered_at": now,
+        "raw_observations_preserved": True,
+    }
+    new_version = int(event["current_version"]) + 1
+    connection.execute(
+        """INSERT INTO event_versions(
+           event_id,version,changed_at,status,label_status,event_family,event_type,
+           manual_grade,facts_json,change_reason
+           ) VALUES (?,?,?,'rejected','rejected',?,?,?,?,?)""",
+        (
+            event_id,
+            new_version,
+            now,
+            event["event_family"],
+            event["event_type"],
+            event["manual_grade"],
+            stable_json(facts),
+            reason,
+        ),
+    )
+    connection.execute(
+        """UPDATE canonical_events
+           SET current_version=?,status='rejected',label_status='rejected',last_updated_at=?
+           WHERE event_id=?""",
+        (new_version, now, event_id),
+    )
+    return True
+
+
+def expire_stale_opennews_candidates(
+    connection: Any, *, stale_hours: int = DEFAULT_P2_STALE_HOURS
+) -> int:
+    now = utc_now()
+    rows = connection.execute(
+        """SELECT DISTINCT e.event_id
+           FROM canonical_events e
+           JOIN pipeline_jobs j ON j.event_id=e.event_id
+           WHERE e.status='candidate' AND e.discovery_source='opennews_free'
+             AND j.job_type='live_primary_evidence_review'
+             AND j.status='PENDING_PRIMARY_EVIDENCE'
+             AND (julianday(?) - julianday(e.last_updated_at)) * 24 >= ?
+             AND NOT EXISTS (SELECT 1 FROM event_evidence x WHERE x.event_id=e.event_id)
+             AND NOT EXISTS (
+                 SELECT 1 FROM event_observations eo
+                 JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                 JOIN sources s ON s.source_id=r.source_id
+                 WHERE eo.event_id=e.event_id AND s.authority_tier LIKE 'P0%'
+             )""",
+        (now, stale_hours),
+    ).fetchall()
+    for row in rows:
+        event_id = str(row["event_id"])
+        connection.execute(
+            """UPDATE pipeline_jobs
+               SET status='COMPLETED_DISCOVERY_EXPIRED',last_error=?,updated_at=?
+               WHERE event_id=? AND job_type='live_primary_evidence_review'
+                 AND status='PENDING_PRIMARY_EVIDENCE'""",
+            (f"p2_discovery_ttl_exceeded:{stale_hours}h", now, event_id),
+        )
+        _filter_candidate_event(
+            connection,
+            event_id,
+            reason=f"p2_discovery_ttl_exceeded:{stale_hours}h",
+            now=now,
+        )
+    connection.commit()
+    return len(rows)
+
+
+def trim_opennews_backlog(connection: Any, *, pending_cap: int = DEFAULT_P2_PENDING_CAP) -> int:
+    rows = connection.execute(
+        """SELECT DISTINCT e.event_id,j.priority,e.last_updated_at
+           FROM canonical_events e
+           JOIN pipeline_jobs j ON j.event_id=e.event_id
+           WHERE e.status='candidate' AND e.discovery_source='opennews_free'
+             AND j.job_type='live_primary_evidence_review'
+             AND j.status='PENDING_PRIMARY_EVIDENCE'
+             AND NOT EXISTS (SELECT 1 FROM event_evidence x WHERE x.event_id=e.event_id)
+             AND NOT EXISTS (
+                 SELECT 1 FROM event_observations eo
+                 JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                 JOIN sources s ON s.source_id=r.source_id
+                 WHERE eo.event_id=e.event_id AND s.authority_tier LIKE 'P0%'
+             )
+           ORDER BY j.priority DESC,e.last_updated_at DESC,e.event_id"""
+    ).fetchall()
+    overflow = rows[max(0, pending_cap):]
+    now = utc_now()
+    for row in overflow:
+        event_id = str(row["event_id"])
+        connection.execute(
+            """UPDATE pipeline_jobs
+               SET status='COMPLETED_BACKPRESSURE_EVICTED',
+                   last_error='p2_pending_cap_eviction',updated_at=?
+               WHERE event_id=? AND job_type='live_primary_evidence_review'
+                 AND status='PENDING_PRIMARY_EVIDENCE'""",
+            (now, event_id),
+        )
+        _filter_candidate_event(
+            connection,
+            event_id,
+            reason="p2_pending_cap_eviction",
+            now=now,
+        )
+    connection.commit()
+    return len(overflow)
+
+
+def pending_opennews_reviews(connection: Any) -> int:
+    return int(
+        connection.execute(
+            """SELECT COUNT(*) FROM pipeline_jobs j
+               JOIN canonical_events e ON e.event_id=j.event_id
+               WHERE e.status='candidate' AND e.discovery_source='opennews_free'
+                 AND j.job_type='live_primary_evidence_review'
+                 AND j.status='PENDING_PRIMARY_EVIDENCE'"""
+        ).fetchone()[0]
+    )
+
+
+def repair_opennews_asset_tags(connection: Any) -> int:
+    """Remove provider retrieval tags that the story text does not substantiate."""
+    rows = connection.execute(
+        """SELECT e.event_id,e.current_version,e.event_family,e.event_type,e.manual_grade,
+                  e.ticker_at_event,r.title,r.summary,r.raw_json
+           FROM canonical_events e
+           JOIN event_observations eo ON eo.event_id=e.event_id
+           JOIN latest_source_content r ON r.observation_id=eo.observation_id
+           WHERE e.status='candidate' AND e.discovery_source='opennews_free'
+             AND eo.relation_type!='filtered_aggregated_noise'
+             AND r.source_id='opennews_free'
+           ORDER BY e.event_id,r.local_received_at DESC"""
+    ).fetchall()
+    grouped: dict[str, list[Any]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["event_id"]), []).append(row)
+    now = utc_now()
+    repaired = 0
+    for event_id, observations in grouped.items():
+        event = observations[0]
+        validated = next(
+            (
+                symbol
+                for row in observations
+                if (
+                    symbol := extract_symbol(
+                        str(row["raw_json"]),
+                        opennews_discovery_text(row) or f"{row['title']}\n{row['summary']}",
+                    )
+                )
+            ),
+            None,
+        )
+        current = str(event["ticker_at_event"] or "").strip() or None
+        if current == validated:
+            continue
+        version_row = connection.execute(
+            "SELECT facts_json FROM event_versions WHERE event_id=? AND version=?",
+            (event_id, event["current_version"]),
+        ).fetchone()
+        try:
+            facts = json.loads(version_row["facts_json"]) if version_row else {}
+        except (json.JSONDecodeError, TypeError):
+            facts = {}
+        facts["asset_tag_repair"] = {
+            "previous_provider_tag": current,
+            "validated_symbol": validated,
+            "reason": "provider_tag_not_substantiated_by_story_text",
+            "repaired_at": now,
+        }
+        new_version = int(event["current_version"]) + 1
+        connection.execute(
+            """INSERT INTO event_versions(
+               event_id,version,changed_at,status,label_status,event_family,event_type,
+               manual_grade,facts_json,change_reason
+               ) VALUES (?,?,?,'candidate','candidate',?,?,?,?,
+                         'opennews_asset_tag_story_validation')""",
+            (
+                event_id,
+                new_version,
+                now,
+                event["event_family"],
+                event["event_type"],
+                event["manual_grade"],
+                stable_json(facts),
+            ),
+        )
+        connection.execute(
+            """UPDATE canonical_events
+               SET current_version=?,ticker_at_event=?,last_updated_at=?
+               WHERE event_id=? AND status='candidate'""",
+            (new_version, validated, now, event_id),
+        )
+        repaired += 1
+    connection.commit()
+    return repaired
+
+
+def process_pending(
+    connection: Any,
+    *,
+    limit: int,
+    p2_pending_cap: int = DEFAULT_P2_PENDING_CAP,
+    p2_cycle_cap: int = DEFAULT_P2_CYCLE_CAP,
+    p2_stale_hours: int = DEFAULT_P2_STALE_HOURS,
+) -> dict[str, Any]:
+    retracted = retract_filtered_opennews_candidates(connection)
+    expired = expire_stale_opennews_candidates(connection, stale_hours=p2_stale_hours)
+    evicted = trim_opennews_backlog(connection, pending_cap=p2_pending_cap)
+    candidate_duplicates = reconcile_opennews_candidate_duplicates(connection)
+    asset_tag_repairs = repair_opennews_asset_tags(connection)
+    p2_pending = pending_opennews_reviews(connection)
     rows = connection.execute(
         """
         SELECT j.*,r.source_id,r.source_published_at,r.local_received_at,r.title,r.summary,
@@ -471,7 +903,12 @@ def process_pending(connection: Any, *, limit: int) -> dict[str, Any]:
         JOIN latest_source_content r ON r.observation_id=j.observation_id
         JOIN sources s ON s.source_id=r.source_id
         WHERE j.job_type='extract_live_event_candidate' AND j.status='PENDING'
-        ORDER BY j.priority DESC,j.available_at,j.job_id LIMIT ?
+        ORDER BY CASE
+                   WHEN s.authority_tier LIKE 'P0%' THEN 0
+                   WHEN s.authority_tier LIKE 'P1%' THEN 1
+                   ELSE 2
+                 END,
+                 j.priority DESC,j.available_at,j.job_id LIMIT ?
         """,
         (limit,),
     ).fetchall()
@@ -480,11 +917,20 @@ def process_pending(connection: Any, *, limit: int) -> dict[str, Any]:
         "processed": 0,
         "candidates": 0,
         "no_candidate": 0,
+        "scope_filtered": 0,
+        "backpressure_filtered": 0,
         "new_events": 0,
         "linked_observations": 0,
         "by_type": {},
         "event_ids": [],
+        "retracted_events": retracted,
+        "expired_events": expired,
+        "backlog_evicted_events": evicted,
+        "candidate_duplicates_reconciled": candidate_duplicates,
+        "asset_tag_repairs": asset_tag_repairs,
+        "p2_pending_before_admission": p2_pending,
     }
+    p2_admitted = 0
     for row in rows:
         result["processed"] += 1
         matched = classify_observation(row)
@@ -497,7 +943,35 @@ def process_pending(connection: Any, *, limit: int) -> dict[str, Any]:
             result["no_candidate"] += 1
             continue
 
+        is_p2 = not str(row["authority_tier"]).startswith(("P0", "P1"))
+        if str(row["source_id"]) == "opennews_free":
+            admission = opennews_admission(row, matched)
+            if not admission.admitted:
+                connection.execute(
+                    """UPDATE observation_jobs
+                       SET status='COMPLETED_SCOPE_FILTERED',attempts=attempts+1,
+                           last_error=?,updated_at=? WHERE job_id=?""",
+                    (";".join(admission.reasons), now, row["job_id"]),
+                )
+                result["scope_filtered"] += 1
+                continue
+
         event_id = existing_story_event_id(connection, row, matched) or live_event_id(row, matched)
+        existing = connection.execute(
+            "SELECT 1 FROM canonical_events WHERE event_id=?", (event_id,)
+        ).fetchone()
+        if is_p2 and existing is None and (
+            p2_pending >= p2_pending_cap or p2_admitted >= p2_cycle_cap
+        ):
+            connection.execute(
+                """UPDATE observation_jobs
+                   SET status='COMPLETED_BACKPRESSURE_FILTERED',attempts=attempts+1,
+                       last_error='p2_admission_capacity_reached',updated_at=?
+                   WHERE job_id=?""",
+                (now, row["job_id"]),
+            )
+            result["backpressure_filtered"] += 1
+            continue
         event_date = (row["source_published_at"] or row["local_received_at"])[:10]
         grade_cap = provisional_grade_cap(row["authority_tier"])
         relation_type = (
@@ -517,9 +991,6 @@ def process_pending(connection: Any, *, limit: int) -> dict[str, Any]:
             "auto_verification_allowed": False,
             "no_trading": True,
         }
-        existing = connection.execute(
-            "SELECT 1 FROM canonical_events WHERE event_id=?", (event_id,)
-        ).fetchone()
         connection.execute(
             """
             INSERT OR IGNORE INTO canonical_events(
@@ -535,7 +1006,10 @@ def process_pending(connection: Any, *, limit: int) -> dict[str, Any]:
                 event_date,
                 row["local_received_at"],
                 now,
-                extract_symbol(row["raw_json"]),
+                extract_symbol(
+                    row["raw_json"],
+                    opennews_discovery_text(row) or f"{row['title']}\n{row['summary']}",
+                ),
                 extract_company(row["raw_json"]),
                 grade_cap,
                 row["source_id"],
@@ -543,6 +1017,9 @@ def process_pending(connection: Any, *, limit: int) -> dict[str, Any]:
         )
         if existing is None:
             result["new_events"] += 1
+            if is_p2:
+                p2_pending += 1
+                p2_admitted += 1
         connection.execute(
             """INSERT OR IGNORE INTO event_versions(
                event_id,version,changed_at,status,label_status,event_family,event_type,
@@ -589,8 +1066,8 @@ def process_pending(connection: Any, *, limit: int) -> dict[str, Any]:
         result["event_ids"].append(event_id)
         result["by_type"][matched.event_type] = result["by_type"].get(matched.event_type, 0) + 1
     connection.commit()
-    result["retracted_events"] = retract_filtered_opennews_candidates(connection)
     result["duplicate_events_reconciled"] = reconcile_verified_opennews_duplicates(connection)
+    result["p2_pending_after_admission"] = pending_opennews_reviews(connection)
     result["unique_events"] = len(set(result["event_ids"]))
     return result
 

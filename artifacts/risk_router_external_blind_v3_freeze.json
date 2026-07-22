@@ -1,0 +1,48 @@
+{
+  "schema_version": 3,
+  "freeze_id": "external-blind-v3-7e5eac882b03",
+  "frozen_at": "2026-07-22T08:25:41.203753+00:00",
+  "architecture": "structured_evidence_gate_plus_binary_semantic_router",
+  "dataset_sha256": "7e5eac882b03594751a6c01d88fe286c110ac49df87c2d3b8665cf88cd1d0598",
+  "development_dataset_sha256": "c82cfde20465f70ab98b60eea7415d5153a2e72cc391bec12dd3f21abb877bc8",
+  "rows": 80,
+  "label_counts": {
+    "ABSTAIN": 20,
+    "NON_TARGET": 30,
+    "RISK_REVIEW": 30
+  },
+  "source_counts": {
+    "sec_edgar": 38,
+    "federal_reserve_press": 8,
+    "external_official_primary": 16,
+    "sec_litigation_releases": 3,
+    "opennews_free": 9,
+    "fda_medwatch": 3,
+    "ftc_press": 1,
+    "bls_key_indicators": 1,
+    "cftc_enforcement": 1
+  },
+  "blind_min_event_date": "2020-01-01",
+  "adjudicator": "codex_gpt5_evidence_policy_v1",
+  "reviewer_type": "AI_RUBRIC_ADJUDICATOR_NOT_HUMAN",
+  "human_labels_claimed": false,
+  "label_policy_locked_before_inference": true,
+  "predictions_present": false,
+  "predecessor_blind_v2": {
+    "freeze_id": "external-blind-v2-35fe0a851d63",
+    "dataset_sha256": "35fe0a851d63f2f34f2d25210cff07ce476c1c95b5eb148f32f0a94d64b323b2",
+    "gate_pass": false,
+    "role": "EXPOSED_FAILURE_DIAGNOSTIC_NOT_A_BLIND_TEST_ANYMORE"
+  },
+  "exposed_v2_substantive_rows_used_in_development": 50,
+  "overlap_audit": {
+    "event_id": 0,
+    "entity_group": 0,
+    "event_chain_group": 0,
+    "near_duplicate": 0,
+    "exposed_v2_event": 0,
+    "exposed_v2_entity": 0,
+    "exposed_v2_near_duplicate": 0
+  },
+  "no_trading": true
+}

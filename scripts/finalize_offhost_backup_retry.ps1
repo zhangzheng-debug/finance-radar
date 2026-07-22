@@ -47,8 +47,9 @@ $releaseNeedle = "releases/$RequiredRelease/"
 if (-not ($listing | Where-Object { $_ -like "*$releaseNeedle*" } | Select-Object -First 1)) {
     throw "required release missing from archive"
 }
-if (-not ($listing | Where-Object { $_ -like "*risk_router_external_blind_v1_report.json" } | Select-Object -First 1)) {
-    throw "external blind report missing from archive"
+$blindNeedle = "releases/$RequiredRelease/artifacts/risk_router_external_blind_v3_report.json"
+if (-not ($listing | Where-Object { $_ -like "*$blindNeedle" } | Select-Object -First 1)) {
+    throw "external blind v3 report missing from accepted release"
 }
 
 & python (Join-Path $PSScriptRoot "backup_crypto.py") encrypt $plain $encrypted --passphrase-file $passphrase
@@ -70,6 +71,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "full isolated migration restore audit failed"
 }
 $fullRestoreMarkdown = [System.IO.Path]::ChangeExtension($fullRestoreReport, ".md")
+$restoreAudit = Get-Content -Raw -LiteralPath $fullRestoreReport | ConvertFrom-Json
 Copy-Item -LiteralPath $fullRestoreReport -Destination (Join-Path $repoRoot "reports\migration_full_restore_latest.json") -Force
 Copy-Item -LiteralPath $fullRestoreMarkdown -Destination (Join-Path $repoRoot "reports\migration_full_restore_latest.md") -Force
 
@@ -89,12 +91,19 @@ $verification = [ordered]@{
     full_restore_report = $fullRestoreReport
     full_restore_markdown = $fullRestoreMarkdown
     external_blind_report_included = $true
+    model_version = $restoreAudit.release.risk_router_model_version
+    model_artifact_sha256 = $restoreAudit.release.risk_router_artifact_sha256
+    external_blind_report = $restoreAudit.release.external_blind_report
+    external_blind_gate_pass = [bool]$restoreAudit.release.external_blind_gate_pass
+    external_blind_promotion = $restoreAudit.release.external_blind_promotion
+    ledger_events = [int]$restoreAudit.ledger_restore.counts.canonical_events
+    ledger_evidence = [int]$restoreAudit.ledger_restore.counts.event_evidence
     trading_project_included = $false
 }
 $verification | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination "offhost-verification.json") -Encoding UTF8
 
 $publicStatus = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     status = "VERIFIED"
     verified_at = $verification.created_at
     backup_stamp = $Stamp
@@ -102,6 +111,12 @@ $publicStatus = [ordered]@{
     full_restore_verified = $true
     encrypted_at_rest = $true
     archive_entries = @($listing).Count
+    required_release = $RequiredRelease
+    model_version = $verification.model_version
+    external_blind_gate_pass = $verification.external_blind_gate_pass
+    external_blind_promotion = $verification.external_blind_promotion
+    ledger_events = $verification.ledger_events
+    ledger_evidence = $verification.ledger_evidence
 }
 $publicStatusPath = Join-Path $destination "offhost-status.json"
 $publicStatus | ConvertTo-Json | Set-Content -LiteralPath $publicStatusPath -Encoding UTF8

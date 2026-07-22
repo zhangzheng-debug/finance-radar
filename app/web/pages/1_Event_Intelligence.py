@@ -100,7 +100,15 @@ family_options = facet_values(facets, "families", requested_family)
 source_options = facet_values(facets, "sources", requested_source)
 
 filter_cols = st.columns([1.0, 1.45, 1.35, 2.15, .65], gap="small")
-flow = filter_cols[0].selectbox("保存视图", flow_names, key="event_flow")
+flow = filter_cols[0].selectbox(
+    "保存视图",
+    flow_names,
+    key="event_flow",
+    format_func=lambda value: {
+        "已核验": "证据核验",
+        "弱证据": "证据不足",
+    }.get(str(value), str(value)),
+)
 family = filter_cols[1].selectbox(
     "事件族",
     family_options,

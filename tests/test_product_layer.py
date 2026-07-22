@@ -105,10 +105,46 @@ class ProductLayerTests(unittest.TestCase):
         self.assertEqual(repository.list_events(source="test")["total"], 1)
         self.assertEqual(repository.list_events(source="missing")["total"], 0)
         self.assertEqual(repository.list_events(query="test")["total"], 1)
+        listed = repository.list_events(query="Chapter 11 petition")
+        self.assertEqual(listed["total"], 1)
+        self.assertEqual(listed["items"][0]["source_title"], "Bankruptcy filing")
+        self.assertEqual(listed["items"][0]["source_summary"], "Chapter 11 petition")
         source = repository.list_source_health()[0]
         self.assertEqual(source["observations"], 1)
         self.assertEqual(source["cursor_status"], "STATIC_IMPORTED")
         self.assertIsNotNone(source["last_success_at"])
+
+    def test_filtered_observation_is_auditable_but_not_used_as_preferred_source(self) -> None:
+        connection = open_ledger(self.ledger_path)
+        now = utc_now()
+        connection.execute(
+            """INSERT INTO raw_observations VALUES (
+               'obs-noise','sec','noise-1','2026-07-17',?,'Live roundup noise',
+               'unrelated commentary','https://sec.example/noise','noise-hash','{}','captured')""",
+            (now,),
+        )
+        connection.execute(
+            """INSERT INTO event_observations VALUES (
+               'evt-1','obs-noise','filtered_aggregated_noise',?)""",
+            (now,),
+        )
+        connection.commit()
+        connection.close()
+
+        repository = LedgerRepository(self.ledger_path)
+        listed = repository.list_events(status="verified")
+        self.assertEqual(listed["items"][0]["source_title"], "Bankruptcy filing")
+        self.assertEqual(repository.list_events(query="roundup noise")["total"], 0)
+        detail = repository.event_detail("evt-1")
+        self.assertEqual(detail["preferred_source"]["title"], "Bankruptcy filing")
+        timeline = repository.event_timeline("evt-1")
+        self.assertTrue(
+            any(
+                item["kind"] == "observation"
+                and item["payload"].get("relation_type") == "filtered_aggregated_noise"
+                for item in timeline
+            )
+        )
 
     def test_market_capabilities_distinguish_persisted_providers_and_local_probe(self) -> None:
         connection = open_ledger(self.ledger_path)
@@ -137,13 +173,24 @@ class ProductLayerTests(unittest.TestCase):
         providers = {item["provider_id"]: item for item in capabilities["providers"]}
         self.assertEqual(providers["binance_public"]["status"], "OBSERVED")
         self.assertEqual(providers["binance_public"]["snapshots"], 1)
+        self.assertEqual(providers["binance_public"]["freshness_status"], "FRESH_CAPTURE")
+        self.assertFalse(providers["binance_public"]["continuous_feed"])
+        self.assertEqual(
+            providers["binance_public"]["activity_scope"],
+            "EVENT_TRIGGERED_SNAPSHOTS",
+        )
         self.assertEqual(providers["ibkr_tws_readonly"]["status"], "LOCAL_PROBE_ONLY")
+        self.assertEqual(
+            providers["ibkr_tws_readonly"]["freshness_status"],
+            "NOT_APPLICABLE_LOCAL_PROBE",
+        )
         self.assertTrue(capabilities["boundary"]["no_trading"])
         self.assertTrue(all(not item["order_endpoints_present"] for item in providers.values()))
         self.assertEqual(
             capabilities["horizon_policy"]["windows"],
             ["t_plus_5m", "t_plus_30m", "t_plus_1d"],
         )
+        self.assertFalse(capabilities["horizon_policy"]["continuous_quote_feed"])
 
     def test_api_contract_and_admin_boundary(self) -> None:
         with TestClient(create_app(self.settings)) as client:
@@ -154,6 +201,8 @@ class ProductLayerTests(unittest.TestCase):
             self.assertIn("trace_id", payload)
             self.assertIn("generated_at", payload)
             self.assertEqual(payload["data"]["ledger"]["counts"]["canonical_events"], 1)
+            self.assertEqual(payload["data"]["ledger"]["database"], self.ledger_path.name)
+            self.assertEqual(payload["data"]["operations"]["database"], self.settings.operations_db.name)
             self.assertIn("raw_official_source_snapshots", payload["data"]["capabilities"])
             self.assertEqual(payload["data"]["operations"]["worker_window_24h"]["status"], "NO_DATA")
             overview = client.get("/api/v1/overview")
@@ -167,6 +216,10 @@ class ProductLayerTests(unittest.TestCase):
             archive = client.get("/api/v1/evidence/archive")
             self.assertEqual(archive.status_code, 200)
             self.assertTrue(archive.json()["data"]["policy"]["immutable"])
+            self.assertIn("coverage", archive.json()["data"])
+            self.assertEqual(archive.json()["data"]["coverage"]["missing_links"], 0)
+            self.assertEqual(archive.json()["data"]["coverage"]["coverage_pct"], 100.0)
+            self.assertEqual(archive.json()["data"]["coverage"]["terminal_policy_exclusions"], 0)
             facets = client.get("/api/v1/events/facets")
             self.assertEqual(facets.status_code, 200)
             self.assertTrue(facets.json()["data"]["read_only"])
@@ -176,6 +229,13 @@ class ProductLayerTests(unittest.TestCase):
             detail = client.get("/api/v1/events/evt-1")
             self.assertEqual(detail.status_code, 200)
             self.assertTrue(detail.json()["data"]["model_shadow_output"]["no_trading"])
+            self.assertTrue(
+                detail.json()["data"]["model_input_contract"]["excludes_event_taxonomy_shortcuts"]
+            )
+            self.assertEqual(
+                detail.json()["data"]["model_shadow_output"]["scope_gate"]["decision"],
+                "ADMIT_RISK_SCOPE",
+            )
             denied = client.post("/api/v1/replays/positive_earnings_non_target/run")
             self.assertEqual(denied.status_code, 403)
             allowed = client.post(
@@ -184,6 +244,13 @@ class ProductLayerTests(unittest.TestCase):
             )
             self.assertEqual(allowed.status_code, 200)
             self.assertEqual(allowed.json()["data"]["final_label"], "NON_TARGET")
+
+    def test_mutations_fail_closed_when_admin_token_is_not_configured(self) -> None:
+        settings = replace(self.settings, admin_token=None)
+        with TestClient(create_app(settings)) as client:
+            response = client.post("/api/v1/replays/positive_earnings_non_target/run")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["error"]["code"], "ADMIN_MUTATIONS_DISABLED")
 
     def test_structured_evidence_agent_persists_trace_objects_and_override(self) -> None:
         with TestClient(create_app(self.settings)) as client:
@@ -295,10 +362,24 @@ class ProductLayerTests(unittest.TestCase):
         positive = router.predict("Record revenue and profit growth beat estimates; guidance raised with a new partnership.")
         risk = router.predict("The issuer filed Chapter 11 bankruptcy after default and faces liquidation.")
         uncertain = router.predict("Management published a routine update.")
+        ai_benchmark = router.predict(
+            "OpenAI models escaped a secure test environment and hacked Hugging Face to cheat on a benchmark evaluation."
+        )
+        fed_collision = router.predict(
+            "The Fed rang the alarm about Anthropic's AI model but had to go months without it."
+        )
         self.assertEqual(positive["label"], "NON_TARGET")
         self.assertEqual(risk["label"], "RISK_REVIEW")
         self.assertEqual(uncertain["label"], "ABSTAIN")
-        self.assertTrue(all(item["no_trading"] for item in (positive, risk, uncertain)))
+        self.assertEqual(ai_benchmark["label"], "NON_TARGET")
+        self.assertEqual(fed_collision["label"], "ABSTAIN")
+        self.assertEqual(ai_benchmark["runtime"], "scope_guardrail")
+        self.assertTrue(
+            all(
+                item["no_trading"]
+                for item in (positive, risk, uncertain, ai_benchmark, fed_collision)
+            )
+        )
 
     def test_corrupt_model_artifact_degrades_visibly_and_safely(self) -> None:
         artifact = Path(self.temp_dir.name) / "corrupt.joblib"

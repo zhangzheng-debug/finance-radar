@@ -1,0 +1,731 @@
+{
+  "schema_version": 4,
+  "model_name": "Finance Radar Evidence-Gated Semantic Risk Router",
+  "model_version": "risk-router-v4-c82cfde20465",
+  "artifact_sha256": "1f1d2c1bbfeaf2fd22280474787b89c717646d4dd651472fca57514f1a0d695d",
+  "trained_at": "2026-07-22T08:28:16.295911+00:00",
+  "architecture": "structured_evidence_gate_plus_binary_semantic_router_v1",
+  "task": "Classify primary-supported event text as RISK_REVIEW or NON_TARGET; evidence gate owns ABSTAIN.",
+  "label_provenance": "AI_RUBRIC_ADJUDICATOR_NOT_HUMAN",
+  "human_labels_claimed": false,
+  "development_evaluation": {
+    "schema_version": 1,
+    "evaluation_type": "binary_semantic_grouped_5_fold_oof",
+    "created_at": "2026-07-22T08:28:16.295911+00:00",
+    "model_version": "risk-router-v4-c82cfde20465",
+    "artifact_sha256": "1f1d2c1bbfeaf2fd22280474787b89c717646d4dd651472fca57514f1a0d695d",
+    "architecture": "structured_evidence_gate_plus_binary_semantic_router_v1",
+    "development_dataset_sha256": "c82cfde20465f70ab98b60eea7415d5153a2e72cc391bec12dd3f21abb877bc8",
+    "development_rows": 139,
+    "label_counts": {
+      "RISK_REVIEW": 84,
+      "NON_TARGET": 55
+    },
+    "folds": [
+      {
+        "fold": 1,
+        "train_rows": 111,
+        "test_rows": 28,
+        "train_labels": {
+          "RISK_REVIEW": 67,
+          "NON_TARGET": 44
+        },
+        "test_labels": {
+          "NON_TARGET": 11,
+          "RISK_REVIEW": 17
+        },
+        "group_overlap_count": 0
+      },
+      {
+        "fold": 2,
+        "train_rows": 111,
+        "test_rows": 28,
+        "train_labels": {
+          "RISK_REVIEW": 67,
+          "NON_TARGET": 44
+        },
+        "test_labels": {
+          "RISK_REVIEW": 17,
+          "NON_TARGET": 11
+        },
+        "group_overlap_count": 0
+      },
+      {
+        "fold": 3,
+        "train_rows": 112,
+        "test_rows": 27,
+        "train_labels": {
+          "RISK_REVIEW": 68,
+          "NON_TARGET": 44
+        },
+        "test_labels": {
+          "RISK_REVIEW": 16,
+          "NON_TARGET": 11
+        },
+        "group_overlap_count": 0
+      },
+      {
+        "fold": 4,
+        "train_rows": 111,
+        "test_rows": 28,
+        "train_labels": {
+          "RISK_REVIEW": 67,
+          "NON_TARGET": 44
+        },
+        "test_labels": {
+          "RISK_REVIEW": 17,
+          "NON_TARGET": 11
+        },
+        "group_overlap_count": 0
+      },
+      {
+        "fold": 5,
+        "train_rows": 111,
+        "test_rows": 28,
+        "train_labels": {
+          "RISK_REVIEW": 67,
+          "NON_TARGET": 44
+        },
+        "test_labels": {
+          "NON_TARGET": 11,
+          "RISK_REVIEW": 17
+        },
+        "group_overlap_count": 0
+      }
+    ],
+    "development_blind_overlap": {
+      "event_id": 0,
+      "entity_group": 0,
+      "event_chain_group": 0,
+      "text_sha256": 0
+    },
+    "selected_policy": {
+      "semantic_policy_version": "semantic-policy-gate-v1",
+      "semantic_risk_threshold": 0.51
+    },
+    "selected_metrics": {
+      "accuracy": 0.9136690647482014,
+      "macro_f1": 0.9102839931153184,
+      "risk_recall": 0.9166666666666666,
+      "risk_precision": 0.9390243902439024,
+      "non_target_recall": 0.9090909090909091,
+      "non_target_false_risk_rate": 0.09090909090909091,
+      "classification_report": {
+        "RISK_REVIEW": {
+          "precision": 0.9390243902439024,
+          "recall": 0.9166666666666666,
+          "f1-score": 0.927710843373494,
+          "support": 84.0
+        },
+        "NON_TARGET": {
+          "precision": 0.8771929824561403,
+          "recall": 0.9090909090909091,
+          "f1-score": 0.8928571428571429,
+          "support": 55.0
+        },
+        "accuracy": 0.9136690647482014,
+        "macro avg": {
+          "precision": 0.9081086863500214,
+          "recall": 0.9128787878787878,
+          "f1-score": 0.9102839931153184,
+          "support": 139.0
+        },
+        "weighted avg": {
+          "precision": 0.9145587252919103,
+          "recall": 0.9136690647482014,
+          "f1-score": 0.9139198107950817,
+          "support": 139.0
+        }
+      },
+      "confusion_matrix": [
+        [
+          77,
+          7
+        ],
+        [
+          5,
+          50
+        ]
+      ]
+    },
+    "policy_candidates": [
+      {
+        "semantic_risk_threshold": 0.48,
+        "metrics": {
+          "accuracy": 0.8992805755395683,
+          "macro_f1": 0.8946969696969697,
+          "risk_recall": 0.9166666666666666,
+          "risk_precision": 0.9166666666666666,
+          "non_target_recall": 0.8727272727272727,
+          "non_target_false_risk_rate": 0.12727272727272726,
+          "classification_report": {
+            "RISK_REVIEW": {
+              "precision": 0.9166666666666666,
+              "recall": 0.9166666666666666,
+              "f1-score": 0.9166666666666666,
+              "support": 84.0
+            },
+            "NON_TARGET": {
+              "precision": 0.8727272727272727,
+              "recall": 0.8727272727272727,
+              "f1-score": 0.8727272727272727,
+              "support": 55.0
+            },
+            "accuracy": 0.8992805755395683,
+            "macro avg": {
+              "precision": 0.8946969696969697,
+              "recall": 0.8946969696969697,
+              "f1-score": 0.8946969696969697,
+              "support": 139.0
+            },
+            "weighted avg": {
+              "precision": 0.8992805755395683,
+              "recall": 0.8992805755395683,
+              "f1-score": 0.8992805755395683,
+              "support": 139.0
+            }
+          },
+          "confusion_matrix": [
+            [
+              77,
+              7
+            ],
+            [
+              7,
+              48
+            ]
+          ]
+        },
+        "gates": {
+          "macro_f1": true,
+          "risk_recall": true,
+          "non_target_false_risk": false,
+          "group_overlap": true
+        },
+        "gate_pass": false
+      },
+      {
+        "semantic_risk_threshold": 0.5,
+        "metrics": {
+          "accuracy": 0.9064748201438849,
+          "macro_f1": 0.9025192857528187,
+          "risk_recall": 0.9166666666666666,
+          "risk_precision": 0.927710843373494,
+          "non_target_recall": 0.8909090909090909,
+          "non_target_false_risk_rate": 0.10909090909090909,
+          "classification_report": {
+            "RISK_REVIEW": {
+              "precision": 0.927710843373494,
+              "recall": 0.9166666666666666,
+              "f1-score": 0.9221556886227545,
+              "support": 84.0
+            },
+            "NON_TARGET": {
+              "precision": 0.875,
+              "recall": 0.8909090909090909,
+              "f1-score": 0.8828828828828829,
+              "support": 55.0
+            },
+            "accuracy": 0.9064748201438849,
+            "macro avg": {
+              "precision": 0.901355421686747,
+              "recall": 0.9037878787878788,
+              "f1-score": 0.9025192857528187,
+              "support": 139.0
+            },
+            "weighted avg": {
+              "precision": 0.9068540348444136,
+              "recall": 0.9064748201438849,
+              "f1-score": 0.90661608922928,
+              "support": 139.0
+            }
+          },
+          "confusion_matrix": [
+            [
+              77,
+              7
+            ],
+            [
+              6,
+              49
+            ]
+          ]
+        },
+        "gates": {
+          "macro_f1": true,
+          "risk_recall": true,
+          "non_target_false_risk": false,
+          "group_overlap": true
+        },
+        "gate_pass": false
+      },
+      {
+        "semantic_risk_threshold": 0.51,
+        "metrics": {
+          "accuracy": 0.9136690647482014,
+          "macro_f1": 0.9102839931153184,
+          "risk_recall": 0.9166666666666666,
+          "risk_precision": 0.9390243902439024,
+          "non_target_recall": 0.9090909090909091,
+          "non_target_false_risk_rate": 0.09090909090909091,
+          "classification_report": {
+            "RISK_REVIEW": {
+              "precision": 0.9390243902439024,
+              "recall": 0.9166666666666666,
+              "f1-score": 0.927710843373494,
+              "support": 84.0
+            },
+            "NON_TARGET": {
+              "precision": 0.8771929824561403,
+              "recall": 0.9090909090909091,
+              "f1-score": 0.8928571428571429,
+              "support": 55.0
+            },
+            "accuracy": 0.9136690647482014,
+            "macro avg": {
+              "precision": 0.9081086863500214,
+              "recall": 0.9128787878787878,
+              "f1-score": 0.9102839931153184,
+              "support": 139.0
+            },
+            "weighted avg": {
+              "precision": 0.9145587252919103,
+              "recall": 0.9136690647482014,
+              "f1-score": 0.9139198107950817,
+              "support": 139.0
+            }
+          },
+          "confusion_matrix": [
+            [
+              77,
+              7
+            ],
+            [
+              5,
+              50
+            ]
+          ]
+        },
+        "gates": {
+          "macro_f1": true,
+          "risk_recall": true,
+          "non_target_false_risk": true,
+          "group_overlap": true
+        },
+        "gate_pass": true
+      },
+      {
+        "semantic_risk_threshold": 0.52,
+        "metrics": {
+          "accuracy": 0.9136690647482014,
+          "macro_f1": 0.9102839931153184,
+          "risk_recall": 0.9166666666666666,
+          "risk_precision": 0.9390243902439024,
+          "non_target_recall": 0.9090909090909091,
+          "non_target_false_risk_rate": 0.09090909090909091,
+          "classification_report": {
+            "RISK_REVIEW": {
+              "precision": 0.9390243902439024,
+              "recall": 0.9166666666666666,
+              "f1-score": 0.927710843373494,
+              "support": 84.0
+            },
+            "NON_TARGET": {
+              "precision": 0.8771929824561403,
+              "recall": 0.9090909090909091,
+              "f1-score": 0.8928571428571429,
+              "support": 55.0
+            },
+            "accuracy": 0.9136690647482014,
+            "macro avg": {
+              "precision": 0.9081086863500214,
+              "recall": 0.9128787878787878,
+              "f1-score": 0.9102839931153184,
+              "support": 139.0
+            },
+            "weighted avg": {
+              "precision": 0.9145587252919103,
+              "recall": 0.9136690647482014,
+              "f1-score": 0.9139198107950817,
+              "support": 139.0
+            }
+          },
+          "confusion_matrix": [
+            [
+              77,
+              7
+            ],
+            [
+              5,
+              50
+            ]
+          ]
+        },
+        "gates": {
+          "macro_f1": true,
+          "risk_recall": true,
+          "non_target_false_risk": true,
+          "group_overlap": true
+        },
+        "gate_pass": true
+      },
+      {
+        "semantic_risk_threshold": 0.54,
+        "metrics": {
+          "accuracy": 0.9136690647482014,
+          "macro_f1": 0.9102839931153184,
+          "risk_recall": 0.9166666666666666,
+          "risk_precision": 0.9390243902439024,
+          "non_target_recall": 0.9090909090909091,
+          "non_target_false_risk_rate": 0.09090909090909091,
+          "classification_report": {
+            "RISK_REVIEW": {
+              "precision": 0.9390243902439024,
+              "recall": 0.9166666666666666,
+              "f1-score": 0.927710843373494,
+              "support": 84.0
+            },
+            "NON_TARGET": {
+              "precision": 0.8771929824561403,
+              "recall": 0.9090909090909091,
+              "f1-score": 0.8928571428571429,
+              "support": 55.0
+            },
+            "accuracy": 0.9136690647482014,
+            "macro avg": {
+              "precision": 0.9081086863500214,
+              "recall": 0.9128787878787878,
+              "f1-score": 0.9102839931153184,
+              "support": 139.0
+            },
+            "weighted avg": {
+              "precision": 0.9145587252919103,
+              "recall": 0.9136690647482014,
+              "f1-score": 0.9139198107950817,
+              "support": 139.0
+            }
+          },
+          "confusion_matrix": [
+            [
+              77,
+              7
+            ],
+            [
+              5,
+              50
+            ]
+          ]
+        },
+        "gates": {
+          "macro_f1": true,
+          "risk_recall": true,
+          "non_target_false_risk": true,
+          "group_overlap": true
+        },
+        "gate_pass": true
+      },
+      {
+        "semantic_risk_threshold": 0.56,
+        "metrics": {
+          "accuracy": 0.9136690647482014,
+          "macro_f1": 0.9102839931153184,
+          "risk_recall": 0.9166666666666666,
+          "risk_precision": 0.9390243902439024,
+          "non_target_recall": 0.9090909090909091,
+          "non_target_false_risk_rate": 0.09090909090909091,
+          "classification_report": {
+            "RISK_REVIEW": {
+              "precision": 0.9390243902439024,
+              "recall": 0.9166666666666666,
+              "f1-score": 0.927710843373494,
+              "support": 84.0
+            },
+            "NON_TARGET": {
+              "precision": 0.8771929824561403,
+              "recall": 0.9090909090909091,
+              "f1-score": 0.8928571428571429,
+              "support": 55.0
+            },
+            "accuracy": 0.9136690647482014,
+            "macro avg": {
+              "precision": 0.9081086863500214,
+              "recall": 0.9128787878787878,
+              "f1-score": 0.9102839931153184,
+              "support": 139.0
+            },
+            "weighted avg": {
+              "precision": 0.9145587252919103,
+              "recall": 0.9136690647482014,
+              "f1-score": 0.9139198107950817,
+              "support": 139.0
+            }
+          },
+          "confusion_matrix": [
+            [
+              77,
+              7
+            ],
+            [
+              5,
+              50
+            ]
+          ]
+        },
+        "gates": {
+          "macro_f1": true,
+          "risk_recall": true,
+          "non_target_false_risk": true,
+          "group_overlap": true
+        },
+        "gate_pass": true
+      },
+      {
+        "semantic_risk_threshold": 0.58,
+        "metrics": {
+          "accuracy": 0.9136690647482014,
+          "macro_f1": 0.9102839931153184,
+          "risk_recall": 0.9166666666666666,
+          "risk_precision": 0.9390243902439024,
+          "non_target_recall": 0.9090909090909091,
+          "non_target_false_risk_rate": 0.09090909090909091,
+          "classification_report": {
+            "RISK_REVIEW": {
+              "precision": 0.9390243902439024,
+              "recall": 0.9166666666666666,
+              "f1-score": 0.927710843373494,
+              "support": 84.0
+            },
+            "NON_TARGET": {
+              "precision": 0.8771929824561403,
+              "recall": 0.9090909090909091,
+              "f1-score": 0.8928571428571429,
+              "support": 55.0
+            },
+            "accuracy": 0.9136690647482014,
+            "macro avg": {
+              "precision": 0.9081086863500214,
+              "recall": 0.9128787878787878,
+              "f1-score": 0.9102839931153184,
+              "support": 139.0
+            },
+            "weighted avg": {
+              "precision": 0.9145587252919103,
+              "recall": 0.9136690647482014,
+              "f1-score": 0.9139198107950817,
+              "support": 139.0
+            }
+          },
+          "confusion_matrix": [
+            [
+              77,
+              7
+            ],
+            [
+              5,
+              50
+            ]
+          ]
+        },
+        "gates": {
+          "macro_f1": true,
+          "risk_recall": true,
+          "non_target_false_risk": true,
+          "group_overlap": true
+        },
+        "gate_pass": true
+      },
+      {
+        "semantic_risk_threshold": 0.6,
+        "metrics": {
+          "accuracy": 0.9136690647482014,
+          "macro_f1": 0.9102839931153184,
+          "risk_recall": 0.9166666666666666,
+          "risk_precision": 0.9390243902439024,
+          "non_target_recall": 0.9090909090909091,
+          "non_target_false_risk_rate": 0.09090909090909091,
+          "classification_report": {
+            "RISK_REVIEW": {
+              "precision": 0.9390243902439024,
+              "recall": 0.9166666666666666,
+              "f1-score": 0.927710843373494,
+              "support": 84.0
+            },
+            "NON_TARGET": {
+              "precision": 0.8771929824561403,
+              "recall": 0.9090909090909091,
+              "f1-score": 0.8928571428571429,
+              "support": 55.0
+            },
+            "accuracy": 0.9136690647482014,
+            "macro avg": {
+              "precision": 0.9081086863500214,
+              "recall": 0.9128787878787878,
+              "f1-score": 0.9102839931153184,
+              "support": 139.0
+            },
+            "weighted avg": {
+              "precision": 0.9145587252919103,
+              "recall": 0.9136690647482014,
+              "f1-score": 0.9139198107950817,
+              "support": 139.0
+            }
+          },
+          "confusion_matrix": [
+            [
+              77,
+              7
+            ],
+            [
+              5,
+              50
+            ]
+          ]
+        },
+        "gates": {
+          "macro_f1": true,
+          "risk_recall": true,
+          "non_target_false_risk": true,
+          "group_overlap": true
+        },
+        "gate_pass": true
+      }
+    ],
+    "gates": {
+      "macro_f1": true,
+      "risk_recall": true,
+      "non_target_false_risk": true,
+      "group_overlap": true
+    },
+    "gate_thresholds": {
+      "macro_f1_min": 0.85,
+      "risk_recall_min": 0.85,
+      "non_target_false_risk_max": 0.1,
+      "group_overlap_max": 0
+    },
+    "gate_pass": true,
+    "blind_v3_predictions_used": false,
+    "promotion_decision": "ELIGIBLE_FOR_ONE_TIME_BLIND_V3",
+    "no_trading": true,
+    "shadow": true
+  },
+  "blind_evaluation": {
+    "freeze_id": "external-blind-v3-7e5eac882b03",
+    "dataset_sha256": "7e5eac882b03594751a6c01d88fe286c110ac49df87c2d3b8665cf88cd1d0598",
+    "report_path": "risk_router_external_blind_v3_report.json",
+    "full_layered_metrics": {
+      "accuracy": 0.9625,
+      "macro_f1": 0.9666574048346762,
+      "risk_recall": 0.9666666666666667,
+      "risk_precision": 0.9354838709677419,
+      "non_target_recall": 0.9333333333333333,
+      "non_target_false_risk_rate": 0.06666666666666667,
+      "all_non_risk_false_risk_rate": 0.04,
+      "abstain_recall": 1.0,
+      "abstain_precision": 1.0,
+      "classification_report": {
+        "RISK_REVIEW": {
+          "precision": 0.9354838709677419,
+          "recall": 0.9666666666666667,
+          "f1-score": 0.9508196721311475,
+          "support": 30.0
+        },
+        "NON_TARGET": {
+          "precision": 0.9655172413793104,
+          "recall": 0.9333333333333333,
+          "f1-score": 0.9491525423728814,
+          "support": 30.0
+        },
+        "ABSTAIN": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 20.0
+        },
+        "accuracy": 0.9625,
+        "macro avg": {
+          "precision": 0.9670003707823508,
+          "recall": 0.9666666666666667,
+          "f1-score": 0.9666574048346762,
+          "support": 80.0
+        },
+        "weighted avg": {
+          "precision": 0.9628754171301447,
+          "recall": 0.9625,
+          "f1-score": 0.9624895804390109,
+          "support": 80.0
+        }
+      },
+      "confusion_matrix": [
+        [
+          29,
+          1,
+          0
+        ],
+        [
+          2,
+          28,
+          0
+        ],
+        [
+          0,
+          0,
+          20
+        ]
+      ]
+    },
+    "semantic_substantive_metrics": {
+      "accuracy": 0.95,
+      "macro_f1": 0.9499861072520144,
+      "risk_recall": 0.9666666666666667,
+      "risk_precision": 0.9354838709677419,
+      "non_target_recall": 0.9333333333333333,
+      "non_target_false_risk_rate": 0.06666666666666667,
+      "classification_report": {
+        "RISK_REVIEW": {
+          "precision": 0.9354838709677419,
+          "recall": 0.9666666666666667,
+          "f1-score": 0.9508196721311475,
+          "support": 30.0
+        },
+        "NON_TARGET": {
+          "precision": 0.9655172413793104,
+          "recall": 0.9333333333333333,
+          "f1-score": 0.9491525423728814,
+          "support": 30.0
+        },
+        "accuracy": 0.95,
+        "macro avg": {
+          "precision": 0.9505005561735261,
+          "recall": 0.95,
+          "f1-score": 0.9499861072520144,
+          "support": 60.0
+        },
+        "weighted avg": {
+          "precision": 0.9505005561735262,
+          "recall": 0.95,
+          "f1-score": 0.9499861072520145,
+          "support": 60.0
+        }
+      },
+      "confusion_matrix": [
+        [
+          29,
+          1
+        ],
+        [
+          2,
+          28
+        ]
+      ]
+    },
+    "gate_pass": true,
+    "promotion_decision": "QUALIFIED_SHADOW"
+  },
+  "limitations": [
+    "AI rubric labels are not independent human double adjudication.",
+    "The semantic model must never run as if unreviewed discovery text were primary-supported.",
+    "The model is a shadow queue aid, not a fact verifier, sentiment engine, or trading model."
+  ],
+  "no_trading": true,
+  "shadow": true
+}

@@ -87,6 +87,8 @@ def test_archives_html_and_is_idempotent() -> None:
         assert len(calls) == 1
         archive = operations.evidence_archive_summary()
         assert archive["source_snapshots"] == 1
+        assert archive["source_snapshot_links"] == 1
+        assert operations.source_snapshot_pairs() == {("evt-1", "evid-1")}
         assert archive["by_mime"]["text/html"]["objects"] == 1
         item = archive["recent_objects"][0]
         assert item["object_kind"] == "SOURCE_SNAPSHOT"
@@ -320,4 +322,73 @@ def test_failed_snapshot_is_persistently_deferred_and_does_not_block_later_rows(
         assert second["status"] == "PASS"
         assert second["attempted"] == 0
         assert second["deferred_failures"] == 1
+        ledger.close()
+
+
+def test_oversized_snapshot_becomes_visible_terminal_policy_exclusion() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        ledger, operations, store = _fixture(root)
+        first = snapshots.archive_pending(
+            ledger,
+            operations,
+            store,
+            user_agent="FinanceRadar test@example.com",
+            cache_dir=root / "cache",
+            limit=1,
+            fetcher=lambda *_: (_ for _ in ()).throw(
+                ValueError("evidence object exceeds 10485760 bytes")
+            ),
+        )
+        assert first["status"] == "DEGRADED"
+        assert first["terminal_policy_failures"] == 1
+        pairs = operations.source_snapshot_failure_pairs()
+        assert pairs["terminal_policy"] == {("evt-1", "evid-1")}
+
+        second = snapshots.archive_pending(
+            ledger,
+            operations,
+            store,
+            user_agent="FinanceRadar test@example.com",
+            cache_dir=root / "cache",
+            limit=1,
+            fetcher=lambda *_: (_ for _ in ()).throw(AssertionError("terminal URL must not refetch")),
+        )
+        assert second["status"] == "PASS"
+        assert second["attempted"] == 0
+        assert second["terminal_policy_failures"] == 1
+        ledger.close()
+
+
+def test_legacy_oversized_failure_is_migrated_without_refetch() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        ledger, operations, store = _fixture(root)
+        operations.set_state(
+            "source_snapshot_failures_v1",
+            {
+                "evt-1:evid-1": {
+                    "source_url": "https://www.sec.gov/example.htm",
+                    "attempts": 1,
+                    "last_error": "ValueError: evidence object exceeds 10485760 bytes",
+                    "retry_after": "2099-01-01T00:00:00+00:00",
+                }
+            },
+        )
+        result = snapshots.archive_pending(
+            ledger,
+            operations,
+            store,
+            user_agent="FinanceRadar test@example.com",
+            cache_dir=root / "cache",
+            limit=1,
+            fetcher=lambda *_: (_ for _ in ()).throw(AssertionError("legacy terminal URL must not refetch")),
+        )
+        assert result["status"] == "PASS"
+        assert result["attempted"] == 0
+        assert result["terminal_policy_failures"] == 1
+        assert result["failure_state_migrations"] == 1
+        state = operations.get_state("source_snapshot_failures_v1", {})
+        assert state["evt-1:evid-1"]["terminal_policy"] is True
+        assert state["evt-1:evid-1"]["retry_after"] is None
         ledger.close()

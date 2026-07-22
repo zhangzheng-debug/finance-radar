@@ -407,15 +407,15 @@ def flow_shortcuts_markup(event_status: dict[str, Any]) -> str:
     weak = int(event_status.get("weak") or 0)
     rejected = int(event_status.get("rejected") or 0)
     flows = [
-        ("全部事件", verified + candidate + weak + rejected, ""),
-        ("待复核", candidate, "is-review"),
-        ("已核验", verified, "is-verified"),
-        ("弱证据", weak, "is-review"),
-        ("已拒绝", rejected, ""),
+        ("全部事件", "全部事件", verified + candidate + weak + rejected, ""),
+        ("待复核", "待复核", candidate, "is-review"),
+        ("已核验", "证据核验", verified, "is-verified"),
+        ("弱证据", "证据不足", weak, "is-review"),
+        ("已拒绝", "已拒绝", rejected, ""),
     ]
     links = []
-    for label, count, state in flows:
-        url = f"./Event_Intelligence?flow={quote(label, safe='')}"
+    for flow, label, count, state in flows:
+        url = f"./Event_Intelligence?flow={quote(flow, safe='')}"
         links.append(
             f'<a class="flow-link {state}" href="{url}" aria-label="打开{escape(label)}信息流，{count}条">'
             f'<span>{escape(label)}</span><span class="flow-count">{count:,}</span></a>'
