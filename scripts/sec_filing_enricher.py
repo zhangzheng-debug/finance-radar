@@ -27,6 +27,9 @@ DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
 DEFAULT_ENV = ROOT / ".env"
 DEFAULT_REPORT = ROOT / "reports" / "sec_filing_enrichment_latest.md"
 SEC_BASE = "https://www.sec.gov"
+DOCUMENT_MANIFEST_VERSION = 2
+RELEVANT_EXHIBIT_PREFIXES = ("EX-2", "EX-4", "EX-10", "EX-99")
+MAX_SELECTED_DOCUMENTS = 8
 ADMINISTRATIVE_NON_EVENT_TYPES = {
     "routine_nav_and_leverage_update",
     "routine_board_committee_appointment",
@@ -478,6 +481,55 @@ def evidence_excerpt(text: str, keywords: tuple[str, ...], *, max_chars: int = 1
             semantic_bonus = 4 if not keyword.startswith("item ") else 0
             score = quantified_facts * 5 + material_terms * 3 + semantic_bonus - boilerplate_penalty
             candidates.append((score, start))
+    if not candidates:
+        # A no-match filing still needs an honest, useful review excerpt. Do not
+        # default to the SEC cover page: rank bounded windows and prefer
+        # substantive disclosure text over XBRL/registrant boilerplate.
+        step = max(300, max_chars // 2)
+        for start in range(0, max(1, len(compact)), step):
+            window = compact[start : start + max_chars]
+            if not window:
+                continue
+            window_lower = window.casefold()
+            facts = len(
+                re.findall(
+                    r"(?:\$\s*\d[\d,.]*|\b\d+(?:\.\d+)?\s*%|\b\d+(?:\.\d+)?\s+(?:million|billion))",
+                    window,
+                    flags=re.I,
+                )
+            )
+            disclosure_terms = sum(
+                term in window_lower
+                for term in (
+                    "item 1.01",
+                    "item 2.01",
+                    "item 2.02",
+                    "item 2.04",
+                    "item 3.01",
+                    "item 4.02",
+                    "item 5.02",
+                    "item 7.01",
+                    "item 8.01",
+                    "exhibit 99",
+                    "press release",
+                    "revenue",
+                    "guidance",
+                    "agreement",
+                    "resigned",
+                    "default",
+                    "investigation",
+                )
+            )
+            cover_penalty = 20 * sum(
+                phrase in window_lower
+                for phrase in (
+                    "united states securities and exchange commission washington",
+                    "check the appropriate box below",
+                    "pursuant to section 13 or 15",
+                    "state or other jurisdiction of incorporation",
+                )
+            )
+            candidates.append((facts * 5 + disclosure_terms * 4 - cover_penalty, start))
     start = max(candidates, key=lambda item: (item[0], item[1]))[1] if candidates else 0
     excerpt = compact[start : start + max_chars]
     if start:
@@ -504,7 +556,7 @@ class SecFilingClient:
         user_agent: str,
         *,
         min_interval: float = 0.12,
-        max_bytes: int = 1_500_000,
+        max_bytes: int = 5_000_000,
         timeout: float = 30.0,
     ) -> None:
         if not user_agent or "@" not in user_agent:
@@ -533,10 +585,36 @@ class SecFilingClient:
         except (urllib.error.URLError, TimeoutError) as exc:
             raise RuntimeError(f"SEC request failed for {url}: {exc}") from exc
         self._last_request = time.monotonic()
-        return payload[: self.max_bytes]
+        if len(payload) > self.max_bytes:
+            raise RuntimeError(
+                f"SEC document exceeds safe capture limit ({self.max_bytes} bytes): {url}"
+            )
+        return payload
 
 
-def choose_documents(documents: list[FilingDocument], form: str) -> list[FilingDocument]:
+def is_relevant_exhibit(document: FilingDocument) -> bool:
+    document_type = document.document_type.upper()
+    description = document.description.casefold()
+    return (
+        document_type.startswith(RELEVANT_EXHIBIT_PREFIXES)
+        or "press release" in description
+        or "material agreement" in description
+    ) and not document_type.startswith(("EX-101", "GRAPHIC", "XML", "ZIP"))
+
+
+def choose_documents(
+    documents: list[FilingDocument],
+    form: str,
+    *,
+    max_documents: int = MAX_SELECTED_DOCUMENTS,
+) -> list[FilingDocument]:
+    """Choose the primary filing plus decision-relevant exhibits.
+
+    The previous implementation only kept two exhibits after the primary
+    document. That was enough for many filings, but could silently omit the
+    press release or material agreement that contains the actual Item 7.01/
+    9.01 disclosure.
+    """
     base_form = form.removesuffix("/A")
     primary = next(
         (row for row in documents if row.document_type.removesuffix("/A") == base_form),
@@ -546,9 +624,155 @@ def choose_documents(documents: list[FilingDocument], form: str) -> list[FilingD
     selected.extend(
         row
         for row in documents
-        if row not in selected and row.document_type.upper().startswith("EX-99")
+        if row not in selected and is_relevant_exhibit(row)
     )
-    return selected[:3]
+    return selected[: max(1, max_documents)]
+
+
+def item_codes_from_raw(raw_json: str) -> tuple[str, ...]:
+    try:
+        payload = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return ()
+    item = payload.get("item") if isinstance(payload, dict) else None
+    values = item.get("items") if isinstance(item, dict) else None
+    if not isinstance(values, list):
+        return ()
+    return tuple(str(value).strip() for value in values if str(value).strip())
+
+
+def document_manifest(
+    documents: list[FilingDocument],
+    selected: list[FilingDocument],
+    fetched_texts: dict[str, str],
+    *,
+    item_codes: tuple[str, ...],
+    error: str | None = None,
+) -> dict[str, Any]:
+    relevant = [document for document in documents if is_relevant_exhibit(document)]
+    selected_urls = {document.url for document in selected}
+    fetched_urls = set(fetched_texts)
+    omitted = [document.url for document in relevant if document.url not in selected_urls]
+    missing = [document.url for document in selected if document.url not in fetched_urls]
+    expects_exhibit = any(code == "9.01" for code in item_codes)
+    if error:
+        coverage_status = "INCOMPLETE_FETCH_ERROR"
+    elif omitted:
+        coverage_status = "INCOMPLETE_SELECTION_LIMIT"
+    elif missing:
+        coverage_status = "INCOMPLETE_FETCH"
+    elif expects_exhibit and not relevant:
+        coverage_status = "INCOMPLETE_EXPECTED_EXHIBIT"
+    else:
+        coverage_status = "COMPLETE"
+    return {
+        "manifest_version": DOCUMENT_MANIFEST_VERSION,
+        "coverage_status": coverage_status,
+        "item_codes": list(item_codes),
+        "documents": [document.__dict__ for document in documents],
+        "selected_documents": [
+            {
+                **document.__dict__,
+                "fetched": document.url in fetched_urls,
+                "text_chars": len(fetched_texts.get(document.url, "")),
+                "text_sha256": (
+                    hashlib.sha256(fetched_texts[document.url].encode("utf-8")).hexdigest()
+                    if document.url in fetched_urls
+                    else None
+                ),
+            }
+            for document in selected
+        ],
+        "omitted_relevant_urls": omitted,
+        "missing_selected_urls": missing,
+        "error": error,
+    }
+
+
+def manifest_coverage(value: str) -> str:
+    """Read v2 manifest coverage while remaining compatible with legacy lists."""
+    try:
+        payload = json.loads(value or "[]")
+    except json.JSONDecodeError:
+        return "LEGACY_UNKNOWN"
+    if isinstance(payload, dict):
+        return str(payload.get("coverage_status") or "UNKNOWN")
+    return "LEGACY_UNKNOWN"
+
+
+def manifest_evidence_url(value: str, default: str) -> str:
+    try:
+        payload = json.loads(value or "[]")
+    except json.JSONDecodeError:
+        return default
+    if not isinstance(payload, dict):
+        return default
+    selected = payload.get("selected_documents")
+    if not isinstance(selected, list):
+        return default
+    for document in selected:
+        if not isinstance(document, dict) or not document.get("fetched"):
+            continue
+        document_type = str(document.get("document_type") or "").upper()
+        if document_type.startswith(RELEVANT_EXHIBIT_PREFIXES):
+            return str(document.get("url") or default)
+    return default
+
+
+def substantive_text_score(text: str, document: FilingDocument) -> int:
+    compact = " ".join(text.split())
+    lowered = compact.casefold()
+    score = min(len(compact) // 80, 40)
+    score += 25 if is_relevant_exhibit(document) else 0
+    score += 8 * sum(
+        term in lowered
+        for term in (
+            "revenue",
+            "net income",
+            "guidance",
+            "default",
+            "bankruptcy",
+            "resigned",
+            "acquisition",
+            "merger",
+            "investigation",
+            "press release",
+        )
+    )
+    score += 3 * len(re.findall(r"\$\s*\d|\b\d+(?:\.\d+)?\s*%", compact))
+    score -= 35 * sum(
+        phrase in lowered
+        for phrase in (
+            "united states securities and exchange commission washington",
+            "check the appropriate box below",
+            "pursuant to section 13 or 15",
+        )
+    )
+    return score
+
+
+def select_excerpt_source(
+    fetched_documents: list[tuple[FilingDocument, str]],
+    classification: Classification,
+) -> str:
+    if not fetched_documents:
+        return ""
+    ranked: list[tuple[int, str]] = []
+    for document, text in fetched_documents:
+        document_classification = classify_filing_text(text)
+        semantic_match = int(
+            bool(classification.event_type)
+            and document_classification.event_type == classification.event_type
+        )
+        ranked.append(
+            (
+                semantic_match * 1000
+                + len(document_classification.keywords) * 100
+                + substantive_text_score(text, document),
+                text,
+            )
+        )
+    return max(ranked, key=lambda item: item[0])[1]
 
 
 def upsert_enrichment(
@@ -557,14 +781,25 @@ def upsert_enrichment(
     row: Any,
     accession: str,
     documents: list[FilingDocument],
+    selected_documents: list[FilingDocument],
+    fetched_texts: dict[str, str],
     primary_url: str | None,
     text: str,
+    excerpt_source_text: str | None,
     classification: Classification,
     status: str,
     attempts: int,
     error: str | None,
 ) -> None:
     now = utc_now()
+    items = item_codes_from_raw(str(row["raw_json"] or ""))
+    manifest = document_manifest(
+        documents,
+        selected_documents,
+        fetched_texts,
+        item_codes=items,
+        error=error,
+    )
     connection.execute(
         """
         INSERT INTO sec_filing_enrichments(
@@ -593,8 +828,11 @@ def upsert_enrichment(
             row["form"],
             row["canonical_url"],
             primary_url,
-            stable_json([document.__dict__ for document in documents]),
-            evidence_excerpt(text, classification.keywords),
+            stable_json(manifest),
+            evidence_excerpt(
+                excerpt_source_text if excerpt_source_text is not None else text,
+                classification.keywords,
+            ),
             hashlib.sha256(text.encode("utf-8")).hexdigest() if text else None,
             classification.event_family,
             classification.event_type,
@@ -699,13 +937,88 @@ def _reject_sec_noise_event(connection: Any, row: Any, *, reason: str, now: str)
     return True
 
 
+def reopen_inconclusive_sec_events(connection: Any) -> int:
+    """Repair historical generic SEC rows that were rejected without a scoped match.
+
+    A missing semantic match is not proof that a filing is a non-event,
+    especially for Item 7.01/9.01 filings whose substance may live in an
+    exhibit. Reopen only the exact legacy terminal reason; reviewed or
+    explicitly administrative rejections remain untouched.
+    """
+    rows = connection.execute(
+        """SELECT e.event_id,e.current_version,e.event_family,e.event_type,e.manual_grade,
+                  v.facts_json,x.observation_id
+           FROM canonical_events e
+           JOIN event_versions v
+             ON v.event_id=e.event_id AND v.version=e.current_version
+           JOIN sec_filing_enrichments x ON x.event_id=e.event_id
+           WHERE e.status='rejected'
+             AND v.change_reason='sec_primary_semantic_non_event:no_scoped_event_match'
+             AND x.matched_event_type IS NULL"""
+    ).fetchall()
+    now = utc_now()
+    reopened = 0
+    for row in rows:
+        try:
+            facts = json.loads(row["facts_json"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            facts = {}
+        facts["sec_semantic_filter"] = {
+            "reason": "sec_semantic_inconclusive:no_scoped_event_match",
+            "terminal": False,
+            "attachment_complete_required": True,
+            "reopened_at": now,
+        }
+        new_version = int(row["current_version"]) + 1
+        connection.execute(
+            """INSERT INTO event_versions(
+               event_id,version,changed_at,status,label_status,event_family,event_type,
+               manual_grade,facts_json,change_reason
+               ) VALUES (?,?,?,'candidate','candidate',?,?,?,?,?)""",
+            (
+                row["event_id"],
+                new_version,
+                now,
+                row["event_family"],
+                row["event_type"],
+                row["manual_grade"],
+                stable_json(facts),
+                "sec_primary_semantic_inconclusive_reopened",
+            ),
+        )
+        connection.execute(
+            """UPDATE canonical_events
+               SET current_version=?,status='candidate',label_status='candidate',last_updated_at=?
+               WHERE event_id=? AND status='rejected'""",
+            (new_version, now, row["event_id"]),
+        )
+        connection.execute(
+            """UPDATE sec_filing_enrichments
+               SET status='ERROR',attempts=0,
+                   last_error='reprocess_after_nonterminal_no_match_policy',updated_at=?
+               WHERE observation_id=?""",
+            (now, row["observation_id"]),
+        )
+        connection.execute(
+            """UPDATE pipeline_jobs
+               SET status='PENDING_PRIMARY_EVIDENCE',attempts=0,available_at=?,
+                   last_error='reprocess_after_nonterminal_no_match_policy',updated_at=?
+               WHERE event_id=? AND job_type='live_primary_evidence_review'""",
+            (now, now, row["event_id"]),
+        )
+        reopened += 1
+    if reopened:
+        connection.commit()
+    return reopened
+
+
 def materialize_parsed_enrichment_evidence(connection: Any) -> dict[str, int]:
     """Bridge parsed SEC primary documents into the canonical evidence state machine."""
     rows = connection.execute(
         """SELECT e.event_id,e.current_version,e.status AS event_status,e.event_family,
                   e.event_type,e.manual_grade,r.observation_id,r.source_published_at,
                   r.canonical_url,r.raw_json,x.form,x.filing_index_url,
-                  x.primary_document_url,x.evidence_excerpt,x.matched_event_type,
+                  x.primary_document_url,x.documents_json,x.evidence_excerpt,x.matched_event_type,
                   x.matched_keywords_json,x.confidence
            FROM sec_filing_enrichments x
            JOIN canonical_events e ON e.event_id=x.event_id
@@ -720,6 +1033,8 @@ def materialize_parsed_enrichment_evidence(connection: Any) -> dict[str, int]:
         "reviewed_status_preserved": 0,
         "jobs_advanced": 0,
         "semantic_noise_rejected": 0,
+        "semantic_inconclusive": 0,
+        "attachment_incomplete": 0,
     }
     now = utc_now()
     for row in rows:
@@ -737,11 +1052,16 @@ def materialize_parsed_enrichment_evidence(connection: Any) -> dict[str, int]:
             keywords = []
         if not isinstance(keywords, list):
             keywords = []
-        evidence_url = str(
+        primary_evidence_url = str(
             row["primary_document_url"]
             or row["filing_index_url"]
             or row["canonical_url"]
             or ""
+        )
+        coverage_status = manifest_coverage(str(row["documents_json"] or ""))
+        evidence_url = manifest_evidence_url(
+            str(row["documents_json"] or ""),
+            primary_evidence_url,
         )
         evidence_id = stable_id("EVID", str(row["event_id"]), str(row["observation_id"]))
         excerpt = str(row["evidence_excerpt"] or "").strip()
@@ -749,16 +1069,27 @@ def materialize_parsed_enrichment_evidence(connection: Any) -> dict[str, int]:
         items_text = ";".join(str(code) for code in item_codes)
         keywords_text = ";".join(str(keyword) for keyword in keywords)
         passage_score = max(0, min(100, round(float(row["confidence"] or 0) * 100)))
-        evidence_status = (
-            "machine_extracted_unreviewed" if excerpt else "link_only_no_relevant_passage"
-        )
+        matched_type = str(row["matched_event_type"] or "")
+        if coverage_status.startswith("INCOMPLETE"):
+            evidence_status = "attachment_incomplete"
+        elif excerpt and matched_type:
+            evidence_status = "machine_extracted_unreviewed"
+        elif excerpt:
+            evidence_status = "machine_extracted_non_decision"
+        else:
+            evidence_status = "link_only_no_relevant_passage"
         existing = connection.execute(
             """SELECT evidence_url,filing_date,form,items,evidence_passage,
                       matched_keywords,passage_score,evidence_status,auto_verification_allowed
                FROM event_evidence WHERE event_id=? AND observation_id=?""",
             (row["event_id"], row["observation_id"]),
         ).fetchone()
-        machine_statuses = {"machine_extracted_unreviewed", "link_only_no_relevant_passage"}
+        machine_statuses = {
+            "machine_extracted_unreviewed",
+            "machine_extracted_non_decision",
+            "attachment_incomplete",
+            "link_only_no_relevant_passage",
+        }
         if existing is not None and str(existing["evidence_status"]) not in machine_statuses:
             result["reviewed_status_preserved"] += 1
         else:
@@ -824,15 +1155,13 @@ def materialize_parsed_enrichment_evidence(connection: Any) -> dict[str, int]:
                 )
                 result["evidence_inserted" if existing is None else "evidence_updated"] += 1
 
-        matched_type = str(row["matched_event_type"] or "")
-        semantic_noise = matched_type in ADMINISTRATIVE_NON_EVENT_TYPES or (
-            str(row["event_type"]) == "sec_material_filing" and not matched_type
+        semantic_noise = (
+            coverage_status == "COMPLETE"
+            and matched_type in ADMINISTRATIVE_NON_EVENT_TYPES
         )
         if semantic_noise:
             reason = (
                 f"sec_primary_semantic_non_event:{matched_type}"
-                if matched_type
-                else "sec_primary_semantic_non_event:no_scoped_event_match"
             )
             if _reject_sec_noise_event(connection, row, reason=reason, now=now):
                 result["semantic_noise_rejected"] += 1
@@ -843,25 +1172,52 @@ def materialize_parsed_enrichment_evidence(connection: Any) -> dict[str, int]:
                      AND status='PENDING_PRIMARY_EVIDENCE'""",
                 (reason, now, row["event_id"]),
             )
-        else:
+        elif coverage_status.startswith("INCOMPLETE"):
+            result["attachment_incomplete"] += 1
+            reason = f"sec_evidence_incomplete:{coverage_status.casefold()}"
             cursor = connection.execute(
                 """UPDATE pipeline_jobs
-                   SET status='PENDING_EVIDENCE_REVIEW',last_error=NULL,updated_at=?
+                   SET status='PENDING_PRIMARY_EVIDENCE',last_error=?,updated_at=?
+                   WHERE event_id=? AND job_type='live_primary_evidence_review'
+                     AND status IN ('PENDING_PRIMARY_EVIDENCE','PENDING_EVIDENCE_REVIEW')""",
+                (reason, now, row["event_id"]),
+            )
+        else:
+            result["semantic_inconclusive"] += int(not matched_type)
+            reason = None if matched_type else "sec_semantic_inconclusive:no_scoped_event_match"
+            cursor = connection.execute(
+                """UPDATE pipeline_jobs
+                   SET status='PENDING_EVIDENCE_REVIEW',last_error=?,updated_at=?
                    WHERE event_id=? AND job_type='live_primary_evidence_review'
                      AND status='PENDING_PRIMARY_EVIDENCE'""",
-                (now, row["event_id"]),
+                (reason, now, row["event_id"]),
             )
         result["jobs_advanced"] += cursor.rowcount
     connection.commit()
     return result
 
 
-def pending_rows(connection: Any, *, limit: int, refresh_parsed: bool = False) -> list[Any]:
+def pending_rows(
+    connection: Any,
+    *,
+    limit: int,
+    refresh_parsed: bool = False,
+    event_id: str | None = None,
+) -> list[Any]:
     enrichment_filter = (
         "(x.observation_id IS NULL OR x.status='PARSED' OR (x.status='ERROR' AND x.attempts<3))"
         if refresh_parsed
-        else "(x.observation_id IS NULL OR (x.status='ERROR' AND x.attempts<3))"
+        else """(
+            x.observation_id IS NULL
+            OR (x.status='ERROR' AND x.attempts<3)
+            OR (
+                x.status='PARSED' AND x.attempts<3
+                AND json_extract(x.documents_json,'$.coverage_status') LIKE 'INCOMPLETE%'
+            )
+        )"""
     )
+    event_filter = "AND e.event_id=?" if event_id else ""
+    parameters: tuple[Any, ...] = (event_id, limit) if event_id else (limit,)
     return connection.execute(
         f"""
         SELECT e.event_id,e.current_version,e.event_type,e.event_family,
@@ -872,11 +1228,36 @@ def pending_rows(connection: Any, *, limit: int, refresh_parsed: bool = False) -
         JOIN event_observations eo ON eo.event_id=e.event_id
         JOIN latest_source_content r ON r.observation_id=eo.observation_id
         LEFT JOIN sec_filing_enrichments x ON x.observation_id=r.observation_id
+        LEFT JOIN (
+            SELECT
+              event_id,
+              MAX(priority) AS priority,
+              MIN(available_at) AS available_at,
+              MAX(
+                CASE WHEN last_error='reprocess_after_nonterminal_no_match_policy'
+                     THEN 1 ELSE 0 END
+              ) AS corrective_reprocess
+            FROM pipeline_jobs
+            WHERE job_type='live_primary_evidence_review'
+              AND status='PENDING_PRIMARY_EVIDENCE'
+            GROUP BY event_id
+        ) pending_job ON pending_job.event_id=e.event_id
         WHERE e.status='candidate' AND r.source_id='sec_current_filings'
           AND {enrichment_filter}
-        ORDER BY r.source_published_at DESC,r.observation_id LIMIT ?
+          {event_filter}
+        ORDER BY
+          CASE
+            WHEN pending_job.corrective_reprocess=1 THEN 0
+            WHEN pending_job.event_id IS NOT NULL THEN 1
+            ELSE 2
+          END,
+          pending_job.priority DESC,
+          pending_job.available_at ASC,
+          r.source_published_at DESC,
+          r.observation_id
+        LIMIT ?
         """,
-        (limit,),
+        parameters,
     ).fetchall()
 
 
@@ -886,8 +1267,14 @@ def enrich_pending(
     *,
     limit: int = 8,
     refresh_parsed: bool = False,
+    event_id: str | None = None,
 ) -> dict[str, Any]:
-    rows = pending_rows(connection, limit=limit, refresh_parsed=refresh_parsed)
+    rows = pending_rows(
+        connection,
+        limit=limit,
+        refresh_parsed=refresh_parsed,
+        event_id=event_id,
+    )
     result: dict[str, Any] = {
         "requested": len(rows),
         "refresh_parsed": refresh_parsed,
@@ -902,6 +1289,7 @@ def enrich_pending(
         accession = accession_number(row["raw_json"], row["canonical_url"])
         documents: list[FilingDocument] = []
         selected: list[FilingDocument] = []
+        fetched_texts: dict[str, str] = {}
         combined_text = ""
         try:
             index_payload = client.get(row["canonical_url"])
@@ -913,8 +1301,11 @@ def enrich_pending(
                     row=row,
                     accession=accession,
                     documents=documents,
+                    selected_documents=selected,
+                    fetched_texts=fetched_texts,
                     primary_url=None,
                     text="",
+                    excerpt_source_text="",
                     classification=Classification(None, None, (), 0.0),
                     status="NO_DOCUMENT",
                     attempts=attempts,
@@ -922,16 +1313,28 @@ def enrich_pending(
                 )
                 result["no_document"] += 1
                 continue
-            texts = [visible_text(client.get(document.url)) for document in selected]
-            combined_text = "\n".join(text for text in texts if text)
+            fetched_documents: list[tuple[FilingDocument, str]] = []
+            for document in selected:
+                text = visible_text(client.get(document.url))
+                fetched_texts[document.url] = text
+                fetched_documents.append((document, text))
+            combined_text = "\n".join(
+                f"[DOCUMENT {document.document_type} {document.description}]\n{text}"
+                for document, text in fetched_documents
+                if text
+            )
             classification = classify_filing_text(combined_text)
+            excerpt_source = select_excerpt_source(fetched_documents, classification)
             upsert_enrichment(
                 connection,
                 row=row,
                 accession=accession,
                 documents=documents,
+                selected_documents=selected,
+                fetched_texts=fetched_texts,
                 primary_url=selected[0].url,
                 text=combined_text,
+                excerpt_source_text=excerpt_source,
                 classification=classification,
                 status="PARSED",
                 attempts=attempts,
@@ -949,8 +1352,11 @@ def enrich_pending(
                 row=row,
                 accession=accession,
                 documents=documents,
+                selected_documents=selected,
+                fetched_texts=fetched_texts,
                 primary_url=selected[0].url if selected else None,
                 text=combined_text,
+                excerpt_source_text=None,
                 classification=Classification(None, None, (), 0.0),
                 status="ERROR",
                 attempts=attempts,
@@ -976,12 +1382,15 @@ def write_report(path: Path, result: dict[str, Any], connection: Any) -> None:
         f"- Requested this run: `{result['requested']}`",
         f"- Parsed: `{result['parsed']}`",
         f"- Candidate types refined: `{result['refined']}`",
+        f"- Legacy inconclusive terminal rejections reopened: `{result.get('inconclusive_events_reopened', 0)}`",
         f"- Negated old machine matches repaired: `{result.get('negated_match_repairs', 0)}`",
         f"- Stored semantic classifications repaired: `{result.get('semantic_reclassifications', 0)}`",
         f"- Errors: `{result['errors']}`",
         f"- Parsed SEC rows materialized as evidence: `{result.get('evidence_materialization', {}).get('evidence_inserted', 0)}`",
         f"- Evidence jobs advanced: `{result.get('evidence_materialization', {}).get('jobs_advanced', 0)}`",
         f"- Parsed generic/administrative filings filtered: `{result.get('evidence_materialization', {}).get('semantic_noise_rejected', 0)}`",
+        f"- Parsed filings kept nonterminal because no scoped match was found: `{result.get('evidence_materialization', {}).get('semantic_inconclusive', 0)}`",
+        f"- Parsed filings awaiting complete attachments: `{result.get('evidence_materialization', {}).get('attachment_incomplete', 0)}`",
         f"- Ledger status totals: `{json.dumps(statuses, sort_keys=True)}`",
         "- Safety: document text may refine a candidate type but cannot verify severity or enable trading.",
         "",
@@ -999,6 +1408,10 @@ def main() -> int:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--limit", type=int, default=8)
     parser.add_argument(
+        "--event-id",
+        help="Process one exact SEC candidate for audited repair or operator verification.",
+    )
+    parser.add_argument(
         "--refresh-parsed",
         action="store_true",
         help="Re-fetch parsed candidate filings to apply improved extraction and classification rules.",
@@ -1009,12 +1422,15 @@ def main() -> int:
     client = SecFilingClient(user_agent)
     connection = open_ledger(args.db)
     try:
+        reopened = reopen_inconclusive_sec_events(connection)
         result = enrich_pending(
             connection,
             client,
             limit=args.limit,
             refresh_parsed=args.refresh_parsed,
+            event_id=args.event_id,
         )
+        result["inconclusive_events_reopened"] = reopened
         result["negated_match_repairs"] = repair_negated_enrichment_matches(connection)
         result["semantic_reclassifications"] = reclassify_parsed_enrichments(connection)
         result["evidence_materialization"] = materialize_parsed_enrichment_evidence(connection)

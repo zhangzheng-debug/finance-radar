@@ -110,6 +110,9 @@ class RiskRouter:
             label = "ABSTAIN"
             probability_map = {"RISK_REVIEW": 0.0, "NON_TARGET": 0.0, "ABSTAIN": 1.0}
             runtime = "structured_evidence_gate"
+            decision_source = "DETERMINISTIC_EVIDENCE_GATE"
+            semantic_model_invoked = False
+            confidence_applicable = False
         elif architecture == "structured_evidence_gate_plus_binary_semantic_router_v1":
             semantic_policy = assess_semantic_policy(text)
             if semantic_policy.decision != "DEFER_TO_MODEL":
@@ -120,6 +123,9 @@ class RiskRouter:
                     "NON_TARGET": 0.99 if label == "NON_TARGET" else 0.01,
                 }
                 runtime = "semantic_policy_gate"
+                decision_source = "DETERMINISTIC_SEMANTIC_POLICY_GATE"
+                semantic_model_invoked = False
+                confidence_applicable = False
             elif self.bundle:
                 pipeline = self.bundle["pipeline"]
                 probabilities = pipeline.predict_proba([text])[0]
@@ -130,9 +136,15 @@ class RiskRouter:
                 label = "RISK_REVIEW" if risk_probability >= semantic_threshold else "NON_TARGET"
                 confidence = probability_map[label]
                 runtime = "trained_semantic_artifact"
+                decision_source = "TRAINED_SEMANTIC_MODEL"
+                semantic_model_invoked = True
+                confidence_applicable = True
             else:  # pragma: no cover
                 label, confidence, probability_map = self._fallback(text)
                 runtime = "fallback"
+                decision_source = "KEYWORD_FALLBACK"
+                semantic_model_invoked = False
+                confidence_applicable = True
         elif scope_gate.decision in {"REJECT_NOISE", "REJECT_NON_TARGET"}:
             confidence = 0.94 if scope_gate.decision == "REJECT_NOISE" else min(
                 0.68 + 0.05 * max(positive_hits, len(scope_gate.positive_cues)), 0.93
@@ -140,11 +152,17 @@ class RiskRouter:
             label = "NON_TARGET"
             probability_map = {"RISK_REVIEW": 1 - confidence, "NON_TARGET": confidence}
             runtime = "scope_guardrail"
+            decision_source = "LEGACY_SCOPE_GUARDRAIL"
+            semantic_model_invoked = False
+            confidence_applicable = False
         elif scope_gate.decision in {"ABSTAIN_INSUFFICIENT", "ADMIT_CONTEXT"}:
             confidence = 0.5
             label = "ABSTAIN"
             probability_map = {"RISK_REVIEW": 0.5, "NON_TARGET": 0.5}
             runtime = "scope_guardrail"
+            decision_source = "LEGACY_SCOPE_GUARDRAIL"
+            semantic_model_invoked = False
+            confidence_applicable = False
         elif self.bundle:
             pipeline = self.bundle["pipeline"]
             probabilities = pipeline.predict_proba([text])[0]
@@ -167,9 +185,15 @@ class RiskRouter:
             else:
                 label = best_label if best_label == "ABSTAIN" or confidence >= threshold else "ABSTAIN"
             runtime = "trained_artifact"
+            decision_source = "TRAINED_SEMANTIC_MODEL"
+            semantic_model_invoked = True
+            confidence_applicable = True
         else:
             label, confidence, probability_map = self._fallback(text)
             runtime = "fallback"
+            decision_source = "KEYWORD_FALLBACK"
+            semantic_model_invoked = False
+            confidence_applicable = True
         latency_ms = (time.perf_counter() - started) * 1000
         return {
             "label": label,
@@ -180,6 +204,9 @@ class RiskRouter:
             "scope_gate": scope_gate.as_dict(),
             "evidence_gate": evidence_gate,
             "architecture": architecture,
+            "decision_source": decision_source,
+            "semantic_model_invoked": semantic_model_invoked,
+            "confidence_applicable": confidence_applicable,
             "shadow": True,
             "no_trading": True,
             "input_sha256": input_hash,

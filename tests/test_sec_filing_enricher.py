@@ -290,7 +290,7 @@ class SecFilingEnricherTests(unittest.TestCase):
         self.assertEqual(ordinary_pending, [])
         self.assertEqual(len(refresh_pending), 1)
 
-    def test_parsed_generic_sec_filing_is_evidenced_then_semantically_rejected(self) -> None:
+    def test_parsed_generic_sec_filing_is_evidenced_but_kept_nonterminal(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             connection = open_ledger(Path(directory) / "db.sqlite3")
             now = utc_now()
@@ -363,13 +363,100 @@ class SecFilingEnricherTests(unittest.TestCase):
             job = connection.execute("SELECT status,last_error FROM pipeline_jobs").fetchone()
             evidence_count = connection.execute("SELECT COUNT(*) FROM event_evidence").fetchone()[0]
             connection.close()
-        self.assertEqual(result["semantic_noise_rejected"], 1)
-        self.assertEqual(event["status"], "rejected")
-        self.assertEqual(event["label_status"], "rejected")
-        self.assertEqual(event["current_version"], 2)
-        self.assertEqual(job["status"], "COMPLETED_DISCOVERY_FILTERED")
+        self.assertEqual(result["semantic_noise_rejected"], 0)
+        self.assertEqual(result["semantic_inconclusive"], 1)
+        self.assertEqual(event["status"], "candidate")
+        self.assertEqual(event["label_status"], "candidate")
+        self.assertEqual(event["current_version"], 1)
+        self.assertEqual(job["status"], "PENDING_EVIDENCE_REVIEW")
         self.assertIn("no_scoped_event_match", job["last_error"])
         self.assertEqual(evidence_count, 1)
+
+    def test_document_selection_keeps_multiple_decision_relevant_exhibits(self) -> None:
+        documents = [
+            enricher.FilingDocument("1", "CURRENT REPORT", "main.htm", "8-K", "100", "https://x/main"),
+            enricher.FilingDocument("2", "PRESS RELEASE", "ex991.htm", "EX-99.1", "100", "https://x/99"),
+            enricher.FilingDocument("3", "MATERIAL AGREEMENT", "ex101.htm", "EX-10.1", "100", "https://x/10"),
+            enricher.FilingDocument("4", "MERGER AGREEMENT", "ex21.htm", "EX-2.1", "100", "https://x/2"),
+            enricher.FilingDocument("5", "DEBT INSTRUMENT", "ex41.htm", "EX-4.1", "100", "https://x/4"),
+        ]
+        selected = enricher.choose_documents(documents, "8-K")
+        self.assertEqual([item.url for item in selected], [item.url for item in documents])
+
+    def test_pending_evidence_job_is_not_starved_by_newer_filings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            connection = open_ledger(Path(directory) / "db.sqlite3")
+            now = utc_now()
+            connection.execute(
+                """INSERT INTO sources VALUES (
+                   'sec_current_filings','SEC','official_primary_feed','P0_official',1,1,?,?)""",
+                (now, now),
+            )
+            for suffix, published in (("older", "2026-07-22T10:00:00+00:00"), ("newer", "2026-07-23T10:00:00+00:00")):
+                observation_id = f"obs-{suffix}"
+                event_id = f"event-{suffix}"
+                raw_json = json.dumps({"item": {"form": "8-K"}})
+                connection.execute(
+                    """INSERT INTO raw_observations VALUES (
+                       ?,'sec_current_filings',?,?,?,'8-K Example','Item 8.01',
+                       ?,?,?,'captured')""",
+                    (
+                        observation_id,
+                        suffix,
+                        published,
+                        now,
+                        "https://www.sec.gov/Archives/a/index.htm",
+                        hashlib.sha256(raw_json.encode()).hexdigest(),
+                        raw_json,
+                    ),
+                )
+                connection.execute(
+                    """INSERT INTO canonical_events VALUES (
+                       ?,1,'candidate','candidate','regulatory_filing','sec_material_filing',
+                       '2026-07-23',?,?,NULL,NULL,?,NULL,'A_P0','sec_current_filings',1)""",
+                    (event_id, now, now, f"Example {suffix}"),
+                )
+                connection.execute(
+                    """INSERT INTO event_versions VALUES (
+                       ?,1,?,'candidate','candidate','regulatory_filing','sec_material_filing',
+                       NULL,'{}','live_rule_candidate')""",
+                    (event_id, now),
+                )
+                connection.execute(
+                    "INSERT INTO event_observations VALUES (?,?, 'official_primary_candidate',?)",
+                    (event_id, observation_id, now),
+                )
+            connection.execute(
+                """INSERT INTO pipeline_jobs VALUES (
+                   'older-job','event-older','live_primary_evidence_review',
+                   'PENDING_PRIMARY_EVIDENCE',26,0,?,?,'{}',?,?)""",
+                (now, "reprocess_after_nonterminal_no_match_policy", now, now),
+            )
+            connection.execute(
+                """INSERT INTO pipeline_jobs VALUES (
+                   'newer-job','event-newer','live_primary_evidence_review',
+                   'PENDING_PRIMARY_EVIDENCE',90,0,?,NULL,'{}',?,?)""",
+                (now, now, now),
+            )
+            connection.commit()
+            selected = enricher.pending_rows(connection, limit=1)
+            exact = enricher.pending_rows(connection, limit=1, event_id="event-newer")
+            connection.close()
+        self.assertEqual(selected[0]["event_id"], "event-older")
+        self.assertEqual(exact[0]["event_id"], "event-newer")
+
+    def test_item_901_without_exhibit_is_marked_incomplete(self) -> None:
+        documents = [
+            enricher.FilingDocument("1", "CURRENT REPORT", "main.htm", "8-K", "100", "https://x/main")
+        ]
+        selected = enricher.choose_documents(documents, "8-K")
+        manifest = enricher.document_manifest(
+            documents,
+            selected,
+            {"https://x/main": "Item 9.01 Financial Statements and Exhibits."},
+            item_codes=("7.01", "9.01"),
+        )
+        self.assertEqual(manifest["coverage_status"], "INCOMPLETE_EXPECTED_EXHIBIT")
 
 
 if __name__ == "__main__":

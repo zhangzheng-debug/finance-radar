@@ -17,7 +17,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import Settings
-from app.storage import EvidenceObjectStore, OperationsRepository
+from app.models import RiskRouter
+from app.services import EvidenceAgent, LocalEvidenceModelProvider, run_shadow_batch
+from app.storage import EvidenceObjectStore, LedgerRepository, OperationsRepository
 from apply_live_asset_relations import apply_relations
 from apply_live_primary_adjudications import apply_rows
 from build_live_evidence_review import build_rows, write_outputs
@@ -36,6 +38,7 @@ from sec_filing_enricher import (
     materialize_parsed_enrichment_evidence,
     repair_negated_enrichment_matches,
     reclassify_parsed_enrichments,
+    reopen_inconclusive_sec_events,
 )
 from snapshot_evidence_sources import archive_pending as archive_evidence_sources
 from snapshot_evidence_sources import write_report as write_snapshot_report
@@ -92,6 +95,72 @@ def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def run_pending_evidence_agents(
+    connection: Any,
+    evidence_agent: EvidenceAgent,
+    operations: OperationsRepository,
+    *,
+    limit: int = 4,
+) -> dict[str, Any]:
+    """Run bounded internal evidence analysis after primary evidence enrichment."""
+    rows = connection.execute(
+        """SELECT e.event_id,j.priority
+           FROM canonical_events e
+           JOIN pipeline_jobs j ON j.event_id=e.event_id
+           WHERE e.status='candidate'
+             AND j.job_type='live_primary_evidence_review'
+             AND j.status='PENDING_EVIDENCE_REVIEW'
+             AND EXISTS (
+                 SELECT 1 FROM event_evidence ev WHERE ev.event_id=e.event_id
+             )
+           ORDER BY j.priority DESC,e.last_updated_at DESC
+           LIMIT ?""",
+        (max(1, limit),),
+    ).fetchall()
+    result: dict[str, Any] = {
+        "selected": len(rows),
+        "run": 0,
+        "already_run": 0,
+        "errors": [],
+        "no_trading": True,
+    }
+    now = utc_now()
+    for row in rows:
+        event_id = str(row["event_id"])
+        if operations.agent_decisions(event_id, limit=1):
+            connection.execute(
+                """UPDATE pipeline_jobs
+                   SET status='PENDING_HUMAN_REVIEW',last_error=NULL,updated_at=?
+                   WHERE event_id=? AND job_type='live_primary_evidence_review'
+                     AND status='PENDING_EVIDENCE_REVIEW'""",
+                (now, event_id),
+            )
+            result["already_run"] += 1
+            continue
+        try:
+            decision = evidence_agent.run(event_id)
+            connection.execute(
+                """UPDATE pipeline_jobs
+                   SET status='PENDING_HUMAN_REVIEW',last_error=NULL,updated_at=?
+                   WHERE event_id=? AND job_type='live_primary_evidence_review'
+                     AND status='PENDING_EVIDENCE_REVIEW'""",
+                (utc_now(), event_id),
+            )
+            result["run"] += 1
+            result.setdefault("statuses", {}).setdefault(decision["status"], 0)
+            result["statuses"][decision["status"]] += 1
+        except Exception as exc:
+            connection.execute(
+                """UPDATE pipeline_jobs
+                   SET attempts=attempts+1,last_error=?,updated_at=?
+                   WHERE event_id=? AND job_type='live_primary_evidence_review'""",
+                (f"{type(exc).__name__}: {str(exc)[:500]}", utc_now(), event_id),
+            )
+            result["errors"].append(f"{event_id}:{type(exc).__name__}:{str(exc)[:240]}")
+    connection.commit()
+    return result
+
+
 def run_cycle(
     connection: Any,
     *,
@@ -99,6 +168,9 @@ def run_cycle(
     timeout: float,
     operations: OperationsRepository | None = None,
     evidence_object_store: EvidenceObjectStore | None = None,
+    ledger_repository: LedgerRepository | None = None,
+    risk_router: RiskRouter | None = None,
+    evidence_agent: EvidenceAgent | None = None,
 ) -> dict[str, Any]:
     started_at = utc_now()
     result: dict[str, Any] = {"started_at": started_at, "errors": []}
@@ -146,6 +218,7 @@ def run_cycle(
         ROOT / "reports" / "live_candidate_extraction_latest.md", candidates, connection
     )
 
+    reopened_sec_events = reopen_inconclusive_sec_events(connection)
     if sec_user_agent:
         result["sec_filing_enrichment"] = enrich_sec_filings(
             connection,
@@ -159,6 +232,7 @@ def run_cycle(
             "errors": 0,
             "skipped_missing_user_agent": 1,
         }
+    result["sec_filing_enrichment"]["inconclusive_events_reopened"] = reopened_sec_events
     result["sec_filing_enrichment"]["negated_match_repairs"] = (
         repair_negated_enrichment_matches(connection)
     )
@@ -248,6 +322,35 @@ def run_cycle(
             "errors": [],
         }
 
+    if operations is not None and ledger_repository is not None and risk_router is not None:
+        result["shadow_routing"] = run_shadow_batch(
+            ledger_repository,
+            operations,
+            risk_router,
+            scan_limit=200,
+            run_limit=100,
+        )
+    else:
+        result["shadow_routing"] = {
+            "status": "SKIPPED",
+            "reason": "operations_ledger_or_router_not_configured",
+            "recorded": 0,
+        }
+
+    if evidence_agent is not None and operations is not None:
+        result["evidence_agent"] = run_pending_evidence_agents(
+            connection,
+            evidence_agent,
+            operations,
+            limit=4,
+        )
+    else:
+        result["evidence_agent"] = {
+            "status": "SKIPPED",
+            "reason": "evidence_agent_or_operations_not_configured",
+            "run": 0,
+        }
+
     asset_events = load_json(ROOT / "config" / "live_asset_relations.json")["events"]
     result["asset_relations"] = apply_relations(connection, asset_events)
     if sec_user_agent:
@@ -309,12 +412,35 @@ def main() -> int:
         print("live_cycle=skipped reason=lease_held")
         return 3
     try:
+        operations = OperationsRepository(settings.operations_db)
+        evidence_object_store = EvidenceObjectStore(settings.evidence_object_dir)
+        ledger_repository = LedgerRepository(args.db)
+        risk_router = RiskRouter(settings.model_artifact, settings.model_card)
+        evidence_model_provider = (
+            LocalEvidenceModelProvider(
+                settings.evidence_llm_url,
+                settings.evidence_llm_model,
+                timeout_seconds=settings.evidence_llm_timeout_seconds,
+                max_tokens=settings.evidence_llm_max_tokens,
+            )
+            if settings.evidence_llm_url
+            else None
+        )
+        evidence_agent = EvidenceAgent(
+            ledger_repository,
+            operations,
+            evidence_object_store,
+            evidence_model_provider,
+        )
         result = run_cycle(
             connection,
             send=args.send,
             timeout=args.timeout,
-            operations=OperationsRepository(settings.operations_db),
-            evidence_object_store=EvidenceObjectStore(settings.evidence_object_dir),
+            operations=operations,
+            evidence_object_store=evidence_object_store,
+            ledger_repository=ledger_repository,
+            risk_router=risk_router,
+            evidence_agent=evidence_agent,
         )
     finally:
         release_cycle_lease(connection, lease)

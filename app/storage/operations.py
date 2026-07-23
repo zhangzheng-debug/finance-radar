@@ -238,6 +238,33 @@ class OperationsRepository:
             connection.commit()
         return run_id
 
+    def record_model_run_once(
+        self,
+        event_id: str,
+        result: dict[str, Any],
+    ) -> tuple[str, bool]:
+        """Persist one shadow result per event version/input/model combination."""
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                """SELECT run_id,output_json FROM model_runs
+                   WHERE event_id=? AND input_sha256=? AND model_version=?
+                   ORDER BY created_at DESC LIMIT 10""",
+                (
+                    event_id,
+                    result["input_sha256"],
+                    result["model_version"],
+                ),
+            ).fetchall()
+        event_version = int(result.get("event_version") or 0)
+        for row in rows:
+            try:
+                previous = json.loads(row["output_json"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if int(previous.get("event_version") or 0) == event_version:
+                return str(row["run_id"]), False
+        return self.record_model_run(event_id, result), True
+
     def model_runs(self, event_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
         sql = "SELECT * FROM model_runs"
         params: list[Any] = []
@@ -799,6 +826,37 @@ class OperationsRepository:
         item["restored_counts"] = json.loads(item.pop("restored_count_json")) if item["restored_count_json"] else None
         return item
 
+    def backup_summary(self) -> dict[str, int]:
+        """Separate historical run records from files retained on this host."""
+        with closing(self.connect()) as connection:
+            rows = [dict(row) for row in connection.execute(
+                "SELECT backup_path,status FROM backup_runs ORDER BY created_at DESC"
+            )]
+        retained_daily = {
+            str(Path(str(row["backup_path"])).resolve())
+            for row in rows
+            if row.get("backup_path") and Path(str(row["backup_path"])).is_file()
+        }
+        weekly_files: set[str] = set()
+        parent_dirs = {
+            Path(str(row["backup_path"])).parent
+            for row in rows
+            if row.get("backup_path")
+        }
+        for parent in parent_dirs:
+            weekly_dir = parent / "weekly"
+            if not weekly_dir.is_dir():
+                continue
+            weekly_files.update(str(path.resolve()) for path in weekly_dir.glob("*.sqlite3"))
+        return {
+            "historical_runs": len(rows),
+            "verified_runs": sum(row.get("status") == "VERIFIED" for row in rows),
+            "failed_runs": sum(row.get("status") == "FAILED" for row in rows),
+            "running_runs": sum(row.get("status") == "RUNNING" for row in rows),
+            "retained_daily_files": len(retained_daily),
+            "retained_weekly_files": len(weekly_files),
+        }
+
     def health(self) -> dict[str, Any]:
         with closing(self.connect()) as connection:
             quick_check = connection.execute("PRAGMA quick_check").fetchone()[0]
@@ -826,4 +884,5 @@ class OperationsRepository:
             "latest_worker_cycle": self.latest_worker_cycle(),
             "worker_window_24h": self.worker_window(),
             "latest_backup": self.latest_backup(),
+            "backup_summary": self.backup_summary(),
         }
