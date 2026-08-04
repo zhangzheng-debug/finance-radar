@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+import scripts.release_audit as release_audit
+
 from scripts.release_audit import (
     DEFAULT_CRITICAL_FILES,
     build_release_manifest,
@@ -104,6 +106,41 @@ def test_release_bundle_is_hash_bound_and_verifies_cross_platform(tmp_path: Path
     acceptance = write_acceptance_bundle(report, output / "acceptance")
     assert set(acceptance) == {"json", "markdown", "checksums"}
     assert all((output / "acceptance" / name).is_file() for name in acceptance.values())
+
+
+def test_utf8_lf_binding_accepts_a_crlf_checkout_and_lf_git_archive(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    target = root / "deployment" / "test.conf"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"release contract\r\n")
+    artifact = _artifact(
+        tmp_path / "git-archive.tgz",
+        members={"deployment/test.conf": b"release contract\n"},
+    )
+    manifest = build_release_manifest(
+        root,
+        release_id="crlf-git-archive",
+        critical_files=("deployment/test.conf",),
+        artifact_paths=(artifact,),
+        verifications=(parse_verification("pytest=PASS"),),
+        git_state=CLEAN_GIT,
+        generated_at=FIXED_TIME,
+    )
+
+    assert manifest["critical_files"][0]["hash_basis"] == "utf8_lf_normalized"
+    assert manifest["critical_files"][0]["bytes"] == len(b"release contract\n")
+    records = tmp_path / "records"
+    names = write_release_bundle(manifest, records)
+    report = verify_release_manifest(
+        records / names["json"],
+        root,
+        artifact_paths=(artifact,),
+        require_ready=True,
+        require_sidecar=True,
+        require_artifact=True,
+        verified_at=FIXED_TIME,
+    )
+    assert report["status"] == "PASS"
 
 
 def test_verifier_detects_tampered_release_file(tmp_path: Path) -> None:
@@ -364,9 +401,18 @@ def test_cli_accepts_real_repository_contract_on_windows_or_linux(
 ) -> None:
     root = Path(__file__).parents[1]
     artifact = tmp_path / "finance-radar-cli-smoke.tgz"
-    with tarfile.open(artifact, "w:gz") as archive:
-        for relative in DEFAULT_CRITICAL_FILES:
-            archive.add(root / relative, arcname=relative, recursive=False)
+    git_state = release_audit.inspect_git(root)
+    if git_state["available"] and not git_state["dirty"]:
+        subprocess.run(
+            ["git", "-C", str(root), "archive", "--format=tar.gz", f"--output={artifact}", "HEAD"],
+            check=True,
+        )
+    else:
+        # A deliberately dirty source is a workspace-byte release and must not
+        # pretend that a clean Git archive contains the pending changes.
+        with tarfile.open(artifact, "w:gz") as archive:
+            for relative in DEFAULT_CRITICAL_FILES:
+                archive.add(root / relative, arcname=relative, recursive=False)
 
     records = tmp_path / "records"
     create_result = main(

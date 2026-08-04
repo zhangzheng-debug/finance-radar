@@ -97,13 +97,27 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _sha256_stream(handle: Any) -> tuple[str, int]:
-    digest = hashlib.sha256()
-    total = 0
-    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-        digest.update(chunk)
-        total += len(chunk)
-    return digest.hexdigest(), total
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _canonical_release_bytes(data: bytes) -> tuple[bytes, str]:
+    """Normalize UTF-8 text line endings without ever treating binary data as text."""
+
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data, "raw_bytes"
+    return data.replace(b"\r\n", b"\n"), "utf8_lf_normalized"
+
+
+def _entry_content_bytes(data: bytes, entry: dict[str, Any]) -> bytes:
+    """Apply the manifest's explicit content basis to one source/archive member."""
+
+    if entry.get("hash_basis", "workspace") == "utf8_lf_normalized":
+        normalized, _basis = _canonical_release_bytes(data)
+        return normalized
+    return data
 
 
 def assert_no_high_confidence_secret(path: Path) -> None:
@@ -277,7 +291,7 @@ def bind_archive_to_critical_files(
     path: Path,
     critical_files: Sequence[dict[str, Any]],
 ) -> str:
-    """Require every critical file in a tar/zip to match the workspace hash."""
+    """Require every critical file in a tar/zip to match its manifest content hash."""
 
     expected = {entry["path"]: entry for entry in critical_files}
     seen: set[str] = set()
@@ -294,8 +308,8 @@ def bind_archive_to_critical_files(
                 if member is None or member.is_dir():
                     raise ValueError("release artifact is missing a critical file")
                 with archive.open(member, "r") as handle:
-                    digest, size = _sha256_stream(handle)
-                if digest != entry["sha256"] or size != entry["bytes"]:
+                    content = _entry_content_bytes(handle.read(), entry)
+                if _sha256_bytes(content) != entry["sha256"] or len(content) != entry["bytes"]:
                     raise ValueError("release artifact critical file does not match workspace")
                 seen.add(relative)
     elif tarfile.is_tarfile(path):
@@ -314,8 +328,8 @@ def bind_archive_to_critical_files(
                 if handle is None:
                     raise ValueError("release artifact critical file is unreadable")
                 with handle:
-                    digest, size = _sha256_stream(handle)
-                if digest != entry["sha256"] or size != entry["bytes"]:
+                    content = _entry_content_bytes(handle.read(), entry)
+                if _sha256_bytes(content) != entry["sha256"] or len(content) != entry["bytes"]:
                     raise ValueError("release artifact critical file does not match workspace")
                 seen.add(relative)
     else:
@@ -467,8 +481,19 @@ def build_release_manifest(
         if not path.is_file() or path.is_symlink():
             raise FileNotFoundError(f"required release file missing: {relative}")
         assert_no_high_confidence_secret(path)
+        # A release archive may honor a producer's EOL policy differently from
+        # this checkout (for example, an unpinned ``text=auto`` CSS file under
+        # Git for Windows). Hash UTF-8 critical text after CRLF -> LF
+        # normalization, while preserving raw bytes for any non-UTF-8 file.
+        # The full archive itself remains SHA-256 bound separately.
+        content, hash_basis = _canonical_release_bytes(path.read_bytes())
         file_records.append(
-            {"path": relative, "bytes": path.stat().st_size, "sha256": sha256_file(path)}
+            {
+                "path": relative,
+                "bytes": len(content),
+                "sha256": _sha256_bytes(content),
+                "hash_basis": hash_basis,
+            }
         )
     if not file_records:
         raise ValueError("at least one critical release file is required")
@@ -702,6 +727,8 @@ def _load_manifest(path: Path) -> tuple[dict[str, Any], str]:
             or entry["bytes"] < 0
             or not isinstance(entry.get("sha256"), str)
             or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
+            or entry.get("hash_basis", "workspace")
+            not in {"workspace", "raw_bytes", "utf8_lf_normalized"}
         ):
             raise ValueError("manifest critical file entry is invalid")
         relative = _safe_relative_path(entry["path"])
@@ -795,10 +822,11 @@ def verify_release_manifest(
                 raise ValueError("critical file is a symlink")
             target = candidate.resolve()
             target.relative_to(root)
-            valid = (
+            content = _entry_content_bytes(target.read_bytes(), entry) if target.is_file() else b""
+            valid = bool(
                 target.is_file()
-                and target.stat().st_size == entry.get("bytes")
-                and sha256_file(target) == entry.get("sha256")
+                and len(content) == entry.get("bytes")
+                and _sha256_bytes(content) == entry.get("sha256")
             )
         except (OSError, ValueError):
             valid = False
