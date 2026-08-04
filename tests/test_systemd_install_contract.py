@@ -152,3 +152,29 @@ def test_in_place_installer_rolls_back_services_and_edge_on_any_cutover_failure(
         "Operations_and_Model",
     ):
         assert denied_path in source
+
+
+def test_in_place_installer_requires_a_fresh_verified_backup_before_cutover() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+    cutover_marker = '# The only point at which the running release changes.'
+    backup_marker = 'require_predeploy_verified_backup || exit 4'
+
+    assert 'systemctl is-active --quiet finance-radar-admin' in source
+    assert 'systemctl show finance-radar-admin --property=UnitFileState --value' in source
+    assert 'disabled|static|masked|masked-runtime|not-found|""' in source
+    assert 'enabled|enabled-runtime|linked|linked-runtime|alias|indirect|generated' in source
+    assert 'systemctl is-active --quiet finance-radar-backup.service' in source
+    assert 'systemctl start finance-radar-backup.service' in source
+    assert 'systemctl show finance-radar-backup.service --property=Result --value' in source
+    assert 'finance-radar-recovery-bundle-v1' in source
+    assert 'predeploy backup receipt validation failed' in source
+    assert 'PREDEPLOY_BACKUP_MANIFEST_SHA256' in source
+    assert 'predeploy_backup_snapshot_id=%s' in source
+
+    assert source.index(backup_marker) < source.index(cutover_marker)
+    assert source.index('systemctl start finance-radar-backup.service') < source.index(
+        '"$BASE/venv/bin/python" -m pip install'
+    )
+    assert source.index('systemctl start finance-radar-backup.service') < source.index(
+        'ln -sfn "$RELEASE" "$BASE/current"'
+    )

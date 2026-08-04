@@ -122,6 +122,14 @@ release's `release-records/` directory. Omitting the fifth argument preserves
 backward compatibility and prints `release_manifest=not_supplied`; production
 cutovers should use the verified form.
 
+Before any release switch, a verified production cutover also requires the
+manual admin UI to be inactive and not boot-enabled and the backup service to be idle.
+The installer then starts the existing recovery-bundle service itself; only a
+successful two-database restore verification can proceed to cutover. Its
+activation receipt records the fresh snapshot ID and manifest SHA-256. The
+backup policy remains one newest verified daily bundle, so a failed backup never
+deletes the prior recovery point.
+
 ## Rollback handoff
 
 Before cutover, open the generated rollback checklist and record:

@@ -153,6 +153,113 @@ else
     printf 'release_manifest=not_supplied\n'
 fi
 
+# Mandatory pre-cutover recovery gate. A code/config rollback without a fresh recovery point is not a safe cutover.
+# Run the currently installed, independently verified backup unit before any
+# current symlink, unit file, environment or venv is touched.  The unit keeps
+# retention at one only after its isolated restore succeeds, so this replaces
+# rather than accumulates daily recovery bundles.
+PREDEPLOY_BACKUP_ID=""
+PREDEPLOY_BACKUP_MANIFEST_SHA256=""
+PREDEPLOY_BACKUP_PATH=""
+require_predeploy_verified_backup() {
+    if systemctl is-active --quiet finance-radar-admin; then
+        printf 'finance-radar-admin is active; stop the manual loopback session before backup/cutover\n' >&2
+        return 1
+    fi
+    local admin_unit_state
+    admin_unit_state="$(systemctl show finance-radar-admin --property=UnitFileState --value 2>/dev/null || true)"
+    case "$admin_unit_state" in
+        enabled|enabled-runtime|linked|linked-runtime|alias|indirect|generated)
+            printf 'finance-radar-admin is boot-enabled (%s); keep the privileged UI disabled before backup/cutover\n' \
+                "$admin_unit_state" >&2
+            return 1
+            ;;
+        disabled|static|masked|masked-runtime|not-found|"")
+            ;;
+        *)
+            printf 'finance-radar-admin has an unrecognized unit-file state: %s\n' "$admin_unit_state" >&2
+            return 1
+            ;;
+    esac
+    if systemctl is-active --quiet finance-radar-backup.service; then
+        printf 'finance-radar-backup.service is active; wait for the existing verified backup to finish\n' >&2
+        return 1
+    fi
+
+    local started_at receipt
+    started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if ! systemctl start finance-radar-backup.service; then
+        printf 'predeploy backup service failed\n' >&2
+        return 1
+    fi
+    if [ "$(systemctl show finance-radar-backup.service --property=Result --value)" != "success" ]; then
+        printf 'predeploy backup service did not report success\n' >&2
+        return 1
+    fi
+    if systemctl is-active --quiet finance-radar-backup.service; then
+        printf 'predeploy backup service is still active after start returned\n' >&2
+        return 1
+    fi
+
+    receipt="$(python3 - "$SHARED/data/operational_backups" "$started_at" <<'PY'
+from datetime import datetime
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+backup_root = Path(sys.argv[1])
+started_at = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
+candidates = []
+for bundle in backup_root.glob("finance_radar_*"):
+    manifest_path = bundle / "manifest.json"
+    if not bundle.is_dir() or not manifest_path.is_file():
+        continue
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        created_at = datetime.fromisoformat(str(manifest["created_at"]).replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        continue
+    if manifest.get("format") != "finance-radar-recovery-bundle-v1" or created_at < started_at:
+        continue
+    candidates.append((created_at, bundle, manifest_path, manifest))
+if len(candidates) != 1:
+    raise SystemExit(f"expected exactly one fresh verified backup bundle, found {len(candidates)}")
+_created_at, bundle, manifest_path, manifest = candidates[0]
+snapshot_id = manifest.get("snapshot_id")
+if not isinstance(snapshot_id, str) or snapshot_id != bundle.name:
+    raise SystemExit("fresh backup manifest identity does not match its bundle directory")
+digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+print(f"{snapshot_id}\t{digest}\t{bundle.name}")
+PY
+)" || {
+        printf 'predeploy backup receipt validation failed\n' >&2
+        return 1
+    }
+    IFS=$'\t' read -r PREDEPLOY_BACKUP_ID PREDEPLOY_BACKUP_MANIFEST_SHA256 PREDEPLOY_BACKUP_PATH <<< "$receipt"
+    [[ "$PREDEPLOY_BACKUP_ID" =~ ^finance_radar_[A-Za-z0-9_]+$ ]] || {
+        printf 'predeploy backup receipt has an invalid snapshot id\n' >&2
+        return 1
+    }
+    [[ "$PREDEPLOY_BACKUP_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+        printf 'predeploy backup receipt has an invalid manifest hash\n' >&2
+        return 1
+    }
+    [[ "$PREDEPLOY_BACKUP_PATH" == "$PREDEPLOY_BACKUP_ID" ]] || {
+        printf 'predeploy backup receipt has an invalid bundle path\n' >&2
+        return 1
+    }
+    PREDEPLOY_BACKUP_PATH="$SHARED/data/operational_backups/$PREDEPLOY_BACKUP_PATH"
+    [ -f "$PREDEPLOY_BACKUP_PATH/manifest.json" ] || {
+        printf 'predeploy backup receipt bundle is missing after validation\n' >&2
+        return 1
+    }
+    printf 'predeploy_backup=VERIFIED snapshot_id=%s manifest_sha256=%s\n' \
+        "$PREDEPLOY_BACKUP_ID" "$PREDEPLOY_BACKUP_MANIFEST_SHA256"
+}
+
+require_predeploy_verified_backup || exit 4
+
 # Preserve the previous release intact so a failed upgrade can be rolled back.
 # The first shared-data migration is a copy, never a move, and runs only after
 # the optional candidate release gate has succeeded.
@@ -529,12 +636,14 @@ done
 
 install -d -m 0750 -o finance-radar -g finance-radar "$RELEASE_RECORDS"
 install -m 0640 -o root -g finance-radar /dev/null "$RELEASE_RECORDS/ACTIVATION.txt"
-printf 'release=%s\nprevious_release=%s\npublic_web=%s\nservices=active\nnginx_edge=PASS\n' \
+printf 'release=%s\nprevious_release=%s\npublic_web=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_manifest_sha256=%s\nservices=active\nnginx_edge=PASS\n' \
     "$RELEASE_ID" "${PREVIOUS_RELEASE:-none}" "$PUBLIC_WEB_URL" \
+    "$PREDEPLOY_BACKUP_ID" "$PREDEPLOY_BACKUP_MANIFEST_SHA256" \
     > "$RELEASE_RECORDS/ACTIVATION.txt"
 trap - ERR
 [[ "$ROLLBACK_DIR" == /var/tmp/finance-radar-install-* ]] || exit 70
 rm -rf -- "$ROLLBACK_DIR"
 
-printf 'activation=PASS\nrelease=%s\nprevious_release=%s\npublic_web=%s\nnginx_edge=PASS\n' \
-    "$RELEASE" "${PREVIOUS_RELEASE:-none}" "$PUBLIC_WEB_URL"
+printf 'activation=PASS\nrelease=%s\nprevious_release=%s\npublic_web=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_manifest_sha256=%s\nnginx_edge=PASS\n' \
+    "$RELEASE" "${PREVIOUS_RELEASE:-none}" "$PUBLIC_WEB_URL" \
+    "$PREDEPLOY_BACKUP_ID" "$PREDEPLOY_BACKUP_MANIFEST_SHA256"

@@ -301,7 +301,7 @@ def test_systemd_installer_verifies_optional_manifest_before_cutover() -> None:
     root = Path(__file__).parents[1]
     installer = (root / "deployment/systemd/install_remote.sh").read_text(encoding="utf-8")
     gate = installer.split("# Optional, backward-compatible release gate.", 1)[1].split(
-        "# Source credentials", 1
+        "# Mandatory pre-cutover recovery gate.", 1
     )[0]
 
     assert "RELEASE_MANIFEST=${5:-}" in installer

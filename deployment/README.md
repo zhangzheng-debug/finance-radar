@@ -119,7 +119,10 @@ MemoryHigh -p MemoryMax -p TasksMax`; inspect any older local drop-ins with
 `systemctl cat finance-radar-worker` before manually removing them.
 
 `install_remote.sh` is a health-gated transaction, not an install-only helper.
-After the archive/manifest gate it records the previous release, privately
+After the archive/manifest gate it refuses an active or boot-enabled admin UI and an
+active backup job, starts the current verified two-database backup service, and
+records the resulting snapshot ID and manifest hash. The backup service retains
+only the newest successfully restored daily bundle. It then records the previous release, privately
 snapshots the service units, protected/public environments, Nginx candidate and
 renewal hook, and the shared venv. It switches `current`, enables/restarts only
 API/Web/Worker/backup-timer, verifies both loopback health endpoints, then uses
