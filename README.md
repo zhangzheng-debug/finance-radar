@@ -18,15 +18,15 @@
 - CPU 小模型：word/char TF-IDF + 校准逻辑回归，`RISK_REVIEW / NON_TARGET / ABSTAIN`，仅 shadow mode。
 - 结构化 Evidence Agent：`EventClaim / EvidenceEdge / AgentDecision`，精确段落引用、冲突/不足硬门、内容寻址证据对象和人工覆盖审计；VPS 已接入回环 `llama.cpp + Qwen2.5-0.5B Q4_K_M` 真实小模型，但模型只写 advisory summary，claim 判定与最终状态仍由确定性证据图控制。
 - V3 双人盲标工作流：已从真实账本建立24条未标注任务；两名审核者互不可见答案，页面隐藏模型结果、旧标签、原始来源身份和事件后行情，只提交重大性/极性/证据状态三个轴；冲突必须第三人裁决，公网写控件默认关闭。
-- 常驻 Worker、Telegram 深链、30 天日备份、12 周周快照、每日加密异机拉取和隔离恢复核验；事件账本与内容寻址原文证据没有自动过期删除。
+- 常驻 Worker、Telegram 深链、单份已验证日备份（无周备份）、每日加密异机拉取和隔离恢复核验；事件账本与内容寻址原文证据没有自动过期删除。
 - 两层离线保障：答辩证据包用于无服务复核；可执行离线终端含22条精选真实事件、证据、Replay、影子模型、API和五页Web，启动时强制只允许回环网络，且不打包采集器、Telegram、券商/交易所客户端、密钥或交易能力。
 - 12页专业答辩PPT：沿用Calm Institutional视觉系统，使用四张当前公网真图，完整呈现证据链、Replay、模型失败门禁、迁移恢复与剩余真实过程要求；每页含演讲备注并已逐页渲染复核。
 - 22 路分类来源：SEC/CFTC/FTC/FDIC/Fed/BLS/FDA/ECB/EIA 等 P0 官方源，NVIDIA 等 P1 发行人源，以及 OpenNews/历史研究等 P2 发现源；来源权威级别与事件极性分开保存。
 - 分类行情层：加密资产由 Binance 公共、免认证、仅行情域名持续落库；股票/ETF/外汇和商品代理由 Twelve Data 落库；IBKR TWS 只保留操作者本机只读能力探针。系统以首个真实快照为观察基线调度 T+5m/T+30m/T+1d，超过宽限期就记录 `MISSED_WINDOW`，绝不拿最新报价回填；收益指标只能进入事后审计。Operations 展示提供商、窗口状态与退化原因，Event Workbench 显示报价、币种、采集年龄、三窗口和不可用状态。
-- AWS 美国东部 EC2 的 systemd + Nginx 生产拓扑：API、Web、Worker、每日备份均为独立服务；应用和数据使用 release/shared 分离。原新加坡服务器已停止，不再承担生产流量。
+- AWS 美国东部 EC2 的 systemd + Nginx 生产拓扑：API、Web、Worker、每日备份均为独立服务；Worker 的主 unit 固定 `MemoryHigh=380M`、`MemoryMax=520M` 与 `TasksMax=128`，应用和数据使用 release/shared 分离。原新加坡服务器已停止，不再承担生产流量。
 - Docker Compose + Caddy 作为可移植备选拓扑（本机无 Docker，因此没有冒充完成容器运行验收）。
 
-当前已接受 VPS 迁移快照（2026-07-19 04:55 UTC）：22 个来源、1194 个事件、3951 个原始观测、2117 个事件版本、2394 条证据、1898 条事件后市场指标；262 个已落库 Worker 周期、35 次可验证在线备份、7 次回放、7 次模型运行、24 条未标注任务和0条人工审核。Worker 每5分钟自动运行，失败后由 systemd 20秒重启；事件与证据不设TTL。快照内证据存档含83个不可变对象，其中81个是官方原始页面快照（80份HTML、1份PDF，共10,936,893字节），另有2份精确引文。注册官方来源的HTTP链接会先安全升级到HTTPS并再次验证跳转域名，每轮最多归档4份；分页扫描可越过已存档或长期失败的头部记录，避免后续证据被卡住；支持HTML/PDF/JSON，保持渐进采集。在线备份保留30个日备份与12个周备份。Windows 异机任务生成服务器一致性快照，经 SSH/SCP、SHA、tar、AES-256-GCM 后做完整隔离恢复。最新已接受异机备份 `20260719T045536Z` 已逐项核验 9,860 个文件清单，恢复后的 Schema 12/3 两套 SQLite 均通过 `quick_check` 与 `integrity_check`，并确认包含当前 release `20260719T044852Z`、五页终端、本机命名Flow、只读Facets、来源筛选、终端命令条、统一中文操作层、官方原始证据存档、跨页全局检索、T+窗口调度与错过保护、双人盲标工作流、本地 Qwen/llama.cpp 模型运行时、冻结评测、换机VPS失败前置检查和在线备份器，不含交易项目与 TLS 私钥；9,861个常规文件/1,559,757,804字节的空白VPS服务树预恢复也已通过。`migration_full_restore_latest.*` 由备份脚本自动同步。事件账本三项硬边界违规均为 0。
+历史已接受 VPS 迁移快照（2026-07-19 04:55 UTC）：22 个来源、1194 个事件、3951 个原始观测、2117 个事件版本、2394 条证据、1898 条事件后市场指标；262 个已落库 Worker 周期、35 次可验证在线备份、7 次回放、7 次模型运行、24 条未标注任务和0条人工审核。Worker 每5分钟自动运行，失败后由 systemd 20秒重启；事件与证据不设TTL。快照内证据存档含83个不可变对象，其中81个是官方原始页面快照（80份HTML、1份PDF，共10,936,893字节），另有2份精确引文。注册官方来源的HTTP链接会先安全升级到HTTPS并再次验证跳转域名，每轮最多归档4份；分页扫描可越过已存档或长期失败的头部记录，避免后续证据被卡住；支持HTML/PDF/JSON，保持渐进采集。该历史快照时期的在线备份保留30个日备份与12个周备份；当前策略已改为只保留一份通过恢复验证的日备份且不保留周备份。Windows 异机任务生成服务器一致性快照，经 SSH/SCP、SHA、tar、AES-256-GCM 后做完整隔离恢复。最新已接受异机备份 `20260719T045536Z` 已逐项核验 9,860 个文件清单，恢复后的 Schema 12/3 两套 SQLite 均通过 `quick_check` 与 `integrity_check`，并确认包含当前 release `20260719T044852Z`、五页终端、本机命名Flow、只读Facets、来源筛选、终端命令条、统一中文操作层、官方原始证据存档、跨页全局检索、T+窗口调度与错过保护、双人盲标工作流、本地 Qwen/llama.cpp 模型运行时、冻结评测、换机VPS失败前置检查和在线备份器，不含交易项目与 TLS 私钥；9,861个常规文件/1,559,757,804字节的空白VPS服务树预恢复也已通过。`migration_full_restore_latest.*` 由备份脚本自动同步。事件账本三项硬边界违规均为 0。
 
 持续增长复核（2026-07-19 05:17 UTC）：Worker 已达266周期/20.613小时、最新状态`SUCCESS`，线上证据对象已从已接受快照的83个继续增长到95个，证明部署后采集没有停。
 
@@ -105,7 +105,7 @@ python scripts/audit_course_readiness.py --require-ready
 
 当前回归结果为 `360 passed, 17 subtests passed`。新增换机VPS资源/端口/工具/HTTPS失败前置门、本地模型输入合同、V2数据清洗/来源留出、v3风险标签一致性、双人盲审/第三人裁决、默认关闭公网写入、本地模型回环限制、严格 JSON 合同、伪造 citation 拒绝、控制边界、提示注入、分类行情提供商隔离、T+窗口错过保护、跨页检索/深链筛选连续性、只读Facets与来源精确筛选、扩展验收报告向前兼容、本机Flow状态边界/localStorage无网络，以及官方原始HTML/PDF/JSON证据快照的域名白名单、安全HTTPS升级、重定向复核、大小上限、MIME、哈希完整性、幂等和跨分页持续采集测试。v3合同将P0/P1/P2仅用于确定性证据通道，要求由内容、重大性、极性和证据状态共同决定`RISK_REVIEW / NON_TARGET / ABSTAIN`；现有877条候选清单因没有双人内容裁决且已提前分割，被机器判定`NOT_READY_FOR_BLIND_V2`，生产模型未改。五个 Streamlit 页面使用 AppTest 运行结构回归。上一版 release 已用真实 Chrome 从公网 HTTPS 完成 1920×1080 答辩大屏、1366×768 桌面及 390×844 移动关键路径矩阵，6/6交互与五页可访问性门禁均通过；当前 `20260719T044852Z` 在此基础上加入可跨分页持续推进的渐进式官方证据归档、Operations可见性、本机命名Flow、事件族/来源联想、首页命令条、统一中文操作层与换机VPS失败前置检查；结构回归、公网产品验收19/19和行情能力验收17/17均已通过，真实浏览器视觉/交互矩阵明确待刷新，不能沿用旧截图冒充当前版本。公网已经真实显示 Binance 的旧 T+5m/T+30m 为 `MISSED_WINDOW`、T+1d为`PENDING`，证明系统没有用同一时刻报价伪造窗口。12页答辩PPT位于`artifacts/defense_deck/`。在线验收快照位于 `reports/product_acceptance_live_latest.json`，官方原始证据采集报告位于`reports/evidence_source_snapshots_latest.*`。6 项无网络故障注入位于 `reports/defense_drills_latest.json`，全部通过。最新离线答辩包位于`artifacts/defense_pack/`；它不包含环境文件、解密密钥、加密服务器备份、Telegram发送能力或交易项目。
 
-人读项目任务书 `financial_event_radar_project_proposal_v5_2_human.docx` 已完成真实 Word 引擎二次渲染验收：10/10 页逐页原尺寸检查，无截断、重叠、表格溢出、缺字、编号错乱或页脚碰撞，a11y high/medium/low 均为 0。新版已写入 release、5分钟采集、每轮4份原始证据、无TTL、30日/12周在线备份与最新换机恢复证据；可复核 PDF、逐页 PNG 与检查记录位于 `reports/docx_qa_v5_2_long_running_20260719T043425Z/`。
+人读项目任务书 `financial_event_radar_project_proposal_v5_2_human.docx` 已完成真实 Word 引擎二次渲染验收：10/10 页逐页原尺寸检查，无截断、重叠、表格溢出、缺字、编号错乱或页脚碰撞，a11y high/medium/low 均为 0。该 2026-07-19 文档历史版本写入了5分钟采集、每轮4份原始证据、无TTL、30日/12周在线备份与当时的换机恢复证据；当前在线保留策略以本 README 和 `docs/LONG_RUNNING_COLLECTION_POLICY.md` 的单份已验证日备份、无周备份为准。可复核 PDF、逐页 PNG 与检查记录位于 `reports/docx_qa_v5_2_long_running_20260719T043425Z/`。
 
 风险模型在分组时间留出集上的组合特征覆盖率为 82.7%、覆盖样本准确率为 95.7%；三组消融及漂移阻断阈值位于 `artifacts/risk_router_robustness.json`。真正的 label-first 外部盲测另行冻结 40 条 SEC/CFTC 风险公告与 Fed/NVIDIA 非目标公告，训练标题/ID 重叠为 0；结果为风险召回 100%、正常新闻误报 95%、门槛 FAIL。完整报告位于 `artifacts/risk_router_external_blind_v1_report.json`，捷径诊断位于 `artifacts/risk_router_v1_shortcut_audit.md`。模型因此明确保持 shadow，只可做候选队列高召回路由，不能作为正负新闻总分类器。
 

@@ -39,11 +39,27 @@ WITH ranked_rough_reviews AS (
     FROM pipeline_jobs
     WHERE status='COMPLETED_AUTHORIZED_ROUGH_REVIEW'
 ),
+ranked_light_followups AS (
+    SELECT job_id,event_id,status,payload_json,updated_at,
+           ROW_NUMBER() OVER (
+               PARTITION BY event_id
+               ORDER BY updated_at DESC,job_id DESC
+           ) AS followup_rank
+    FROM pipeline_jobs
+    WHERE job_type='light_verification_followup'
+      AND status IN ('PENDING_EVIDENCE_REVIEW','PENDING_HUMAN_REVIEW')
+),
 event_public AS (
     SELECT canonical.*,
+           light.status AS light_followup_status,
+           light.updated_at AS light_followup_updated_at,
+           CASE WHEN json_valid(light.payload_json)
+             THEN json_extract(light.payload_json,'$.light_verification_followup.expected_next_action')
+           END AS light_followup_next_action,
            CASE
-             WHEN canonical.status='verified' THEN 'verified'
              WHEN canonical.status='rejected' THEN 'excluded'
+             WHEN light.job_id IS NOT NULL AND canonical.status!='weak' THEN 'pending_verification'
+             WHEN canonical.status='verified' THEN 'verified'
              WHEN canonical.status='weak' OR (
                rough.job_id IS NOT NULL
                AND CASE WHEN json_valid(rough.payload_json)
@@ -67,6 +83,8 @@ event_public AS (
     FROM canonical_events canonical
     LEFT JOIN ranked_rough_reviews rough
       ON rough.event_id=canonical.event_id AND rough.rough_rank=1
+    LEFT JOIN ranked_light_followups light
+      ON light.event_id=canonical.event_id AND light.followup_rank=1
 )
 """.strip()
 
@@ -224,12 +242,21 @@ class LedgerRepository:
         }
 
     @staticmethod
-    def _public_state(status: Any, rough_outcome: str | None) -> str:
+    def _public_state(
+        status: Any,
+        rough_outcome: str | None,
+        light_followup_status: str | None = None,
+    ) -> str:
         normalized = str(status or "candidate").lower()
-        if normalized == "verified":
-            return "verified"
         if normalized == "rejected":
             return "excluded"
+        if light_followup_status in {"PENDING_EVIDENCE_REVIEW", "PENDING_HUMAN_REVIEW"}:
+            # A known weak record remains honestly insufficient.  Any other
+            # active follow-up means a previous formal-looking disposition is
+            # being reconciled and cannot be presented as settled verification.
+            return "insufficient" if normalized == "weak" else "pending_verification"
+        if normalized == "verified":
+            return "verified"
         if rough_outcome == "ROUGH_INSUFFICIENT" or normalized == "weak":
             return "insufficient"
         if normalized == "candidate" and rough_outcome is not None:
@@ -262,6 +289,21 @@ class LedgerRepository:
             rough_by_event[event_id] = LedgerRepository._rough_review_metadata(
                 row["payload_json"], row["updated_at"]
             )
+        light_followup_by_event: dict[str, str] = {}
+        for row in connection.execute(
+            """SELECT event_id,status
+               FROM (
+                   SELECT event_id,status,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY event_id ORDER BY updated_at DESC,job_id DESC
+                          ) AS followup_rank
+                   FROM pipeline_jobs
+                   WHERE job_type='light_verification_followup'
+                     AND status IN ('PENDING_EVIDENCE_REVIEW','PENDING_HUMAN_REVIEW')
+               )
+               WHERE followup_rank=1"""
+        ):
+            light_followup_by_event[str(row["event_id"])] = str(row["status"])
 
         buckets = {
             "verified": 0,
@@ -279,7 +321,11 @@ class LedgerRepository:
             status = str(event.get("status") or "candidate").lower()
             rough = rough_by_event.get(event_id)
             rough_outcome = str(rough["outcome"]) if rough else None
-            public_state = LedgerRepository._public_state(status, rough_outcome)
+            public_state = LedgerRepository._public_state(
+                status,
+                rough_outcome,
+                light_followup_by_event.get(event_id),
+            )
             buckets[public_state] += 1
             if public_state == "insufficient" and rough_outcome == "ROUGH_INSUFFICIENT":
                 insufficient_breakdown["rough_review"] += 1
@@ -295,6 +341,13 @@ class LedgerRepository:
             "partition_total": partition_total,
             "partition_complete": partition_total == total,
             "insufficient_breakdown": insufficient_breakdown,
+            "active_light_followups": len(light_followup_by_event),
+            "light_followup_statuses": {
+                followup_status: sum(
+                    1 for value in light_followup_by_event.values() if value == followup_status
+                )
+                for followup_status in ("PENDING_EVIDENCE_REVIEW", "PENDING_HUMAN_REVIEW")
+            },
             "definitions": {
                 "verified": "formally verified canonical events",
                 "excluded": "canonically rejected events",
@@ -302,7 +355,10 @@ class LedgerRepository:
                     "canonical weak events or events whose latest authorized rough review "
                     "concluded ROUGH_INSUFFICIENT"
                 ),
-                "pending_verification": "candidate events without a completed rough-review disposition",
+                "pending_verification": (
+                    "candidate events without a completed rough-review disposition or any event with an "
+                    "active evidence/human light-verification follow-up"
+                ),
                 "rough_reviewed": (
                     "candidate events with an authorized rough review completed without an "
                     "insufficient outcome; not formal verification"
@@ -529,10 +585,40 @@ class LedgerRepository:
                 if rough_row is not None
                 else None
             )
+            light_followup_row = connection.execute(
+                """SELECT status,payload_json,updated_at
+                   FROM pipeline_jobs
+                   WHERE event_id=? AND job_type='light_verification_followup'
+                     AND status IN ('PENDING_EVIDENCE_REVIEW','PENDING_HUMAN_REVIEW')
+                   ORDER BY updated_at DESC,job_id DESC LIMIT 1""",
+                (event_id,),
+            ).fetchone()
+            light_followup: dict[str, Any] | None = None
+            if light_followup_row is not None:
+                payload = _json(light_followup_row["payload_json"], {})
+                details = (
+                    payload.get("light_verification_followup")
+                    if isinstance(payload, dict)
+                    else None
+                )
+                details = details if isinstance(details, dict) else {}
+                light_followup = {
+                    "status": str(light_followup_row["status"]),
+                    "updated_at": str(light_followup_row["updated_at"]),
+                    "last_attempted_at": details.get("last_attempted_at"),
+                    "expected_next_action": details.get("expected_next_action"),
+                    "gap_reasons": details.get("gap_reasons", []),
+                    "legacy_reconciliation": bool(details.get("legacy_reconciliation")),
+                    "formal_verification": False,
+                    "no_trading": True,
+                }
             event["public_state"] = self._public_state(
-                event.get("status"), str(rough["outcome"]) if rough else None
+                event.get("status"),
+                str(rough["outcome"]) if rough else None,
+                str(light_followup["status"]) if light_followup else None,
             )
             event["reviewed_at"] = rough.get("reviewed_at") if rough else None
+            event["light_followup"] = light_followup
             version = _dict(
                 connection.execute(
                     "SELECT * FROM event_versions WHERE event_id=? AND version=?",

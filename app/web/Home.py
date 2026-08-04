@@ -412,29 +412,37 @@ if UI_ROLE == "admin":
 else:
     latest_worker = overview.get("latest_worker_cycle") or {}
     worker_status = str(latest_worker.get("status") or "").upper()
-    worker_fresh = worker_age is None or float(worker_age) <= 1800
+    worker_has_finished_time = worker_age is not None
+    worker_fresh = worker_has_finished_time and float(worker_age) <= 1800
     collector_ok = worker_status in {"SUCCESS", "COMPLETED", "OK"} and worker_fresh
-    collector_label = "正常" if collector_ok else ("状态未知" if not worker_status else "需关注")
-    collector_state = "ok" if collector_ok else ("" if not worker_status else "watch")
-    funnel_total = max(0, int(public_funnel.get("total") or 0))
-    rough_stage = max(0, int(public_funnel.get("rough_reviewed") or 0))
-    formal_disposition = sum(
-        max(0, int(public_funnel.get(key) or 0))
-        for key in ("verified", "excluded", "insufficient")
+    collector_label = (
+        "正常"
+        if collector_ok
+        else ("状态未知" if not worker_status or not worker_has_finished_time else "需关注")
     )
-    formal_value = f"{formal_disposition:,}/{funnel_total:,}" if funnel_total else "—"
+    collector_state = "ok" if collector_ok else "watch"
+    formally_verified = max(0, int(public_funnel.get("verified") or 0))
+    formally_excluded = max(0, int(public_funnel.get("excluded") or 0))
+    review_needed = sum(
+        max(0, int(public_funnel.get(key) or 0))
+        for key in ("pending_verification", "rough_reviewed", "insufficient")
+    )
     status_items = [
         ("采集状态", collector_label, collector_state),
         ("最近成功采集", format_elapsed(worker_age), collector_state),
-        ("当前粗审阶段", f"{rough_stage:,} 条", "watch" if rough_stage else "ok"),
-        ("正式处置状态", formal_value, "ok" if funnel_total and formal_disposition == funnel_total else "watch"),
+        (
+            "正式结论",
+            f"核验 {formally_verified:,} · 排除 {formally_excluded:,}",
+            "ok" if not review_needed else "watch",
+        ),
+        ("待补证 / 复核", f"{review_needed:,} 条", "watch" if review_needed else "ok"),
     ]
 status_strip(status_items)
 if UI_ROLE != "admin":
     st.markdown(
         '<p class="public-health-explainer">'
         f'采集与核验是两条独立时间线（最近发现新事件：{escape(format_elapsed(event_age))} 前）。'
-        '正式处置含已核验、证据不足和已排除，不表示全部已通过。'
+        '正式结论只统计已核验和已排除；证据不足、待核验和已粗审仍需要补证或人工复核。'
         '</p>',
         unsafe_allow_html=True,
     )
@@ -535,6 +543,7 @@ if UI_ROLE != "admin":
         st.query_params.pop("preview_page", None)
         st.rerun()
 
+feed_error: Exception | None = None
 try:
     if UI_ROLE == "admin":
         feed_result = api_request(
@@ -567,9 +576,12 @@ try:
         )
     live_feed = list(feed_result.get("items") or [])
     live_total = int(feed_result.get("total") or 0)
-except Exception:
-    live_feed = overview["recent_events"]
-    live_total = len(live_feed)
+except Exception as exc:
+    # A failed filtered request must not silently display the overview's
+    # unrelated recent-event sample under the active filters.
+    live_feed = []
+    live_total = 0
+    feed_error = exc
 finally:
     feed_loading.empty()
 
@@ -774,7 +786,12 @@ if preview_event_id:
     finally:
         preview_loading.empty()
 
-if UI_ROLE != "admin":
+if UI_ROLE != "admin" and feed_error is not None:
+    st.markdown('<div id="live-events"></div>', unsafe_allow_html=True)
+    section_header("事件浏览", "当前筛选的数据暂时不可用 · 未显示任何替代事件")
+    render_api_error(feed_error)
+    st.caption("已保留当前筛选、排序和分页设置；恢复后请刷新重新读取。")
+elif UI_ROLE != "admin":
     total_pages = max(1, ceil(live_total / public_page_size))
     if live_total and public_page > total_pages:
         st.query_params["preview_page"] = str(total_pages)
@@ -866,14 +883,19 @@ else:
     left, right = st.columns([1.78, .82], gap="large")
     with left:
         st.markdown('<div id="live-events"></div>', unsafe_allow_html=True)
-        feed_context = f"{active_flow} · 当前页预览"
-        if preview_query:
-            feed_context += f" · 搜索 {preview_query}"
-        section_header("实时事件流", f"最新 {len(live_feed)} 条 · UTC · {feed_context}")
-        if live_feed:
-            render_event_feed(live_feed, flow=active_flow, public=False)
+        if feed_error is not None:
+            section_header("实时事件流", f"{active_flow} · 当前筛选的数据暂时不可用")
+            render_api_error(feed_error)
+            st.caption("已保留当前筛选设置；恢复后请刷新重新读取。")
         else:
-            st.info("暂无事件。")
+            feed_context = f"{active_flow} · 当前页预览"
+            if preview_query:
+                feed_context += f" · 搜索 {preview_query}"
+            section_header("实时事件流", f"最新 {len(live_feed)} 条 · UTC · {feed_context}")
+            if live_feed:
+                render_event_feed(live_feed, flow=active_flow, public=False)
+            else:
+                st.info("暂无事件。")
 
     with right:
         section_header("系统复核队列", "证据复核")

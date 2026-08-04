@@ -128,6 +128,10 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert "已粗审" in rendered
     assert "最近成功采集" in rendered
     assert "最近发现新事件" in rendered
+    assert "正式结论" in rendered
+    assert "核验 5 · 排除 1" in rendered
+    assert "待补证 / 复核" in rendered
+    assert "正式处置状态" not in rendered
     assert "Schema" not in rendered
     assert "quick_check" not in rendered
     assert "快捷命令" not in rendered
@@ -194,3 +198,41 @@ def test_public_inline_preview_bounds_long_source_text(monkeypatch) -> None:
     assert "Z" * 901 not in rendered
     assert "Y" * 361 not in rendered
     assert "…" in rendered
+
+
+def test_public_event_feed_failure_never_substitutes_overview_events(monkeypatch) -> None:
+    def failing_feed_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        if urllib.parse.urlsplit(path).path == "/api/v1/events":
+            raise web_common.ApiError("API unavailable")
+        return _fake_api(path, **kwargs)
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", failing_feed_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10).run()
+    rendered = "\n".join(str(item.value) for item in [*page.markdown, *page.caption])
+
+    assert not page.exception
+    assert "当前筛选的数据暂时不可用" in rendered
+    assert "未显示任何替代事件" in rendered
+    assert "数据服务暂时不可用" in rendered
+    assert "Example Holdings" not in rendered
+    assert "当前筛选没有匹配事件" not in rendered
+    assert "事件分页" not in rendered
+
+
+def test_public_collector_marks_missing_success_timestamp_unknown(monkeypatch) -> None:
+    def missing_worker_time_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        if urllib.parse.urlsplit(path).path == "/api/v1/overview":
+            overview = _overview()
+            overview["timing"] = {**overview["timing"], "latest_worker_success_age_seconds": None}
+            return overview
+        return _fake_api(path, **kwargs)
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", missing_worker_time_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10).run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "采集状态" in rendered
+    assert "状态未知" in rendered

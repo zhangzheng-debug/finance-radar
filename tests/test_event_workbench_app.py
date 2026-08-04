@@ -163,3 +163,12 @@ def test_event_workbench_external_query_replaces_stale_widget_state(monkeypatch)
     )
     assert next(item for item in page.selectbox if item.key == "event_limit").value == 50
     assert page.session_state["selected_event_id"] == "event-b"
+
+
+def test_event_workbench_labels_its_controlled_audit_and_review_writes() -> None:
+    source = PAGE.read_text(encoding="utf-8")
+
+    assert '"READ ONLY"' not in source
+    assert "内部 · 受控写入" in source
+    assert "运行证据代理（写入审计与证据记录）" in source
+    assert "会写入人工复核记录" in source

@@ -16,7 +16,7 @@ import hashlib
 import json
 import re
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -41,6 +41,18 @@ ALLOWED_EVIDENCE_STATUSES = {
 }
 ALLOWED_PRIMARY_TIERS = {"P0", "P1"}
 BLOCKING_ROUGH_OUTCOMES = {"ROUGH_CONFLICT", "ROUGH_UNRESOLVED"}
+# A bounded passage check can safely confirm only a small set of discrete,
+# source-record events.  Threshold, price, ratio and accounting events need a
+# claim-specific quantitative parser plus a comparison against the event fact;
+# a lexical match is never enough to turn them into a formal conclusion.
+AUTO_FORMAL_EVENT_TYPES = frozenset(
+    {
+        "delisted",
+        "voluntarydelisting",
+        "reverse_split",
+        "bankruptcy_liquidation",
+    }
+)
 STATUS_RANK = {
     "accepted_manual_primary_evidence": 0,
     "confirmed_primary": 1,
@@ -205,6 +217,21 @@ def _event_signal(event: dict[str, Any], evidence: dict[str, Any], claim_text: s
     return True, list(dict.fromkeys(matched))[:8], [(match.start(), match.end()) for match in matches]
 
 
+def _automatic_formal_eligibility(event: dict[str, Any]) -> tuple[bool, str]:
+    """Return whether this taxonomy may ever use the bounded auto-formal path.
+
+    The allow-list is intentionally much narrower than the discovery taxonomy.
+    An otherwise well-sourced threshold/market/fundamental candidate remains a
+    useful nonterminal evidence task, but it cannot be called formally verified
+    until a dedicated quantitative verifier exists.
+    """
+
+    event_type = str(event.get("event_type") or "").casefold()
+    if event_type in AUTO_FORMAL_EVENT_TYPES:
+        return True, "discrete_source_record_event"
+    return False, "event_type_requires_quantitative_or_human_verification"
+
+
 def _modality_check(claim_text: str, signal_spans: list[tuple[int, int]]) -> tuple[bool, str]:
     """Reject a signal when its local context says it did not happen.
 
@@ -290,6 +317,32 @@ def evidence_fingerprint(event: dict[str, Any], evidence: list[dict[str, Any]]) 
     return hashlib.sha256(stable_json({"event": event_part, "evidence": evidence_part}).encode("utf-8")).hexdigest()
 
 
+def evidence_receipt_rows(connection: sqlite3.Connection, event_id: str) -> list[dict[str, Any]]:
+    """Return the provenance-enriched evidence receipt used by every scope gate.
+
+    A formal authorization must bind the same fields that were evaluated:
+    evidence row state plus its source/observation provenance.  Keeping this
+    query here lets the write transaction re-read exactly that receipt instead
+    of accidentally comparing a bare ``event_evidence`` row with an enriched
+    read-model record.
+    """
+
+    return [
+        dict(item)
+        for item in connection.execute(
+            """SELECT ev.*, o.title AS observation_title, o.summary AS observation_summary,
+                      o.source_published_at, o.local_received_at, s.source_id, s.name AS source_name,
+                      s.authority_tier, s.source_type
+               FROM event_evidence ev
+               JOIN raw_observations o ON o.observation_id=ev.observation_id
+               JOIN sources s ON s.source_id=o.source_id
+               WHERE ev.event_id=?
+               ORDER BY ev.evidence_id""",
+            (event_id,),
+        )
+    ]
+
+
 def _model_text(event: dict[str, Any], evidence: list[dict[str, Any]]) -> str:
     facts = event.get("facts") if isinstance(event.get("facts"), dict) else {}
     sections = [
@@ -367,7 +420,7 @@ def model_delta(before_model: dict[str, Any], after_model: dict[str, Any]) -> di
     }
 
 
-def _gap_reasons(best: dict[str, Any]) -> list[str]:
+def _gap_reasons(best: dict[str, Any], *, automatic_formal_eligible: bool = True) -> list[str]:
     reasons: list[str] = []
     if not best.get("identity_match"):
         reasons.append("stable issuer identity is missing or inconsistent")
@@ -379,6 +432,10 @@ def _gap_reasons(best: dict[str, Any]) -> list[str]:
         reasons.append("source date is not within the permitted 366-day event window")
     if int(best.get("excerpt_chars") or 0) < MIN_EXCERPT_CHARS:
         reasons.append("primary passage is too short to support a claim")
+    if not automatic_formal_eligible:
+        reasons.append(
+            "event type requires a quantitative fact gate or human verification before a formal conclusion"
+        )
     return reasons or ["primary evidence requires human review before a formal conclusion"]
 
 
@@ -435,6 +492,7 @@ def evaluate_event(event: dict[str, Any], evidence: list[dict[str, Any]]) -> dic
             "gap_reasons": ["contradictory or rejected primary evidence requires human adjudication"],
         }
 
+    automatic_formal_eligible, automatic_formal_reason = _automatic_formal_eligibility(event)
     checks: list[dict[str, Any]] = []
     for item in selected:
         excerpt = _compact(item.get("evidence_passage"))
@@ -478,11 +536,15 @@ def evaluate_event(event: dict[str, Any], evidence: list[dict[str, Any]]) -> dic
                 "event_date": event_date.isoformat() if event_date else None,
                 "date_gap_days": date_gap_days,
                 "excerpt_chars": len(excerpt),
+                "automatic_formal_eligible": automatic_formal_eligible,
+                "automatic_formal_reason": automatic_formal_reason,
             }
         )
 
     best = max(checks, key=lambda item: int(item["score"]))
     supported = bool(
+        automatic_formal_eligible
+        and
         best["identity_match"]
         and best["event_signal"]
         and best["modality_safe"]
@@ -493,7 +555,11 @@ def evaluate_event(event: dict[str, Any], evidence: list[dict[str, Any]]) -> dic
     rationale = (
         "primary passage passes stable-identity, event-fact, date and modality gates"
         if supported
-        else "primary passage exists but failed one or more mandatory light-verification gates"
+        else (
+            "primary passage is retained for review, but this event type is not eligible for automatic formal verification"
+            if not automatic_formal_eligible
+            else "primary passage exists but failed one or more mandatory light-verification gates"
+        )
     )
     return {
         "version": LIGHT_VERIFICATION_VERSION,
@@ -505,7 +571,9 @@ def evaluate_event(event: dict[str, Any], evidence: list[dict[str, Any]]) -> dic
         "score": int(best["score"]),
         "rationale": rationale,
         "checks": checks,
-        "gap_reasons": [] if supported else _gap_reasons(best),
+        "gap_reasons": []
+        if supported
+        else _gap_reasons(best, automatic_formal_eligible=automatic_formal_eligible),
         "claim_summary": {
             "subject": event.get("company_name") or event.get("ticker_at_event") or event.get("event_id"),
             "predicate": event.get("event_type"),
@@ -561,6 +629,7 @@ def _persist_followup(
     batch_id: str,
     force_human_review: bool = False,
     legacy: bool = False,
+    authorization_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create/update a durable nonterminal task without changing event truth."""
 
@@ -592,6 +661,7 @@ def _persist_followup(
         "formal_verification": False,
         "no_trading": True,
         "legacy_reconciliation": bool(legacy),
+        "authorization": dict(authorization_context or {}),
     }
     payload = dict(existing_payload)
     payload["light_verification_followup"] = followup
@@ -660,6 +730,58 @@ def _formal_budget_block_reason(
     return None
 
 
+def _validate_formal_scope(
+    connection: sqlite3.Connection,
+    *,
+    row: sqlite3.Row,
+    result: dict[str, Any],
+    authorization_context: dict[str, Any] | None,
+    batch_id: str,
+    require_current_support: bool = True,
+) -> None:
+    """Re-read and bind the exact evidence receipt inside the write transaction."""
+
+    if not authorization_context:
+        raise ValueError("formal light verification requires a scoped authorization context")
+    for key in ("authorization_id", "actor", "purpose", "expires_at", "batch_id"):
+        if not str(authorization_context.get(key) or "").strip():
+            raise ValueError(f"formal light verification authorization is missing {key}")
+    if str(authorization_context["batch_id"]) != batch_id:
+        raise ValueError("formal light verification authorization batch does not match the write target")
+    expiry_text = str(authorization_context["expires_at"]).replace("Z", "+00:00")
+    try:
+        expires_at = datetime.fromisoformat(expiry_text)
+    except ValueError as exc:
+        raise ValueError("formal light verification authorization expires_at is invalid") from exc
+    if expires_at.tzinfo is None:
+        raise ValueError("formal light verification authorization expires_at must include a timezone")
+    if expires_at.astimezone(timezone.utc) <= datetime.now(timezone.utc):
+        raise ValueError("formal light verification authorization is expired")
+    scope_entry = authorization_context.get("scope_entry")
+    if not isinstance(scope_entry, dict):
+        raise ValueError("formal light verification authorization is missing an exact scope entry")
+    event_id = str(row["event_id"])
+    before_version = int(row["current_version"])
+    if str(scope_entry.get("event_id") or "") != event_id:
+        raise ValueError("formal authorization event id does not match the write target")
+    if int(scope_entry.get("current_version") or -1) != before_version:
+        raise ValueError("formal authorization event version does not match the write target")
+    evidence = evidence_receipt_rows(connection, event_id)
+    current_fingerprint = evidence_fingerprint(dict(row), evidence)
+    evaluated_fingerprint = str(result.get("evidence_fingerprint") or "")
+    authorized_fingerprint = str(scope_entry.get("evidence_fingerprint") or "")
+    if not evaluated_fingerprint or current_fingerprint != evaluated_fingerprint:
+        raise ValueError("evidence changed since light verification evaluation")
+    if authorized_fingerprint != current_fingerprint:
+        raise ValueError("formal authorization evidence fingerprint does not match the write target")
+    if require_current_support:
+        fresh_result = evaluate_event(dict(row), evidence)
+        if fresh_result.get("decision") != "SUPPORTED":
+            raise ValueError("event no longer passes the strict formal light-verification gates")
+        if list(fresh_result.get("evidence_ids") or []) != list(result.get("evidence_ids") or []):
+            raise ValueError("formal light verification evidence selection no longer matches the write target")
+
+
 def apply_event(
     connection: sqlite3.Connection,
     result: dict[str, Any],
@@ -711,6 +833,7 @@ def apply_event(
             result=base,
             batch_id=batch_id,
             force_human_review=blocked_by_rough,
+            authorization_context=authorization_context,
         )
         return {
             **base,
@@ -727,6 +850,15 @@ def apply_event(
 
     if str(row["status"] or "").lower() != "candidate":
         raise ValueError(f"event is no longer a candidate: {event_id}")
+    if str(row["event_type"] or "").casefold() not in AUTO_FORMAL_EVENT_TYPES:
+        raise ValueError("event type is not eligible for automatic formal light verification")
+    _validate_formal_scope(
+        connection,
+        row=row,
+        result=result,
+        authorization_context=authorization_context,
+        batch_id=batch_id,
+    )
     budget_block = _formal_budget_block_reason(
         connection,
         batch_id=batch_id,
@@ -836,6 +968,7 @@ def reconcile_legacy_event(
     *,
     event_id: str,
     batch_id: str,
+    authorization_context: dict[str, Any],
 ) -> dict[str, Any]:
     """Re-open a v1 light-verification record without reverting its history."""
 
@@ -855,7 +988,18 @@ def reconcile_legacy_event(
             "reopened": False,
             "reason": "event is not currently a v1 light-verification record",
         }
-    evidence = [dict(item) for item in connection.execute("SELECT * FROM event_evidence WHERE event_id=? ORDER BY evidence_id", (event_id,))]
+    evidence = evidence_receipt_rows(connection, event_id)
+    _validate_formal_scope(
+        connection,
+        row=row,
+        result={
+            "event_id": event_id,
+            "evidence_fingerprint": evidence_fingerprint(dict(row), evidence),
+        },
+        authorization_context=authorization_context,
+        batch_id=batch_id,
+        require_current_support=False,
+    )
     event = dict(row)
     result = {
         "version": LIGHT_VERIFICATION_VERSION,
@@ -878,6 +1022,7 @@ def reconcile_legacy_event(
         batch_id=batch_id,
         force_human_review=str(row["status"]).lower() == "verified",
         legacy=True,
+        authorization_context=authorization_context,
     )
     return {
         "event_id": event_id,

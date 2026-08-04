@@ -42,7 +42,11 @@ require_admin_ui()
 restore_deep_link("Event_Intelligence")
 render_primary_navigation("events")
 
-header("事件工作台", "发现、判断与核验在同一工作面完成；模型只做 shadow 分流", "READ ONLY")
+header(
+    "事件工作台",
+    "发现、判断与核验在同一工作面完成；仅受控写入证据代理审计、关联证据与人工复核记录，模型只做 shadow 分流",
+    "内部 · 受控写入",
+)
 no_trading_banner()
 
 flow_names = list(FLOW_PRESETS)
@@ -380,7 +384,8 @@ with context_col:
             if detail.get("market_metrics"):
                 st.dataframe(pd.DataFrame(detail["market_metrics"]), width="stretch", hide_index=True)
 
-    if st.button("运行证据代理（只读）", type="primary", width="stretch"):
+    st.caption("运行会写入可追溯的代理审计和关联证据记录，不会改写事件结论，也不触发交易。")
+    if st.button("运行证据代理（写入审计与证据记录）", type="primary", width="stretch"):
         try:
             result = api_request(f"/api/v1/events/{selected_id}/agent/run", method="POST")
             st.success(f"{result['status']} · {result['trace_id']}")
@@ -391,7 +396,7 @@ with context_col:
     if decisions:
         latest = decisions[0]
         with st.expander("人工复核记录"):
-            st.caption("只改变复核状态，不触发交易。")
+            st.caption("会写入人工复核记录；不触发交易，也不会自动改写事件的正式结论。")
             with st.form(f"human-override-{selected_id}"):
                 actor = st.text_input("审核者", value="defense-reviewer")
                 review_status = st.selectbox(

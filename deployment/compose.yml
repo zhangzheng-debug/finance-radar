@@ -82,14 +82,18 @@ services:
 
   worker:
     <<: *radar-service
-    command: ["python", "-m", "app.workers.continuous", "--interval", "300"]
+    # The continuous collector must not autonomously apply formal
+    # verification; scoped manual batches remain the only mutation path.
+    command: ["python", "-m", "app.workers.continuous", "--interval", "300", "--no-light-verify"]
     depends_on:
       api:
         condition: service_healthy
 
   backup:
     <<: *radar-service
-    command: ["python", "-m", "app.workers.backup_scheduler", "--interval", "86400", "--retention", "30", "--weekly-retention", "12"]
+    # User-selected retention: keep only the last daily bundle after its
+    # restore verification succeeds; no weekly copies are retained.
+    command: ["python", "-m", "app.workers.backup_scheduler", "--interval", "86400", "--retention", "1", "--weekly-retention", "0"]
     depends_on:
       api:
         condition: service_healthy

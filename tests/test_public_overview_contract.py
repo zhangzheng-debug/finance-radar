@@ -239,6 +239,58 @@ def test_repository_public_funnel_exposes_rough_insufficient_as_an_exhaustive_pa
         assert without_canonical_weak["public_funnel"]["insufficient_breakdown"]["rough_review"] == 14
 
 
+def test_active_light_followup_is_visible_as_pending_evidence_work() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        ledger_path = _populated_ledger(Path(directory))
+        connection = open_ledger(ledger_path)
+        followup_at = "2026-08-04T14:00:00+00:00"
+        payload = json.dumps(
+            {
+                "light_verification_followup": {
+                    "expected_next_action": "human_review",
+                    "gap_reasons": ["primary passage needs human adjudication"],
+                    "legacy_reconciliation": True,
+                }
+            },
+            sort_keys=True,
+        )
+        connection.execute(
+            """INSERT INTO pipeline_jobs VALUES (
+               'light-followup-verified','verified-0','light_verification_followup',
+               'PENDING_HUMAN_REVIEW',95,0,?,NULL,?,?,?)""",
+            (followup_at, payload, followup_at, followup_at),
+        )
+        connection.commit()
+        connection.close()
+
+        repository = LedgerRepository(ledger_path)
+        overview = repository.overview(run_integrity_check=False)
+        pending = repository.list_events(public_state="pending_verification", limit=200)
+        item = next(row for row in pending["items"] if row["event_id"] == "verified-0")
+        detail = repository.event_detail("verified-0")
+
+        assert overview["public_funnel"]["active_light_followups"] == 1
+        assert overview["public_funnel"]["light_followup_statuses"] == {
+            "PENDING_EVIDENCE_REVIEW": 0,
+            "PENDING_HUMAN_REVIEW": 1,
+        }
+        assert item["public_state"] == "pending_verification"
+        assert item["light_followup_status"] == "PENDING_HUMAN_REVIEW"
+        assert item["light_followup_next_action"] == "human_review"
+        assert detail is not None
+        assert detail["event"]["public_state"] == "pending_verification"
+        assert detail["event"]["light_followup"] == {
+            "status": "PENDING_HUMAN_REVIEW",
+            "updated_at": followup_at,
+            "last_attempted_at": None,
+            "expected_next_action": "human_review",
+            "gap_reasons": ["primary passage needs human adjudication"],
+            "legacy_reconciliation": True,
+            "formal_verification": False,
+            "no_trading": True,
+        }
+
+
 def test_repository_public_filters_dates_sorting_and_legacy_status_compose_safely() -> None:
     with tempfile.TemporaryDirectory() as directory:
         repository = LedgerRepository(_populated_ledger(Path(directory)))
@@ -387,6 +439,7 @@ def test_api_contract_separates_new_event_updates_and_last_successful_worker_cyc
 def test_public_state_query_materializes_latest_rough_once_without_correlated_job_lookup() -> None:
     assert "ROW_NUMBER() OVER" in PUBLIC_EVENT_STATE_CTE
     assert "LEFT JOIN ranked_rough_reviews" in PUBLIC_EVENT_STATE_CTE
+    assert "LEFT JOIN ranked_light_followups" in PUBLIC_EVENT_STATE_CTE
     assert "SELECT latest_rough.job_id" not in PUBLIC_EVENT_STATE_CTE
 
     with tempfile.TemporaryDirectory() as directory:

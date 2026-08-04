@@ -104,11 +104,13 @@ def run_pending_evidence_agents(
 ) -> dict[str, Any]:
     """Run bounded internal evidence analysis after primary evidence enrichment."""
     rows = connection.execute(
-        """SELECT e.event_id,j.priority
+        """SELECT e.event_id,j.job_id,j.job_type,j.priority
            FROM canonical_events e
            JOIN pipeline_jobs j ON j.event_id=e.event_id
-           WHERE e.status='candidate'
-             AND j.job_type='live_primary_evidence_review'
+           WHERE (
+                 (j.job_type='live_primary_evidence_review' AND e.status='candidate')
+                 OR j.job_type='light_verification_followup'
+             )
              AND j.status='PENDING_EVIDENCE_REVIEW'
              AND EXISTS (
                  SELECT 1 FROM event_evidence ev WHERE ev.event_id=e.event_id
@@ -122,18 +124,22 @@ def run_pending_evidence_agents(
         "run": 0,
         "already_run": 0,
         "errors": [],
+        "by_job_type": {},
         "no_trading": True,
     }
     now = utc_now()
     for row in rows:
         event_id = str(row["event_id"])
+        job_id = str(row["job_id"])
+        job_type = str(row["job_type"])
+        result["by_job_type"][job_type] = result["by_job_type"].get(job_type, 0) + 1
         if operations.agent_decisions(event_id, limit=1):
             connection.execute(
                 """UPDATE pipeline_jobs
                    SET status='PENDING_HUMAN_REVIEW',last_error=NULL,updated_at=?
-                   WHERE event_id=? AND job_type='live_primary_evidence_review'
+                   WHERE job_id=? AND job_type=?
                      AND status='PENDING_EVIDENCE_REVIEW'""",
-                (now, event_id),
+                (now, job_id, job_type),
             )
             result["already_run"] += 1
             continue
@@ -142,9 +148,9 @@ def run_pending_evidence_agents(
             connection.execute(
                 """UPDATE pipeline_jobs
                    SET status='PENDING_HUMAN_REVIEW',last_error=NULL,updated_at=?
-                   WHERE event_id=? AND job_type='live_primary_evidence_review'
+                   WHERE job_id=? AND job_type=?
                      AND status='PENDING_EVIDENCE_REVIEW'""",
-                (utc_now(), event_id),
+                (utc_now(), job_id, job_type),
             )
             result["run"] += 1
             result.setdefault("statuses", {}).setdefault(decision["status"], 0)
@@ -153,8 +159,8 @@ def run_pending_evidence_agents(
             connection.execute(
                 """UPDATE pipeline_jobs
                    SET attempts=attempts+1,last_error=?,updated_at=?
-                   WHERE event_id=? AND job_type='live_primary_evidence_review'""",
-                (f"{type(exc).__name__}: {str(exc)[:500]}", utc_now(), event_id),
+                   WHERE job_id=? AND job_type=?""",
+                (f"{type(exc).__name__}: {str(exc)[:500]}", utc_now(), job_id, job_type),
             )
             result["errors"].append(f"{event_id}:{type(exc).__name__}:{str(exc)[:240]}")
     connection.commit()

@@ -37,6 +37,9 @@ def test_long_running_units_restart_worker_disable_formal_auto_verify_and_keep_o
     assert "--no-light-verify" in worker_send_override
     assert "Restart=on-failure" in worker
     assert "RestartSec=20" in worker
+    assert "MemoryHigh=380M" in worker
+    assert "MemoryMax=520M" in worker
+    assert "TasksMax=128" in worker
     assert "--retention 1 --weekly-retention 0" in backup
 
 
@@ -73,9 +76,9 @@ def test_public_web_uses_a_fixed_minimal_environment_without_admin_token() -> No
         "FINANCE_RADAR_SHOW_DEBUG=0",
     ):
         assert literal in installer
-    public_env_block = installer.split("/etc/finance-radar-public.env", 1)[1].split(
-        'ln -sfn "$RELEASE"', 1
-    )[0]
+    public_env_block = installer.split(
+        "# The public Streamlit process receives a deliberately minimal environment.", 1
+    )[1].split('install -m 0644 "$RELEASE/deployment/systemd/finance-radar-api.service"', 1)[0]
     assert "FINANCE_RADAR_ADMIN_TOKEN" not in public_env_block
     assert "cp " not in public_env_block
     assert "grep " not in public_env_block
@@ -92,7 +95,10 @@ def test_admin_ui_is_manual_loopback_only_and_installed_without_enablement() -> 
     assert "MemoryMax=256M" in admin
     assert "\n[Install]\n" not in admin
     assert "finance-radar-admin.service" in installer
-    assert "systemctl enable" not in installer
+    enable_line = next(
+        line for line in installer.splitlines() if line.startswith("systemctl enable finance-radar-api")
+    )
+    assert "finance-radar-admin" not in enable_line
 
 
 def test_restore_recreates_public_environment_and_never_enables_admin() -> None:
@@ -109,3 +115,40 @@ def test_restore_recreates_public_environment_and_never_enables_admin() -> None:
         line for line in source.splitlines() if line.startswith("systemctl enable --now finance-radar-api")
     )
     assert "finance-radar-admin" not in enable_line
+
+
+def test_in_place_installer_rolls_back_services_and_edge_on_any_cutover_failure() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+
+    assert 'PREVIOUS_RELEASE="$(readlink -f -- "$BASE/current")"' in source
+    assert 'ROLLBACK_DIR="/var/tmp/finance-radar-install-${RELEASE_ID}-' in source
+    for path in (
+        "/etc/finance-radar-public.env",
+        "/etc/systemd/system/finance-radar-worker.service",
+        "/etc/nginx/conf.d/finance-radar-direct.conf",
+        "/etc/letsencrypt/renewal-hooks/deploy/finance-radar-reload-nginx.sh",
+    ):
+        assert path in source
+    assert "rollback()" in source
+    assert 'ln -sfn "$PREVIOUS_RELEASE" "$BASE/current"' in source
+    cutover = source.split("# The only point at which the running release changes.", 1)[1]
+    assert cutover.index("systemctl stop finance-radar-worker") < cutover.index(
+        'ln -sfn "$RELEASE" "$BASE/current"'
+    )
+    assert "ROLLBACK_ENABLED_UNITS" in source
+    assert "ROLLBACK_ACTIVE_UNITS" in source
+    assert "restore_service_runtime()" in source
+    assert "systemctl is-enabled --quiet" in source
+    assert "systemctl is-active --quiet" in source
+    assert "restore_service_runtime" in source
+    assert "systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer" in source
+    assert 'bash "$DIRECT_ENDPOINT_INSTALLER" "$DIRECT_ENDPOINT_CANDIDATE" "$DIRECT_ENDPOINT_HOOK"' in source
+    assert "nginx -t" in source
+    assert "--resolve \"$PUBLIC_EDGE_HOST:$PUBLIC_EDGE_PORT:127.0.0.1\"" in source
+    for denied_path in (
+        "/finance-radar-api/",
+        "/radar-admin/",
+        "/radar/Event_Intelligence",
+        "Operations_and_Model",
+    ):
+        assert denied_path in source

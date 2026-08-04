@@ -51,7 +51,8 @@ def build_rows(connection: Any, decisions: dict[str, dict[str, Any]]) -> list[di
         """SELECT j.job_id,j.event_id,j.status,j.payload_json,e.discovery_source,e.event_family
            FROM pipeline_jobs j
            JOIN canonical_events e ON e.event_id=j.event_id
-           WHERE j.status='PENDING_HUMAN_REVIEW'
+           WHERE j.job_type='live_primary_evidence_review'
+             AND j.status='PENDING_HUMAN_REVIEW'
            ORDER BY j.event_id"""
     ):
         decision = decisions.get(str(job["event_id"]))
@@ -120,7 +121,8 @@ def apply_rows(
             cursor = connection.execute(
                 """UPDATE pipeline_jobs
                    SET status=?,last_error=NULL,payload_json=?,updated_at=?
-                   WHERE job_id=? AND status='PENDING_HUMAN_REVIEW'""",
+                   WHERE job_id=? AND job_type='live_primary_evidence_review'
+                     AND status='PENDING_HUMAN_REVIEW'""",
                 (COMPLETED_STATUS, stable_json(payload), reviewed_at, row["job_id"]),
             )
             updated += int(cursor.rowcount)

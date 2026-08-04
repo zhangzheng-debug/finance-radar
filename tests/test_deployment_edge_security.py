@@ -30,6 +30,15 @@ def test_compose_admin_is_opt_in_and_bound_to_host_loopback() -> None:
     assert '"app/web/Admin.py"' in admin
 
 
+def test_compose_worker_and_backup_keep_the_production_safety_defaults() -> None:
+    source = (ROOT / "deployment/compose.yml").read_text(encoding="utf-8")
+    worker = source.split("\n  worker:\n", 1)[1].split("\n  backup:\n", 1)[0]
+    backup = source.split("\n  backup:\n", 1)[1].split("\n  notifier:\n", 1)[0]
+
+    assert '"--no-light-verify"' in worker
+    assert '"--retention", "1", "--weekly-retention", "0"' in backup
+
+
 def test_portable_caddy_edge_returns_not_found_for_backend_routes() -> None:
     source = (ROOT / "deployment/Caddyfile").read_text(encoding="utf-8")
     assert "@private_backend path /api/* /docs* /openapi.json /finance-radar-api*" in source

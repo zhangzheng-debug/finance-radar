@@ -125,3 +125,43 @@ def test_apply_requires_exact_authorization() -> None:
             assert rough.AUTHORIZATION_PHRASE in str(exc)
         else:
             raise AssertionError("apply must require the authorization phrase")
+
+
+def test_light_followup_jobs_cannot_be_closed_by_bulk_rough_review() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        ledger_path, operations_path = _fixture(Path(directory))
+        ledger = open_ledger(ledger_path)
+        now = utc_now()
+        ledger.execute(
+            """INSERT INTO pipeline_jobs VALUES (
+               'light-followup-1','evt-1','light_verification_followup','PENDING_HUMAN_REVIEW',
+               75,0,?,NULL,'{}',?,?)""",
+            (now, now, now),
+        )
+        ledger.commit()
+        ledger.close()
+
+        dry = rough.run(
+            ledger_path,
+            operations_path,
+            apply=False,
+            authorization=None,
+            batch_id="batch-followup-isolation",
+        )
+        assert dry["selected"] == 2
+
+        applied = rough.run(
+            ledger_path,
+            operations_path,
+            apply=True,
+            authorization=rough.AUTHORIZATION_PHRASE,
+            batch_id="batch-followup-isolation",
+        )
+        assert applied["updated"] == 2
+        ledger = open_ledger(ledger_path)
+        followup = ledger.execute(
+            "SELECT status,payload_json FROM pipeline_jobs WHERE job_id='light-followup-1'"
+        ).fetchone()
+        assert followup["status"] == "PENDING_HUMAN_REVIEW"
+        assert "rough_review" not in json.loads(followup["payload_json"])
+        ledger.close()

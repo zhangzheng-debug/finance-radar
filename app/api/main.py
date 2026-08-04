@@ -378,9 +378,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data["latest_worker_cycle"] = latest_worker
         data["latest_backup"] = public_backup_status(latest_backup)
         data["latest_backup_attempt"] = public_backup_status(operations.latest_backup())
+        # Keep the legacy alias and the explicit update clock exactly aligned.
+        # Computing elapsed time twice makes an otherwise identical API fact
+        # differ by milliseconds and turns deterministic contract tests flaky.
+        event_update_age_seconds = elapsed_seconds(data.get("last_event_update"))
         data["timing"] = {
             # Legacy field: age of the most recent insert or revision.
-            "latest_event_age_seconds": elapsed_seconds(data.get("last_event_update")),
+            "latest_event_age_seconds": event_update_age_seconds,
             "worker_cycle_duration_seconds": elapsed_seconds(
                 latest_worker.get("started_at") if latest_worker else None,
                 latest_worker.get("finished_at") if latest_worker else None,
@@ -399,7 +403,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "latest_new_event_at": data.get("last_new_event_at"),
             "latest_new_event_age_seconds": elapsed_seconds(data.get("last_new_event_at")),
             "latest_event_update_at": data.get("last_event_update"),
-            "latest_event_update_age_seconds": elapsed_seconds(data.get("last_event_update")),
+            "latest_event_update_age_seconds": event_update_age_seconds,
         }
         return envelope(request, data)
 

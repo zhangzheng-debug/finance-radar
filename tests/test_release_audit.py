@@ -239,6 +239,27 @@ def test_default_release_contract_files_exist() -> None:
     assert missing == []
 
 
+def test_default_release_contract_covers_runtime_mutation_and_edge_boundaries() -> None:
+    required = {
+        "app/config.py",
+        "app/models/risk_router.py",
+        "app/services/evidence_agent.py",
+        "app/services/light_verification.py",
+        "app/storage/operations.py",
+        "scripts/light_verify.py",
+        "deployment/systemd/finance-radar-worker-send.conf",
+        "deployment/systemd/create_migration_backup.sh",
+        "deployment/systemd/install_direct_endpoint.sh",
+        "deployment/systemd/install_local_evidence_model.sh",
+        "deployment/systemd/certbot-reload-nginx.sh",
+        "deployment/systemd/finance-radar-evidence-llm.service",
+        "scripts/apply_authorized_rough_reviews.py",
+        "scripts/official_primary_page_enricher.py",
+        "scripts/run_live_cycle.py",
+    }
+    assert required.issubset(DEFAULT_CRITICAL_FILES)
+
+
 def test_systemd_installer_verifies_optional_manifest_before_cutover() -> None:
     root = Path(__file__).parents[1]
     installer = (root / "deployment/systemd/install_remote.sh").read_text(encoding="utf-8")

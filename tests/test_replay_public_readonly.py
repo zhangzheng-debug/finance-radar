@@ -93,9 +93,11 @@ def test_readonly_presentation_is_deterministic_for_all_frozen_cases() -> None:
 def test_public_replay_explains_its_readonly_boundary() -> None:
     source = PAGE.read_text(encoding="utf-8")
     for copy in (
-        "固定案例的只读讲解",
+        "固定案例的只读教学示意",
         "不会触发实时采集、模型运行或数据库写入",
         "不会改变任何历史记录",
+        "不代表当前系统的实际输出或最终判断",
+        "不调用模型或读取当前系统输出",
         "不保存演示过程",
         "不修改生产数据",
     ):
@@ -105,14 +107,14 @@ def test_public_replay_explains_its_readonly_boundary() -> None:
 def test_public_replay_has_a_chinese_first_screen_and_secondary_raw_evidence() -> None:
     source = PAGE.read_text(encoding="utf-8")
     for copy in (
-        'header("证据演示"',
-        '"只读演示")',
-        '("发生什么", "冻结案例逐步展开"',
+        '    "证据演示",',
+        '    "只读教学演示",',
+        '("演示目的", "冻结案例教学示意"',
         '("证据如何变化", "按时间顺序查看"',
-        '("最终结论", "走完案例后明确显示"',
+        '("教学小结", "走完案例后显示"',
         '("仍不做什么", "不写入、不交易"',
         'section_header("发生什么"',
-        'section_header("证据如何改变判断"',
+        'section_header("证据如何改变教学提示"',
         'st.expander("查看英文原始证据（次级）", expanded=False)',
     ):
         assert copy in source
@@ -129,14 +131,16 @@ def test_completed_demo_has_an_explicit_terminal_state_and_session_only_restart(
     source = PAGE.read_text(encoding="utf-8")
     for copy in (
         'restart_col.button(\n    "重新开始"',
-        'section_header("最终结论"',
-        "演示完成：最终判断为",
-        "接下来只进入人工风险复核",
+        'section_header("教学小结"',
+        "教学示意完成：最后一步的规则提示为",
+        "教学规则提示进入人工风险复核",
         'section_header("仍不做什么"',
         "本页唯一会变化的是当前浏览会话中的显示进度",
     ):
         assert copy in source
 
+    assert "演示完成：最终判断为" not in source
+    assert "此刻系统应该怎样做" not in source
     assert 'st.session_state[visible_key] = 1' in source
     assert "session_state.pop" not in source
 
@@ -154,4 +158,4 @@ def test_replay_progress_strip_uses_the_same_visible_step_as_the_conclusion(monk
     assert not page.exception
     assert "当前进度" in rendered
     assert "2/2" in rendered
-    assert any("演示完成：最终判断为" in str(item.value) for item in page.success)
+    assert any("教学示意完成：最后一步的规则提示为" in str(item.value) for item in page.success)

@@ -3,7 +3,9 @@
 ## 运行目标
 
 Finance Radar 应作为只读情报采集系统长期运行。服务器 Worker 每 300 秒启动一轮；
-systemd 设置开机自启、进程异常后 20 秒重启。单一来源失败只能使当轮降级，不能阻断
+systemd 设置开机自启、进程异常后 20 秒重启，并在主 unit 中固定
+`MemoryHigh=380M`、`MemoryMax=520M`、`TasksMax=128`。超过软阈值先由 systemd
+施加回收/节流压力；达到硬上限时按正常重启策略恢复。单一来源失败只能使当轮降级，不能阻断
 其他来源、事件账本、行情窗口或后续周期。
 
 ## 永久数据
@@ -18,10 +20,22 @@ systemd 设置开机自启、进程异常后 20 秒重启。单一来源失败�
 
 ## 备份层次
 
-- VPS 在线 SQLite 备份：保留最近 30 份日备份。
-- VPS 周快照：保留最近 12 周。
+- VPS 在线 SQLite 备份：只保留最近 1 份已通过恢复验证的日备份。
+- VPS 周快照：当前不保留（`weekly-retention=0`）。新备份只有在账本、运维库和
+  清单恢复验证通过后，才会删除上一份。
 - Windows 异机备份：每日拉取、AES-256-GCM 加密、完整隔离恢复验证，保留策略独立。
 - 换机前必须再生成一次最终异机快照；旧 VPS 只在新端点验收通过后下线。
+
+2026-07-19 的迁移快照和旧报告中出现的“30 份日备份、12 周快照”仅描述当时的
+历史状态，不能作为当前保留策略或容量估算依据。
+
+## 备份锁与可用性
+
+备份器使用带 PID、令牌和时间戳的专用锁，避免两个备份同时清理同一份恢复包。锁在
+6 小时租约到期且记录的 owner 进程已不存活时，才会被原子隔离并由下一次备份自动恢复；
+它不会因为一次定时触发失败就删除一个仍可能在运行的锁。若日志显示锁占用，先确认
+`finance-radar-backup.service` 不在运行、核对锁的年龄和 PID，并保留 `journalctl` 证据；
+不要用计划任务或粗暴的 `rm` 自动清锁。
 
 ## 容量与停止条件
 
@@ -34,10 +48,11 @@ systemd 设置开机自启、进程异常后 20 秒重启。单一来源失败�
 ```bash
 systemctl is-active finance-radar-worker finance-radar-backup.timer
 systemctl is-enabled finance-radar-worker finance-radar-backup.timer
-systemctl show finance-radar-worker -p Restart -p RestartUSec -p NRestarts
+systemctl show finance-radar-worker -p Restart -p RestartUSec -p NRestarts -p MemoryHigh -p MemoryMax -p TasksMax
 systemctl list-timers finance-radar-backup.timer --no-pager
 df -h /opt/finance-radar
 journalctl -u finance-radar-worker --since "-20 min" --no-pager
+journalctl -u finance-radar-backup.service --since "-2 days" --no-pager
 ```
 
 公网 Operations 页面和 `/api/v1/health` 同时展示最近 Worker、来源游标、备份和证据对象数量。

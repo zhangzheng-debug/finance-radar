@@ -98,10 +98,11 @@ def _decision_label(value: str) -> str:
 
 
 def _presentation_steps(case: dict[str, Any]) -> list[dict[str, Any]]:
-    """Build a deterministic, read-only explanation from the frozen observations.
+    """Build a deterministic teaching illustration from frozen observations.
 
-    This deliberately does not call the model or a write endpoint.  It mirrors only
-    the public evidence-gate story needed by the presentation.
+    This deliberately does not call the model or a write endpoint.  Its simple
+    rules illustrate the public evidence-gate concept; they are not a replay of
+    the current router and must never be read as its actual final judgment.
     """
 
     observed: list[dict[str, Any]] = []
@@ -118,19 +119,19 @@ def _presentation_steps(case: dict[str, Any]) -> list[dict[str, Any]]:
 
         if has_conflict:
             decision = "ABSTAIN"
-            explanation = "新证据与早先说法冲突，系统停止告警并等待人工复核。"
+            explanation = "教学规则示意：证据相互冲突时，提示暂不下结论，并交给完整核验流程与人工复核。"
             evidence_summary = "出现相互冲突的证据"
         elif has_risk_claim and not has_primary:
             decision = "ABSTAIN"
-            explanation = "目前只有发现线索，还需要官方原始文件确认。"
+            explanation = "教学规则示意：只有发现线索时，提示等待官方原始文件确认。"
             evidence_summary = "只有发现线索，尚无官方确认"
         elif has_risk_claim and has_primary:
             decision = "RISK_REVIEW"
-            explanation = "官方原始文件支持风险描述，事件进入风险复核。"
+            explanation = "教学规则示意：官方原始文件出现后，提示进入人工风险复核；这不是当前模型输出。"
             evidence_summary = "官方原始文件已经到位"
         else:
             decision = "NON_TARGET"
-            explanation = "当前材料不属于下行风险目标，不进入告警队列。"
+            explanation = "教学规则示意：材料不属于下行风险目标，提示不进入下行风险队列；这不是当前模型输出。"
             evidence_summary = "材料完整，但不构成下行风险"
 
         steps.append(
@@ -149,15 +150,23 @@ st.set_page_config(page_title="证据演示 · Finance Radar", page_icon="▷", 
 install_style()
 restore_deep_link("Replay_Lab")
 render_primary_navigation("replay")
-header("证据演示", "用冻结案例解释判断如何随证据变化；整个过程只在当前浏览会话中翻页", "只读演示")
+header(
+    "证据演示",
+    "用冻结案例说明教学规则如何随证据变化；不代表当前系统的实际输出",
+    "只读教学演示",
+)
 no_trading_banner()
 
-st.info("这是固定案例的只读讲解，不会触发实时采集、模型运行或数据库写入，也不会改变任何历史记录。")
+st.info(
+    "这是固定案例的只读教学示意，不会触发实时采集、模型运行或数据库写入，也不会改变任何历史记录。"
+    "页面展示的规则提示不代表当前系统的实际输出或最终判断。"
+)
 status_strip(
     [
-        ("发生什么", "冻结案例逐步展开", ""),
+        ("演示目的", "冻结案例教学示意", ""),
         ("证据如何变化", "按时间顺序查看", ""),
-        ("最终结论", "走完案例后明确显示", "watch"),
+        ("教学小结", "走完案例后显示", "watch"),
+        ("真实系统输出", "本页不读取", "ok"),
         ("仍不做什么", "不写入、不交易", "ok"),
     ]
 )
@@ -226,23 +235,26 @@ current = shown_steps[-1]
 complete = visible_steps == len(steps)
 status_strip(
     [
-        ("当前判断", _decision_label(current["decision"]), "ok" if complete else "watch"),
-        ("演示状态", "已完整展示" if complete else "等待下一步", "ok" if complete else "watch"),
-        ("告警动作", "仅进入人工复核" if current["decision"] == "RISK_REVIEW" else "不发出告警", ""),
+        ("当前教学提示", _decision_label(current["decision"]), "ok" if complete else "watch"),
+        ("教学状态", "已完整展示" if complete else "等待下一步", "ok" if complete else "watch"),
+        ("真实系统输出", "本页不读取", "ok"),
         ("交易功能", "始终关闭", "ok"),
     ]
 )
 if not complete:
-    st.info("演示停在当前证据状态。点击“下一步”，观察新证据如何改变判断。")
+    st.info("教学示意停在当前证据状态。点击“下一步”，观察新证据如何改变规则提示。")
 
-section_header("证据如何改变判断", "冻结时间线 · 只读演示")
+section_header("证据如何改变教学提示", "冻结时间线 · 只读教学示意")
 for index, step in enumerate(shown_steps, 1):
     observation = step["observation"]
     original_title = str(observation.get("title") or "")
     source = _SOURCE_LABELS.get(str(observation.get("source")), "公开来源")
     authority = _AUTHORITY_LABELS.get(str(observation.get("authority_tier")), "来源待核实")
     title = _OBSERVATION_TITLES.get(original_title, "来自公开来源的新证据")
-    summary = _OBSERVATION_SUMMARIES.get(original_title, "这个节点出现了一条新证据，系统将依据来源与内容更新判断。")
+    summary = _OBSERVATION_SUMMARIES.get(
+        original_title,
+        "这个节点出现了一条新证据；教学示意会依据来源与内容更新规则提示。",
+    )
     with st.container(border=True):
         clock_col, evidence_col, decision_col = st.columns([0.36, 1.2, 0.9], gap="small")
         with clock_col:
@@ -264,32 +276,35 @@ for index, step in enumerate(shown_steps, 1):
                     st.caption(original_title)
                 st.write(observation.get("passage") or "这个节点没有附带英文原始摘录。")
         with decision_col:
-            st.caption("此刻系统应该怎样做")
-            st.metric("当前判断", _decision_label(step["decision"]))
+            st.caption("教学规则在此刻给出的提示")
+            st.metric("教学提示", _decision_label(step["decision"]))
             st.write(step["explanation"])
             if step["decision"] == "RISK_REVIEW":
-                st.caption("进入人工风险复核，不触发交易。")
+                st.caption("教学示意提示进入人工风险复核；真实运行仍需完整证据流程，不触发交易。")
             else:
-                st.caption("保持克制，不发出风险告警。")
+                st.caption("教学示意提示保持克制；真实运行仍需完整证据流程，不触发交易。")
 
-section_header("最终结论", "完成全部证据节点后显示")
+section_header("教学小结", "完成全部证据节点后显示")
 if complete:
-    st.success(f"演示完成：最终判断为“{_decision_label(current['decision'])}”。")
+    st.success(f"教学示意完成：最后一步的规则提示为“{_decision_label(current['decision'])}”。")
     with st.container(border=True):
-        st.markdown(f"**最终结论：{_decision_label(current['decision'])}**")
+        st.markdown(f"**教学提示：{_decision_label(current['decision'])}**")
         st.write(current["explanation"])
         if current["decision"] == "RISK_REVIEW":
-            st.write("接下来只进入人工风险复核；这个演示本身不会发布告警，也不会触发交易。")
+            st.write("教学规则提示进入人工风险复核；真实系统仍需完整核验。这个演示不会发布告警，也不会触发交易。")
         else:
-            st.write("案例到此结束；系统保持克制，不发布风险告警，也不触发交易。")
+            st.write("教学案例到此结束；真实系统仍需完整核验。这个演示不会发布风险告警，也不触发交易。")
         if len(steps) > 1:
             st.caption("想重新讲解时，可点击上方“重新开始”回到第一步。")
 else:
-    st.info(f"还剩 {len(steps) - visible_steps} 个证据节点。走完后，这里会明确显示最终结论。")
+    st.info(f"还剩 {len(steps) - visible_steps} 个证据节点。走完后，这里会显示教学小结。")
 
 section_header("仍不做什么", "演示边界始终不变")
 with st.container(border=True):
     st.write("不把冻结案例冒充实时事件，不运行模型或采集器，不写入数据库或演示历史，也不触发告警、交易或其他外部动作。")
     st.caption("本页唯一会变化的是当前浏览会话中的显示进度；关闭页面后无需清理任何生产数据。")
 
-st.caption("演示边界：页面只读取冻结案例并在浏览会话中控制显示进度，不调用模型、不保存演示过程、不修改生产数据。")
+st.caption(
+    "演示边界：页面只读取冻结案例并在浏览会话中控制显示进度，不调用模型或读取当前系统输出，"
+    "不保存演示过程，也不修改生产数据。"
+)

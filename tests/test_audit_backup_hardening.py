@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -30,7 +33,12 @@ def _light_result(*, rationale: str = "primary source supports the formal event"
     }
 
 
-def _seed_committed_light_version(path: Path, result: dict) -> None:
+def _seed_committed_light_version(
+    path: Path,
+    result: dict,
+    *,
+    change_reason: str = "light_evidence_verification_v1",
+) -> None:
     connection = open_ledger(path)
     now = utc_now()
     connection.execute(
@@ -72,7 +80,7 @@ def _seed_committed_light_version(path: Path, result: dict) -> None:
         (
             "evt-recovery", 2, now, "verified", "verified", "delisting_or_suspension",
             "delisted", None, stable_json({"light_verification": light}),
-            "light_evidence_verification_v1",
+            change_reason,
         ),
     )
     connection.commit()
@@ -191,3 +199,103 @@ def test_verified_bundle_captures_evidence_reports_and_failed_followup_keeps_pre
     assert verify_bundle_restore(first_bundle)["manifest_verified"] is True
     assert Path(str(operations.latest_verified_backup()["backup_path"])).parent == first_bundle
     assert operations.latest_backup()["status"] == "FAILED"
+
+
+def test_recovery_bundle_excludes_its_transient_run_and_recovers_only_dead_stale_lock(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "data" / "ledger.sqlite3"
+    ledger_path.parent.mkdir(parents=True)
+    _seed_minimal_ledger(ledger_path)
+    operations = OperationsRepository(tmp_path / "data" / "operations.sqlite3")
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    lock = backup_dir / ".finance-radar-backup.lock"
+    lock.write_text(json.dumps({"token": "dead-owner", "pid": 999_999_999}), encoding="utf-8")
+    stale_time = time.time() - backup_module.LOCK_STALE_AFTER_SECONDS - 1
+    os.utime(lock, (stale_time, stale_time))
+
+    result = create_and_verify(ledger_path, backup_dir, operations)
+    bundle = Path(result["backup_path"])
+    manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["lock"]["recovered_stale_lock"] is True
+    with sqlite3.connect(bundle / "operations.sqlite3") as connection:
+        assert connection.execute(
+            "SELECT 1 FROM backup_runs WHERE backup_id=?", (result["backup_id"],)
+        ).fetchone() is None
+    assert operations.latest_backup()["status"] == "VERIFIED"
+
+    lock.write_text(json.dumps({"token": "live-owner", "pid": os.getpid()}), encoding="utf-8")
+    try:
+        with pytest.raises(RuntimeError, match="another backup is already running"):
+            create_and_verify(ledger_path, backup_dir, operations)
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def test_formal_audit_consistency_detects_a_split_recovery_pair(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    result = _light_result()
+    _seed_committed_light_version(
+        ledger_path,
+        result,
+        change_reason="light_evidence_verification_v2",
+    )
+
+    missing = backup_module._formal_audit_consistency(ledger_path, operations.path)
+    assert missing["status"] == "FAIL"
+    assert missing["missing_audits"] == ["evt-recovery@2"]
+
+    mutation_id = operations.prepare_light_verification_mutation(result)
+    operations.confirm_light_verification_mutation(mutation_id, result)
+    consistent = backup_module._formal_audit_consistency(ledger_path, operations.path)
+    assert consistent["status"] == "PASS"
+
+
+def test_sparse_v1_history_is_disclosed_without_blocking_a_verified_recovery_bundle(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "data" / "ledger.sqlite3"
+    ledger_path.parent.mkdir(parents=True)
+    _seed_minimal_ledger(ledger_path)
+    with sqlite3.connect(ledger_path) as connection:
+        connection.execute(
+            """UPDATE event_versions
+               SET change_reason='light_evidence_verification_v1',
+                   facts_json=?
+               WHERE event_id='evt-backup' AND version=1""",
+            (stable_json({"light_verification": {"version": "light-evidence-gate-v1"}}),),
+        )
+        connection.commit()
+    operations = OperationsRepository(tmp_path / "data" / "operations.sqlite3")
+
+    consistency = backup_module._formal_audit_consistency(ledger_path, operations.path)
+    assert consistency["status"] == "PASS"
+    assert consistency["legacy_v1_without_audit"] == ["evt-backup@1"]
+
+    result = create_and_verify(ledger_path, tmp_path / "backups", operations)
+    assert result["verification"]["formal_audit_consistency"]["status"] == "PASS"
+    assert result["verification"]["formal_audit_consistency"]["legacy_v1_without_audit"] == ["evt-backup@1"]
+
+
+def test_parseable_v1_history_is_not_retroactively_audited_by_backup(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "data" / "ledger.sqlite3"
+    ledger_path.parent.mkdir(parents=True)
+    result = _light_result()
+    _seed_committed_light_version(ledger_path, result)
+    operations = OperationsRepository(tmp_path / "data" / "operations.sqlite3")
+
+    backup = create_and_verify(ledger_path, tmp_path / "backups", operations)
+    assert operations.formal_mutation_audits("evt-recovery") == []
+    assert backup["verification"]["formal_audit_consistency"]["legacy_v1_without_audit"] == [
+        "evt-recovery@2"
+    ]
+
+
+def test_posix_permission_denied_lock_probe_is_treated_as_a_live_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(backup_module.os, "name", "posix")
+
+    def deny_probe(_pid: int, _signal: int) -> None:
+        raise PermissionError("not allowed")
+
+    monkeypatch.setattr(backup_module.os, "kill", deny_probe)
+    assert backup_module._pid_is_alive(424242) is True

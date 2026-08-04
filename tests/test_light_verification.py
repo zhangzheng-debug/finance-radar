@@ -9,11 +9,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import pytest
+
 from app.models.risk_router import derive_evidence_context
 from app.services.light_verification import (
     LIGHT_FOLLOWUP_JOB_TYPE,
     LIGHT_VERIFICATION_VERSION,
     apply_event,
+    evidence_fingerprint,
+    evidence_receipt_rows,
     evaluate_event,
     model_delta,
     reconcile_legacy_event,
@@ -91,7 +95,22 @@ def _seed_ledger(tmp_path: Path, *, include_evidence: bool = True) -> tuple[sqli
     if include_evidence:
         connection.execute(
             "INSERT INTO event_evidence VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            ("ev-light-1", "evt-light-1", "obs", "https://www.sec.gov/Archives/acme.htm", "2025-01-03", None, None, "ACME HOLDINGS INC was determined to delist under the applicable listing rule.", "delist", 30, "candidate_passage", 0, now, now),
+            (
+                "ev-light-1",
+                "evt-light-1",
+                "obs",
+                "https://www.sec.gov/Archives/acme.htm",
+                "2025-01-03",
+                None,
+                None,
+                "ACME HOLDINGS INC was determined to delist under the applicable listing rule, and trading will be suspended after the final exchange notice.",
+                "delist",
+                30,
+                "candidate_passage",
+                0,
+                now,
+                now,
+            ),
         )
     connection.execute(
         "INSERT INTO pipeline_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -99,6 +118,36 @@ def _seed_ledger(tmp_path: Path, *, include_evidence: bool = True) -> tuple[sqli
     )
     connection.commit()
     return connection, str(db)
+
+
+def _stored_event_and_evidence(connection: sqlite3.Connection) -> tuple[dict, list[dict]]:
+    """Mirror the exact receipt that the production writer re-reads."""
+
+    event = dict(
+        connection.execute("SELECT * FROM canonical_events WHERE event_id='evt-light-1'").fetchone()
+    )
+    version = connection.execute(
+        "SELECT facts_json FROM event_versions WHERE event_id=? AND version=?",
+        (event["event_id"], event["current_version"]),
+    ).fetchone()
+    event["facts"] = json.loads(version["facts_json"])
+    evidence = evidence_receipt_rows(connection, "evt-light-1")
+    return event, evidence
+
+
+def _scoped_authorization(result: dict, *, batch_id: str) -> dict:
+    return {
+        "authorization_id": f"test-{batch_id}",
+        "actor": "test-user",
+        "purpose": "bounded light-verification regression",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "batch_id": batch_id,
+        "scope_entry": {
+            "event_id": result["event_id"],
+            "current_version": result["before_version"],
+            "evidence_fingerprint": result["evidence_fingerprint"],
+        },
+    }
 
 
 def test_supported_requires_event_taxonomy_signal() -> None:
@@ -155,24 +204,54 @@ def test_supported_rejects_not_delisted_and_old_year_primary_passage() -> None:
     assert identity_mismatch["checks"][0]["identity_match"] is False
 
 
-def test_negative_equity_pattern_is_valid_and_decision_grade() -> None:
-    event = _event("negative_equity")
-    event["event_family"] = "fundamental_shock"
-    result = evaluate_event(
-        event,
-        _evidence(
+def test_threshold_market_and_fundamental_taxonomies_stay_nonterminal_without_fact_gates() -> None:
+    # These passages deliberately look persuasive to a lexical matcher.  Their
+    # numbers/semantics either contradict the candidate or are too coarse to
+    # compare against its fact, so none may become a formal conclusion until a
+    # dedicated quantitative gate exists.
+    cases = (
+        (
+            "negative_equity",
+            "fundamental_shock",
             "ACME HOLDINGS INC reported an accumulated deficit and total equity ($1.2 million) in its annual report, resulting in negative equity at year end.",
-            keywords="negative equity",
+            "negative equity",
+        ),
+        (
+            "interest_coverage_below_1",
+            "fundamental_shock",
+            "ACME HOLDINGS INC reported an operating loss, while its interest coverage ratio was 4.0x for the period after the interest expense calculation.",
+            "interest coverage",
+        ),
+        (
+            "one_day_crash",
+            "price_crash",
+            "ACME HOLDINGS INC reported that its stock price declined 1% during the regular trading session, a modest daily change in the quoted market.",
+            "price decline",
+        ),
+        (
+            "free_cash_flow_turn_negative",
+            "fundamental_shock",
+            "ACME HOLDINGS INC reported free cash flow of $2.0 million, which was positive for the period after capital expenditures were paid.",
+            "free cash flow",
         ),
     )
-    assert result["decision"] == "SUPPORTED"
+    for event_type, family, passage, keywords in cases:
+        event = _event(event_type)
+        event["event_family"] = family
+        result = evaluate_event(event, _evidence(passage, keywords=keywords))
+        assert result["decision"] == "INSUFFICIENT"
+        assert result["checks"][0]["event_signal"] is True
+        assert result["checks"][0]["automatic_formal_eligible"] is False
+        assert any("quantitative fact gate" in reason for reason in result["gap_reasons"])
 
 
 def test_apply_is_atomic_and_marks_light_evidence(tmp_path: Path) -> None:
     connection, _ = _seed_ledger(tmp_path)
 
-    result = evaluate_event(_event(), _evidence("ACME HOLDINGS INC was determined to delist under the applicable listing rule, and trading will be suspended after the final exchange notice."))
+    event, evidence_rows = _stored_event_and_evidence(connection)
+    result = evaluate_event(event, evidence_rows)
     result["batch_id"] = "batch-test"
+    authorization = _scoped_authorization(result, batch_id="batch-test")
     connection.execute("BEGIN")
     applied = apply_event(
         connection,
@@ -180,6 +259,7 @@ def test_apply_is_atomic_and_marks_light_evidence(tmp_path: Path) -> None:
         batch_id="batch-test",
         before_model={"label": "ABSTAIN"},
         after_model={"label": "NON_TARGET"},
+        authorization_context=authorization,
     )
     connection.commit()
     row = connection.execute("SELECT status,current_version FROM canonical_events WHERE event_id='evt-light-1'").fetchone()
@@ -195,14 +275,11 @@ def test_apply_is_atomic_and_marks_light_evidence(tmp_path: Path) -> None:
 def test_formal_support_is_bracketed_by_durable_operations_outbox(tmp_path: Path) -> None:
     connection, _ = _seed_ledger(tmp_path)
     operations = OperationsRepository(tmp_path / "operations.sqlite3")
-    result = evaluate_event(
-        _event(),
-        _evidence(
-            "ACME HOLDINGS INC was determined to delist under the applicable listing rule, and trading will be suspended after the final exchange notice."
-        ),
-    )
+    event, evidence_rows = _stored_event_and_evidence(connection)
+    result = evaluate_event(event, evidence_rows)
     before_model = {"input_sha256": "before", "label": "ABSTAIN"}
     after_model = {"input_sha256": "after", "label": "RISK_REVIEW"}
+    authorization = _scoped_authorization(result, batch_id="batch-outbox")
     result.update(
         {
             "batch_id": "batch-outbox",
@@ -211,6 +288,7 @@ def test_formal_support_is_bracketed_by_durable_operations_outbox(tmp_path: Path
             "after_version": None,
             "applied": False,
             "no_trading": True,
+            "authorization_context": authorization,
         }
     )
     mutation_id = operations.prepare_light_verification_mutation(result)
@@ -221,6 +299,7 @@ def test_formal_support_is_bracketed_by_durable_operations_outbox(tmp_path: Path
         batch_id="batch-outbox",
         before_model=before_model,
         after_model=after_model,
+        authorization_context=authorization,
     )
     connection.commit()
     operations.confirm_light_verification_mutation(mutation_id, applied)
@@ -228,6 +307,102 @@ def test_formal_support_is_bracketed_by_durable_operations_outbox(tmp_path: Path
     assert applied["formal_applied"] is True
     assert audit["state"] == "LEDGER_COMMITTED"
     assert audit["after_version"] == 2
+    connection.close()
+
+
+def test_formal_support_requires_an_exact_nonempty_authorization_receipt(tmp_path: Path) -> None:
+    connection, _ = _seed_ledger(tmp_path)
+    event, evidence_rows = _stored_event_and_evidence(connection)
+    result = evaluate_event(event, evidence_rows)
+
+    connection.execute("BEGIN IMMEDIATE")
+    with pytest.raises(ValueError, match="scoped authorization context"):
+        apply_event(
+            connection,
+            result,
+            batch_id="batch-missing-auth",
+            before_model={"input_sha256": "before"},
+            after_model={"input_sha256": "after"},
+        )
+    connection.rollback()
+    connection.close()
+
+
+def test_formal_support_rejects_stale_or_mismatched_authorization_scope(tmp_path: Path) -> None:
+    connection, _ = _seed_ledger(tmp_path)
+    event, evidence_rows = _stored_event_and_evidence(connection)
+    result = evaluate_event(event, evidence_rows)
+    authorization = _scoped_authorization(result, batch_id="batch-scope")
+
+    wrong_version = {
+        **authorization,
+        "scope_entry": {**authorization["scope_entry"], "current_version": 99},
+    }
+    connection.execute("BEGIN IMMEDIATE")
+    with pytest.raises(ValueError, match="version does not match"):
+        apply_event(
+            connection,
+            result,
+            batch_id="batch-scope",
+            before_model={"input_sha256": "before"},
+            after_model={"input_sha256": "after"},
+            authorization_context=wrong_version,
+        )
+    connection.rollback()
+
+    connection.execute(
+        "UPDATE event_evidence SET evidence_passage=?,updated_at=? WHERE evidence_id='ev-light-1'",
+        (
+            "ACME HOLDINGS INC was determined to delist under the applicable listing rule, and a new official passage adds material context before the final exchange notice.",
+            utc_now(),
+        ),
+    )
+    connection.commit()
+    connection.execute("BEGIN IMMEDIATE")
+    with pytest.raises(ValueError, match="evidence changed"):
+        apply_event(
+            connection,
+            result,
+            batch_id="batch-scope",
+            before_model={"input_sha256": "before"},
+            after_model={"input_sha256": "after"},
+            authorization_context=authorization,
+        )
+    connection.rollback()
+    connection.close()
+
+
+def test_formal_write_rechecks_current_evidence_gates_not_only_caller_decision(tmp_path: Path) -> None:
+    connection, _ = _seed_ledger(tmp_path)
+    connection.execute(
+        "UPDATE event_evidence SET evidence_passage=?,updated_at=? WHERE evidence_id='ev-light-1'",
+        (
+            "ACME HOLDINGS INC announced that it will not be delisted and will remain listed under the applicable listing rule after review by the exchange.",
+            utc_now(),
+        ),
+    )
+    connection.commit()
+    event, evidence_rows = _stored_event_and_evidence(connection)
+    evaluated = evaluate_event(event, evidence_rows)
+    assert evaluated["decision"] == "INSUFFICIENT"
+    forged_supported = {
+        **evaluated,
+        "decision": "SUPPORTED",
+        "evidence_ids": ["ev-light-1"],
+    }
+    authorization = _scoped_authorization(forged_supported, batch_id="batch-recheck")
+
+    connection.execute("BEGIN IMMEDIATE")
+    with pytest.raises(ValueError, match="strict formal light-verification gates"):
+        apply_event(
+            connection,
+            forged_supported,
+            batch_id="batch-recheck",
+            before_model={"input_sha256": "before"},
+            after_model={"input_sha256": "after"},
+            authorization_context=authorization,
+        )
+    connection.rollback()
     connection.close()
 
 
@@ -371,6 +546,13 @@ def test_scoped_authorization_binds_expiry_batch_and_exact_event_scope(tmp_path:
                 "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
                 "max_applies": 1,
                 "event_ids": ["evt-light-1"],
+                "event_scope": [
+                    {
+                        "event_id": "evt-light-1",
+                        "current_version": 1,
+                        "evidence_fingerprint": "a" * 64,
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -380,10 +562,127 @@ def test_scoped_authorization_binds_expiry_batch_and_exact_event_scope(tmp_path:
         authorization=light_verify.AUTHORIZATION_PHRASE,
         batch_id="batch-scoped",
     )
-    contract, context, event_ids = light_verify.load_scoped_authorization(args)
+    contract, context, event_scope = light_verify.load_scoped_authorization(args)
     assert contract["authorization_id"] == "lv-test-1"
     assert context["batch_id"] == "batch-scoped"
-    assert event_ids == {"evt-light-1"}
+    assert event_scope == {
+        "evt-light-1": {
+            "event_id": "evt-light-1",
+            "current_version": 1,
+            "evidence_fingerprint": "a" * 64,
+        }
+    }
+
+
+def test_light_verify_dry_run_never_initializes_operations_storage(tmp_path: Path) -> None:
+    connection, db = _seed_ledger(tmp_path)
+    operations_path = tmp_path / "operations-must-not-exist.sqlite3"
+    args = argparse.Namespace(
+        db=Path(db),
+        operations_db=operations_path,
+        report=tmp_path / "light-report.json",
+        event_id=None,
+        limit=10,
+        max_applies=10,
+        daily_budget=10,
+        batch_id=None,
+        allow_unrough=False,
+        apply=False,
+        authorization=None,
+        authorization_file=None,
+        reconcile_legacy=False,
+    )
+    try:
+        with patch.object(
+            light_verify,
+            "OperationsRepository",
+            side_effect=AssertionError("dry run must not construct OperationsRepository"),
+        ):
+            report = light_verify.run(args)
+        assert report["mode"] == "dry_run"
+        assert report["evaluated"] == 0
+        assert not operations_path.exists()
+    finally:
+        connection.close()
+
+    args.allow_unrough = True
+    with pytest.raises(SystemExit, match="retired"):
+        light_verify.run(args)
+
+
+def test_scoped_apply_uses_the_same_provenance_receipt_as_the_write_transaction(tmp_path: Path) -> None:
+    connection, db = _seed_ledger(tmp_path)
+    now = utc_now()
+    connection.execute(
+        """INSERT INTO pipeline_jobs VALUES (
+           'rough-approved','evt-light-1','rough_review','COMPLETED_AUTHORIZED_ROUGH_REVIEW',
+           90,0,?,NULL,?,?,?)""",
+        (
+            now,
+            stable_json({"rough_review": {"outcome": "ROUGH_ACCEPTED"}}),
+            now,
+            now,
+        ),
+    )
+    connection.commit()
+    selected_scope = light_verify.candidate_scope(
+        Path(db),
+        limit=10,
+        event_id=None,
+        require_rough=True,
+    )
+    assert len(selected_scope) == 1
+    batch_id = "batch-end-to-end-scope"
+    contract_path = tmp_path / "authorization.json"
+    contract_path.write_text(
+        json.dumps(
+            {
+                "authorization": light_verify.AUTHORIZATION_PHRASE,
+                "authorization_id": "lv-end-to-end",
+                "actor": "test-user",
+                "purpose": "prove the evaluated and written evidence receipts match",
+                "batch_id": batch_id,
+                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                "max_applies": 1,
+                "event_ids": ["evt-light-1"],
+                "event_scope": selected_scope,
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = argparse.Namespace(
+        db=Path(db),
+        operations_db=tmp_path / "operations.sqlite3",
+        report=tmp_path / "light-report.json",
+        event_id=None,
+        limit=10,
+        max_applies=1,
+        daily_budget=10,
+        batch_id=batch_id,
+        allow_unrough=False,
+        apply=True,
+        authorization=light_verify.AUTHORIZATION_PHRASE,
+        authorization_file=contract_path,
+        reconcile_legacy=False,
+    )
+    try:
+        with patch.object(
+            light_verify.Settings,
+            "from_env",
+            return_value=SimpleNamespace(
+                model_artifact=tmp_path / "missing-risk-router.joblib",
+                model_card=tmp_path / "missing-risk-router-card.json",
+            ),
+        ):
+            report = light_verify.run(args)
+        assert report["formal_applied"] == 1
+        assert report["decisions"][0]["formal_applied"] is True
+        current = connection.execute(
+            "SELECT status,current_version FROM canonical_events WHERE event_id='evt-light-1'"
+        ).fetchone()
+        assert tuple(current) == ("verified", 2)
+    finally:
+        connection.close()
 
 
 def test_legacy_reconciliation_reopens_task_without_rolling_back_history(tmp_path: Path) -> None:
@@ -405,8 +704,22 @@ def test_legacy_reconciliation_reopens_task_without_rolling_back_history(tmp_pat
         ("evt-light-1", 2, now, "weak", "weak", "delisting_or_suspension", "delisted", None, stable_json(legacy_facts), "light_evidence_verification_v1"),
     )
     connection.commit()
+    event, evidence_rows = _stored_event_and_evidence(connection)
+    authorization = _scoped_authorization(
+        {
+            "event_id": event["event_id"],
+            "before_version": event["current_version"],
+            "evidence_fingerprint": evidence_fingerprint(event, evidence_rows),
+        },
+        batch_id="legacy-reconcile-test",
+    )
     connection.execute("BEGIN IMMEDIATE")
-    result = reconcile_legacy_event(connection, event_id="evt-light-1", batch_id="legacy-reconcile-test")
+    result = reconcile_legacy_event(
+        connection,
+        event_id="evt-light-1",
+        batch_id="legacy-reconcile-test",
+        authorization_context=authorization,
+    )
     connection.commit()
     current = connection.execute("SELECT status,current_version FROM canonical_events WHERE event_id='evt-light-1'").fetchone()
     followup = connection.execute(

@@ -16,6 +16,14 @@ EnvironmentFile=/etc/finance-radar.env
 ExecStart=/opt/finance-radar/venv/bin/python -m app.workers.continuous --interval 300 --no-light-verify
 Restart=on-failure
 RestartSec=20
+# Keep the collector recoverable when a malformed feed, parser or model cache
+# grows unexpectedly.  These limits live in the primary unit (rather than an
+# operator-only drop-in) so a normal install or disaster restore preserves
+# them.  `MemoryHigh` starts reclaim/throttling before `MemoryMax` kills the
+# process; systemd will then apply the normal restart policy.
+MemoryHigh=380M
+MemoryMax=520M
+TasksMax=128
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

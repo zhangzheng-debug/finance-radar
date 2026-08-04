@@ -35,6 +35,7 @@ from app.services.light_verification import (
     LIGHT_VERIFIED_EVIDENCE_STATUS,
     apply_event,
     evidence_fingerprint,
+    evidence_receipt_rows,
     evaluate_event,
     model_delta,
     model_snapshot,
@@ -85,15 +86,15 @@ def _followup_fingerprint(connection: sqlite3.Connection, event_id: str) -> tupl
     return str(followup.get("evidence_fingerprint") or "") or None, int(version) if str(version or "").isdigit() else None
 
 
-def candidate_ids(
+def candidate_scope(
     path: Path,
     *,
     limit: int,
     event_id: str | None,
     require_rough: bool,
     allowed_event_ids: set[str] | None = None,
-) -> list[str]:
-    """Return changed candidates only, unless an explicit event id is requested.
+) -> list[dict[str, Any]]:
+    """Return changed candidate receipts, including the exact authorization state.
 
     Each persisted nonterminal attempt stores its evidence fingerprint.  A
     candidate is reconsidered only when its event version or evidence changes,
@@ -120,7 +121,7 @@ def candidate_ids(
                 ORDER BY e.last_updated_at DESC,e.event_id ASC""",
             params,
         ).fetchall()
-        selected: list[str] = []
+        selected: list[dict[str, Any]] = []
         for row in rows:
             current = dict(row)
             current_event_id = str(current["event_id"])
@@ -131,13 +132,7 @@ def candidate_ids(
                 continue
             if require_rough and outcome not in {"ROUGH_ACCEPTED", "ROUGH_INSUFFICIENT"}:
                 continue
-            evidence = [
-                dict(item)
-                for item in connection.execute(
-                    "SELECT * FROM event_evidence WHERE event_id=? ORDER BY evidence_id",
-                    (current_event_id,),
-                )
-            ]
+            evidence = evidence_receipt_rows(connection, current_event_id)
             current_fingerprint = evidence_fingerprint(current, evidence)
             prior_fingerprint, prior_version = _followup_fingerprint(connection, current_event_id)
             if (
@@ -146,12 +141,40 @@ def candidate_ids(
                 and prior_version == int(current["current_version"])
             ):
                 continue
-            selected.append(current_event_id)
+            selected.append(
+                {
+                    "event_id": current_event_id,
+                    "current_version": int(current["current_version"]),
+                    "evidence_fingerprint": current_fingerprint,
+                }
+            )
             if len(selected) >= max(1, min(int(limit), 5000)):
                 break
         return selected
     finally:
         connection.close()
+
+
+def candidate_ids(
+    path: Path,
+    *,
+    limit: int,
+    event_id: str | None,
+    require_rough: bool,
+    allowed_event_ids: set[str] | None = None,
+) -> list[str]:
+    """Compatibility view of :func:`candidate_scope` for read-only callers."""
+
+    return [
+        str(item["event_id"])
+        for item in candidate_scope(
+            path,
+            limit=limit,
+            event_id=event_id,
+            require_rough=require_rough,
+            allowed_event_ids=allowed_event_ids,
+        )
+    ]
 
 
 def _event_with_facts(ledger: LedgerRepository, event_id: str) -> dict[str, Any] | None:
@@ -200,11 +223,77 @@ def _contract_event_ids(contract: dict[str, Any]) -> set[str]:
     return values
 
 
+def _scope_entry(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("authorization contract event_scope entries must be objects")
+    event_id = str(value.get("event_id") or "").strip()
+    fingerprint = str(value.get("evidence_fingerprint") or "").strip()
+    try:
+        current_version = int(value.get("current_version"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("authorization contract event_scope current_version must be an integer") from exc
+    if not event_id or current_version < 1 or len(fingerprint) != 64:
+        raise ValueError(
+            "authorization contract event_scope requires event_id, positive current_version, and SHA-256 evidence_fingerprint"
+        )
+    if any(character not in "0123456789abcdefABCDEF" for character in fingerprint):
+        raise ValueError("authorization contract event_scope evidence_fingerprint must be SHA-256 hex")
+    return {
+        "event_id": event_id,
+        "current_version": current_version,
+        "evidence_fingerprint": fingerprint.lower(),
+    }
+
+
+def _contract_event_scope(contract: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw = contract.get("event_scope")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("authorization contract must contain a non-empty event_scope list")
+    entries = [_scope_entry(item) for item in raw]
+    scope = {str(item["event_id"]): item for item in entries}
+    if len(scope) != len(entries):
+        raise ValueError("authorization contract event_scope event_id values must be unique")
+    event_ids = _contract_event_ids(contract)
+    if set(scope) != event_ids:
+        raise ValueError("authorization contract event_ids and event_scope must contain the same exact event ids")
+    return scope
+
+
+def _scope_from_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        str(row["event_id"]): {
+            "event_id": str(row["event_id"]),
+            "current_version": int(row["current_version"]),
+            "evidence_fingerprint": str(row["evidence_fingerprint"]),
+        }
+        for row in rows
+    }
+
+
+def _assert_exact_scope(
+    actual: dict[str, dict[str, Any]],
+    authorized: dict[str, dict[str, Any]],
+    *,
+    label: str,
+) -> None:
+    if actual == authorized:
+        return
+    missing = sorted(set(authorized) - set(actual))
+    unexpected = sorted(set(actual) - set(authorized))
+    changed = sorted(
+        event_id
+        for event_id in set(actual) & set(authorized)
+        if actual[event_id] != authorized[event_id]
+    )
+    raise SystemExit(
+        f"{label} no longer matches its exact event/version/evidence scope; create a fresh contract "
+        f"(missing={missing[:5]}, unexpected={unexpected[:5]}, changed={changed[:5]})"
+    )
+
+
 def load_scoped_authorization(
     args: argparse.Namespace,
-    *,
-    require_event_ids: bool = True,
-) -> tuple[dict[str, Any], dict[str, Any], set[str]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
     """Load and validate the manual authorization contract before any mutation."""
 
     if not args.authorization_file:
@@ -235,11 +324,10 @@ def load_scoped_authorization(
         raise SystemExit("authorization contract max_applies must be a positive integer") from exc
     if max_applies < 1:
         raise SystemExit("authorization contract max_applies must be positive")
-    event_ids = _contract_event_ids(contract) if require_event_ids else {
-        str(item).strip()
-        for item in contract.get("event_ids", [])
-        if str(item).strip()
-    }
+    try:
+        event_scope = _contract_event_scope(contract)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     context = {
         "authorization_id": str(contract["authorization_id"]),
         "actor": str(contract["actor"]),
@@ -247,24 +335,24 @@ def load_scoped_authorization(
         "expires_at": expires_at.isoformat(),
         "batch_id": str(contract["batch_id"]),
         "max_applies": max_applies,
-        "event_scope_sha256": hashlib.sha256(stable_json(sorted(event_ids)).encode("utf-8")).hexdigest(),
+        "event_scope_sha256": hashlib.sha256(
+            stable_json([event_scope[event_id] for event_id in sorted(event_scope)]).encode("utf-8")
+        ).hexdigest(),
     }
-    return contract, context, event_ids
+    return contract, context, event_scope
 
 
 def _validate_selected_scope(
     args: argparse.Namespace,
     contract: dict[str, Any],
-    selected: list[str],
-    contract_event_ids: set[str],
+    selected: list[dict[str, Any]],
+    contract_event_scope: dict[str, dict[str, Any]],
 ) -> int:
-    if set(selected) != contract_event_ids:
-        missing = sorted(contract_event_ids - set(selected))
-        unexpected = sorted(set(selected) - contract_event_ids)
-        raise SystemExit(
-            "authorization scope no longer matches eligible candidates; create a fresh contract "
-            f"(missing={missing[:5]}, unexpected={unexpected[:5]})"
-        )
+    _assert_exact_scope(
+        _scope_from_rows(selected),
+        contract_event_scope,
+        label="authorization scope",
+    )
     authorized_max = int(contract["max_applies"])
     if args.max_applies < 1:
         raise SystemExit("--max-applies must be positive")
@@ -299,32 +387,55 @@ def _legacy_records(path: Path, *, limit: int, event_id: str | None) -> list[dic
             where.append("e.event_id=?")
             params.append(event_id)
         rows = connection.execute(
-            f"""SELECT e.event_id,e.current_version,e.status,v.facts_json,v.change_reason
+            f"""SELECT e.*,v.facts_json,v.change_reason
                 FROM canonical_events e
                 JOIN event_versions v ON v.event_id=e.event_id AND v.version=e.current_version
                 WHERE {' AND '.join(where)}
                 ORDER BY e.event_id ASC LIMIT ?""",
             (*params, max(1, min(int(limit), 5000))),
         ).fetchall()
-        return [dict(row) for row in rows]
+        records: list[dict[str, Any]] = []
+        for row in rows:
+            record = dict(row)
+            evidence = evidence_receipt_rows(connection, str(record["event_id"]))
+            record["evidence_fingerprint"] = evidence_fingerprint(record, evidence)
+            records.append(record)
+        return records
     finally:
         connection.close()
 
 
 def _legacy_manifest(rows: list[dict[str, Any]]) -> str:
     material = [
-        {"event_id": str(row["event_id"]), "current_version": int(row["current_version"]), "status": str(row["status"])}
+        {
+            "event_id": str(row["event_id"]),
+            "current_version": int(row["current_version"]),
+            "status": str(row["status"]),
+            "evidence_fingerprint": str(row["evidence_fingerprint"]),
+        }
         for row in rows
     ]
     return hashlib.sha256(stable_json(material).encode("utf-8")).hexdigest()
 
 
-def _validate_legacy_scope(args: argparse.Namespace, contract: dict[str, Any], rows: list[dict[str, Any]]) -> int:
+def _validate_legacy_scope(
+    args: argparse.Namespace,
+    contract: dict[str, Any],
+    rows: list[dict[str, Any]],
+    contract_event_scope: dict[str, dict[str, Any]],
+) -> int:
     manifest = _legacy_manifest(rows)
     if str(contract.get("legacy_manifest_sha256") or "") != manifest:
         raise SystemExit("legacy reconciliation manifest no longer matches; generate a fresh dry-run report and contract")
     if str(contract.get("event_selector") or "") != "legacy_light_v1":
         raise SystemExit("legacy authorization contract must set event_selector to legacy_light_v1")
+    _assert_exact_scope(
+        _scope_from_rows(rows),
+        contract_event_scope,
+        label="legacy authorization scope",
+    )
+    if args.max_applies < 1:
+        raise SystemExit("--max-applies must be positive")
     if len(rows) > int(contract["max_applies"]):
         raise SystemExit("legacy authorization max_applies is smaller than the exact legacy manifest")
     return min(int(args.max_applies), int(contract["max_applies"]))
@@ -343,8 +454,8 @@ def _run_legacy_reconciliation(args: argparse.Namespace) -> dict[str, Any]:
     context: dict[str, Any] | None = None
     authorized_max = 0
     if args.apply:
-        contract, context, _ = load_scoped_authorization(args, require_event_ids=False)
-        authorized_max = _validate_legacy_scope(args, contract, rows)
+        contract, context, contract_event_scope = load_scoped_authorization(args)
+        authorized_max = _validate_legacy_scope(args, contract, rows, contract_event_scope)
     reopened: list[dict[str, Any]] = []
     errors: list[str] = []
     if args.apply:
@@ -353,7 +464,20 @@ def _run_legacy_reconciliation(args: argparse.Namespace) -> dict[str, Any]:
             connection.row_factory = sqlite3.Row
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                result = reconcile_legacy_event(connection, event_id=str(row["event_id"]), batch_id=batch_id)
+                assert context is not None
+                result = reconcile_legacy_event(
+                    connection,
+                    event_id=str(row["event_id"]),
+                    batch_id=batch_id,
+                    authorization_context={
+                        **context,
+                        "scope_entry": {
+                            "event_id": str(row["event_id"]),
+                            "current_version": int(row["current_version"]),
+                            "evidence_fingerprint": str(row["evidence_fingerprint"]),
+                        },
+                    },
+                )
                 connection.commit()
                 reopened.append(result)
             except Exception as exc:
@@ -377,6 +501,15 @@ def _run_legacy_reconciliation(args: argparse.Namespace) -> dict[str, Any]:
             "max_applies": len(rows),
             "event_selector": "legacy_light_v1",
             "legacy_manifest_sha256": manifest,
+            "event_ids": [str(row["event_id"]) for row in rows],
+            "event_scope": [
+                {
+                    "event_id": str(row["event_id"]),
+                    "current_version": int(row["current_version"]),
+                    "evidence_fingerprint": str(row["evidence_fingerprint"]),
+                }
+                for row in rows
+            ],
         },
         "selected": len(rows),
         "reopened": len([item for item in reopened if item.get("reopened")]),
@@ -414,6 +547,10 @@ def _run_legacy_reconciliation(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
+    if args.allow_unrough:
+        raise SystemExit(
+            "--allow-unrough has been retired; formal and production light verification always require a completed rough review"
+        )
     if args.reconcile_legacy:
         return _run_legacy_reconciliation(args)
     if args.daily_budget < 0:
@@ -421,22 +558,26 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
     contract: dict[str, Any] | None = None
     authorization_context: dict[str, Any] | None = None
-    contract_ids: set[str] | None = None
+    contract_event_scope: dict[str, dict[str, Any]] | None = None
     if args.apply:
-        contract, authorization_context, contract_ids = load_scoped_authorization(args)
+        contract, authorization_context, contract_event_scope = load_scoped_authorization(args)
     ledger = LedgerRepository(args.db)
-    operations = OperationsRepository(args.operations_db)
+    # A dry run reads the ledger and writes its requested report only.  Do not
+    # instantiate OperationsRepository here: initialization creates/migrates an
+    # operations SQLite database and would violate the dry-run boundary.
+    operations = OperationsRepository(args.operations_db) if args.apply else None
     settings = Settings.from_env()
     router = RiskRouter(settings.model_artifact, settings.model_card)
-    event_ids = candidate_ids(
+    selected_scope = candidate_scope(
         args.db,
         limit=args.limit,
         event_id=args.event_id,
-        require_rough=not args.allow_unrough,
-        allowed_event_ids=contract_ids,
+        require_rough=True,
+        allowed_event_ids=set(contract_event_scope) if contract_event_scope is not None else None,
     )
-    if args.apply and contract is not None and contract_ids is not None:
-        authorized_max = _validate_selected_scope(args, contract, event_ids, contract_ids)
+    event_ids = [str(item["event_id"]) for item in selected_scope]
+    if args.apply and contract is not None and contract_event_scope is not None:
+        authorized_max = _validate_selected_scope(args, contract, selected_scope, contract_event_scope)
     else:
         authorized_max = 0
     batch_id = args.batch_id or f"light-{utc_now().replace(':', '').replace('+00:00', 'Z')}"
@@ -446,7 +587,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     formal_applied = 0
     attempts_persisted = 0
 
-    for event_id in event_ids:
+    for scope_entry in selected_scope:
+        event_id = str(scope_entry["event_id"])
         event = _event_with_facts(ledger, event_id)
         if event is None:
             continue
@@ -470,6 +612,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "model_calls": 2 if result["decision"] == "SUPPORTED" else 1,
             "max_model_calls": 2,
         }
+        per_event_authorization = (
+            {**authorization_context, "scope_entry": dict(scope_entry)}
+            if authorization_context is not None
+            else {}
+        )
         result.update(
             {
                 "batch_id": batch_id,
@@ -480,12 +627,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "formal_applied": False,
                 "attempt_persisted": False,
                 "after_version": None,
-                "authorization_context": authorization_context or {},
+                "authorization_context": per_event_authorization,
                 "no_trading": True,
             }
         )
 
         if args.apply:
+            assert operations is not None
             mutation_id: str | None = None
             ledger_committed = False
             try:
@@ -504,7 +652,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         batch_id=batch_id,
                         before_model=before_model,
                         after_model=after_model,
-                        authorization_context=authorization_context,
+                        authorization_context=per_event_authorization,
                         daily_budget=args.daily_budget,
                         max_batch_applies=authorized_max,
                     )
@@ -554,7 +702,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "batch_id": batch_id,
         "mode": "apply" if args.apply else "dry_run",
         "authorization": authorization_context,
-        "require_rough_review": not args.allow_unrough,
+        "require_rough_review": True,
         "requested": len(event_ids),
         "evaluated": len(decisions),
         "formal_applied": formal_applied,
@@ -581,6 +729,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "expires_at": "replace-with-an-expiring-ISO-8601-time",
             "max_applies": len(event_ids),
             "event_ids": event_ids,
+            "event_scope": selected_scope,
         },
         "no_trading": True,
         "decisions": decisions,
