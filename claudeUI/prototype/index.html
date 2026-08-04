@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Finance Radar · Evidence Terminal v2</title>
+<title>Finance Radar · 证据情报终端 v3</title>
 <style>
 /* ==========================================================
    Calm Institutional v2 "Obsidian" — 内联 tokens
@@ -316,6 +316,39 @@ button { font-family:inherit; }
 .identity-id { font:650 11px var(--fr-font-mono); color:var(--fr-text-2); background:var(--fr-raised);
   border:1px solid var(--fr-border); border-radius:4px; padding:5px 8px; overflow-wrap:anywhere; }
 .identity-meta { color:var(--fr-muted); font-size:11px; margin-top:6px; }
+.next-action-card {
+  padding:12px; margin-bottom:10px; border:1px solid var(--fr-border-strong);
+  border-left:3px solid var(--fr-amber); border-radius:6px;
+  background:linear-gradient(135deg,var(--fr-amber-dim),transparent 72%),var(--fr-panel);
+}
+.next-action-card.risk {
+  border-left-color:var(--fr-red);
+  background:linear-gradient(135deg,var(--fr-red-dim),transparent 72%),var(--fr-panel);
+}
+.next-action-card.ok {
+  border-left-color:var(--fr-green);
+  background:linear-gradient(135deg,var(--fr-green-dim),transparent 72%),var(--fr-panel);
+}
+.next-action-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.next-action-label { color:var(--fr-muted); font:700 9.5px var(--fr-font-mono); letter-spacing:.08em; }
+.next-action-priority {
+  padding:2px 7px; border:1px solid rgba(245,180,83,.35); border-radius:999px;
+  color:var(--fr-amber); background:var(--fr-amber-dim);
+  font:700 9px var(--fr-font-mono); white-space:nowrap;
+}
+.next-action-card.risk .next-action-priority { color:var(--fr-red); border-color:rgba(255,107,122,.35); background:var(--fr-red-dim); }
+.next-action-card.ok .next-action-priority { color:var(--fr-green); border-color:rgba(47,208,143,.32); background:var(--fr-green-dim); }
+.next-action-title { margin-top:8px; color:var(--fr-text); font-size:13px; font-weight:720; line-height:1.4; }
+.next-action-copy { margin-top:4px; color:var(--fr-text-2); font-size:10.8px; line-height:1.55; }
+.next-action-steps { margin:8px 0 0 17px; color:var(--fr-text-2); font-size:10.8px; line-height:1.55; }
+.next-action-steps li+li { margin-top:3px; }
+.next-action-steps li::marker { color:var(--fr-cyan); font-family:var(--fr-font-mono); font-weight:700; }
+.next-action-foot {
+  display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 8px;
+  margin-top:9px; padding-top:7px; border-top:1px solid var(--fr-border);
+  color:var(--fr-muted); font:650 9px/1.45 var(--fr-font-mono);
+}
+.next-action-foot .reviewed { color:var(--fr-green); }
 .action-row { display:flex; gap:6px; flex-wrap:wrap; }
 .btn {
   display:inline-flex; align-items:center; justify-content:center; gap:6px;
@@ -512,11 +545,11 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
     <span class="brand-name">FINANCE RADAR</span>
   </div>
   <nav class="nav-tabs" role="navigation" aria-label="终端页面导航">
-    <button class="nav-tab" data-route="situation">态势室 <span class="en">SITUATION</span></button>
-    <button class="nav-tab" data-route="workbench">事件工作台 <span class="en">WORKBENCH</span></button>
-    <button class="nav-tab" data-route="replay">回放实验室 <span class="en">REPLAY</span></button>
-    <button class="nav-tab" data-route="ops">运行与模型 <span class="en">OPS</span></button>
-    <button class="nav-tab" data-route="adjudication">模型人工验收 <span class="en">ADJUD</span></button>
+    <button class="nav-tab" data-route="situation">态势总览</button>
+    <button class="nav-tab" data-route="workbench">事件工作台</button>
+    <button class="nav-tab" data-route="replay">证据回放</button>
+    <button class="nav-tab" data-route="ops">运行与模型</button>
+    <button class="nav-tab" data-route="adjudication">双人盲审</button>
   </nav>
   <div class="top-search">
     <span class="icon" aria-hidden="true">⌕</span>
@@ -676,7 +709,7 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
   <span>只读行情 · 无下单 · 无仓位 · 无余额</span><span class="sep">/</span>
   <span>Ledger Schema 12 · quick_check=ok</span><span class="sep">/</span>
   <span id="footer-snapshot">合成演示快照</span><span class="sep">/</span>
-  <span>Evidence Terminal v2 · AWS 正式只读终端</span>
+  <span>Evidence Terminal v3 · AWS 正式只读终端</span>
 </footer>
 
 <div class="palette-backdrop" id="palette-backdrop" aria-hidden="true">
@@ -1313,6 +1346,74 @@ function modelDisplay(ev) {
   }
   return {value:"未执行", state:"watch", title:"当前没有可核验的语义模型执行记录"};
 }
+function nextActionGuidance(ev) {
+  const evidence = Array.isArray(ev.evidence) ? ev.evidence : [];
+  const evidenceCount = Number.isFinite(Number(ev.evidenceCount)) ? Number(ev.evidenceCount) : evidence.length;
+  const statuses = evidence.map(item => String(item.status || "").toUpperCase());
+  const conflict = Boolean(ev.conflict) || statuses.some(status => /CONFLICT|CONTRADICT/.test(status));
+  const highestTier = evidence.map(item => String(item.tier || "P?")).sort((a,b) => {
+    const rank = value => /^P[0-2]$/.test(value) ? Number(value.slice(1)) : 99;
+    return rank(a) - rank(b);
+  })[0] || ev.tier || "P?";
+  const status = String(ev.status || "candidate").toLowerCase();
+  const reviewed = Number(ev.humanReviewCount || 0) > 0;
+  let action;
+
+  if (conflict) {
+    action = {
+      code:"EVIDENCE_CONFLICT", tone:"risk", priority:"立即复核", title:"先处理证据冲突",
+      reason:`当前 ${evidenceCount} 条证据中存在相互冲突的状态，结论不能自动升级。`,
+      steps:["并排核对冲突来源的精确引文与发布时间", "确认是否属于修订、撤回或同名主体混淆", "由人工写明保留、降级或拒绝理由"]
+    };
+  } else if (evidenceCount === 0) {
+    action = {
+      code:"MISSING_EVIDENCE", tone:"risk", priority:"先补证据", title:"补齐可引用的原始证据",
+      reason:"当前事件没有证据边，系统必须保持待复核或弃权。",
+      steps:["优先找到 P0/P1 原始来源并确认主体与日期", "截取能够直接支持事件事实的精确段落", "证据代理形成可追溯记录后再由人工判断"]
+    };
+  } else if (status === "rejected") {
+    action = {
+      code:"REJECTION_WATCH", tone:"ok", priority:"保留拒绝", title:"保留拒绝结论，等待新证据",
+      reason:"当前工作流已拒绝该事件；只有来源修订或新增高权威证据才应重开。",
+      steps:["确认拒绝理由仍与当前原始来源一致", "关注撤回、修订或新增监管文件", "没有新证据时不重复运行判断流程"]
+    };
+  } else if (status === "verified") {
+    action = {
+      code:"VERIFIED_MONITOR", tone:"ok", priority:"持续观察", title:"核验已完成，转入版本观察",
+      reason:`事件已有 ${evidenceCount} 条证据边，当前工作流状态为已核验。`,
+      steps:["确认最高权威来源与当前事件版本一致", "只在来源修订或新增事实时创建新版本", "保留精确引文与人工记录以便回放审计"]
+    };
+  } else if (status === "weak") {
+    action = {
+      code:"WEAK_EVIDENCE", tone:"watch", priority:"补强证据", title:"先补强证据，再决定是否保留事件",
+      reason:`当前 ${evidenceCount} 条证据尚不足以闭合事实，工作流保持弱证据状态。`,
+      steps:[`复核现有最高权威 ${highestTier} 来源能直接支持哪些事实`, "补充更高权威来源或缩小事件陈述的事实范围", "仍无法闭合时由人工标记证据不足或拒绝"]
+    };
+  } else if (String(ev.route || "").toUpperCase() === "RISK_REVIEW") {
+    action = {
+      code:"HUMAN_RISK_REVIEW", tone:"risk", priority:"人工风险复核", title:"核对不利事件的事实边界",
+      reason:"Shadow 路由将其列入风险复核队列；这只是排序信号，不是交易方向。",
+      steps:[`先核对最高权威 ${highestTier} 来源的精确引文`, "区分已发生事实、条件性表述与前瞻性陈述", "由人工记录保留、降级或证据不足结论"]
+    };
+  } else {
+    action = {
+      code:"EVIDENCE_REVIEW", tone:"watch", priority:"等待判断", title:"核对最高权威证据后再判断",
+      reason:`当前共有 ${evidenceCount} 条证据边，尚未完成事实闭环。`,
+      steps:[highestTier === "P0" ? "逐字核对 P0 来源与事件摘要" : "优先补充 P0/P1 来源，再核对现有引文", "检查主体、发布日期、事件版本和引文上下文", ev.agentDecisionCount ? "核对代理引用后由人工记录结论" : "需要结构化比对时等待只读证据代理记录"]
+    };
+  }
+  return {...action, reviewed};
+}
+function nextActionMarkup(ev) {
+  const action = nextActionGuidance(ev);
+  return `<section class="next-action-card ${action.tone}" data-action-code="${esc(action.code)}" aria-labelledby="next-action-title">
+    <div class="next-action-top"><span class="next-action-label">下一步行动</span><span class="next-action-priority">${esc(action.priority)}</span></div>
+    <h2 class="next-action-title" id="next-action-title">${esc(action.title)}</h2>
+    <p class="next-action-copy">${esc(action.reason)}</p>
+    <ol class="next-action-steps">${action.steps.map(step => `<li>${esc(step)}</li>`).join("")}</ol>
+    <div class="next-action-foot"><span class="${action.reviewed?"reviewed":""}">${action.reviewed?"已存在人工复核记录":"尚未记录人工复核"}</span><span>只读提示 · 不构成交易建议 · 不触发下单</span></div>
+  </section>`;
+}
 function renderWorkbench() {
   const familySel = $("#wb-family");
   if (familySel.options.length === 1) {
@@ -1422,6 +1523,7 @@ function renderWorkbench() {
         </div>`).join("")}
     </div>` : "";
   $("#wb-right").innerHTML = `
+    ${nextActionMarkup(ev)}
     <div class="section-head"><span class="section-title">决策上下文</span>
       <span class="section-meta">DIMENSIONS ARE SEPARATE</span></div>
     <div class="score-rail">

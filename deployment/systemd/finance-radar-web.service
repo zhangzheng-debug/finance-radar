@@ -9,15 +9,29 @@ Type=simple
 User=finance-radar
 Group=finance-radar
 WorkingDirectory=/opt/finance-radar/current
-EnvironmentFile=/etc/finance-radar.env
-ExecStart=/opt/finance-radar/venv/bin/python -m streamlit run app/web/Home.py --server.address 127.0.0.1 --server.port 18501 --server.baseUrlPath radar --server.headless true --browser.gatherUsageStats false
+EnvironmentFile=/etc/finance-radar-public.env
+Environment=FINANCE_RADAR_UI_ROLE=public
+Environment=FINANCE_RADAR_SHOW_DEBUG=0
+UnsetEnvironment=FINANCE_RADAR_ADMIN_TOKEN
+ExecStart=/opt/finance-radar/venv/bin/python -B -m streamlit run app/web/Home.py --server.address 127.0.0.1 --server.port 18501 --server.baseUrlPath radar --server.headless true --browser.gatherUsageStats false
 Restart=on-failure
 RestartSec=5
+MemoryHigh=160M
+MemoryMax=256M
+TasksMax=128
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/finance-radar/shared/data /opt/finance-radar/shared/reports
+PrivateDevices=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+InaccessiblePaths=-/etc/finance-radar.env -/opt/finance-radar/current/.env -/opt/finance-radar/shared/data -/opt/finance-radar/shared/reports
 
 [Install]
 WantedBy=multi-user.target

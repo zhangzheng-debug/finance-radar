@@ -122,11 +122,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--api-base",
-        default="https://radar.167-172-69-16.sslip.io:8443/finance-radar-api",
+        default="https://radar.18-208-34-152.sslip.io:8443/finance-radar-api",
     )
     parser.add_argument(
         "--web-url",
-        default="https://radar.167-172-69-16.sslip.io:8443/radar/Adjudication_Studio",
+        default="https://radar.18-208-34-152.sslip.io:8443/radar/Adjudication_Studio",
     )
     parser.add_argument(
         "--diagnostics",

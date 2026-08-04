@@ -1,5 +1,5 @@
 [Unit]
-Description=Finance Radar verified online backup and restore drill
+Description=Finance Radar single latest verified recovery bundle and restore drill
 After=finance-radar-api.service
 
 [Service]
@@ -8,7 +8,10 @@ User=finance-radar
 Group=finance-radar
 WorkingDirectory=/opt/finance-radar/current
 EnvironmentFile=/etc/finance-radar.env
-ExecStart=/opt/finance-radar/venv/bin/python -m app.ops.backup backup --retention 30 --weekly-retention 12
+# Retention is intentionally one latest verified daily bundle.  The backup job
+# only removes the previous bundle after the new ledger+operations+manifest
+# restore verification succeeds.
+ExecStart=/opt/finance-radar/venv/bin/python -m app.ops.backup backup --retention 1 --weekly-retention 0
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

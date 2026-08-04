@@ -1,6 +1,40 @@
 from __future__ import annotations
 
-from app.web.common import ACCESSIBILITY_CSS, ACCESSIBILITY_JS, api_error_descriptor
+import json
+import urllib.error
+
+import pytest
+
+import app.web.common as web_common
+from app.web.common import (
+    ACCESSIBILITY_CSS,
+    ACCESSIBILITY_JS,
+    DESIGN_TOKENS_V3,
+    STYLE_V3,
+    ApiError,
+    api_request,
+    api_error_descriptor,
+    format_elapsed,
+)
+
+
+class _JsonResponse:
+    def __enter__(self) -> "_JsonResponse":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps({"data": {"ok": True}}).encode("utf-8")
+
+
+class _RawResponse(_JsonResponse):
+    def __init__(self, payload: object) -> None:
+        self.payload = payload
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode("utf-8")
 
 
 def test_api_error_descriptor_is_safe_and_deterministic() -> None:
@@ -22,6 +56,14 @@ def test_api_error_descriptor_distinguishes_rate_limit_and_auth() -> None:
     assert auth_title == "只读接口拒绝访问"
 
 
+def test_format_elapsed_uses_a_human_scale_without_hiding_age() -> None:
+    assert format_elapsed(None) == "—"
+    assert format_elapsed(30) == "30 秒"
+    assert format_elapsed(90) == "1.5 分钟"
+    assert format_elapsed(7200) == "2.0 小时"
+    assert format_elapsed(172800) == "2.0 天"
+
+
 def test_accessibility_contract_sets_landmarks_language_focus_and_targets() -> None:
     assert 'setAttribute("lang", "zh-CN")' in ACCESSIBILITY_JS
     assert 'setAttribute("role", "main")' in ACCESSIBILITY_JS
@@ -31,3 +73,100 @@ def test_accessibility_contract_sets_landmarks_language_focus_and_targets() -> N
     assert "outline: 2px solid var(--fr-cyan)" in ACCESSIBILITY_CSS
     assert "min-height: 44px" in ACCESSIBILITY_CSS
     assert 'a[aria-label="Link to heading"]' in ACCESSIBILITY_CSS
+
+
+def test_v3_runtime_tokens_are_single_source_and_styles_consume_them() -> None:
+    assert "--fr-text-2: #b5c3d1" in DESIGN_TOKENS_V3
+    assert "--fr-muted: #8ea1b4" in DESIGN_TOKENS_V3
+    assert ":root" not in STYLE_V3
+    assert "var(--fr-text-2)" in STYLE_V3
+
+
+def test_public_api_requests_never_attach_admin_token(monkeypatch) -> None:
+    captured: list[object] = []
+
+    def fake_urlopen(request: object, *, timeout: int) -> _JsonResponse:
+        assert timeout == 20
+        captured.append(request)
+        return _JsonResponse()
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "ADMIN_TOKEN", "must-not-leave-process")
+    monkeypatch.setattr(web_common.urllib.request, "urlopen", fake_urlopen)
+    assert api_request("/api/v1/overview") == {"ok": True}
+    assert captured
+    assert captured[0].get_header("X-admin-token") is None
+
+
+def test_admin_api_request_can_attach_configured_token(monkeypatch) -> None:
+    captured: list[object] = []
+
+    def fake_urlopen(request: object, *, timeout: int) -> _JsonResponse:
+        captured.append(request)
+        return _JsonResponse()
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "admin")
+    monkeypatch.setattr(web_common, "ADMIN_TOKEN", "internal-only")
+    monkeypatch.setattr(web_common.urllib.request, "urlopen", fake_urlopen)
+    assert api_request("/api/v1/overview") == {"ok": True}
+    assert captured[0].get_header("X-admin-token") == "internal-only"
+
+
+def test_public_api_rejects_writes_before_network_access(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(
+        web_common.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("public write reached the network"),
+    )
+    with pytest.raises(ApiError, match="只允许只读请求"):
+        api_request("/api/v1/demo/mode/LIVE", method="POST")
+
+
+def test_public_transport_errors_do_not_expose_internal_target(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "API_URL", "http://private-api:18000")
+    monkeypatch.setattr(
+        web_common.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            urllib.error.URLError("secret internal path /srv/radar")
+        ),
+    )
+    with pytest.raises(ApiError) as caught:
+        api_request("/api/v1/overview")
+    message = str(caught.value)
+    assert "private-api" not in message
+    assert "/srv/radar" not in message
+    assert "secret" not in message
+
+
+@pytest.mark.parametrize("payload", [["unexpected"], {"error": "internal /srv/path"}, {}])
+def test_malformed_api_envelopes_fail_closed_without_echoing_payload(
+    monkeypatch, payload: object
+) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(
+        web_common.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _RawResponse(payload),
+    )
+    with pytest.raises(ApiError) as caught:
+        api_request("/api/v1/overview")
+    assert "/srv/path" not in str(caught.value)
+    assert "internal" not in str(caught.value)
+
+
+def test_require_admin_ui_stops_public_render(monkeypatch) -> None:
+    rendered: list[str] = []
+
+    class Stopped(RuntimeError):
+        pass
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common.st, "error", lambda value: rendered.append(str(value)))
+    monkeypatch.setattr(web_common.st, "caption", lambda value: rendered.append(str(value)))
+    monkeypatch.setattr(web_common.st, "stop", lambda: (_ for _ in ()).throw(Stopped()))
+    with pytest.raises(Stopped):
+        web_common.require_admin_ui()
+    assert any("仅限内部管理环境" in value for value in rendered)

@@ -82,6 +82,10 @@ for path in (stage / "shared" / "data").glob("*.snapshot-*"):
 PY
 
 install -m 0600 /etc/finance-radar.env "$STAGE/config/etc/finance-radar.env"
+if [ -f /etc/finance-radar-public.env ]; then
+    install -m 0640 /etc/finance-radar-public.env \
+        "$STAGE/config/etc/finance-radar-public.env"
+fi
 cp -a /etc/systemd/system/finance-radar-*.service \
     /etc/systemd/system/finance-radar-*.timer \
     "$STAGE/config/etc/systemd/system/" 2>/dev/null || true
@@ -91,12 +95,12 @@ while IFS= read -r file; do
 done < <(
     find /etc/nginx -maxdepth 3 -type f -print0 2>/dev/null \
         | xargs -0 grep -IlE \
-            'radar\.167-172-69-16\.sslip\.io|finance-radar-api|/radar/' \
+            'radar\.(167-172-69-16|18-208-34-152)\.sslip\.io|finance-radar-api|/radar/' \
         || true
 )
 
 certbot certificates > "$STAGE/config/CERTIFICATE_STATUS.txt" 2>&1 || true
-systemctl status finance-radar-api finance-radar-web finance-radar-worker \
+systemctl status finance-radar-api finance-radar-web finance-radar-admin finance-radar-worker \
     finance-radar-backup.timer --no-pager \
     > "$STAGE/config/SERVICE_STATUS.txt" 2>&1 || true
 "$BASE/venv/bin/python" --version > "$STAGE/config/PYTHON_VERSION.txt" 2>&1

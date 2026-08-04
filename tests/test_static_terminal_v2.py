@@ -38,6 +38,24 @@ def test_public_terminal_explains_workflow_without_fake_disabled_actions() -> No
     assert "人工复核记录" in source
 
 
+def test_public_terminal_uses_chinese_navigation_and_evidence_driven_next_actions() -> None:
+    source = terminal_source()
+    for label in ("态势总览", "事件工作台", "证据回放", "运行与模型", "双人盲审"):
+        assert f">{label}</button>" in source
+    assert 'class="en"' not in source
+    assert "function nextActionGuidance(ev)" in source
+    for code in (
+        "EVIDENCE_CONFLICT",
+        "MISSING_EVIDENCE",
+        "WEAK_EVIDENCE",
+        "HUMAN_RISK_REVIEW",
+        "VERIFIED_MONITOR",
+    ):
+        assert code in source
+    assert "这只是排序信号，不是交易方向" in source
+    assert "不构成交易建议 · 不触发下单" in source
+
+
 def test_backup_counts_distinguish_history_from_retained_files() -> None:
     source = terminal_source()
     assert "历史备份运行" in source

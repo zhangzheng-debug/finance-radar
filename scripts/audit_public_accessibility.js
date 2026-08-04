@@ -204,7 +204,7 @@ async function focusAudit(page) {
 (async () => {
   const baseUrl = argument(
     "base-url",
-    "https://radar.167-172-69-16.sslip.io:8443/radar"
+    "https://radar.18-208-34-152.sslip.io:8443/radar"
   ).replace(/\/$/, "");
   const output = path.resolve(
     argument("output", "reports/accessibility_public_latest.json")

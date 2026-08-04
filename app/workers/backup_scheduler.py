@@ -13,11 +13,11 @@ def main() -> int:
     settings = Settings.from_env()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--interval", type=float, default=float(os.getenv("FINANCE_RADAR_BACKUP_INTERVAL", "86400")))
-    parser.add_argument("--retention", type=int, default=int(os.getenv("FINANCE_RADAR_BACKUP_RETENTION", "30")))
+    parser.add_argument("--retention", type=int, default=int(os.getenv("FINANCE_RADAR_BACKUP_RETENTION", "1")))
     parser.add_argument(
         "--weekly-retention",
         type=int,
-        default=int(os.getenv("FINANCE_RADAR_WEEKLY_BACKUP_RETENTION", "12")),
+        default=int(os.getenv("FINANCE_RADAR_WEEKLY_BACKUP_RETENTION", "0")),
     )
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()

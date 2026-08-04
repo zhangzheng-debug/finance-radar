@@ -256,6 +256,35 @@ def host_allowed(source_id: str, url: str) -> bool:
     )
 
 
+def canonical_official_url(source_id: str, url: str) -> str | None:
+    """Upgrade registered official HTTP links to fetch-only HTTPS.
+
+    Some government feeds still publish ``http://`` item links even though the
+    same pages are served over HTTPS.  Only already-registered source domains
+    may be upgraded; user info and non-default ports remain rejected.
+    """
+
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    host = (parsed.hostname or "").casefold().rstrip(".")
+    if not any(
+        host == suffix or host.endswith(f".{suffix}")
+        for suffix in SOURCE_HOST_SUFFIXES.get(source_id, ())
+    ):
+        return None
+    scheme = parsed.scheme.casefold()
+    if scheme == "https" and port in {None, 443}:
+        return urllib.parse.urlunsplit(("https", host, parsed.path, parsed.query, ""))
+    if scheme == "http" and port in {None, 80}:
+        return urllib.parse.urlunsplit(("https", host, parsed.path, parsed.query, ""))
+    return None
+
+
 def fetch_page(url: str, user_agent: str, timeout: float) -> FetchResult:
     request = urllib.request.Request(
         url,
@@ -406,15 +435,22 @@ def enrich(
         "link_only": 0,
         "errors": [],
         "by_type": {},
+        "http_upgraded_to_https": 0,
         "jobs_advanced": advance_existing_evidence_jobs(connection),
     }
     rows = pending_rows(connection, limit=limit, refresh=refresh)
     result["selected"] = len(rows)
     for row in rows:
-        url = str(row["canonical_url"])
-        if not host_allowed(str(row["source_id"]), url):
-            result["errors"].append(f"{row['event_id']}: disallowed host for {url}")
+        source_id = str(row["source_id"])
+        original_url = str(row["canonical_url"])
+        url = canonical_official_url(source_id, original_url)
+        if url is None or not host_allowed(source_id, url):
+            result["errors"].append(
+                f"{row['event_id']}: disallowed host for {original_url}"
+            )
             continue
+        if urllib.parse.urlsplit(original_url).scheme.casefold() == "http":
+            result["http_upgraded_to_https"] += 1
         path = cache_path(cache_dir, url)
         try:
             if path.is_file():
@@ -424,7 +460,7 @@ def enrich(
                 fetched = fetcher(url, user_agent, timeout)
                 payload = fetched.body
                 final_url = fetched.final_url
-                if not host_allowed(str(row["source_id"]), final_url):
+                if not host_allowed(source_id, final_url):
                     raise ValueError(f"redirected to disallowed host: {final_url}")
                 path.write_bytes(payload)
             passage = select_passage(

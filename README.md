@@ -12,7 +12,7 @@
 
 - Schema 12 SQLite WAL 事件账本：原始观测、修订、事件版本、证据边、市场观察、作业和 Telegram outbox。
 - FastAPI 只读/受控 API：健康、来源、事件、证据、时间线、trace、模型卡、回放、双人盲标、行情能力矩阵与演示模式；公网 API 每客户端默认 180 次/分钟。
-- Streamlit 五页终端：Situation Room、Event Intelligence、Replay Lab、Operations & Model、Adjudication Studio；Event Workbench 可在本机浏览器保存最多8个命名Flow，只持久化筛选条件，不上传正文或身份数据。
+- Streamlit 公网与管理端分离：公网仅提供“态势总览、证据演示、方法与边界”三页只读产品；人工复核、运行与模型、双人盲审位于仅回环监听的独立管理端。事件浏览支持中文摘要、互斥状态漏斗、来源/类别/时间筛选、排序与分页。
 - 三模式演示：`LIVE`、`RECENT_CAPTURE`、`REPLAY`。
 - 四个固定回放：SEC 破产核验、正面业绩非目标、谣言冲突弃权、SEC 官方更正撤回告警资格；不依赖现场出现随机事件。
 - CPU 小模型：word/char TF-IDF + 校准逻辑回归，`RISK_REVIEW / NON_TARGET / ABSTAIN`，仅 shadow mode。
@@ -23,7 +23,7 @@
 - 12页专业答辩PPT：沿用Calm Institutional视觉系统，使用四张当前公网真图，完整呈现证据链、Replay、模型失败门禁、迁移恢复与剩余真实过程要求；每页含演讲备注并已逐页渲染复核。
 - 22 路分类来源：SEC/CFTC/FTC/FDIC/Fed/BLS/FDA/ECB/EIA 等 P0 官方源，NVIDIA 等 P1 发行人源，以及 OpenNews/历史研究等 P2 发现源；来源权威级别与事件极性分开保存。
 - 分类行情层：加密资产由 Binance 公共、免认证、仅行情域名持续落库；股票/ETF/外汇和商品代理由 Twelve Data 落库；IBKR TWS 只保留操作者本机只读能力探针。系统以首个真实快照为观察基线调度 T+5m/T+30m/T+1d，超过宽限期就记录 `MISSED_WINDOW`，绝不拿最新报价回填；收益指标只能进入事后审计。Operations 展示提供商、窗口状态与退化原因，Event Workbench 显示报价、币种、采集年龄、三窗口和不可用状态。
-- 新加坡 VPS 的 systemd + Nginx 实盘运行拓扑：API、Web、Worker、每日备份均为独立服务；应用和数据使用 release/shared 分离。
+- AWS 美国东部 EC2 的 systemd + Nginx 生产拓扑：API、Web、Worker、每日备份均为独立服务；应用和数据使用 release/shared 分离。原新加坡服务器已停止，不再承担生产流量。
 - Docker Compose + Caddy 作为可移植备选拓扑（本机无 Docker，因此没有冒充完成容器运行验收）。
 
 当前已接受 VPS 迁移快照（2026-07-19 04:55 UTC）：22 个来源、1194 个事件、3951 个原始观测、2117 个事件版本、2394 条证据、1898 条事件后市场指标；262 个已落库 Worker 周期、35 次可验证在线备份、7 次回放、7 次模型运行、24 条未标注任务和0条人工审核。Worker 每5分钟自动运行，失败后由 systemd 20秒重启；事件与证据不设TTL。快照内证据存档含83个不可变对象，其中81个是官方原始页面快照（80份HTML、1份PDF，共10,936,893字节），另有2份精确引文。注册官方来源的HTTP链接会先安全升级到HTTPS并再次验证跳转域名，每轮最多归档4份；分页扫描可越过已存档或长期失败的头部记录，避免后续证据被卡住；支持HTML/PDF/JSON，保持渐进采集。在线备份保留30个日备份与12个周备份。Windows 异机任务生成服务器一致性快照，经 SSH/SCP、SHA、tar、AES-256-GCM 后做完整隔离恢复。最新已接受异机备份 `20260719T045536Z` 已逐项核验 9,860 个文件清单，恢复后的 Schema 12/3 两套 SQLite 均通过 `quick_check` 与 `integrity_check`，并确认包含当前 release `20260719T044852Z`、五页终端、本机命名Flow、只读Facets、来源筛选、终端命令条、统一中文操作层、官方原始证据存档、跨页全局检索、T+窗口调度与错过保护、双人盲标工作流、本地 Qwen/llama.cpp 模型运行时、冻结评测、换机VPS失败前置检查和在线备份器，不含交易项目与 TLS 私钥；9,861个常规文件/1,559,757,804字节的空白VPS服务树预恢复也已通过。`migration_full_restore_latest.*` 由备份脚本自动同步。事件账本三项硬边界违规均为 0。
@@ -36,11 +36,11 @@
 
 ## 在线成品
 
-- Web 主终端：<https://radar.167-172-69-16.sslip.io:8443/radar/>
-- API 健康：<https://radar.167-172-69-16.sslip.io:8443/finance-radar-api/api/v1/health>
-- 原域名入口：<https://sg.zb1og.cn/radar/>（保留，但 Cloudflare 可能先显示人机验证，不作为答辩唯一入口）
+- 公网只读终端：<https://radar.18-208-34-152.sslip.io:8443/radar/>
+- 管理端：仅通过服务器回环端口与 SSH 隧道按需开启，不设公网路由。
+- API：仅监听服务器 `127.0.0.1:18000`；公网 `/finance-radar-api/`、管理页面和内部路由统一返回 `404`。
 
-直接 HTTPS 入口使用 TLS 1.3 和自动续期证书。API/Web 只在 VPS loopback 监听，由 Nginx 暴露；现有 xray 和量化交易项目没有被进入或修改。
+直接 HTTPS 入口使用自动续期证书。Nginx 只代理公开 Streamlit 页面；现有 VPN、Xray 与 WireGuard 不属于本项目部署范围。
 
 ## 本地启动
 

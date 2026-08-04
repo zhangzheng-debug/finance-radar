@@ -35,6 +35,9 @@ def execute_cycle(
     send: bool,
     timeout: float,
     health_only: bool,
+    light_enabled: bool = False,
+    light_limit: int = 25,
+    light_daily_budget: int = 100,
 ) -> tuple[str, dict[str, Any]]:
     cycle_id = operations.start_worker_cycle()
     started = time.perf_counter()
@@ -95,6 +98,52 @@ def execute_cycle(
                 status = "DEGRADED"
             else:
                 status = "FAILED"
+            if light_enabled and status in {"SUCCESS", "DEGRADED"}:
+                # This worker is deliberately observation-only.  Formal light
+                # verification is a separately invoked, expiring scoped batch;
+                # never put an evergreen authorization or ``--apply`` here.
+                light_report_path = ROOT / "reports" / "light_verification_latest.json"
+                light_command = [
+                    sys.executable,
+                    str(ROOT / "scripts" / "light_verify.py"),
+                    "--db",
+                    str(settings.ledger_db),
+                    "--operations-db",
+                    str(settings.operations_db),
+                    "--report",
+                    str(light_report_path),
+                    "--limit",
+                    str(max(1, light_limit)),
+                    "--max-applies",
+                    str(max(1, light_limit)),
+                    "--daily-budget",
+                    str(max(0, light_daily_budget)),
+                ]
+                light_report_path.unlink(missing_ok=True)
+                light_completed = subprocess.run(
+                    light_command,
+                    cwd=ROOT,
+                    env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=max(120, int(timeout * 20)),
+                    check=False,
+                )
+                light_result = (
+                    json.loads(light_report_path.read_text(encoding="utf-8"))
+                    if light_report_path.is_file()
+                    else {}
+                )
+                light_result["process"] = {
+                    "returncode": light_completed.returncode,
+                    "stdout_tail": light_completed.stdout[-2000:],
+                    "stderr_tail": light_completed.stderr[-2000:],
+                }
+                result["light_verification"] = light_result
+                if light_completed.returncode != 0 and status == "SUCCESS":
+                    status = "DEGRADED"
         result["worker_elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
         operations.finish_worker_cycle(cycle_id, status, result)
         operations.set_state(
@@ -119,6 +168,22 @@ def main() -> int:
     parser.add_argument("--max-cycles", type=int)
     parser.add_argument("--health-only", action="store_true", help="record a local health cycle without external network calls")
     parser.add_argument("--send", action="store_true", help="explicitly enable Telegram delivery")
+    parser.add_argument(
+        "--light-verify-dry-run",
+        action="store_true",
+        help="after each successful ingestion cycle, run read-only light-verification reporting only",
+    )
+    parser.add_argument(
+        "--no-light-verify",
+        action="store_true",
+        help="explicitly disable even the optional read-only light-verification report (kept for service compatibility)",
+    )
+    parser.add_argument("--light-limit", type=int, default=int(os.getenv("FINANCE_RADAR_LIGHT_LIMIT", "25")))
+    parser.add_argument(
+        "--light-daily-budget",
+        type=int,
+        default=int(os.getenv("FINANCE_RADAR_LIGHT_DAILY_BUDGET", "100")),
+    )
     args = parser.parse_args()
     signal.signal(signal.SIGINT, request_stop)
     if hasattr(signal, "SIGTERM"):
@@ -133,6 +198,9 @@ def main() -> int:
             send=args.send,
             timeout=args.timeout,
             health_only=args.health_only,
+            light_enabled=bool(args.light_verify_dry_run and not args.no_light_verify),
+            light_limit=args.light_limit,
+            light_daily_budget=args.light_daily_budget,
         )
         print(json.dumps({"status": status, "result": result}, ensure_ascii=False), flush=True)
         cycles += 1

@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import requests
 
 
-DEFAULT_UPSTREAM = "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api"
+DEFAULT_UPSTREAM = "https://radar.18-208-34-152.sslip.io:8443/finance-radar-api"
 API_PREFIX = "/finance-radar-api/api/v1/"
 
 

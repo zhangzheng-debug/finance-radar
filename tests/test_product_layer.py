@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from app.api.main import create_app
 from app.config import Settings
 from app.models import RiskRouter
-from app.ops.backup import create_and_verify, create_weekly_snapshot
+from app.ops.backup import create_and_verify, create_weekly_snapshot, verify_restore
 from app.ops.backup import prune_backups
 from app.workers.continuous import execute_cycle
 from app.services import ReplayService
@@ -113,6 +113,36 @@ class ProductLayerTests(unittest.TestCase):
         self.assertEqual(source["observations"], 1)
         self.assertEqual(source["cursor_status"], "STATIC_IMPORTED")
         self.assertIsNotNone(source["last_success_at"])
+
+    def test_overview_separates_rough_reviewed_from_pending_review(self) -> None:
+        connection = open_ledger(self.ledger_path)
+        now = utc_now()
+        connection.execute(
+            "UPDATE canonical_events SET status='candidate',label_status='candidate' WHERE event_id='evt-1'"
+        )
+        connection.execute(
+            """INSERT INTO pipeline_jobs VALUES (
+               'review-job','evt-1','live_primary_evidence_review','PENDING_HUMAN_REVIEW',
+               50,0,?,NULL,'{}',?,?)""",
+            (now, now, now),
+        )
+        connection.commit()
+        connection.close()
+
+        repository = LedgerRepository(self.ledger_path)
+        pending = repository.overview(run_integrity_check=False)
+        self.assertEqual(pending["review_queue"], 1)
+        self.assertEqual(pending["rough_reviewed"], 0)
+
+        connection = open_ledger(self.ledger_path)
+        connection.execute(
+            "UPDATE pipeline_jobs SET status='COMPLETED_AUTHORIZED_ROUGH_REVIEW' WHERE job_id='review-job'"
+        )
+        connection.commit()
+        connection.close()
+        completed = repository.overview(run_integrity_check=False)
+        self.assertEqual(completed["review_queue"], 0)
+        self.assertEqual(completed["rough_reviewed"], 1)
 
     def test_filtered_observation_is_auditable_but_not_used_as_preferred_source(self) -> None:
         connection = open_ledger(self.ledger_path)
@@ -432,25 +462,31 @@ class ProductLayerTests(unittest.TestCase):
         self.assertEqual(result["verification"]["quick_check"], "ok")
         self.assertEqual(result["verification"]["counts"]["canonical_events"], 1)
         self.assertTrue(result["verification"]["isolated_restore"])
+        self.assertTrue(result["verification"]["manifest_verified"])
+        self.assertTrue(Path(result["manifest_path"]).is_file())
+        self.assertTrue((Path(result["backup_path"]) / "operations.sqlite3").is_file())
+        restored = verify_restore(Path(result["backup_path"]))
+        self.assertTrue(restored["manifest_verified"])
+        self.assertEqual(restored["operations"]["quick_check"], "ok")
         self.assertEqual(operations.health()["counts"]["backup_runs"], 1)
         self.assertEqual(operations.latest_backup()["status"], "VERIFIED")
 
-    def test_production_backup_defaults_preserve_month_and_quarter(self) -> None:
+    def test_production_backup_defaults_keep_one_latest_verified_daily_bundle(self) -> None:
         parameters = inspect.signature(create_and_verify).parameters
-        self.assertEqual(parameters["retention"].default, 30)
-        self.assertEqual(parameters["weekly_retention"].default, 12)
+        self.assertEqual(parameters["retention"].default, 1)
+        self.assertEqual(parameters["weekly_retention"].default, 0)
 
     def test_backup_retention_removes_sqlite_companions(self) -> None:
         backup_dir = Path(self.temp_dir.name) / "retention"
         backup_dir.mkdir()
         old = backup_dir / "finance_radar_20260101T000000Z.sqlite3"
         new = backup_dir / "finance_radar_20260102T000000Z.sqlite3"
-        for path in (old, Path(f"{old}-wal"), Path(f"{old}-shm"), new):
+        for path in (old, Path(f"{old}-wal"), Path(f"{old}-shm"), Path(f"{old}-journal"), new):
             path.write_bytes(b"fixture")
         os.utime(old, (1, 1))
         os.utime(new, (2, 2))
         removed = prune_backups(backup_dir, retention=1)
-        self.assertEqual(set(removed), {str(old), f"{old}-wal", f"{old}-shm"})
+        self.assertEqual(set(removed), {str(old), f"{old}-wal", f"{old}-shm", f"{old}-journal"})
         self.assertTrue(new.exists())
 
     def test_weekly_snapshot_is_verified_idempotent_and_retained(self) -> None:
@@ -463,7 +499,10 @@ class ProductLayerTests(unittest.TestCase):
             retention=14,
             weekly_retention=8,
         )
-        daily = max(backup_dir.glob("finance_radar_*.sqlite3"), key=lambda path: path.stat().st_mtime)
+        daily = max(
+            (path for path in backup_dir.glob("finance_radar_*") if path.is_dir()),
+            key=lambda path: path.stat().st_mtime,
+        )
         weekly_dir = backup_dir / "manual-weekly"
         first = create_weekly_snapshot(
             daily,
@@ -479,6 +518,31 @@ class ProductLayerTests(unittest.TestCase):
         self.assertEqual(second["status"], "RETAINED")
         self.assertEqual(first["verification"]["quick_check"], "ok")
         self.assertEqual(len(list(weekly_dir.glob("*.sqlite3"))), 1)
+
+    def test_zero_weekly_retention_disables_and_prunes_snapshots(self) -> None:
+        weekly_dir = Path(self.temp_dir.name) / "weekly-disabled"
+        weekly_dir.mkdir()
+        old = weekly_dir / "finance_radar_week_2026-W29.sqlite3"
+        for path in (old, Path(f"{old}-wal"), Path(f"{old}-shm"), Path(f"{old}-journal")):
+            path.write_bytes(b"fixture")
+
+        result = create_weekly_snapshot(
+            self.ledger_path,
+            weekly_dir,
+            retention=0,
+            at=datetime(2026, 7, 18, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(result["status"], "DISABLED")
+        self.assertIsNone(result["backup_path"])
+        self.assertEqual(result["backup_bytes"], 0)
+        self.assertIsNone(result["verification"])
+        self.assertEqual(
+            set(result["pruned"]),
+            {str(old), f"{old}-wal", f"{old}-shm", f"{old}-journal"},
+        )
+        self.assertEqual(list(weekly_dir.glob("*.sqlite3")), [])
+        self.assertEqual(list(weekly_dir.glob("*.sqlite3-*")), [])
 
     @patch("app.workers.continuous.subprocess.run")
     def test_worker_records_partial_source_failure_as_degraded(self, run_mock) -> None:

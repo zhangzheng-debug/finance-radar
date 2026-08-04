@@ -14,7 +14,7 @@ import httpx
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BASE = "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api"
+DEFAULT_BASE = "https://radar.18-208-34-152.sslip.io:8443/finance-radar-api"
 REQUIRED_PROVIDERS = {
     "binance_public": ("PERSISTED_EVENT_OBSERVATION", "SERVER_DIRECT"),
     "twelve_data": ("PERSISTED_EVENT_OBSERVATION", "SERVER_DIRECT"),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+from urllib.parse import urlsplit
 
 import pandas as pd
 import streamlit as st
@@ -12,6 +13,8 @@ from app.web.common import (
     no_trading_banner,
     query_path,
     render_api_error,
+    render_primary_navigation,
+    require_admin_ui,
     restore_deep_link,
     section_header,
 )
@@ -23,6 +26,8 @@ from app.web.components import (
     facet_values,
     family_option_label,
     install_event_keyboard_navigation,
+    next_action_guidance,
+    render_next_action_prompt,
     render_saved_flow_manager,
     render_score_rail,
     render_market_context,
@@ -31,11 +36,13 @@ from app.web.components import (
 )
 
 
-st.set_page_config(page_title="Event Workbench · Finance Radar", page_icon="◇", layout="wide")
+st.set_page_config(page_title="事件工作台 · Finance Radar", page_icon="◇", layout="wide")
 install_style()
+require_admin_ui()
 restore_deep_link("Event_Intelligence")
+render_primary_navigation("events")
 
-header("Event Workbench", "发现、判断与核验在同一工作面完成；模型只做 shadow 分流", "READ ONLY")
+header("事件工作台", "发现、判断与核验在同一工作面完成；模型只做 shadow 分流", "READ ONLY")
 no_trading_banner()
 
 flow_names = list(FLOW_PRESETS)
@@ -101,7 +108,7 @@ source_options = facet_values(facets, "sources", requested_source)
 
 filter_cols = st.columns([1.0, 1.45, 1.35, 2.15, .65], gap="small")
 flow = filter_cols[0].selectbox(
-    "保存视图",
+    "信息流",
     flow_names,
     key="event_flow",
     format_func=lambda value: {
@@ -283,7 +290,18 @@ with evidence_col:
                 unsafe_allow_html=True,
             )
             if item.get("evidence_url"):
-                st.link_button(f"打开原始来源 E{index:02d}", item["evidence_url"], width="stretch")
+                source_url = str(item["evidence_url"])
+                parsed_source = urlsplit(source_url)
+                if parsed_source.scheme in {"http", "https"} and parsed_source.netloc:
+                    st.markdown(
+                        '<div class="evidence-source-actions">'
+                        '<span>精确证据段落已在本页显示</span>'
+                        f'<a href="{escape(source_url, quote=True)}" target="_blank" '
+                        'rel="noopener noreferrer">'
+                        f'确需核对时打开外部原文 E{index:02d} ↗</a>'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
     else:
         st.warning("没有证据边：系统必须保持待复核或弃权，不能自动升级。")
 
@@ -337,6 +355,7 @@ with evidence_col:
             st.json(detail, expanded=False)
 
 with context_col:
+    render_next_action_prompt(next_action_guidance(event, evidence, model, trace=trace))
     st.caption("判断维度 · 各维度相互独立")
     render_score_rail(score_dimensions(event, evidence, model, current_version=version))
     st.caption("风险路由仅用于不利事件分流，不代表交易方向或收益预测。")

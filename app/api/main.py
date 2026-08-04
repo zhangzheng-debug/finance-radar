@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import uuid
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable, Literal
@@ -23,6 +23,7 @@ from app.storage import EvidenceObjectStore, LedgerRepository, OperationsReposit
 
 
 API_SCHEMA_VERSION = "1.1"
+BACKUP_SNAPSHOT_MAX_AGE_SECONDS = 36 * 60 * 60
 
 
 class HumanOverrideRequest(BaseModel):
@@ -55,11 +56,15 @@ def elapsed_seconds(start: str | None, end: str | None = None) -> float | None:
         return None
     try:
         start_at = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        if start_at.tzinfo is None:
+            start_at = start_at.replace(tzinfo=timezone.utc)
         end_at = (
             datetime.fromisoformat(end.replace("Z", "+00:00"))
             if end
             else datetime.now(timezone.utc)
         )
+        if end_at.tzinfo is None:
+            end_at = end_at.replace(tzinfo=timezone.utc)
         return max(0.0, round((end_at - start_at).total_seconds(), 3))
     except (TypeError, ValueError):
         return None
@@ -219,6 +224,84 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             result["database"] = Path(str(result["database"])).name
         if "latest_backup" in result:
             result["latest_backup"] = public_backup_status(result.get("latest_backup"))
+        if "latest_verified_backup" in result:
+            result["latest_verified_backup"] = public_backup_status(result.get("latest_verified_backup"))
+        return result
+
+    def health_from_latest_verified_backup(
+        value: dict[str, Any],
+        latest_backup: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Expose live database liveness separately from backup snapshot freshness.
+
+        A live ``PRAGMA quick_check`` scans the entire ledger and previously made
+        every dashboard request take about as long as the web timeout.  The backup
+        service performs that full check and an isolated restore drill.  It is
+        useful integrity evidence, but it must never be presented as a current
+        database scan.  Keep both facts explicit in the public health contract.
+        """
+        result = dict(value)
+        live_quick_check = result.get("quick_check")
+        live_status = result.get("status")
+        result["current_db_liveness"] = {
+            "status": live_status,
+            "quick_check": live_quick_check,
+            "integrity_check_source": result.get("integrity_check_source"),
+        }
+        backup_snapshot: dict[str, Any] = {
+            "status": "MISSING",
+            "fresh": False,
+            "max_age_seconds": BACKUP_SNAPSHOT_MAX_AGE_SECONDS,
+            "age_seconds": None,
+            "quick_check": None,
+            "verified_at": None,
+        }
+        if latest_backup and latest_backup.get("status") == "VERIFIED":
+            verified_at = latest_backup.get("verified_at")
+            age_seconds: float | None = None
+            try:
+                verified = datetime.fromisoformat(str(verified_at).replace("Z", "+00:00"))
+                if verified.tzinfo is None:
+                    verified = verified.replace(tzinfo=timezone.utc)
+                age_seconds = max(
+                    0.0,
+                    (datetime.now(timezone.utc) - verified.astimezone(timezone.utc)).total_seconds(),
+                )
+            except (TypeError, ValueError):
+                pass
+            backup_quick_check = latest_backup.get("quick_check") or "unknown"
+            backup_path = Path(str(latest_backup.get("backup_path") or ""))
+            path_available = backup_path.exists()
+            fresh = (
+                backup_quick_check == "ok"
+                and age_seconds is not None
+                and age_seconds <= BACKUP_SNAPSHOT_MAX_AGE_SECONDS
+                and path_available
+            )
+            backup_snapshot = {
+                "status": "FRESH" if fresh else ("STALE" if path_available else "MISSING_ARTIFACT"),
+                "fresh": fresh,
+                "max_age_seconds": BACKUP_SNAPSHOT_MAX_AGE_SECONDS,
+                "age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+                "quick_check": backup_quick_check,
+                "verified_at": verified_at,
+                "snapshot_kind": latest_backup.get("snapshot_kind"),
+                "path_available": path_available,
+            }
+        result["backup_snapshot"] = backup_snapshot
+        # These three legacy fields remain for the existing public dashboard,
+        # while ``current_db_liveness`` / ``backup_snapshot`` make the scope
+        # unambiguous for operators and automation.
+        if backup_snapshot["fresh"]:
+            result["quick_check"] = backup_snapshot["quick_check"]
+            result["integrity_check_source"] = "latest_verified_backup"
+            result["integrity_checked_at"] = backup_snapshot["verified_at"]
+        else:
+            result["quick_check"] = "unknown"
+            result["integrity_check_source"] = "stale_or_missing_verified_backup"
+            result["integrity_checked_at"] = None
+        if live_status != "ok" or not backup_snapshot["fresh"]:
+            result["status"] = "degraded"
         return result
 
     def event_or_404(event_id: str) -> dict[str, Any]:
@@ -242,7 +325,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/v1/health")
     def health(request: Request):
         try:
-            ledger_health = public_health_paths(ledger.health())
+            latest_backup = operations.latest_verified_backup()
+            ledger_health = public_health_paths(
+                health_from_latest_verified_backup(
+                    ledger.health(run_integrity_check=False),
+                    latest_backup,
+                )
+            )
             ops_health = public_health_paths(operations.health())
             model_health = router.status()
             status = "ok" if ledger_health["status"] == ops_health["status"] == "ok" else "degraded"
@@ -278,18 +367,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/api/v1/overview")
     def overview(request: Request):
-        data = ledger.overview()
+        latest_backup = operations.latest_verified_backup()
+        data = health_from_latest_verified_backup(
+            ledger.overview(run_integrity_check=False),
+            latest_backup,
+        )
         data["demo_mode"] = operations.demo_mode(settings.demo_mode)
         latest_worker = operations.latest_worker_cycle()
+        latest_successful_worker = operations.latest_successful_worker_cycle()
         data["latest_worker_cycle"] = latest_worker
-        data["latest_backup"] = public_backup_status(operations.latest_backup())
+        data["latest_backup"] = public_backup_status(latest_backup)
+        data["latest_backup_attempt"] = public_backup_status(operations.latest_backup())
         data["timing"] = {
+            # Legacy field: age of the most recent insert or revision.
             "latest_event_age_seconds": elapsed_seconds(data.get("last_event_update")),
             "worker_cycle_duration_seconds": elapsed_seconds(
                 latest_worker.get("started_at") if latest_worker else None,
                 latest_worker.get("finished_at") if latest_worker else None,
             ),
             "latest_worker_finished_at": latest_worker.get("finished_at") if latest_worker else None,
+            "latest_worker_success_at": (
+                latest_successful_worker.get("finished_at")
+                if latest_successful_worker
+                else None
+            ),
+            "latest_worker_success_age_seconds": elapsed_seconds(
+                latest_successful_worker.get("finished_at")
+                if latest_successful_worker
+                else None
+            ),
+            "latest_new_event_at": data.get("last_new_event_at"),
+            "latest_new_event_age_seconds": elapsed_seconds(data.get("last_new_event_at")),
+            "latest_event_update_at": data.get("last_event_update"),
+            "latest_event_update_age_seconds": elapsed_seconds(data.get("last_event_update")),
         }
         return envelope(request, data)
 
@@ -336,19 +446,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def events(
         request: Request,
         status: str | None = None,
+        public_state: Literal[
+            "verified",
+            "excluded",
+            "insufficient",
+            "pending_verification",
+            "rough_reviewed",
+        ]
+        | None = None,
         family: str | None = None,
         source: str | None = None,
         q: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        sort: Literal["latest", "event_date", "subject"] = "event_date",
         limit: int = Query(50, ge=1, le=200),
         offset: int = Query(0, ge=0),
     ):
+        if date_from and date_to and date_from > date_to:
+            raise HTTPException(
+                422,
+                {
+                    "code": "INVALID_DATE_RANGE",
+                    "message": "date_from must not be after date_to",
+                },
+            )
         return envelope(
             request,
             ledger.list_events(
                 status=status,
+                public_state=public_state,
                 family=family,
                 source=source,
                 query=q,
+                date_from=date_from.isoformat() if date_from else None,
+                date_to=date_to.isoformat() if date_to else None,
+                sort=sort,
                 limit=limit,
                 offset=offset,
             ),
@@ -374,6 +507,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ]
         )
         data["evidence_count"] = len(evidence)
+        light_verification = facts.get("light_verification") if isinstance(facts, dict) else None
+        if isinstance(light_verification, dict):
+            data["verification_method"] = {
+                "kind": "light_verification",
+                "version": light_verification.get("version"),
+                "reviewed_at": light_verification.get("reviewed_at"),
+                "evidence_ids": light_verification.get("evidence_ids", []),
+                "score": light_verification.get("score"),
+                "rationale": light_verification.get("rationale"),
+                "no_trading": True,
+            }
         evidence_context = derive_evidence_context(evidence)
         data["model_shadow_output"] = router.predict(text, evidence_context=evidence_context)
         data["model_input_contract"] = {
@@ -403,6 +547,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data["model_runs"] = operations.model_runs(event_id)
         data["agent_decisions"] = operations.agent_decisions(event_id)
         data["human_overrides"] = operations.human_overrides(event_id)
+        data["light_verifications"] = operations.light_verification_runs(event_id)
         data["evidence_objects"] = operations.evidence_objects(event_id)
         for item in data["evidence_objects"]:
             item["integrity_verified"] = evidence_object_store.verify(

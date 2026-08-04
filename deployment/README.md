@@ -1,12 +1,17 @@
 # Finance Radar deployment
 
-Two supported deployment shapes exist. The current Singapore VPS uses systemd + Nginx and is live; Docker Compose + Caddy remains the portable alternative. Telegram delivery is always opt-in so a default deployment cannot send messages accidentally.
+Two supported deployment shapes exist. The current production host is the AWS US East EC2 instance using systemd + Nginx; Docker Compose + Caddy remains the portable alternative. The former Singapore host is stopped. Telegram delivery is always opt-in so a default deployment cannot send messages accidentally.
+
+Before packaging or cutover, generate and verify a source/archive-bound release
+manifest and rollback checklist. The cross-platform workflow and optional
+systemd installer gate are documented in
+[`RELEASE_AUDIT.md`](RELEASE_AUDIT.md).
 
 ## VPS preparation
 
 1. Install Docker Engine and the Compose plugin.
 2. Copy the repository and existing `data/finance_radar.sqlite3` to the VPS.
-3. Create `.env` from `.env.example`; set a strong `FINANCE_RADAR_ADMIN_TOKEN`, public domain and SEC user agent.
+3. Create `.env` from `.env.example`; set a strong `FINANCE_RADAR_ADMIN_TOKEN`, public domain and SEC user agent. The token is for the API and the manual internal admin UI only; the public Web service must never receive it.
 4. Give container UID 10001 write access to `data/`, `artifacts/` and `reports/`.
 5. Train or copy the risk-router artifact before starting the stack.
 
@@ -15,7 +20,26 @@ python scripts/train_risk_router.py
 docker compose -f deployment/compose.yml config
 docker compose -f deployment/compose.yml up -d --build
 docker compose -f deployment/compose.yml ps
-curl -fsS https://YOUR_DOMAIN/api/v1/health
+curl -fsS https://YOUR_DOMAIN/ >/dev/null
+```
+
+The portable Caddy edge deliberately returns `404` for `/api/*`, `/docs`,
+`/openapi.json`, and `/finance-radar-api/*`. Run health checks from inside the
+private Compose network instead:
+
+```bash
+docker compose -f deployment/compose.yml exec api \
+  python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5)"
+```
+
+The public `web` container does not load `.env`; it receives only its private
+API URL, `FINANCE_RADAR_UI_ROLE=public`, and debug-off. When internal access is
+needed, the opt-in `admin` profile binds only to host loopback port 18502:
+
+```bash
+docker compose -f deployment/compose.yml --profile admin up -d admin
+# Open an SSH tunnel to 127.0.0.1:18502, then browse /radar-admin/ locally.
+docker compose -f deployment/compose.yml --profile admin stop admin
 ```
 
 Enable Telegram only after a dry-run and explicit operator review:
@@ -80,7 +104,12 @@ Before transferring plaintext, activation runs `scripts/replacement_vps_prefligh
 
 ## Existing non-Docker VPS
 
-For the current Singapore VPS, `deployment/systemd/` provides isolated services on loopback ports 18000/18501. Mutable data lives in `/opt/finance-radar/shared`; releases remain immutable and rollbackable.
+For a systemd VPS, `deployment/systemd/` provides isolated services on loopback
+ports 18000/18501. Mutable data lives in `/opt/finance-radar/shared`; releases
+remain immutable and rollbackable. The public Web unit reads only
+`/etc/finance-radar-public.env`, which the installer creates from three fixed,
+non-secret values. It never loads `/etc/finance-radar.env` and explicitly
+removes `FINANCE_RADAR_ADMIN_TOKEN` from its process environment.
 
 The Evidence Agent also has an optional, independent loopback service on port
 18601. `install_local_evidence_model.sh` pins both llama.cpp and the GGUF model
@@ -90,12 +119,53 @@ falls back to deterministic evidence gates. The model performs summary-only
 shadow work and cannot classify claims, assign final status, or trade. See
 `docs/LOCAL_EVIDENCE_MODEL.md` and the frozen comparison reports.
 
+## Light verification budget
+
+The continuous worker runs the bounded light-verification step after a successful
+collection cycle. It considers only candidate events with a completed rough
+review, reads at most two already-captured P0/P1 passages per event, performs no
+network fetch, and allows at most one local shadow-model reassessment. The
+deterministic evidence gate, not the model, changes the canonical status. The
+default cap is 25 candidates per cycle and 100 formal applications per UTC day:
+
+```bash
+python scripts/light_verify.py --limit 25 --max-applies 25 \
+  --daily-budget 100 --apply \
+  --authorization user_explicit_light_verification
+```
+
+Without `--apply`, the command is read-only and writes only a JSON/Markdown
+dry-run report. `--no-light-verify` disables the worker step for a diagnostic
+cycle. Every applied event receives a versioned `light_verification` record,
+the supporting evidence is marked `accepted_light_primary_evidence`, and the
+shadow risk router is rerun against the new evidence gate. No market outcome,
+order, position, balance, or trading endpoint is involved.
+
 Primary public endpoint:
 
-- `https://radar.167-172-69-16.sslip.io:8443/radar/`
-- `https://radar.167-172-69-16.sslip.io:8443/finance-radar-api/`
+- `https://radar.18-208-34-152.sslip.io:8443/radar/`
 
-The original `https://sg.zb1og.cn/radar/` route is retained, but Cloudflare may require a human challenge. The direct endpoint uses a Let's Encrypt certificate and Certbot renewal hook. Every Nginx installer validates with `nginx -t`, retains a timestamped rollback copy, and restores it automatically if reload fails. Existing xray listeners and the trading project remain untouched.
+The public edge returns `404` for `/finance-radar-api/`, the internal page
+slugs, and `/radar-admin/`. FastAPI remains available only at
+`http://127.0.0.1:18000` on the server. The one deliberately public operational
+artifact is `/radar/offhost-status.json`, a no-cache file written by the
+off-host backup job.
+
+The internal administration UI is a manual, non-enabled systemd service. It
+loads the protected environment, listens only on `127.0.0.1:18502`, and is not
+referenced by Nginx. Start it only for an SSH-tunnel session, then stop it:
+
+```bash
+sudo systemctl start finance-radar-admin
+ssh -N -L 18502:127.0.0.1:18502 ubuntu@YOUR_SERVER
+# Browse http://127.0.0.1:18502/radar-admin/ on the operator workstation.
+sudo systemctl stop finance-radar-admin
+```
+
+There is intentionally no `[Install]` section in the admin unit, so it cannot
+be enabled as a boot service. Do not add a public Nginx route for port 18502.
+
+The retired Singapore/Cloudflare route is no longer part of production. The AWS direct endpoint uses a Let's Encrypt certificate and Certbot renewal hook. Every Nginx installer validates with `nginx -t`, retains a timestamped rollback copy, and restores it automatically if reload fails. Existing Xray and WireGuard listeners remain outside the Finance Radar deployment scope.
 
 For a manual Telegram preview on this VPS, source `/etc/finance-radar.env` before running `python -m app.workers.notifier --once`; otherwise a standalone SSH shell does not inherit the public Web URL used by systemd. The preview refreshes only `PENDING/RETRY` payloads and never sends without `--send`.
 

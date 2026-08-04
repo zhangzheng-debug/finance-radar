@@ -4,6 +4,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 import app.web.common as web_common
@@ -11,6 +12,11 @@ import app.web.common as web_common
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "app" / "web" / "pages" / "4_Adjudication_Studio.py"
+
+
+@pytest.fixture(autouse=True)
+def _run_in_admin_ui(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "admin")
 
 
 def _fake_api(path: str, *, method: str = "GET", json_body: dict[str, Any] | None = None) -> dict[str, Any]:

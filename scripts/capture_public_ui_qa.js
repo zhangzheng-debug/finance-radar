@@ -19,7 +19,7 @@ function integerArgument(name, fallback) {
 }
 
 (async () => {
-  const url = argument("url", "https://radar.167-172-69-16.sslip.io:8443/radar/");
+  const url = argument("url", "https://radar.18-208-34-152.sslip.io:8443/radar/");
   const output = path.resolve(argument("output", "reports/ui_qa_latest/page.png"));
   const diagnosticsOutput = path.resolve(
     argument("diagnostics", output.replace(/\.png$/i, ".json"))

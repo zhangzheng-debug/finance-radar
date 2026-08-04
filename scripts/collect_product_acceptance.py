@@ -15,8 +15,8 @@ import httpx
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BASE = "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api"
-DEFAULT_WEB = "https://radar.167-172-69-16.sslip.io:8443/radar"
+DEFAULT_BASE = "https://radar.18-208-34-152.sslip.io:8443/finance-radar-api"
+DEFAULT_WEB = "https://radar.18-208-34-152.sslip.io:8443/radar"
 FORBIDDEN_ROUTE_TERMS = ("orders", "positions", "balances", "brokerage", "trade_execution")
 
 

@@ -10,11 +10,21 @@ x-radar-environment: &radar-environment
   FINANCE_RADAR_DEMO_MODE: ${FINANCE_RADAR_DEMO_MODE:-RECENT_CAPTURE}
   FINANCE_RADAR_ADMIN_TOKEN: ${FINANCE_RADAR_ADMIN_TOKEN:-change-me-before-public-deploy}
 
+x-radar-public-web-environment: &radar-public-web-environment
+  FINANCE_RADAR_API_URL: http://api:8000
+  FINANCE_RADAR_UI_ROLE: public
+  FINANCE_RADAR_SHOW_DEBUG: "0"
+
 x-radar-service: &radar-service
   build:
     context: ..
     dockerfile: deployment/Dockerfile
-  image: finance-radar:local
+  image: finance-radar:${FINANCE_RADAR_RELEASE_ID:-local}
+  labels:
+    org.opencontainers.image.title: Finance Radar
+    org.opencontainers.image.version: ${FINANCE_RADAR_RELEASE_ID:-local}
+    org.opencontainers.image.revision: ${FINANCE_RADAR_GIT_COMMIT:-unknown}
+    finance-radar.release-id: ${FINANCE_RADAR_RELEASE_ID:-local}
   restart: unless-stopped
   env_file:
     - ../.env
@@ -40,6 +50,11 @@ services:
 
   web:
     <<: *radar-service
+    # Do not inherit .env: it can contain provider credentials and the admin
+    # token. The public UI needs only a loopback/container API URL and its role.
+    env_file: []
+    environment: *radar-public-web-environment
+    volumes: []
     command: ["python", "-m", "streamlit", "run", "app/web/Home.py", "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true", "--browser.gatherUsageStats", "false"]
     expose: ["8501"]
     depends_on:
@@ -51,6 +66,19 @@ services:
       timeout: 8s
       retries: 5
       start_period: 20s
+
+  admin:
+    <<: *radar-service
+    profiles: ["admin"]
+    environment:
+      <<: *radar-environment
+      FINANCE_RADAR_UI_ROLE: admin
+      FINANCE_RADAR_SHOW_DEBUG: "0"
+    command: ["python", "-m", "streamlit", "run", "app/web/Admin.py", "--server.address", "0.0.0.0", "--server.port", "8502", "--server.baseUrlPath", "radar-admin", "--server.headless", "true", "--browser.gatherUsageStats", "false"]
+    ports: ["127.0.0.1:18502:8502"]
+    depends_on:
+      api:
+        condition: service_healthy
 
   worker:
     <<: *radar-service

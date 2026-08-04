@@ -42,7 +42,7 @@ function recordCheck(checks, name, passed, detail) {
 
 const baseUrl = argument(
   "base-url",
-  "https://radar.167-172-69-16.sslip.io:8443/radar"
+  "https://radar.18-208-34-152.sslip.io:8443/radar"
 ).replace(/\/$/, "");
 const outputDir = path.resolve(argument("output-dir", "reports/ui_qa_20260719"));
 const jsonPath = path.join(outputDir, "public_interaction_acceptance.json");

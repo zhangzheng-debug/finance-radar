@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 import app.web.common as web_common
@@ -10,6 +11,11 @@ import app.web.common as web_common
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "app" / "web" / "pages" / "3_Operations_and_Model.py"
+
+
+@pytest.fixture(autouse=True)
+def _run_in_admin_ui(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "admin")
 
 
 def _fake_api(
@@ -118,3 +124,28 @@ def test_operations_page_separates_event_sources_and_market_capabilities(monkeyp
     assert "first_real_observer_snapshot" in rendered
     assert "最近证据对象均已重新计算" in rendered
     assert "3 raw" in rendered
+
+
+def test_operations_page_degrades_when_model_card_metrics_are_missing(monkeypatch) -> None:
+    def partial_model_api(
+        path: str, *, method: str = "GET", json_body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if path == "/api/v1/model/status":
+            return {
+                "status": "ready",
+                "model_card": {
+                    "dataset": {"rows": 12},
+                    "polarity_policy": "shadow only",
+                    "limitations": ["human review required"],
+                },
+                "robustness": None,
+                "external_blind": None,
+            }
+        return _fake_api(path, method=method, json_body=json_body)
+
+    monkeypatch.setattr(web_common, "api_request", partial_model_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10).run()
+    rendered = "\n".join(str(item.value) for item in [*page.markdown, *page.warning])
+
+    assert not page.exception
+    assert "评估指标尚未生成" in rendered

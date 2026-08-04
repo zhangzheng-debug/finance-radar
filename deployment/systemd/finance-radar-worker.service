@@ -9,7 +9,11 @@ User=finance-radar
 Group=finance-radar
 WorkingDirectory=/opt/finance-radar/current
 EnvironmentFile=/etc/finance-radar.env
-ExecStart=/opt/finance-radar/venv/bin/python -m app.workers.continuous --interval 300
+# Formal light-verification is deliberately opt-in and must be started through
+# a separately scoped, auditable batch.  The continuous collector may keep
+# ingesting and enriching evidence, but it may not autonomously mutate a
+# canonical event into weak/verified.
+ExecStart=/opt/finance-radar/venv/bin/python -m app.workers.continuous --interval 300 --no-light-verify
 Restart=on-failure
 RestartSec=20
 NoNewPrivileges=true

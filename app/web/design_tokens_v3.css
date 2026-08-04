@@ -1,0 +1,50 @@
+/* Finance Radar · Evidence Terminal v3
+   Authoritative runtime design tokens. Component styles belong in style_v3.css. */
+
+:root {
+    --fr-canvas: #05090f;
+    --fr-panel: #0b1220;
+    --fr-raised: #101a2b;
+    --fr-overlay: #141f33;
+    --fr-border: #1c2b3d;
+    --fr-border-strong: #2c4257;
+    --fr-text: #e8eef6;
+    --fr-text-2: #b5c3d1;
+    --fr-muted: #8ea1b4;
+    --fr-text-dim: #61758a;
+    --fr-cyan: #38c7ec;
+    --fr-green: #2fd08f;
+    --fr-amber: #f5b453;
+    --fr-red: #ff6b7a;
+    --fr-purple: #a08bff;
+    --fr-cyan-dim: rgba(56, 199, 236, .10);
+    --fr-green-dim: rgba(47, 208, 143, .10);
+    --fr-amber-dim: rgba(245, 180, 83, .10);
+    --fr-red-dim: rgba(255, 107, 122, .10);
+    --fr-purple-dim: rgba(160, 139, 255, .10);
+    --fr-p0: #e9c46a;
+    --fr-p1: #8ecae6;
+    --fr-p2: #7890a6;
+    --fr-font-ui: "Inter", "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    --fr-font-mono: ui-monospace, "JetBrains Mono", "IBM Plex Mono", Consolas, monospace;
+    --fr-type-body: 1rem;
+    --fr-type-copy: .9375rem;
+    --fr-type-small: .8125rem;
+    --fr-type-label: .75rem;
+    --fr-leading-copy: 1.65;
+    --fr-touch-target: 44px;
+    --fr-focus-ring: #a9ecff;
+    --fr-content-gutter: clamp(.85rem, 2.5vw, 2.5rem);
+    --fr-radius-s: 5px;
+    --fr-radius-m: 8px;
+    --fr-ease: cubic-bezier(.2, .7, .3, 1);
+}
+
+@media (prefers-contrast: more) {
+    :root {
+        --fr-border: #3e566c;
+        --fr-border-strong: #66829a;
+        --fr-muted: #b8c8d6;
+        --fr-text-dim: #9eb2c4;
+    }
+}

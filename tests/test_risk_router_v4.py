@@ -118,6 +118,44 @@ class V4ArtifactTests(unittest.TestCase):
         self.assertTrue(card["blind_evaluation"]["gate_pass"])
         self.assertEqual(card["blind_evaluation"]["promotion_decision"], "QUALIFIED_SHADOW")
 
+    def test_input_audit_hash_covers_evidence_context_and_call_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "risk_router_v4_test.joblib"
+            joblib.dump(
+                {
+                    "model_version": "risk-router-v4-hermetic-test",
+                    "architecture": "structured_evidence_gate_plus_binary_semantic_router_v1",
+                    "semantic_risk_threshold": 0.51,
+                    "pipeline": DeterministicSemanticPipeline(),
+                },
+                artifact,
+            )
+            router = RiskRouter(artifact)
+            text = "The issuer disclosed a material liquidity risk in its annual filing."
+            primary = router.predict(
+                text,
+                evidence_context={
+                    "version": "test", "state": "PRIMARY_SUPPORTED_REVIEWED",
+                    "reason_codes": ["exact_primary"], "evidence_count": 1,
+                },
+            )
+            changed_context = router.predict(
+                text,
+                evidence_context={
+                    "version": "test", "state": "PRIMARY_SUPPORTED_REVIEWED",
+                    "reason_codes": ["different_primary_context"], "evidence_count": 2,
+                },
+            )
+            withheld = router.predict(text)
+
+        self.assertNotEqual(primary["input_sha256"], changed_context["input_sha256"])
+        self.assertEqual(primary["input_contract"]["version"], "risk-router-decision-input-v2")
+        self.assertIn("evidence_context_sha256", primary["input_contract"])
+        self.assertEqual(primary["model_call_count"], primary["call_counts"]["trained_model_calls"])
+        self.assertEqual(withheld["call_kind"], "DETERMINISTIC_EVIDENCE_GATE")
+        self.assertEqual(withheld["model_call_count"], 0)
+        self.assertEqual(withheld["call_counts"]["external_model_calls"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

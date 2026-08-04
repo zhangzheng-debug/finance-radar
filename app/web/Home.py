@@ -1,36 +1,269 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+from html import escape
+from math import ceil
+from urllib.parse import urlencode, urlsplit
+
 import streamlit as st
 
 from app.web.common import (
     DEEP_LINK_STATE_KEY,
+    UI_ROLE,
     api_request,
+    format_elapsed,
     header,
     install_style,
     no_trading_banner,
     pulse_grid,
+    query_path,
+    render_primary_navigation,
     render_api_error,
     section_header,
+    situation_brief,
     status_strip,
 )
 from app.web.components import (
+    EVENT_FAMILY_LABELS,
+    FLOW_PRESETS,
+    PUBLIC_AUTHORITY_LABELS,
+    PUBLIC_SOURCE_LABELS,
+    PUBLIC_STATE_LABELS,
+    facet_counts,
+    facet_values,
+    focus_event_preview,
+    next_action_guidance,
+    public_event_copy,
+    public_event_state,
+    render_evidence_route,
     render_event_feed,
     render_command_palette,
     render_flow_shortcuts,
+    render_next_action_prompt,
     source_health_state,
     terminal_search_state,
 )
 
 
-st.set_page_config(page_title="Finance Radar · Situation Room", page_icon="◎", layout="wide")
+PUBLIC_STATES = frozenset(PUBLIC_STATE_LABELS)
+PUBLIC_PERIODS = {
+    "全部时间": None,
+    "最近 24 小时": 1,
+    "最近 7 天": 7,
+    "最近 30 天": 30,
+    "最近 90 天": 90,
+}
+PUBLIC_SORTS = {
+    "最近发现": "latest",
+    "事件日期": "event_date",
+    "主体名称": "subject",
+}
+
+
+def bounded_int(value: object, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(str(value))
+    except (TypeError, ValueError):
+        return default
+    return min(maximum, max(minimum, parsed))
+
+
+def query_choice(value: object, choices: set[str] | frozenset[str], default: str = "") -> str:
+    normalized = str(value or "")
+    return normalized if normalized in choices else default
+
+
+def public_family_label(value: str, counts: dict[str, int]) -> str:
+    if not value:
+        return "全部类别"
+    label = EVENT_FAMILY_LABELS.get(value, "其他公司事件")
+    return f"{label} · {counts.get(value, 0):,}"
+
+
+def public_source_label(value: str, counts: dict[str, int]) -> str:
+    if not value:
+        return "全部来源"
+    label = PUBLIC_SOURCE_LABELS.get(value, "其他公开来源")
+    return f"{label} · {counts.get(value, 0):,}"
+
+
+def render_public_reading_prompt(event: dict[str, object], evidence: list[dict[str, object]]) -> None:
+    """Give public readers a useful next step without exposing review tooling."""
+    state = public_event_state(event)
+    if not evidence:
+        title = "先等待可引用的原始证据"
+        reason = "当前事件没有可展示的证据段落，不应把摘要当作已确认事实。"
+        steps = ("确认主体与事件日期", "寻找监管、交易所或公司原始文件", "在证据补齐前保留不确定性")
+        tone = "risk"
+    elif state == "verified":
+        title = "回到原始来源核对上下文"
+        reason = f"当前事件已关联 {len(evidence)} 条证据；摘要仍不能替代完整原文。"
+        steps = ("打开原始来源", "核对主体、日期和版本", "区分已发生事实与前瞻性表述")
+        tone = "ok"
+    elif state == "excluded":
+        title = "保留排除结果，等待真正的新证据"
+        reason = "当前线索已被排除；只有来源修订或新增高权威材料才应重新判断。"
+        steps = ("核对排除理由", "确认是否出现修订文件", "没有新证据时不重复放大线索")
+        tone = "ok"
+    elif state == "insufficient":
+        title = "证据不足，暂不形成事实结论"
+        reason = f"现有 {len(evidence)} 条关联材料仍不能闭合事实链。"
+        steps = ("确认缺失的是主体、日期还是关键事实", "优先寻找官方原始文件", "补证前保留不确定性")
+        tone = "risk"
+    elif state == "rough_reviewed":
+        title = "粗审已完成，继续核对正式证据"
+        reason = f"现有 {len(evidence)} 条关联材料已完成快速筛查，但粗审不等于正式核验。"
+        steps = ("先读最高权威证据段落", "核对主体、日期与文件版本", "不要把粗审状态理解为事实确认")
+        tone = "watch"
+    else:
+        title = "把它当作待核验线索"
+        reason = f"当前事件已关联 {len(evidence)} 条证据，但事实链仍未完全闭合。"
+        steps = ("先读最高权威证据段落", "核对是否存在修订或来源冲突", "不要从核验状态推断价格方向")
+        tone = "watch"
+    step_markup = "".join(f"<li>{escape(step)}</li>" for step in steps)
+    st.markdown(
+        f'<section class="next-action next-action-{tone}" aria-labelledby="public-reading-title">'
+        '<div class="next-action-topline"><span>阅读提示</span><strong>只读</strong></div>'
+        f'<h2 id="public-reading-title">{escape(title)}</h2>'
+        f'<p>{escape(reason)}</p><ol>{step_markup}</ol>'
+        '<div class="next-action-boundary"><span>不构成投资建议 · 不触发任何外部操作</span></div>'
+        '</section>',
+        unsafe_allow_html=True,
+    )
+
+
+def public_source_url(evidence: list[dict[str, object]]) -> str | None:
+    """Return an explicitly safe public evidence link, if one is available."""
+    if not evidence:
+        return None
+    value = str(evidence[0].get("evidence_url") or "").strip()
+    if len(value) > 2048:
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    return value if parsed.scheme in {"http", "https"} and parsed.netloc else None
+
+
+def public_time_value(value: object, *, date_only: bool = False) -> str:
+    """Format a declared timestamp while preserving the difference between date and time."""
+    normalized = " ".join(str(value or "").split())
+    if not normalized:
+        return "未记录"
+    if date_only or len(normalized) == 10:
+        return normalized[:10]
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError:
+        return normalized[:80]
+    if parsed.tzinfo is None:
+        return parsed.strftime("%Y-%m-%d %H:%M") + "（时区未记录）"
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def public_time_markup(event: dict[str, object], detail: dict[str, object], verification: dict[str, object] | None) -> str:
+    """Render the five reader-facing clocks for a selected event."""
+    version = detail.get("current_version") or {}
+    facts = version.get("facts") or {} if isinstance(version, dict) else {}
+    if not isinstance(facts, dict):
+        facts = {}
+    preferred = detail.get("preferred_source") or {}
+    if not isinstance(preferred, dict):
+        preferred = {}
+    published_at = (
+        preferred.get("source_published_at")
+        or facts.get("source_published_at")
+        or facts.get("published_at")
+    )
+    verified_at = (verification or {}).get("reviewed_at") or event.get("reviewed_at")
+    values = (
+        ("事件日", public_time_value(event.get("event_date"), date_only=True)),
+        ("来源发布", public_time_value(published_at)),
+        ("系统发现", public_time_value(event.get("first_seen_at"))),
+        ("最后更新", public_time_value(event.get("last_updated_at"))),
+        ("核验记录", public_time_value(verified_at)),
+    )
+    cells = "".join(
+        '<div class="event-time-cell"><span>{}</span><strong>{}</strong></div>'.format(
+            escape(label), escape(value)
+        )
+        for label, value in values
+    )
+    return (
+        '<section class="event-time-facts" aria-label="事件与核验时间">'
+        '<div class="event-time-heading">时间口径 · 事件本身、来源发布、系统处理不是同一个时间</div>'
+        f'<div class="event-time-grid">{cells}</div>'
+        '</section>'
+    )
+
+
+def public_verification_markup(
+    state: str,
+    verification: dict[str, object],
+    evidence: list[dict[str, object]],
+) -> str:
+    """Explain a light-verification record without implying every record passed."""
+    score = verification.get("score")
+    score_copy = f"评分 {escape(str(score))}" if score not in (None, "") else "未记录评分"
+    state_copy = {
+        "verified": "本轮引用材料通过轻量细核，当前状态为“已核验”。",
+        "insufficient": "本轮轻量细核没有形成已核验结论，当前仍为“证据不足”。",
+        "excluded": "本轮记录不改变已排除状态。",
+        "rough_reviewed": "本轮记录不替代后续正式核验。",
+        "pending_verification": "本轮记录不等于正式核验完成。",
+    }.get(state, "本轮记录仅说明曾进行限定检查。")
+    raw_ids = verification.get("evidence_ids") or []
+    known_ids = {
+        str(item.get("evidence_id") or "").strip()
+        for item in evidence
+        if str(item.get("evidence_id") or "").strip()
+    }
+    evidence_ids = []
+    for value in raw_ids if isinstance(raw_ids, list) else []:
+        normalized = " ".join(str(value or "").split())[:96]
+        if normalized and normalized not in evidence_ids:
+            evidence_ids.append(normalized)
+    chips = "".join(
+        '<code class="evidence-id-chip{}">{}</code>'.format(
+            " is-linked" if item in known_ids else "", escape(item)
+        )
+        for item in evidence_ids[:8]
+    )
+    remaining = len(evidence_ids) - min(len(evidence_ids), 8)
+    ids_copy = (
+        f'<div class="verification-evidence-ids"><span>本轮引用证据 ID</span>{chips}'
+        f'{f"<em>另有 {remaining} 条</em>" if remaining else ""}'
+        '<small>这些是本次限定核验实际引用的材料，不等于全部关联证据。</small></div>'
+        if evidence_ids
+        else '<div class="verification-evidence-ids"><span>本轮引用证据 ID 未记录</span>'
+        '<small>因此不能把这条核验记录理解为完整证据链。</small></div>'
+    )
+    return (
+        '<div class="verification-method" role="note">'
+        '<strong>核验记录 · 轻量细核</strong>'
+        f'<span>{state_copy} {score_copy}；模型不负责改写正式结论。</span>'
+        f'{ids_copy}'
+        '</div>'
+    )
+
+
+st.set_page_config(page_title="态势总览 · Finance Radar", page_icon="◎", layout="wide")
 install_style()
+render_primary_navigation("home")
 
 page_targets = {
-    "Event_Intelligence": "pages/1_Event_Intelligence.py",
     "Replay_Lab": "pages/2_Replay_Lab.py",
-    "Operations_and_Model": "pages/3_Operations_and_Model.py",
-    "Adjudication_Studio": "pages/4_Adjudication_Studio.py",
+    "Method_and_Boundaries": "pages/5_Method_and_Boundaries.py",
 }
+if UI_ROLE == "admin":
+    page_targets.update(
+        {
+            "Event_Intelligence": "pages/1_Event_Intelligence.py",
+            "Operations_and_Model": "pages/3_Operations_and_Model.py",
+            "Adjudication_Studio": "pages/4_Adjudication_Studio.py",
+        }
+    )
 requested_page = st.query_params.get("_page")
 if requested_page in page_targets:
     st.session_state[DEEP_LINK_STATE_KEY] = {
@@ -47,106 +280,655 @@ if requested_page in page_targets:
 try:
     overview = api_request("/api/v1/overview")
 except Exception as exc:
-    header("Finance Radar", "多源证据链金融事件情报终端")
+    header("态势总览", "多源证据链金融事件情报终端")
     render_api_error(exc)
     st.stop()
 
-header("Situation Room", "事件流、证据健康、复核队列与运行态总览", overview["demo_mode"])
+header(
+    "态势总览",
+    "实时事件、原始证据与核验进度" if UI_ROLE != "admin" else "事件流、复核队列与运行态总览",
+    overview["demo_mode"] if UI_ROLE == "admin" else None,
+)
 no_trading_banner()
 
-with st.form("terminal-global-search", border=False):
-    search_col, submit_col = st.columns([5.4, .8], gap="small", vertical_alignment="bottom")
-    terminal_query = search_col.text_input(
-        "全终端检索",
-        placeholder="搜索公司、Ticker、事件类型或 Event ID",
-        label_visibility="collapsed",
-    )
-    search_submitted = submit_col.form_submit_button("检索 /", width="stretch")
-if search_submitted:
-    search_state = terminal_search_state(terminal_query)
-    if search_state["q"]:
-        st.session_state[DEEP_LINK_STATE_KEY] = {
-            "page": "Event_Intelligence",
-            "params": search_state,
-        }
-        st.switch_page(page_targets["Event_Intelligence"])
-    else:
-        st.warning("请输入公司、Ticker、事件类型或 Event ID。")
+active_flow = str(st.query_params.get("preview_flow") or "全部事件")
+if active_flow not in FLOW_PRESETS:
+    active_flow = "全部事件"
+preview_query = str(st.query_params.get("preview_query") or "")
+public_state = query_choice(st.query_params.get("preview_state"), PUBLIC_STATES)
+public_family = str(st.query_params.get("preview_family") or "")
+public_source = str(st.query_params.get("preview_source") or "")
+public_period = query_choice(
+    st.query_params.get("preview_period"),
+    frozenset(PUBLIC_PERIODS),
+    "全部时间",
+)
+public_sort = query_choice(
+    st.query_params.get("preview_sort"),
+    frozenset(PUBLIC_SORTS.values()),
+    "latest",
+)
+public_page_size = bounded_int(
+    st.query_params.get("preview_page_size"),
+    24,
+    minimum=12,
+    maximum=48,
+)
+if public_page_size not in {12, 24, 48}:
+    public_page_size = 24
+public_page = bounded_int(st.query_params.get("preview_page"), 1, minimum=1, maximum=10000)
 
 counts = overview["counts"]
 event_status = overview["event_status"]
-timing = overview.get("timing", {})
-event_age = timing.get("latest_event_age_seconds")
-cycle_duration = timing.get("worker_cycle_duration_seconds")
-status_strip(
-    [
-        ("事件", f"{counts['canonical_events']:,}", ""),
-        ("证据核验", f"{event_status.get('verified', 0):,}", "ok"),
-        ("待复核", f"{overview['review_queue']:,}", "watch" if overview["review_queue"] else "ok"),
-        ("证据边", f"{counts['event_evidence']:,}", ""),
-        ("最新事件", f"{event_age / 60:.1f} min" if event_age is not None else "—", ""),
-        ("Worker", f"{cycle_duration:.2f} s" if cycle_duration is not None else "—", "ok"),
-    ]
+rough_reviewed = int(
+    overview.get("rough_reviewed")
+    or (overview.get("job_status") or {}).get("COMPLETED_AUTHORIZED_ROUGH_REVIEW")
+    or 0
 )
-render_flow_shortcuts(event_status)
-try:
-    facets = api_request("/api/v1/events/facets")
-except Exception:
-    facets = {"families": [], "sources": []}
-render_command_palette(facets)
-
-left, right = st.columns([1.65, .85], gap="medium")
-with left:
-    recent = overview["recent_events"]
-    section_header("实时事件流", f"LATEST {len(recent)} · UTC · 点击进入证据工作台")
-    if recent:
-        render_event_feed(recent)
-    else:
-        st.info("暂无事件。")
-
-with right:
-    section_header("系统复核队列", "EVIDENCE REVIEW")
-    st.markdown(
-        '<div class="queue-card">'
-        '<div class="queue-card-label">等待证据或规则复核</div>'
-        f'<div class="queue-card-value">{overview["review_queue"]:,}</div>'
-        '<div class="queue-card-copy">模型只做 shadow 分流；无充分证据的事件不会自动升级。</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-    st.page_link("pages/1_Event_Intelligence.py", label="打开事件工作台")
-    pulse_grid(
-        [
-            ("证据核验", f"{event_status.get('verified', 0):,}", "ok"),
-            ("候选", f"{event_status.get('candidate', 0):,}", "watch"),
-            ("证据不足", f"{event_status.get('weak', 0):,}", "watch"),
-            ("已拒绝", f"{event_status.get('rejected', 0):,}", ""),
-        ]
-    )
-
-    section_header("来源脉搏", "COLLECTOR HEALTH")
-    states = [source_health_state(source) for source in overview["source_health"]]
+public_funnel = overview.get("public_funnel") or {
+    "total": int(counts.get("canonical_events") or 0),
+    "verified": int(event_status.get("verified") or 0),
+    "excluded": int(event_status.get("rejected") or 0),
+    "insufficient": int(event_status.get("weak") or 0),
+    "rough_reviewed": rough_reviewed,
+    "pending_verification": max(
+        0,
+        int(event_status.get("candidate") or 0) - rough_reviewed,
+    ),
+}
+timing = overview.get("timing", {})
+event_age = timing.get("latest_new_event_age_seconds", timing.get("latest_event_age_seconds"))
+worker_age = timing.get("latest_worker_success_age_seconds")
+cycle_duration = timing.get("worker_cycle_duration_seconds") if UI_ROLE == "admin" else None
+if UI_ROLE == "admin":
+    states = [source_health_state(source) for source in overview.get("source_health", [])]
     source_ok = sum(state[1] == "OK" for state in states)
     source_watch = sum(state[1] == "WATCH" for state in states)
     source_error = sum(state[1] == "ERROR" for state in states)
-    p0_sources = sum(source.get("authority_tier") == "P0" for source in overview["source_health"])
-    pulse_grid(
-        [
-            ("健康", source_ok, "ok"),
-            ("观察", source_watch, "watch" if source_watch else ""),
-            ("异常", source_error, "risk" if source_error else "ok"),
-            ("P0 来源", p0_sources, ""),
-        ]
+    p0_sources = sum(
+        source.get("authority_tier") == "P0" for source in overview.get("source_health", [])
+    )
+    attention_sources = source_watch + source_error
+
+review_queue = int(overview["review_queue"] or 0)
+if review_queue:
+    brief_copy = f"有 {review_queue:,} 条事件仍在等待证据或规则核验。"
+    brief_copy += (
+        "先在当前页预览证据与下一步行动，需要完整工具时再进入人工复核。"
+        if UI_ROLE == "admin"
+        else "你可以先看原始证据与上下文，不必把未闭合的信息当成确定事实。"
+    )
+else:
+    brief_copy = (
+        "当前没有等待复核的事件。可以浏览最新事件流，或按需展开运行健康与来源状态。"
+        if UI_ROLE == "admin"
+        else "当前没有等待核验的事件。你可以从最新事件流开始浏览。"
+    )
+situation_brief(
+    "先看需要判断的事件" if UI_ROLE == "admin" else "先看证据是否足够",
+    brief_copy,
+    focus_label="当前优先级",
+    focus_value=(
+        f"{review_queue:,} {'待复核' if UI_ROLE == 'admin' else '待核验'}"
+        if review_queue
+        else "队列已清"
+    ),
+    focus_state="watch" if review_queue else "ok",
+)
+if UI_ROLE != "admin":
+    st.markdown(
+        '<a class="mobile-primary-action" href="#live-events" target="_self">'
+        '查看事件与证据 <span aria-hidden="true">↓</span></a>',
+        unsafe_allow_html=True,
     )
 
-    audit = overview["audit"]
-    if sum(audit.values()) == 0:
-        st.markdown(
-            '<div class="boundary-ok" role="status">硬边界审计 0 违规 · NO TRADING / NO AUTO VERIFY / NO LEAKAGE</div>',
-            unsafe_allow_html=True,
+if UI_ROLE == "admin":
+    with st.form("terminal-global-search", border=False):
+        search_col, submit_col = st.columns([5.4, .8], gap="small", vertical_alignment="bottom")
+        terminal_query = search_col.text_input(
+            "全终端检索",
+            placeholder="搜索公司、Ticker、事件类型或 Event ID",
+            label_visibility="collapsed",
+            value=preview_query,
+        )
+        search_submitted = submit_col.form_submit_button("检索 /", width="stretch")
+    if search_submitted:
+        search_state = terminal_search_state(terminal_query)
+        st.query_params.clear()
+        st.query_params["preview_flow"] = "全部事件"
+        if search_state["q"]:
+            st.query_params["preview_query"] = search_state["q"]
+        st.rerun()
+    status_items = [
+        ("待复核", f"{review_queue:,}", "watch" if review_queue else "ok"),
+        ("已核验证据", f"{event_status.get('verified', 0):,}", "ok"),
+        (
+            "需关注来源",
+            f"{attention_sources:,}",
+            "risk" if source_error else ("watch" if source_watch else "ok"),
+        ),
+        ("最新事件", format_elapsed(event_age), ""),
+    ]
+else:
+    latest_worker = overview.get("latest_worker_cycle") or {}
+    worker_status = str(latest_worker.get("status") or "").upper()
+    worker_fresh = worker_age is None or float(worker_age) <= 1800
+    collector_ok = worker_status in {"SUCCESS", "COMPLETED", "OK"} and worker_fresh
+    collector_label = "正常" if collector_ok else ("状态未知" if not worker_status else "需关注")
+    collector_state = "ok" if collector_ok else ("" if not worker_status else "watch")
+    funnel_total = max(0, int(public_funnel.get("total") or 0))
+    rough_stage = max(0, int(public_funnel.get("rough_reviewed") or 0))
+    formal_disposition = sum(
+        max(0, int(public_funnel.get(key) or 0))
+        for key in ("verified", "excluded", "insufficient")
+    )
+    formal_value = f"{formal_disposition:,}/{funnel_total:,}" if funnel_total else "—"
+    status_items = [
+        ("采集状态", collector_label, collector_state),
+        ("最近成功采集", format_elapsed(worker_age), collector_state),
+        ("当前粗审阶段", f"{rough_stage:,} 条", "watch" if rough_stage else "ok"),
+        ("正式处置状态", formal_value, "ok" if funnel_total and formal_disposition == funnel_total else "watch"),
+    ]
+status_strip(status_items)
+if UI_ROLE != "admin":
+    st.markdown(
+        '<p class="public-health-explainer">'
+        f'采集与核验是两条独立时间线（最近发现新事件：{escape(format_elapsed(event_age))} 前）。'
+        '正式处置含已核验、证据不足和已排除，不表示全部已通过。'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+if UI_ROLE == "admin":
+    render_evidence_route(event_status, review_queue)
+render_flow_shortcuts(
+    event_status,
+    public=UI_ROLE != "admin",
+    public_funnel=public_funnel if UI_ROLE != "admin" else None,
+)
+if UI_ROLE != "admin":
+    st.markdown(
+        '<p class="mobile-scroll-cue" aria-label="筛选提示">左右滑动可查看全部状态筛选 · 向下浏览事件</p>',
+        unsafe_allow_html=True,
+    )
+
+facets: dict[str, object] = {"families": [], "sources": []}
+feed_loading = st.empty()
+if UI_ROLE != "admin":
+    feed_loading.markdown(
+        '<section class="fr-loading-state" role="status" aria-live="polite">'
+        '<strong class="fr-state-title">正在加载当前筛选的事件</strong>'
+        '<p class="fr-state-copy">筛选条件和当前页面会被保留；不会切换到其他页面。</p>'
+        '</section>',
+        unsafe_allow_html=True,
+    )
+try:
+    facets = api_request("/api/v1/events/facets")
+except Exception:
+    pass
+
+if UI_ROLE != "admin":
+    family_options = facet_values(facets, "families", public_family)
+    source_options = facet_values(facets, "sources", public_source)
+    family_counts = facet_counts(facets, "families")
+    source_counts = facet_counts(facets, "sources")
+    selected_period_label = public_period
+    selected_sort_label = next(
+        (label for label, value in PUBLIC_SORTS.items() if value == public_sort),
+        "最近发现",
+    )
+    with st.form("public-event-filters", border=False):
+        search_col, submit_col = st.columns([5.2, 1], gap="small", vertical_alignment="bottom")
+        terminal_query = search_col.text_input(
+            "搜索事件",
+            placeholder="搜索公司、Ticker、事件类别或 Event ID",
+            value=preview_query,
+        )
+        search_submitted = submit_col.form_submit_button("应用筛选", width="stretch")
+        family_col, source_col, period_col, sort_col, size_col = st.columns(
+            [1.4, 1.5, 1.05, 1.05, .8],
+            gap="small",
+        )
+        selected_family = family_col.selectbox(
+            "事件类别",
+            family_options,
+            index=family_options.index(public_family),
+            format_func=lambda value: public_family_label(value, family_counts),
+        )
+        selected_source = source_col.selectbox(
+            "信息来源",
+            source_options,
+            index=source_options.index(public_source),
+            format_func=lambda value: public_source_label(value, source_counts),
+        )
+        selected_period_label = period_col.selectbox(
+            "发生时间",
+            list(PUBLIC_PERIODS),
+            index=list(PUBLIC_PERIODS).index(public_period),
+        )
+        selected_sort_label = sort_col.selectbox(
+            "排序方式",
+            list(PUBLIC_SORTS),
+            index=list(PUBLIC_SORTS).index(selected_sort_label),
+        )
+        selected_page_size = size_col.selectbox(
+            "每页",
+            [12, 24, 48],
+            index=[12, 24, 48].index(public_page_size),
+            format_func=lambda value: f"{value} 条",
+        )
+    if search_submitted:
+        normalized_query = terminal_search_state(terminal_query)["q"]
+        updates = {
+            "preview_query": normalized_query,
+            "preview_family": selected_family,
+            "preview_source": selected_source,
+            "preview_period": selected_period_label if selected_period_label != "全部时间" else "",
+            "preview_sort": PUBLIC_SORTS[selected_sort_label],
+            "preview_page_size": str(selected_page_size),
+        }
+        for key, value in updates.items():
+            if value:
+                st.query_params[key] = value
+            else:
+                st.query_params.pop(key, None)
+        st.query_params.pop("preview_event_id", None)
+        st.query_params.pop("preview_page", None)
+        st.rerun()
+
+try:
+    if UI_ROLE == "admin":
+        feed_result = api_request(
+            query_path(
+                "/api/v1/events",
+                status=FLOW_PRESETS[active_flow]["status"],
+                q=preview_query,
+                limit=12,
+            )
         )
     else:
-        st.error(f"审计异常：{audit}")
-    st.caption(f"Ledger Schema {overview['schema_version']} · SQLite quick_check={overview['quick_check']}")
+        period_days = PUBLIC_PERIODS[public_period]
+        date_from = (
+            (datetime.now(timezone.utc).date() - timedelta(days=period_days)).isoformat()
+            if period_days
+            else None
+        )
+        feed_result = api_request(
+            query_path(
+                "/api/v1/events",
+                public_state=public_state,
+                family=public_family,
+                source=public_source,
+                q=preview_query,
+                date_from=date_from,
+                sort=public_sort,
+                limit=public_page_size,
+                offset=(public_page - 1) * public_page_size,
+            )
+        )
+    live_feed = list(feed_result.get("items") or [])
+    live_total = int(feed_result.get("total") or 0)
+except Exception:
+    live_feed = overview["recent_events"]
+    live_total = len(live_feed)
+finally:
+    feed_loading.empty()
 
-st.caption("J/K 在事件工作台切换事件 · / 聚焦检索 · 所有行情只读 · 所有模型输出均为 shadow")
+preview_event_id = str(st.query_params.get("preview_event_id") or "")
+if preview_event_id:
+    st.markdown('<div id="event-preview" class="event-preview-focus"></div>', unsafe_allow_html=True)
+    focus_event_preview(preview_event_id)
+    preview_loading = st.empty()
+    preview_loading.markdown(
+        '<section class="fr-loading-state fr-loading-compact" role="status" aria-live="polite">'
+        '<strong class="fr-state-title">正在打开当前页事件预览</strong>'
+        '<p class="fr-state-copy">筛选、排序和分页会保持不变。</p>'
+        '</section>',
+        unsafe_allow_html=True,
+    )
+    try:
+        preview_detail = api_request(f"/api/v1/events/{preview_event_id}")
+        preview_evidence = api_request(f"/api/v1/events/{preview_event_id}/evidence")["items"]
+    except Exception as exc:
+        render_api_error(exc)
+    else:
+        preview_event = preview_detail["event"]
+        preview_version = preview_detail.get("current_version") or {}
+        if not isinstance(preview_version, dict):
+            preview_version = {}
+        preview_facts = preview_version.get("facts") or {}
+        if not isinstance(preview_facts, dict):
+            preview_facts = {}
+        public_verification = preview_detail.get("verification_method")
+        if not isinstance(public_verification, dict):
+            public_verification = None
+        preview_model = (
+            preview_detail.get("model_shadow_output") or {} if UI_ROLE == "admin" else {}
+        )
+        if UI_ROLE == "admin":
+            preview_company = preview_event.get("company_name") or preview_event_id
+            preview_type = str(preview_event.get("event_type") or "event").replace("_", " ")
+            preview_summary = (
+                preview_facts.get("evidence_summary")
+                or preview_event.get("evidence_excerpt")
+                or "尚无结构化事件摘要。"
+            )
+            preview_summary = " ".join(str(preview_summary).split())
+        else:
+            copy_input = dict(preview_event)
+            copy_input["facts"] = preview_facts
+            if preview_evidence and not copy_input.get("credibility_tier"):
+                copy_input["credibility_tier"] = preview_evidence[0].get("authority_tier")
+            public_copy = public_event_copy(copy_input)
+            preview_company = public_copy["subject"]
+            preview_type = public_copy["family"]
+        with st.container(border=True):
+            section_header(
+                "当前页事件预览",
+                "留在态势总览 · 核对原始证据与上下文"
+                if UI_ROLE != "admin"
+                else "留在态势总览 · 需要时再进入人工复核",
+            )
+            if UI_ROLE == "admin":
+                st.markdown(
+                    '<div class="home-event-preview">'
+                    f'<div class="event-kicker">{escape(str(preview_event.get("event_date") or "—"))} · '
+                    f'{escape(str(preview_event.get("ticker_at_event") or "NO TICKER"))} · '
+                    f'{escape(preview_type.upper())}</div>'
+                    f'<div class="event-headline">{escape(str(preview_company))}</div>'
+                    f'<div class="event-summary">{escape(str(preview_summary))}</div>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                evidence_authority = (
+                    PUBLIC_AUTHORITY_LABELS.get(
+                        str(preview_evidence[0].get("authority_tier") or "P?"),
+                        "来源待核实",
+                    )
+                    if preview_evidence
+                    else "尚无可引用证据"
+                )
+                reviewed_at = str(
+                    (public_verification or {}).get("reviewed_at")
+                    or preview_event.get("reviewed_at")
+                    or ""
+                )
+                review_copy = {
+                    "verified": "正式核验已完成",
+                    "excluded": "线索已排除",
+                    "insufficient": "证据不足，不形成结论",
+                    "rough_reviewed": "粗审已完成，尚未正式核验",
+                    "pending_verification": "尚未完成正式核验",
+                }[public_copy["state"]]
+                if reviewed_at and public_copy["state"] == "rough_reviewed":
+                    review_copy += f" · {escape(reviewed_at[:10])}"
+                st.markdown(
+                    '<section class="event-answer" aria-label="事件阅读摘要">'
+                    '<div class="event-answer-meta">'
+                    f'<span>{escape(str(preview_event.get("event_date") or "日期待确认"))}</span>'
+                    f'<span>{escape(str(preview_event.get("ticker_at_event") or "无证券代码"))}</span>'
+                    f'<span>{escape(public_copy["family"])}</span>'
+                    '</div>'
+                    f'<h2>{escape(preview_company)}</h2>'
+                    '<div class="event-answer-grid">'
+                    '<article><span>发生了什么</span>'
+                    f'<p>{escape(public_copy["summary"])}</p></article>'
+                    '<article><span>为什么关注</span>'
+                    f'<p>{escape(public_copy["relevance"])}</p></article>'
+                    '<article><span>当前状态</span>'
+                    f'<p><strong>{escape(public_copy["state_label"])}</strong> · {review_copy}</p></article>'
+                    '<article><span>证据情况</span>'
+                    f'<p>{len(preview_evidence):,} 条关联证据 · {escape(evidence_authority)}</p></article>'
+                    '</div>'
+                    '</section>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    public_time_markup(preview_event, preview_detail, public_verification),
+                    unsafe_allow_html=True,
+                )
+            if UI_ROLE != "admin" and public_verification:
+                st.markdown(
+                    public_verification_markup(
+                        public_copy["state"], public_verification, preview_evidence
+                    ),
+                    unsafe_allow_html=True,
+                )
+            if preview_evidence and UI_ROLE == "admin":
+                top_evidence = preview_evidence[0]
+                top_passage = (
+                    top_evidence.get("evidence_passage")
+                    or top_evidence.get("observation_summary")
+                    or "暂无精确证据段落"
+                )
+                top_passage = " ".join(str(top_passage).split())
+                authority = str(top_evidence.get("authority_tier") or "P?")
+                evidence_label = f"最高权威 {authority}"
+                st.markdown(
+                    '<div class="preview-evidence">'
+                    f'<span>{escape(evidence_label)}</span>'
+                    f'<p>{escape(top_passage)}</p>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+            elif preview_evidence:
+                top_evidence = preview_evidence[0]
+                top_passage = " ".join(
+                    str(
+                        top_evidence.get("evidence_passage")
+                        or top_evidence.get("observation_summary")
+                        or "暂无精确证据段落"
+                    ).split()
+                )
+                if len(top_passage) > 900:
+                    top_passage = top_passage[:897].rstrip() + "…"
+                with st.expander("查看原始证据节选（可能为英文）", expanded=False):
+                    st.markdown(
+                        '<div class="preview-evidence raw-evidence">'
+                        '<span>原始证据 · 请结合完整文件阅读</span>'
+                        f'<p>{escape(top_passage)}</p>'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
+            if UI_ROLE == "admin":
+                render_next_action_prompt(
+                    next_action_guidance(preview_event, preview_evidence, preview_model)
+                )
+            else:
+                render_public_reading_prompt(preview_event, preview_evidence)
+            if UI_ROLE == "admin":
+                full_col, close_col = st.columns([1.25, 1], gap="small")
+                if full_col.button(
+                    "进入人工复核（切换工作区）",
+                    type="primary",
+                    width="stretch",
+                    key="open-full-event-workbench",
+                ):
+                    st.session_state[DEEP_LINK_STATE_KEY] = {
+                        "page": "Event_Intelligence",
+                        "params": {"flow": active_flow, "event_id": preview_event_id},
+                    }
+                    st.switch_page(page_targets["Event_Intelligence"])
+            else:
+                method_col, close_col = st.columns([1.25, 1], gap="small")
+                source_url = public_source_url(preview_evidence)
+                if source_url:
+                    method_col.link_button(
+                        "打开原始来源（外部网站）",
+                        source_url,
+                        width="stretch",
+                    )
+                else:
+                    method_col.page_link(
+                        "pages/5_Method_and_Boundaries.py",
+                        label="如何理解证据与置信度",
+                        width="stretch",
+                    )
+            if close_col.button(
+                "收起当前页预览",
+                width="stretch",
+                key="close-home-event-preview",
+            ):
+                st.query_params.pop("preview_event_id", None)
+                st.rerun()
+    finally:
+        preview_loading.empty()
+
+if UI_ROLE != "admin":
+    total_pages = max(1, ceil(live_total / public_page_size))
+    if live_total and public_page > total_pages:
+        st.query_params["preview_page"] = str(total_pages)
+        st.query_params.pop("preview_event_id", None)
+        st.rerun()
+    active_state_label = PUBLIC_STATE_LABELS.get(public_state, "全部状态")
+    st.markdown(
+        '<section class="queue-card queue-card-horizontal" aria-label="优先核验队列">'
+        '<div>'
+        '<div class="queue-card-label">优先核验队列</div>'
+        f'<div class="queue-card-value">{review_queue:,}</div>'
+        '</div>'
+        '<div class="queue-card-copy">'
+        '这里只统计仍需要补证或规则处理的优先事项；它不是全部“待核验”事件，也不代表市场方向。'
+        '<div class="queue-card-next">下一步 · 打开事件，先读中文结论，再核对原始证据</div>'
+        '</div>'
+        '</section>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div id="live-events"></div>', unsafe_allow_html=True)
+    feed_context = active_state_label
+    if preview_query:
+        feed_context += f" · 搜索 {preview_query}"
+    section_header(
+        "事件浏览",
+        f"本页 {len(live_feed):,} 条 · 共 {live_total:,} 条 · 第 {public_page}/{total_pages} 页 · UTC",
+    )
+    if live_feed:
+        link_context = {
+            "preview_state": public_state,
+            "preview_query": preview_query,
+            "preview_family": public_family,
+            "preview_source": public_source,
+            "preview_period": public_period if public_period != "全部时间" else "",
+            "preview_sort": public_sort,
+            "preview_page_size": public_page_size,
+            "preview_page": public_page,
+        }
+        render_event_feed(
+            live_feed,
+            flow=active_flow,
+            public=True,
+            link_context=link_context,
+        )
+    else:
+        st.markdown(
+            '<section class="fr-empty-state" role="status">'
+            '<strong>当前筛选没有匹配事件</strong>'
+            '<p>可以扩大时间范围、清除来源或类别筛选；系统不会用演示数据填充空结果。</p>'
+            '</section>',
+            unsafe_allow_html=True,
+        )
+
+    def public_page_url(page_number: int) -> str:
+        params = {
+            "preview_state": public_state,
+            "preview_query": preview_query,
+            "preview_family": public_family,
+            "preview_source": public_source,
+            "preview_period": public_period if public_period != "全部时间" else "",
+            "preview_sort": public_sort,
+            "preview_page_size": public_page_size,
+            "preview_page": page_number if page_number > 1 else "",
+        }
+        return "./?" + urlencode(
+            {key: value for key, value in params.items() if value not in (None, "")}
+        ) + "#live-events"
+
+    previous_link = (
+        f'<a href="{escape(public_page_url(public_page - 1), quote=True)}" target="_self" aria-label="上一页">← 上一页</a>'
+        if public_page > 1
+        else '<span aria-disabled="true">← 上一页</span>'
+    )
+    next_link = (
+        f'<a href="{escape(public_page_url(public_page + 1), quote=True)}" target="_self" aria-label="下一页">下一页 →</a>'
+        if public_page < total_pages
+        else '<span aria-disabled="true">下一页 →</span>'
+    )
+    st.markdown(
+        '<nav class="fr-pagination" aria-label="事件分页">'
+        f'{previous_link}'
+        f'<span class="fr-pagination-status">第 {public_page} / {total_pages} 页</span>'
+        f'{next_link}'
+        '<a href="./#live-events" target="_self">清除全部筛选</a>'
+        '</nav>',
+        unsafe_allow_html=True,
+    )
+else:
+    left, right = st.columns([1.78, .82], gap="large")
+    with left:
+        st.markdown('<div id="live-events"></div>', unsafe_allow_html=True)
+        feed_context = f"{active_flow} · 当前页预览"
+        if preview_query:
+            feed_context += f" · 搜索 {preview_query}"
+        section_header("实时事件流", f"最新 {len(live_feed)} 条 · UTC · {feed_context}")
+        if live_feed:
+            render_event_feed(live_feed, flow=active_flow, public=False)
+        else:
+            st.info("暂无事件。")
+
+    with right:
+        section_header("系统复核队列", "证据复核")
+        st.markdown(
+            '<div class="queue-card">'
+            '<div class="queue-card-label">等待人工复核</div>'
+            f'<div class="queue-card-value">{review_queue:,}</div>'
+            '<div class="queue-card-copy">'
+            '模型只做 shadow 分流；证据不足、来源冲突或规则未闭合的事件都留给人判断。'
+            '</div>'
+            '<div class="queue-card-next">'
+            '下一步 · 先在当前页预览，需要完整工具时再切换工作区'
+            '</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("在当前页查看待复核事件", width="stretch"):
+            st.query_params["preview_flow"] = "待复核"
+            st.query_params.pop("preview_query", None)
+            st.query_params.pop("preview_event_id", None)
+            st.rerun()
+        st.caption("完整筛选、证据代理和复核记录位于左侧“人工复核”。")
+
+        with st.expander("系统与来源健康", expanded=False):
+            pulse_grid(
+                [
+                    ("健康来源", source_ok, "ok"),
+                    ("观察", source_watch, "watch" if source_watch else ""),
+                    ("异常", source_error, "risk" if source_error else "ok"),
+                    ("P0 来源", p0_sources, ""),
+                    ("事件总数", f"{counts['canonical_events']:,}", ""),
+                    ("证据边", f"{counts['event_evidence']:,}", ""),
+                    (
+                        "Worker",
+                        f"{cycle_duration:.2f} s" if cycle_duration is not None else "—",
+                        "ok",
+                    ),
+                    ("Schema", overview["schema_version"], ""),
+                ]
+            )
+            audit = overview["audit"]
+            if sum(audit.values()) == 0:
+                st.markdown(
+                    '<div class="boundary-ok" role="status">硬边界审计 0 违规 · NO TRADING / NO AUTO VERIFY / NO LEAKAGE</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.error("内部边界审计需要处理。")
+            st.caption(f"SQLite quick_check={overview['quick_check']}")
+
+        with st.expander("其他工作面", expanded=False):
+            render_command_palette(facets)
+
+st.caption(
+    "J/K 在人工复核中切换事件 · / 聚焦检索 · 所有行情只读 · 所有模型输出均为 shadow"
+    if UI_ROLE == "admin"
+    else "事件状态互斥且总和等于全部事件 · 时间统一为 UTC · 原始证据可能保留发布语言"
+)

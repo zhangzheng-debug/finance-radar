@@ -62,7 +62,7 @@ if missing:
 PY
 
 rollback() {
-    systemctl stop finance-radar-api finance-radar-web finance-radar-worker 2>/dev/null || true
+    systemctl stop finance-radar-api finance-radar-web finance-radar-admin finance-radar-worker 2>/dev/null || true
     if [ -d "$BASE" ]; then
         mv "$BASE" "$FAILED_BASE" || true
     fi
@@ -107,6 +107,14 @@ if grep -q '^FINANCE_RADAR_WEB_URL=' /etc/finance-radar.env; then
 else
     printf 'FINANCE_RADAR_WEB_URL=%s\n' "$PUBLIC_WEB_URL" >> /etc/finance-radar.env
 fi
+# Recreate rather than copy/filter the minimal public environment. This keeps
+# every administrator, Telegram and provider secret out of the public process.
+install -m 0640 -o root -g finance-radar /dev/null /etc/finance-radar-public.env
+printf '%s\n' \
+    'FINANCE_RADAR_API_URL=http://127.0.0.1:18000' \
+    'FINANCE_RADAR_UI_ROLE=public' \
+    'FINANCE_RADAR_SHOW_DEBUG=0' \
+    > /etc/finance-radar-public.env
 
 python3 -m venv "$BASE/venv"
 "$BASE/venv/bin/python" -m pip install --upgrade pip
@@ -123,7 +131,23 @@ if [ -f "$BASE/var/www/finance-radar-terminal/index.html" ]; then
 fi
 install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-api.service" /etc/systemd/system/
 install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-web.service" /etc/systemd/system/
+if [ -f "$BASE/config/etc/systemd/system/finance-radar-admin.service" ]; then
+    install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-admin.service" \
+        /etc/systemd/system/
+elif [ -f "$BASE/current/deployment/systemd/finance-radar-admin.service" ]; then
+    install -m 0644 "$BASE/current/deployment/systemd/finance-radar-admin.service" \
+        /etc/systemd/system/
+fi
 install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-worker.service" /etc/systemd/system/
+# A recovered host can retain its optional Telegram override.  Refresh that
+# override from the prepared release so it preserves delivery without reviving
+# automatic formal verification.
+if [ -f /etc/systemd/system/finance-radar-worker.service.d/telegram-send.conf ] && \
+   [ -f "$BASE/current/deployment/systemd/finance-radar-worker-send.conf" ]; then
+    install -d -m 0755 /etc/systemd/system/finance-radar-worker.service.d
+    install -m 0644 "$BASE/current/deployment/systemd/finance-radar-worker-send.conf" \
+        /etc/systemd/system/finance-radar-worker.service.d/telegram-send.conf
+fi
 install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-backup.service" /etc/systemd/system/
 install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-backup.timer" /etc/systemd/system/
 if [ -f "$BASE/config/etc/systemd/system/finance-radar-evidence-llm.service" ]; then

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,48 @@ EVIDENCE_SNAPSHOT_SOURCE_IDS = (
     "us_marad",
     "us_treasury",
 )
+
+
+PUBLIC_EVENT_STATE_CTE = """
+WITH ranked_rough_reviews AS (
+    SELECT job_id,event_id,payload_json,updated_at,
+           ROW_NUMBER() OVER (
+               PARTITION BY event_id
+               ORDER BY updated_at DESC,job_id DESC
+           ) AS rough_rank
+    FROM pipeline_jobs
+    WHERE status='COMPLETED_AUTHORIZED_ROUGH_REVIEW'
+),
+event_public AS (
+    SELECT canonical.*,
+           CASE
+             WHEN canonical.status='verified' THEN 'verified'
+             WHEN canonical.status='rejected' THEN 'excluded'
+             WHEN canonical.status='weak' OR (
+               rough.job_id IS NOT NULL
+               AND CASE WHEN json_valid(rough.payload_json)
+                 THEN COALESCE(
+                   json_extract(rough.payload_json,'$.rough_review.outcome'),
+                   CASE WHEN UPPER(COALESCE(
+                     json_extract(rough.payload_json,'$.rough_review.decision_status'),''
+                   ))='INSUFFICIENT' THEN 'ROUGH_INSUFFICIENT' END
+                 )
+               END='ROUGH_INSUFFICIENT'
+             ) THEN 'insufficient'
+             WHEN canonical.status='candidate' AND rough.job_id IS NOT NULL THEN 'rough_reviewed'
+             ELSE 'pending_verification'
+           END AS public_state,
+           COALESCE(
+             CASE WHEN json_valid(rough.payload_json)
+               THEN json_extract(rough.payload_json,'$.rough_review.reviewed_at')
+             END,
+             rough.updated_at
+           ) AS reviewed_at
+    FROM canonical_events canonical
+    LEFT JOIN ranked_rough_reviews rough
+      ON rough.event_id=canonical.event_id AND rough.rough_rank=1
+)
+""".strip()
 
 
 def _dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -69,9 +111,13 @@ class LedgerRepository:
             ).fetchone()
             return int(row["version"] or 0)
 
-    def health(self) -> dict[str, Any]:
+    def health(self, *, run_integrity_check: bool = True) -> dict[str, Any]:
         with closing(self.connect()) as connection:
-            quick_check = connection.execute("PRAGMA quick_check").fetchone()[0]
+            quick_check = (
+                connection.execute("PRAGMA quick_check").fetchone()[0]
+                if run_integrity_check
+                else "deferred"
+            )
             counts = {
                 table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 for table in (
@@ -105,20 +151,27 @@ class LedgerRepository:
             last_event_update = connection.execute(
                 "SELECT MAX(last_updated_at) FROM canonical_events"
             ).fetchone()[0]
+            last_new_event_at = connection.execute(
+                "SELECT MAX(first_seen_at) FROM canonical_events"
+            ).fetchone()[0]
         return {
-            "status": "ok" if quick_check == "ok" and not any(audit.values()) else "degraded",
+            "status": "ok"
+            if (quick_check == "ok" or not run_integrity_check) and not any(audit.values())
+            else "degraded",
             "database": str(self.path),
             "database_bytes": self.path.stat().st_size,
             "schema_version": self.schema_version(),
             "quick_check": quick_check,
+            "integrity_check_source": "live_database" if run_integrity_check else "not_run",
             "last_event_update": last_event_update,
+            "last_new_event_at": last_new_event_at,
             "counts": counts,
             "event_status": event_status,
             "audit": audit,
         }
 
-    def overview(self, recent_limit: int = 12) -> dict[str, Any]:
-        health = self.health()
+    def overview(self, recent_limit: int = 12, *, run_integrity_check: bool = True) -> dict[str, Any]:
+        health = self.health(run_integrity_check=run_integrity_check)
         with closing(self.connect()) as connection:
             job_status = {
                 row["status"]: row["n"]
@@ -127,7 +180,15 @@ class LedgerRepository:
                 )
             }
             review_queue = connection.execute(
-                "SELECT COUNT(*) FROM canonical_events WHERE status IN ('candidate','weak')"
+                """SELECT COUNT(DISTINCT j.event_id)
+                   FROM pipeline_jobs j
+                   JOIN canonical_events e ON e.event_id=j.event_id
+                   WHERE e.status IN ('candidate','weak')
+                     AND j.status IN (
+                         'PENDING_PRIMARY_EVIDENCE',
+                         'PENDING_EVIDENCE_REVIEW',
+                         'PENDING_HUMAN_REVIEW'
+                     )"""
             ).fetchone()[0]
             alert_status = {
                 row["status"]: row["n"]
@@ -135,13 +196,118 @@ class LedgerRepository:
                     "SELECT status, COUNT(*) AS n FROM alert_outbox GROUP BY status"
                 )
             }
+            public_funnel = self._public_funnel(connection)
         return {
             **health,
+            "public_funnel": public_funnel,
             "review_queue": review_queue,
+            "rough_reviewed": int(job_status.get("COMPLETED_AUTHORIZED_ROUGH_REVIEW", 0)),
             "job_status": job_status,
             "alert_status": alert_status,
             "recent_events": self.list_events(status="verified", limit=recent_limit)["items"],
             "source_health": self.list_source_health(),
+        }
+
+    @staticmethod
+    def _rough_review_metadata(payload_json: Any, updated_at: Any) -> dict[str, str | None]:
+        payload = _json(payload_json, {})
+        rough_review = payload.get("rough_review") if isinstance(payload, dict) else None
+        outcome = rough_review.get("outcome") if isinstance(rough_review, dict) else None
+        if not outcome and isinstance(rough_review, dict):
+            decision_status = str(rough_review.get("decision_status") or "").upper()
+            if decision_status == "INSUFFICIENT":
+                outcome = "ROUGH_INSUFFICIENT"
+        reviewed_at = rough_review.get("reviewed_at") if isinstance(rough_review, dict) else None
+        return {
+            "outcome": str(outcome or "ROUGH_REVIEWED"),
+            "reviewed_at": str(reviewed_at or updated_at) if reviewed_at or updated_at else None,
+        }
+
+    @staticmethod
+    def _public_state(status: Any, rough_outcome: str | None) -> str:
+        normalized = str(status or "candidate").lower()
+        if normalized == "verified":
+            return "verified"
+        if normalized == "rejected":
+            return "excluded"
+        if rough_outcome == "ROUGH_INSUFFICIENT" or normalized == "weak":
+            return "insufficient"
+        if normalized == "candidate" and rough_outcome is not None:
+            return "rough_reviewed"
+        return "pending_verification"
+
+    @staticmethod
+    def _public_funnel(connection: sqlite3.Connection) -> dict[str, Any]:
+        """Build one exhaustive public disposition for every canonical event.
+
+        Formal canonical outcomes take precedence over rough-review metadata.
+        A completed rough review is intentionally not presented as verification.
+        """
+        events = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT event_id,status FROM canonical_events ORDER BY event_id"
+            )
+        ]
+        rough_by_event: dict[str, dict[str, str | None]] = {}
+        for row in connection.execute(
+            """SELECT event_id,payload_json,updated_at
+               FROM pipeline_jobs
+               WHERE status='COMPLETED_AUTHORIZED_ROUGH_REVIEW'
+               ORDER BY updated_at DESC,job_id DESC"""
+        ):
+            event_id = str(row["event_id"])
+            if event_id in rough_by_event:
+                continue
+            rough_by_event[event_id] = LedgerRepository._rough_review_metadata(
+                row["payload_json"], row["updated_at"]
+            )
+
+        buckets = {
+            "verified": 0,
+            "excluded": 0,
+            "insufficient": 0,
+            "pending_verification": 0,
+            "rough_reviewed": 0,
+        }
+        insufficient_breakdown = {
+            "rough_review": 0,
+            "canonical_weak_without_rough_insufficient": 0,
+        }
+        for event in events:
+            event_id = str(event["event_id"])
+            status = str(event.get("status") or "candidate").lower()
+            rough = rough_by_event.get(event_id)
+            rough_outcome = str(rough["outcome"]) if rough else None
+            public_state = LedgerRepository._public_state(status, rough_outcome)
+            buckets[public_state] += 1
+            if public_state == "insufficient" and rough_outcome == "ROUGH_INSUFFICIENT":
+                insufficient_breakdown["rough_review"] += 1
+            elif public_state == "insufficient" and status == "weak":
+                insufficient_breakdown["canonical_weak_without_rough_insufficient"] += 1
+
+        total = len(events)
+        partition_total = sum(buckets.values())
+        return {
+            "schema_version": 1,
+            "total": total,
+            **buckets,
+            "partition_total": partition_total,
+            "partition_complete": partition_total == total,
+            "insufficient_breakdown": insufficient_breakdown,
+            "definitions": {
+                "verified": "formally verified canonical events",
+                "excluded": "canonically rejected events",
+                "insufficient": (
+                    "canonical weak events or events whose latest authorized rough review "
+                    "concluded ROUGH_INSUFFICIENT"
+                ),
+                "pending_verification": "candidate events without a completed rough-review disposition",
+                "rough_reviewed": (
+                    "candidate events with an authorized rough review completed without an "
+                    "insufficient outcome; not formal verification"
+                ),
+            },
         }
 
     def list_source_health(self) -> list[dict[str, Any]]:
@@ -183,25 +349,69 @@ class LedgerRepository:
         self,
         *,
         status: str | None = None,
+        public_state: str | None = None,
         family: str | None = None,
         source: str | None = None,
         query: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        sort: str = "event_date",
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
+        allowed_public_states = {
+            "verified",
+            "excluded",
+            "insufficient",
+            "pending_verification",
+            "rough_reviewed",
+        }
+        if public_state and public_state not in allowed_public_states:
+            raise ValueError(f"unsupported public_state: {public_state}")
+        sort_orders = {
+            "event_date": "e.event_date DESC, e.last_updated_at DESC, e.event_id DESC",
+            "latest": "e.last_updated_at DESC, e.event_date DESC, e.event_id DESC",
+            "subject": (
+                "LOWER(COALESCE(e.company_name,e.ticker_at_event,e.event_id)) ASC, "
+                "e.event_date DESC, e.event_id ASC"
+            ),
+        }
+        if sort not in sort_orders:
+            raise ValueError(f"unsupported sort: {sort}")
+        for name, value in (("date_from", date_from), ("date_to", date_to)):
+            if value is None:
+                continue
+            try:
+                parsed_date = date.fromisoformat(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{name} must be YYYY-MM-DD") from exc
+            if parsed_date.isoformat() != value:
+                raise ValueError(f"{name} must be YYYY-MM-DD")
+        if date_from and date_to and date_from > date_to:
+            raise ValueError("date_from must not be after date_to")
+
         where: list[str] = []
         params: list[Any] = []
         if status:
             where.append("e.status=?")
             params.append(status)
+        if public_state:
+            where.append("e.public_state=?")
+            params.append(public_state)
         if family:
             where.append("e.event_family=?")
             params.append(family)
         if source:
             where.append("e.discovery_source=?")
             params.append(source)
+        if date_from:
+            where.append("e.event_date>=?")
+            params.append(date_from)
+        if date_to:
+            where.append("e.event_date<=?")
+            params.append(date_to)
         if query:
             where.append(
                 "(LOWER(COALESCE(e.company_name,'') || ' ' || COALESCE(e.ticker_at_event,'') || ' ' || "
@@ -214,35 +424,61 @@ class LedgerRepository:
             )
             params.extend([f"%{query.lower()}%", f"%{query.lower()}%"])
         where_sql = " WHERE " + " AND ".join(where) if where else ""
-        base = f"""
-            FROM canonical_events e
-            {where_sql}
-        """
+        paged_query = (
+            PUBLIC_EVENT_STATE_CTE
+            + f"""
+            , paged_events AS (
+                SELECT e.*,COUNT(*) OVER () AS _filtered_total
+                FROM event_public e
+                {where_sql}
+                ORDER BY {sort_orders[sort]}
+                LIMIT ? OFFSET ?
+            )
+            SELECT e.*,
+                   (SELECT COUNT(*) FROM event_evidence x WHERE x.event_id=e.event_id) AS evidence_count,
+                   (SELECT severity_grade FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS severity_grade,
+                   (SELECT credibility_tier FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS credibility_tier,
+                   (SELECT evidence_passage FROM event_evidence x WHERE x.event_id=e.event_id AND evidence_passage IS NOT NULL ORDER BY passage_score DESC, updated_at DESC LIMIT 1) AS evidence_excerpt,
+                   (SELECT r.title FROM event_observations eo
+                    JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                    WHERE eo.event_id=e.event_id
+                      AND eo.relation_type!='filtered_aggregated_noise'
+                    ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_title,
+                   (SELECT r.summary FROM event_observations eo
+                    JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                    WHERE eo.event_id=e.event_id
+                      AND eo.relation_type!='filtered_aggregated_noise'
+                    ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_summary
+            FROM paged_events e
+            ORDER BY {sort_orders[sort]}
+            """
+        )
         with closing(self.connect()) as connection:
-            total = connection.execute("SELECT COUNT(*) " + base, params).fetchone()[0]
             rows = connection.execute(
-                """
-                SELECT e.*,
-                       (SELECT COUNT(*) FROM event_evidence x WHERE x.event_id=e.event_id) AS evidence_count,
-                       (SELECT severity_grade FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS severity_grade,
-                       (SELECT credibility_tier FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS credibility_tier,
-                       (SELECT evidence_passage FROM event_evidence x WHERE x.event_id=e.event_id AND evidence_passage IS NOT NULL ORDER BY passage_score DESC, updated_at DESC LIMIT 1) AS evidence_excerpt,
-                       (SELECT r.title FROM event_observations eo
-                        JOIN latest_source_content r ON r.observation_id=eo.observation_id
-                        WHERE eo.event_id=e.event_id
-                          AND eo.relation_type!='filtered_aggregated_noise'
-                        ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_title,
-                       (SELECT r.summary FROM event_observations eo
-                        JOIN latest_source_content r ON r.observation_id=eo.observation_id
-                        WHERE eo.event_id=e.event_id
-                          AND eo.relation_type!='filtered_aggregated_noise'
-                        ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_summary
-                """
-                + base
-                + " ORDER BY e.event_date DESC, e.last_updated_at DESC LIMIT ? OFFSET ?",
+                paged_query,
                 [*params, limit, offset],
             ).fetchall()
-        return {"items": [dict(row) for row in rows], "total": total, "limit": limit, "offset": offset}
+            items = [dict(row) for row in rows]
+            if items:
+                total = int(items[0]["_filtered_total"])
+                for item in items:
+                    item.pop("_filtered_total", None)
+            else:
+                total = connection.execute(
+                    PUBLIC_EVENT_STATE_CTE
+                    + f" SELECT COUNT(*) FROM event_public e {where_sql}",
+                    params,
+                ).fetchone()[0]
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "public_state": public_state,
+            "date_from": date_from,
+            "date_to": date_to,
+            "sort": sort,
+        }
 
     def event_facets(self) -> dict[str, Any]:
         """Return bounded, live filter suggestions without exposing event content."""
@@ -281,6 +517,22 @@ class LedgerRepository:
             event = _dict(connection.execute("SELECT * FROM canonical_events WHERE event_id=?", (event_id,)).fetchone())
             if event is None:
                 return None
+            rough_row = connection.execute(
+                """SELECT payload_json,updated_at
+                   FROM pipeline_jobs
+                   WHERE event_id=? AND status='COMPLETED_AUTHORIZED_ROUGH_REVIEW'
+                   ORDER BY updated_at DESC,job_id DESC LIMIT 1""",
+                (event_id,),
+            ).fetchone()
+            rough = (
+                self._rough_review_metadata(rough_row["payload_json"], rough_row["updated_at"])
+                if rough_row is not None
+                else None
+            )
+            event["public_state"] = self._public_state(
+                event.get("status"), str(rough["outcome"]) if rough else None
+            )
+            event["reviewed_at"] = rough.get("reviewed_at") if rough else None
             version = _dict(
                 connection.execute(
                     "SELECT * FROM event_versions WHERE event_id=? AND version=?",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import uuid
 from contextlib import closing
@@ -9,8 +10,16 @@ from pathlib import Path
 from typing import Any
 
 
-OPS_SCHEMA_VERSION = 4
+OPS_SCHEMA_VERSION = 6
 DEMO_MODES = {"LIVE", "RECENT_CAPTURE", "REPLAY"}
+FORMAL_MUTATION_KIND_LIGHT_VERIFICATION = "LIGHT_VERIFICATION"
+FORMAL_MUTATION_STATES = {
+    "PREPARED",
+    "LEDGER_COMMITTED",
+    "RECOVERED",
+    "ABANDONED",
+    "RECOVERY_CONFLICT",
+}
 
 
 def utc_now() -> str:
@@ -19,6 +28,19 @@ def utc_now() -> str:
 
 def _stable_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _stable_sha256(value: Any) -> str:
+    return hashlib.sha256(_stable_json(value).encode("utf-8")).hexdigest()
+
+
+def _safe_json(value: Any, default: Any) -> Any:
+    if value in (None, ""):
+        return default
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return default
 
 
 class OperationsRepository:
@@ -56,7 +78,8 @@ class OperationsRepository:
                     model_version TEXT NOT NULL, output_label TEXT NOT NULL,
                     confidence REAL NOT NULL, latency_ms REAL NOT NULL,
                     shadow INTEGER NOT NULL CHECK(shadow IN (0,1)), created_at TEXT NOT NULL,
-                    output_json TEXT NOT NULL
+                    output_json TEXT NOT NULL,
+                    idempotency_key TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_model_event ON model_runs(event_id, created_at DESC);
                 CREATE TABLE IF NOT EXISTS worker_cycles(
@@ -66,7 +89,8 @@ class OperationsRepository:
                 CREATE TABLE IF NOT EXISTS backup_runs(
                     backup_id TEXT PRIMARY KEY, backup_path TEXT NOT NULL, source_bytes INTEGER NOT NULL,
                     backup_bytes INTEGER, quick_check TEXT, restored_count_json TEXT,
-                    status TEXT NOT NULL, created_at TEXT NOT NULL, verified_at TEXT, error TEXT
+                    status TEXT NOT NULL, created_at TEXT NOT NULL, verified_at TEXT, error TEXT,
+                    manifest_path TEXT, components_json TEXT, snapshot_kind TEXT NOT NULL DEFAULT 'ledger_only'
                 );
                 CREATE TABLE IF NOT EXISTS agent_decisions(
                     decision_id TEXT PRIMARY KEY, event_id TEXT NOT NULL, trace_id TEXT NOT NULL UNIQUE,
@@ -76,6 +100,49 @@ class OperationsRepository:
                     evidence_ids_json TEXT NOT NULL, latency_ms REAL NOT NULL, created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_event ON agent_decisions(event_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS light_verification_runs(
+                    run_id TEXT PRIMARY KEY,
+                    batch_id TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    before_version INTEGER NOT NULL,
+                    after_version INTEGER,
+                    evidence_ids_json TEXT NOT NULL,
+                    budget_json TEXT NOT NULL,
+                    rationale TEXT NOT NULL,
+                    before_model_json TEXT NOT NULL,
+                    after_model_json TEXT NOT NULL,
+                    applied INTEGER NOT NULL CHECK(applied IN (0,1)),
+                    created_at TEXT NOT NULL,
+                    mutation_id TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_light_verification_event
+                    ON light_verification_runs(event_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_light_verification_batch
+                    ON light_verification_runs(batch_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS formal_mutation_audits(
+                    mutation_id TEXT PRIMARY KEY,
+                    mutation_kind TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    before_version INTEGER NOT NULL,
+                    after_version INTEGER NOT NULL,
+                    decision TEXT NOT NULL,
+                    content_sha256 TEXT NOT NULL,
+                    state TEXT NOT NULL CHECK(state IN (
+                        'PREPARED','LEDGER_COMMITTED','RECOVERED','ABANDONED','RECOVERY_CONFLICT'
+                    )),
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    ledger_committed_at TEXT,
+                    reconciled_at TEXT,
+                    last_error TEXT,
+                    UNIQUE(mutation_kind,event_id,after_version)
+                );
+                CREATE INDEX IF NOT EXISTS idx_formal_mutation_state
+                    ON formal_mutation_audits(state, created_at);
+                CREATE INDEX IF NOT EXISTS idx_formal_mutation_event
+                    ON formal_mutation_audits(event_id, after_version DESC);
                 CREATE TABLE IF NOT EXISTS evidence_objects(
                     object_sha256 TEXT PRIMARY KEY, relative_path TEXT NOT NULL, mime_type TEXT NOT NULL,
                     byte_length INTEGER NOT NULL, source_url TEXT NOT NULL, fetched_at TEXT NOT NULL
@@ -140,6 +207,37 @@ class OperationsRepository:
                            WHERE mime_type IN ('text/html','application/pdf','application/json')
                        )"""
                 )
+            model_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(model_runs)")
+            }
+            if "idempotency_key" not in model_columns:
+                connection.execute("ALTER TABLE model_runs ADD COLUMN idempotency_key TEXT")
+            connection.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_model_runs_idempotency
+                   ON model_runs(idempotency_key) WHERE idempotency_key IS NOT NULL"""
+            )
+            light_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(light_verification_runs)")
+            }
+            if "mutation_id" not in light_columns:
+                connection.execute("ALTER TABLE light_verification_runs ADD COLUMN mutation_id TEXT")
+            connection.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_light_verification_mutation
+                   ON light_verification_runs(mutation_id) WHERE mutation_id IS NOT NULL"""
+            )
+            backup_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(backup_runs)")
+            }
+            for column, definition in (
+                ("manifest_path", "TEXT"),
+                ("components_json", "TEXT"),
+                ("snapshot_kind", "TEXT NOT NULL DEFAULT 'ledger_only'"),
+            ):
+                if column not in backup_columns:
+                    connection.execute(f"ALTER TABLE backup_runs ADD COLUMN {column} {definition}")
             connection.execute(
                 "INSERT OR IGNORE INTO operations_schema(version,applied_at) VALUES (?,?)",
                 (OPS_SCHEMA_VERSION, utc_now()),
@@ -221,7 +319,10 @@ class OperationsRepository:
         run_id = f"model-{uuid.uuid4().hex}"
         with closing(self.connect()) as connection:
             connection.execute(
-                "INSERT INTO model_runs VALUES (?,?,?,?,?,?,?,?,?,?)",
+                """INSERT INTO model_runs(
+                       run_id,event_id,input_sha256,model_version,output_label,confidence,
+                       latency_ms,shadow,created_at,output_json,idempotency_key
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     run_id,
                     event_id,
@@ -233,10 +334,24 @@ class OperationsRepository:
                     1,
                     utc_now(),
                     _stable_json(result),
+                    None,
                 ),
             )
             connection.commit()
         return run_id
+
+    @staticmethod
+    def _model_run_idempotency_key(event_id: str, result: dict[str, Any]) -> str:
+        """One audit row per immutable event/model/input decision invocation."""
+        return "model-input-" + _stable_sha256(
+            {
+                "event_id": event_id,
+                "event_version": int(result.get("event_version") or 0),
+                "input_sha256": str(result["input_sha256"]),
+                "model_version": str(result["model_version"]),
+                "call_kind": str(result.get("call_kind") or result.get("decision_source") or "unknown"),
+            }
+        )[:40]
 
     def record_model_run_once(
         self,
@@ -244,26 +359,54 @@ class OperationsRepository:
         result: dict[str, Any],
     ) -> tuple[str, bool]:
         """Persist one shadow result per event version/input/model combination."""
+        idempotency_key = self._model_run_idempotency_key(event_id, result)
+        run_id = f"model-{idempotency_key.removeprefix('model-input-')}"
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                """INSERT OR IGNORE INTO model_runs(
+                       run_id,event_id,input_sha256,model_version,output_label,confidence,
+                       latency_ms,shadow,created_at,output_json,idempotency_key
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    run_id,
+                    event_id,
+                    result["input_sha256"],
+                    result["model_version"],
+                    result["label"],
+                    float(result["confidence"]),
+                    float(result["latency_ms"]),
+                    1,
+                    utc_now(),
+                    _stable_json(result),
+                    idempotency_key,
+                ),
+            )
+            if cursor.rowcount:
+                connection.commit()
+                return run_id, True
+            row = connection.execute(
+                "SELECT run_id FROM model_runs WHERE idempotency_key=?",
+                (idempotency_key,),
+            ).fetchone()
+            connection.commit()
+        if row is not None:
+            return str(row["run_id"]), False
+        # A legacy row without the new idempotency key may exist.  Preserve its
+        # old semantics rather than duplicating it during the schema transition.
         with closing(self.connect()) as connection:
             rows = connection.execute(
                 """SELECT run_id,output_json FROM model_runs
                    WHERE event_id=? AND input_sha256=? AND model_version=?
                    ORDER BY created_at DESC LIMIT 10""",
-                (
-                    event_id,
-                    result["input_sha256"],
-                    result["model_version"],
-                ),
+                (event_id, result["input_sha256"], result["model_version"]),
             ).fetchall()
         event_version = int(result.get("event_version") or 0)
-        for row in rows:
-            try:
-                previous = json.loads(row["output_json"])
-            except (json.JSONDecodeError, TypeError):
-                continue
+        for legacy in rows:
+            previous = _safe_json(legacy["output_json"], {})
             if int(previous.get("event_version") or 0) == event_version:
-                return str(row["run_id"]), False
-        return self.record_model_run(event_id, result), True
+                return str(legacy["run_id"]), False
+        raise RuntimeError("model run idempotency insert did not return a row")
 
     def model_runs(self, event_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
         sql = "SELECT * FROM model_runs"
@@ -463,6 +606,441 @@ class OperationsRepository:
             row["tool_calls"] = json.loads(row.pop("tool_calls_json"))
             row["evidence_ids"] = json.loads(row.pop("evidence_ids_json"))
         return rows
+
+    @staticmethod
+    def _light_mutation_payload(result: dict[str, Any]) -> dict[str, Any]:
+        """Return the durable, deterministic audit payload for a formal mutation.
+
+        The ledger write is deliberately *not* represented by a random run id.
+        One event/version may have only one formal conclusion, so retries must
+        resolve to the same identity and reject a materially different payload.
+        """
+        before_version = int(result["before_version"])
+        after_version = int(result.get("after_version") or before_version + 1)
+        decision = str(result["decision"])
+        if decision not in {"SUPPORTED", "INSUFFICIENT"}:
+            raise ValueError(f"unsupported formal light-verification decision: {decision}")
+        if after_version != before_version + 1:
+            raise ValueError("light-verification after_version must equal before_version + 1")
+        return {
+            "audit_contract_version": "formal-mutation-audit-v1",
+            "mutation_kind": FORMAL_MUTATION_KIND_LIGHT_VERIFICATION,
+            "event_id": str(result["event_id"]),
+            "batch_id": str(result["batch_id"]),
+            "decision": decision,
+            "before_version": before_version,
+            "after_version": after_version,
+            "evidence_ids": sorted(str(item) for item in result.get("evidence_ids", [])),
+            "budget": result.get("budget", {}),
+            "rationale": str(result.get("rationale") or ""),
+            "checks": result.get("checks", []),
+            "before_model": result.get("before_model", {}),
+            "after_model": result.get("after_model", {}),
+            "no_trading": bool(result.get("no_trading", True)),
+        }
+
+    @staticmethod
+    def _light_mutation_identity(payload: dict[str, Any]) -> str:
+        """Identity is tied to the immutable ledger version, never a retry token."""
+        return "formal-light-" + _stable_sha256(
+            {
+                "contract": payload["audit_contract_version"],
+                "kind": payload["mutation_kind"],
+                "event_id": payload["event_id"],
+                "after_version": payload["after_version"],
+            }
+        )[:40]
+
+    @staticmethod
+    def _light_mutation_content_hash(payload: dict[str, Any]) -> str:
+        return _stable_sha256(payload)
+
+    def prepare_light_verification_mutation(self, result: dict[str, Any]) -> str:
+        """Durably record audit intent *before* the caller commits the ledger write.
+
+        Callers must invoke this before ``BEGIN IMMEDIATE`` on the ledger.  If the
+        process dies after the ledger commit, the prepared record remains durable
+        and can be reconciled instead of silently losing its audit trail.
+        """
+        payload = self._light_mutation_payload(result)
+        mutation_id = self._light_mutation_identity(payload)
+        content_sha256 = self._light_mutation_content_hash(payload)
+        now = utc_now()
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT content_sha256 FROM formal_mutation_audits WHERE mutation_id=?",
+                (mutation_id,),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["content_sha256"]) != content_sha256:
+                    connection.rollback()
+                    raise ValueError(
+                        "formal mutation identity collision: event/version already has different audit content"
+                    )
+                connection.commit()
+                return mutation_id
+            try:
+                connection.execute(
+                    """INSERT INTO formal_mutation_audits(
+                           mutation_id,mutation_kind,event_id,before_version,after_version,
+                           decision,content_sha256,state,payload_json,created_at,updated_at,
+                           ledger_committed_at,reconciled_at,last_error
+                       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        mutation_id,
+                        FORMAL_MUTATION_KIND_LIGHT_VERIFICATION,
+                        payload["event_id"],
+                        payload["before_version"],
+                        payload["after_version"],
+                        payload["decision"],
+                        content_sha256,
+                        "PREPARED",
+                        _stable_json(payload),
+                        now,
+                        now,
+                        None,
+                        None,
+                        None,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                # A unique event/version collision must never be converted into a
+                # second conclusion with a random retry id.
+                collision = connection.execute(
+                    """SELECT mutation_id,content_sha256 FROM formal_mutation_audits
+                       WHERE mutation_kind=? AND event_id=? AND after_version=?""",
+                    (
+                        FORMAL_MUTATION_KIND_LIGHT_VERIFICATION,
+                        payload["event_id"],
+                        payload["after_version"],
+                    ),
+                ).fetchone()
+                connection.rollback()
+                if collision is not None and str(collision["content_sha256"]) == content_sha256:
+                    return str(collision["mutation_id"])
+                raise ValueError("formal mutation event/version identity collision") from exc
+            connection.commit()
+        return mutation_id
+
+    def _upsert_light_verification_run(
+        self,
+        connection: sqlite3.Connection,
+        mutation_id: str | None,
+        result: dict[str, Any],
+    ) -> str:
+        run_id = str(result.get("run_id") or mutation_id or f"light-{uuid.uuid4().hex}")
+        if mutation_id:
+            existing = connection.execute(
+                "SELECT run_id FROM light_verification_runs WHERE mutation_id=?",
+                (mutation_id,),
+            ).fetchone()
+            if existing is not None:
+                run_id = str(existing["run_id"])
+        connection.execute(
+            """INSERT INTO light_verification_runs(
+                   run_id,batch_id,event_id,decision,before_version,after_version,
+                   evidence_ids_json,budget_json,rationale,before_model_json,
+                   after_model_json,applied,created_at,mutation_id
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(run_id) DO UPDATE SET
+                   batch_id=excluded.batch_id,event_id=excluded.event_id,
+                   decision=excluded.decision,before_version=excluded.before_version,
+                   after_version=excluded.after_version,evidence_ids_json=excluded.evidence_ids_json,
+                   budget_json=excluded.budget_json,rationale=excluded.rationale,
+                   before_model_json=excluded.before_model_json,
+                   after_model_json=excluded.after_model_json,applied=excluded.applied,
+                   created_at=excluded.created_at,mutation_id=COALESCE(excluded.mutation_id,light_verification_runs.mutation_id)""",
+            (
+                run_id,
+                str(result["batch_id"]),
+                str(result["event_id"]),
+                str(result["decision"]),
+                int(result["before_version"]),
+                int(result["after_version"]) if result.get("after_version") is not None else None,
+                _stable_json(result.get("evidence_ids", [])),
+                _stable_json(result.get("budget", {})),
+                str(result.get("rationale") or ""),
+                _stable_json(result.get("before_model", {})),
+                _stable_json(result.get("after_model", {})),
+                int(bool(result.get("applied"))),
+                str(result.get("created_at") or utc_now()),
+                mutation_id,
+            ),
+        )
+        return run_id
+
+    def confirm_light_verification_mutation(
+        self,
+        mutation_id: str,
+        result: dict[str, Any],
+        *,
+        recovered: bool = False,
+    ) -> str:
+        """Mark a pre-written audit intent as committed after the ledger commits.
+
+        This method is idempotent.  It never writes the ledger, and therefore a
+        replay after a process crash is safe as long as the caller observed the
+        committed ledger version.
+        """
+        payload = self._light_mutation_payload(result)
+        expected_mutation_id = self._light_mutation_identity(payload)
+        if mutation_id != expected_mutation_id:
+            raise ValueError("mutation_id does not match the supplied event/version payload")
+        content_sha256 = self._light_mutation_content_hash(payload)
+        now = utc_now()
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT content_sha256,state FROM formal_mutation_audits WHERE mutation_id=?",
+                (mutation_id,),
+            ).fetchone()
+            if row is None:
+                connection.rollback()
+                raise KeyError(f"formal mutation was not prepared: {mutation_id}")
+            if str(row["content_sha256"]) != content_sha256:
+                connection.rollback()
+                raise ValueError("formal mutation payload changed after prepare")
+            if str(row["state"]) == "ABANDONED":
+                connection.rollback()
+                raise ValueError("cannot confirm an abandoned formal mutation")
+            stored_result = {
+                **result,
+                "after_version": payload["after_version"],
+                "applied": True,
+            }
+            run_id = self._upsert_light_verification_run(connection, mutation_id, stored_result)
+            state = "RECOVERED" if recovered else "LEDGER_COMMITTED"
+            connection.execute(
+                """UPDATE formal_mutation_audits
+                   SET state=?,payload_json=?,updated_at=?,ledger_committed_at=COALESCE(ledger_committed_at,?),
+                       reconciled_at=CASE WHEN ? THEN COALESCE(reconciled_at,?) ELSE reconciled_at END,
+                       last_error=NULL
+                   WHERE mutation_id=?""",
+                (
+                    state,
+                    _stable_json(payload),
+                    now,
+                    now,
+                    int(recovered),
+                    now,
+                    mutation_id,
+                ),
+            )
+            connection.commit()
+        return run_id
+
+    def abandon_light_verification_mutation(self, mutation_id: str, error: str) -> None:
+        """Close a prepared intent only when its ledger transaction did not commit."""
+        with closing(self.connect()) as connection:
+            connection.execute(
+                """UPDATE formal_mutation_audits
+                   SET state='ABANDONED',updated_at=?,last_error=?
+                   WHERE mutation_id=? AND state='PREPARED'""",
+                (utc_now(), error[:2000], mutation_id),
+            )
+            connection.commit()
+
+    def record_light_verification(self, result: dict[str, Any]) -> str:
+        """Persist a light-verification audit idempotently.
+
+        New formal mutations should use ``prepare_*`` then ``confirm_*`` around
+        the ledger transaction.  This compatibility path preserves historical
+        callers while still assigning a deterministic audit identity.
+        """
+        if (
+            bool(result.get("applied"))
+            and str(result.get("decision")) in {"SUPPORTED", "INSUFFICIENT"}
+            and result.get("after_version") is not None
+        ):
+            mutation_id = self.prepare_light_verification_mutation(result)
+            return self.confirm_light_verification_mutation(mutation_id, result)
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            run_id = self._upsert_light_verification_run(connection, None, result)
+            connection.commit()
+        return run_id
+
+    def light_verification_runs(self, event_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM light_verification_runs"
+        params: list[Any] = []
+        if event_id:
+            sql += " WHERE event_id=?"
+            params.append(event_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(max(1, min(int(limit), 200)))
+        with closing(self.connect()) as connection:
+            rows = [dict(row) for row in connection.execute(sql, params)]
+        for row in rows:
+            row["evidence_ids"] = json.loads(row.pop("evidence_ids_json"))
+            row["budget"] = json.loads(row.pop("budget_json"))
+            row["before_model"] = json.loads(row.pop("before_model_json"))
+            row["after_model"] = json.loads(row.pop("after_model_json"))
+        return rows
+
+    def formal_mutation_audits(self, event_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM formal_mutation_audits"
+        params: list[Any] = []
+        if event_id:
+            sql += " WHERE event_id=?"
+            params.append(event_id)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(max(1, min(int(limit), 500)))
+        with closing(self.connect()) as connection:
+            rows = [dict(row) for row in connection.execute(sql, params)]
+        for row in rows:
+            row["payload"] = _safe_json(row.pop("payload_json"), {})
+        return rows
+
+    def audit_reconciliation_status(self) -> dict[str, Any]:
+        """Return durable-audit health without changing either database."""
+        with closing(self.connect()) as connection:
+            counts = {
+                str(row["state"]): int(row["n"])
+                for row in connection.execute(
+                    "SELECT state,COUNT(*) AS n FROM formal_mutation_audits GROUP BY state"
+                )
+            }
+        prepared = int(counts.get("PREPARED", 0))
+        conflicts = int(counts.get("RECOVERY_CONFLICT", 0))
+        return {
+            "status": "ok" if not prepared and not conflicts else "degraded",
+            "states": counts,
+            "pending_reconciliation": prepared,
+            "recovery_conflicts": conflicts,
+            "contract": "formal-mutation-audit-v1",
+            "mutations_are_idempotent": True,
+        }
+
+    @staticmethod
+    def _ledger_light_verification_rows(ledger_db: str | Path) -> list[dict[str, Any]]:
+        """Read formal light-verification versions without relying on JSON1 extensions."""
+        path = Path(ledger_db)
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        with closing(sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=10)) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    """SELECT event_id,version,changed_at,status,facts_json,change_reason
+                       FROM event_versions
+                       WHERE change_reason LIKE 'light_evidence_verification_v%'
+                       ORDER BY changed_at,event_id,version"""
+                )
+            ]
+        return rows
+
+    @staticmethod
+    def _result_from_ledger_light_version(row: dict[str, Any]) -> dict[str, Any] | None:
+        facts = _safe_json(row.get("facts_json"), {})
+        light = facts.get("light_verification") if isinstance(facts, dict) else None
+        if not isinstance(light, dict):
+            return None
+        conclusion = str(light.get("formal_conclusion") or "")
+        if conclusion == "verified":
+            decision = "SUPPORTED"
+        elif conclusion == "weak":
+            decision = "INSUFFICIENT"
+        else:
+            return None
+        before_version = int(row["version"]) - 1
+        if before_version < 0:
+            return None
+        return {
+            "batch_id": str(light.get("batch_id") or f"recovered-{row['event_id']}-{row['version']}"),
+            "event_id": str(row["event_id"]),
+            "decision": decision,
+            "before_version": before_version,
+            "after_version": int(row["version"]),
+            "evidence_ids": light.get("evidence_ids", []),
+            "budget": light.get("budget", {}),
+            "rationale": str(light.get("rationale") or ""),
+            "checks": light.get("checks", []),
+            "before_model": (light.get("model_reassessment") or {}).get("before", {}),
+            "after_model": (light.get("model_reassessment") or {}).get("after", {}),
+            "created_at": str(row.get("changed_at") or utc_now()),
+            "applied": True,
+            "no_trading": bool(light.get("no_trading", True)),
+        }
+
+    def reconcile_light_verification_mutations(
+        self,
+        ledger_db: str | Path,
+        *,
+        limit: int = 500,
+        include_legacy: bool = True,
+    ) -> dict[str, int]:
+        """Recover prepared audit intents and optionally backfill legacy committed rows.
+
+        The reconciler never changes the ledger.  It only promotes a prepared
+        audit row after observing its exact immutable event version in the ledger.
+        This makes a crash between ledger commit and ops confirmation recoverable.
+        """
+        ledger_rows = self._ledger_light_verification_rows(ledger_db)
+        by_identity: dict[tuple[str, int], dict[str, Any]] = {}
+        for row in ledger_rows:
+            result = self._result_from_ledger_light_version(row)
+            if result is not None:
+                by_identity[(result["event_id"], int(result["after_version"]))] = result
+
+        counters = {
+            "prepared_seen": 0,
+            "recovered": 0,
+            "still_pending": 0,
+            "conflicts": 0,
+            "legacy_backfilled": 0,
+        }
+        with closing(self.connect()) as connection:
+            pending = [
+                dict(row)
+                for row in connection.execute(
+                    """SELECT mutation_id,event_id,after_version,payload_json
+                       FROM formal_mutation_audits
+                       WHERE state='PREPARED'
+                       ORDER BY created_at LIMIT ?""",
+                    (max(1, min(int(limit), 5000)),),
+                )
+            ]
+            existing = {
+                (str(row["event_id"]), int(row["after_version"]))
+                for row in connection.execute(
+                    """SELECT event_id,after_version FROM formal_mutation_audits
+                       WHERE mutation_kind=?""",
+                    (FORMAL_MUTATION_KIND_LIGHT_VERIFICATION,),
+                )
+            }
+        for row in pending:
+            counters["prepared_seen"] += 1
+            actual = by_identity.get((str(row["event_id"]), int(row["after_version"])))
+            if actual is None:
+                counters["still_pending"] += 1
+                continue
+            try:
+                self.confirm_light_verification_mutation(str(row["mutation_id"]), actual, recovered=True)
+                counters["recovered"] += 1
+            except (KeyError, ValueError):
+                with closing(self.connect()) as connection:
+                    connection.execute(
+                        """UPDATE formal_mutation_audits
+                           SET state='RECOVERY_CONFLICT',updated_at=?,last_error=?
+                           WHERE mutation_id=?""",
+                        (utc_now(), "ledger version does not match prepared audit payload", row["mutation_id"]),
+                    )
+                    connection.commit()
+                counters["conflicts"] += 1
+
+        if include_legacy:
+            for identity, result in by_identity.items():
+                if identity in existing:
+                    continue
+                try:
+                    mutation_id = self.prepare_light_verification_mutation(result)
+                    self.confirm_light_verification_mutation(mutation_id, result, recovered=True)
+                    counters["legacy_backfilled"] += 1
+                except (KeyError, ValueError):
+                    counters["conflicts"] += 1
+        return counters
 
     def record_human_override(
         self,
@@ -718,6 +1296,20 @@ class OperationsRepository:
         result["result"] = json.loads(result.pop("result_json"))
         return result
 
+    def latest_successful_worker_cycle(self) -> dict[str, Any] | None:
+        """Return the newest completed SUCCESS cycle, ignoring newer failures/runs."""
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                """SELECT * FROM worker_cycles
+                   WHERE status='SUCCESS' AND finished_at IS NOT NULL
+                   ORDER BY finished_at DESC,started_at DESC LIMIT 1"""
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["result"] = json.loads(result.pop("result_json"))
+        return result
+
     def worker_window(
         self,
         *,
@@ -790,22 +1382,67 @@ class OperationsRepository:
             "complete": complete,
         }
 
-    def create_backup_run(self, backup_path: Path, source_bytes: int) -> str:
+    def create_backup_run(
+        self,
+        backup_path: Path,
+        source_bytes: int,
+        *,
+        manifest_path: Path | None = None,
+        snapshot_kind: str = "ledger_only",
+    ) -> str:
         backup_id = f"backup-{uuid.uuid4().hex}"
         with closing(self.connect()) as connection:
             connection.execute(
-                "INSERT INTO backup_runs VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (backup_id, str(backup_path), source_bytes, None, None, None, "RUNNING", utc_now(), None, None),
+                """INSERT INTO backup_runs(
+                       backup_id,backup_path,source_bytes,backup_bytes,quick_check,restored_count_json,
+                       status,created_at,verified_at,error,manifest_path,components_json,snapshot_kind
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    backup_id,
+                    str(backup_path),
+                    source_bytes,
+                    None,
+                    None,
+                    None,
+                    "RUNNING",
+                    utc_now(),
+                    None,
+                    None,
+                    str(manifest_path) if manifest_path else None,
+                    None,
+                    snapshot_kind,
+                ),
             )
             connection.commit()
         return backup_id
 
-    def finish_backup_run(self, backup_id: str, *, backup_bytes: int, quick_check: str, counts: dict[str, int]) -> None:
+    def finish_backup_run(
+        self,
+        backup_id: str,
+        *,
+        backup_bytes: int,
+        quick_check: str,
+        counts: dict[str, int],
+        manifest_path: Path | None = None,
+        components: dict[str, Any] | None = None,
+        snapshot_kind: str | None = None,
+    ) -> None:
         with closing(self.connect()) as connection:
             connection.execute(
                 """UPDATE backup_runs SET backup_bytes=?,quick_check=?,restored_count_json=?,
-                   status='VERIFIED',verified_at=? WHERE backup_id=?""",
-                (backup_bytes, quick_check, _stable_json(counts), utc_now(), backup_id),
+                   status='VERIFIED',verified_at=?,manifest_path=COALESCE(?,manifest_path),
+                   components_json=COALESCE(?,components_json),snapshot_kind=COALESCE(?,snapshot_kind)
+                   WHERE backup_id=?""",
+                (
+                    backup_bytes,
+                    quick_check,
+                    _stable_json(counts),
+                    utc_now(),
+                    str(manifest_path) if manifest_path else None,
+                    _stable_json(components) if components is not None else None,
+                    snapshot_kind,
+                    backup_id,
+                ),
             )
             connection.commit()
 
@@ -817,14 +1454,26 @@ class OperationsRepository:
             )
             connection.commit()
 
-    def latest_backup(self) -> dict[str, Any] | None:
+    def _backup_row(self, where: str = "", params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         with closing(self.connect()) as connection:
-            row = connection.execute("SELECT * FROM backup_runs ORDER BY created_at DESC LIMIT 1").fetchone()
+            row = connection.execute(
+                f"SELECT * FROM backup_runs {where} ORDER BY created_at DESC LIMIT 1",
+                params,
+            ).fetchone()
         if row is None:
             return None
         item = dict(row)
         item["restored_counts"] = json.loads(item.pop("restored_count_json")) if item["restored_count_json"] else None
+        item["components"] = _safe_json(item.pop("components_json", None), None)
         return item
+
+    def latest_backup(self) -> dict[str, Any] | None:
+        """Return the latest attempt, including failures, for operator diagnostics."""
+        return self._backup_row()
+
+    def latest_verified_backup(self) -> dict[str, Any] | None:
+        """Return the latest usable recovery point rather than a later failed attempt."""
+        return self._backup_row("WHERE status='VERIFIED'")
 
     def backup_summary(self) -> dict[str, int]:
         """Separate historical run records from files retained on this host."""
@@ -835,14 +1484,18 @@ class OperationsRepository:
         retained_daily = {
             str(Path(str(row["backup_path"])).resolve())
             for row in rows
-            if row.get("backup_path") and Path(str(row["backup_path"])).is_file()
+            if row.get("backup_path")
+            and (Path(str(row["backup_path"])).is_file() or Path(str(row["backup_path"])).is_dir())
         }
         weekly_files: set[str] = set()
-        parent_dirs = {
-            Path(str(row["backup_path"])).parent
-            for row in rows
-            if row.get("backup_path")
-        }
+        parent_dirs: set[Path] = set()
+        for row in rows:
+            if not row.get("backup_path"):
+                continue
+            path = Path(str(row["backup_path"]))
+            # New bundles store the manifest inside one direct daily directory;
+            # weekly snapshots remain siblings of that directory.
+            parent_dirs.add(path.parent.parent if path.name == "manifest.json" else path.parent)
         for parent in parent_dirs:
             weekly_dir = parent / "weekly"
             if not weekly_dir.is_dir():
@@ -855,6 +1508,7 @@ class OperationsRepository:
             "running_runs": sum(row.get("status") == "RUNNING" for row in rows),
             "retained_daily_files": len(retained_daily),
             "retained_weekly_files": len(weekly_files),
+            "retention_policy": "latest_verified_daily_bundle_only",
         }
 
     def health(self) -> dict[str, Any]:
@@ -868,14 +1522,17 @@ class OperationsRepository:
                     "worker_cycles",
                     "backup_runs",
                     "agent_decisions",
+                    "light_verification_runs",
+                    "formal_mutation_audits",
                     "evidence_objects",
                     "human_overrides",
                     "adjudication_samples",
                     "adjudication_reviews",
                 )
             }
+        audit_reconciliation = self.audit_reconciliation_status()
         return {
-            "status": "ok" if quick_check == "ok" else "degraded",
+            "status": "ok" if quick_check == "ok" and audit_reconciliation["status"] == "ok" else "degraded",
             "database": str(self.path),
             "schema_version": OPS_SCHEMA_VERSION,
             "quick_check": quick_check,
@@ -884,5 +1541,7 @@ class OperationsRepository:
             "latest_worker_cycle": self.latest_worker_cycle(),
             "worker_window_24h": self.worker_window(),
             "latest_backup": self.latest_backup(),
+            "latest_verified_backup": self.latest_verified_backup(),
             "backup_summary": self.backup_summary(),
+            "audit_reconciliation": audit_reconciliation,
         }

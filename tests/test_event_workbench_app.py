@@ -4,6 +4,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 import app.web.common as web_common
@@ -31,6 +32,11 @@ def _event(event_id: str, company: str) -> dict[str, Any]:
 
 
 EVENTS = [_event("event-a", "Alpha Test"), _event("event-b", "Beta Test")]
+
+
+@pytest.fixture(autouse=True)
+def _run_in_admin_ui(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "admin")
 
 
 def _fake_api(path: str, *, method: str = "GET", json_body: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -100,6 +106,10 @@ def test_event_workbench_next_button_changes_selected_event(monkeypatch) -> None
     rendered = "\n".join(str(item.value) for item in page.markdown)
     assert "只读行情上下文" in rendered
     assert "NO REVIEWED ASSET" in rendered
+    assert "精确证据段落已在本页显示" in rendered
+    assert "确需核对时打开外部原文 E01" in rendered
+    assert 'target="_blank"' in rendered
+    assert all("打开原始来源" not in button.label for button in page.button)
 
 
 def test_event_workbench_empty_view_can_reset_without_stale_state(monkeypatch) -> None:

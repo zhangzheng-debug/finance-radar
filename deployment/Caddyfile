@@ -9,9 +9,11 @@
         -Server
     }
 
-    @api path /api/* /docs* /openapi.json
-    handle @api {
-        reverse_proxy api:8000
+    # The browser-facing edge never exposes FastAPI, its schema, or its docs.
+    # Public Streamlit reaches the API privately on the Compose network.
+    @private_backend path /api/* /docs* /openapi.json /finance-radar-api* /radar-admin* /Event_Intelligence* /Operations_and_Model* /Adjudication_Studio*
+    handle @private_backend {
+        respond 404
     }
 
     handle {

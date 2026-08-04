@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -18,14 +19,34 @@ def _overview() -> dict[str, Any]:
         "counts": {"canonical_events": 12, "event_evidence": 9},
         "event_status": {"verified": 5, "candidate": 4, "weak": 2, "rejected": 1},
         "review_queue": 6,
-        "timing": {"latest_event_age_seconds": 30, "worker_cycle_duration_seconds": 2.5},
+        "rough_reviewed": 3,
+        "public_funnel": {
+            "total": 12,
+            "verified": 5,
+            "excluded": 1,
+            "insufficient": 2,
+            "rough_reviewed": 3,
+            "pending_verification": 1,
+        },
+        "job_status": {"COMPLETED_AUTHORIZED_ROUGH_REVIEW": 3},
+        "timing": {
+            "latest_event_age_seconds": 30,
+            "latest_new_event_age_seconds": 30,
+            "latest_worker_success_age_seconds": 12,
+            "worker_cycle_duration_seconds": 2.5,
+        },
+        "latest_worker_cycle": {"status": "SUCCESS"},
         "recent_events": [
             {
                 "event_id": "event-a",
                 "status": "candidate",
+                "public_state": "rough_reviewed",
+                "reviewed_at": "2026-08-03T23:00:00+00:00",
                 "event_family": "enforcement",
                 "event_type": "sec_litigation_release",
                 "company_name": "Example Holdings",
+                "event_date": "2026-08-02",
+                "first_seen_at": "2026-08-03T20:00:00+00:00",
                 "last_updated_at": "2026-07-18T12:34:00+00:00",
                 "credibility_tier": "P0",
                 "discovery_source": "sec_current_filings",
@@ -52,16 +73,124 @@ def _overview() -> dict[str, Any]:
     }
 
 
+def _fake_api(path: str, **_kwargs: Any) -> dict[str, Any]:
+    parsed = urllib.parse.urlsplit(path)
+    if parsed.path == "/api/v1/overview":
+        return _overview()
+    if parsed.path == "/api/v1/events/facets":
+        return {"families": [], "sources": []}
+    if parsed.path == "/api/v1/events":
+        return {"items": _overview()["recent_events"], "total": 1}
+    if parsed.path == "/api/v1/events/event-a/evidence":
+        return {
+            "items": [
+                {
+                    "authority_tier": "P0",
+                    "source_name": "Official source",
+                    "evidence_status": "confirmed",
+                    "evidence_passage": "Exact primary-source passage.",
+                    "evidence_url": "https://example.test/source",
+                }
+            ]
+        }
+    if parsed.path == "/api/v1/events/event-a":
+        event = _overview()["recent_events"][0]
+        return {
+            "event": event,
+            "current_version": {"facts": {"evidence_summary": event["evidence_excerpt"]}},
+            "preferred_source": {"source_published_at": "2026-08-02T08:30:00+00:00"},
+            "verification_method": {
+                "reviewed_at": "2026-08-03T23:00:00+00:00",
+                "evidence_ids": ["ev-primary-1"],
+                "score": 74,
+            },
+            "model_shadow_output": {"label": "ABSTAIN", "confidence": 0.5},
+        }
+    raise AssertionError(f"unexpected API request: {path}")
+
+
 def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> None:
-    monkeypatch.setattr(web_common, "api_request", lambda *_args, **_kwargs: _overview())
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", _fake_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10).run()
     rendered = "\n".join(str(item.value) for item in page.markdown)
     assert not page.exception
-    assert "实时事件流" in rendered
+    assert "事件浏览" in rendered
     assert "Example Holdings" in rendered
-    assert "等待证据或规则复核" in rendered
-    assert "硬边界审计 0 违规" in rendered
+    assert "优先核验队列" in rendered
+    assert "先看证据是否足够" in rendered
+    assert "证据路径" not in rendered
     assert "UTC" in rendered
-    assert any(item.label == "全终端检索" for item in page.text_input)
-    assert any(item.label == "检索 /" for item in page.button)
-    assert "快捷命令" in rendered
+    assert any(item.label == "搜索事件" for item in page.text_input)
+    assert any(item.label == "应用筛选" for item in page.button)
+    assert "系统与来源健康" not in rendered
+    assert "Worker" not in rendered
+    assert "已粗审" in rendered
+    assert "最近成功采集" in rendered
+    assert "最近发现新事件" in rendered
+    assert "Schema" not in rendered
+    assert "quick_check" not in rendered
+    assert "快捷命令" not in rendered
+    assert "运行状态" not in rendered
+    assert 'target="_self"' in rendered
+    assert 'target="_blank"' not in rendered
+
+
+def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", _fake_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_flow"] = "全部事件"
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+    assert not page.exception
+    assert "当前页事件预览" in rendered
+    assert "Exact primary-source passage." in rendered
+    assert "阅读提示" in rendered
+    assert "粗审已完成，继续核对正式证据" in rendered
+    assert "监管执法" in rendered
+    assert "SEC 官方文件" in rendered
+    assert "原始证据 · 请结合完整文件阅读" in rendered
+    assert "发生了什么" in rendered
+    assert "为什么关注" in rendered
+    assert "粗审已完成，尚未正式核验" in rendered
+    assert "时间口径" in rendered
+    assert "来源发布" in rendered
+    assert "系统发现" in rendered
+    assert "核验记录" in rendered
+    assert "本轮引用证据 ID" in rendered
+    assert "ev-primary-1" in rendered
+    assert "已按一级来源证据门槛完成" not in rendered
+    assert "sec_litigation_release" not in rendered
+    assert "sec_current_filings" not in rendered
+    assert ">P0<" not in rendered
+    assert any(
+        link.label == "打开原始来源（外部网站）" for link in page.get("link_button")
+    )
+    assert not any("工作台" in button.label or "人工复核" in button.label for button in page.button)
+    assert any(button.label == "收起当前页预览" for button in page.button)
+
+
+def test_public_inline_preview_bounds_long_source_text(monkeypatch) -> None:
+    def long_text_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        data = _fake_api(path, **kwargs)
+        parsed = urllib.parse.urlsplit(path)
+        if parsed.path == "/api/v1/events/event-a/evidence":
+            data["items"][0]["evidence_passage"] = "Z" * 1500
+        elif parsed.path == "/api/v1/events/event-a":
+            data["current_version"]["facts"]["evidence_summary"] = "Y" * 800
+        return data
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", long_text_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_flow"] = "全部事件"
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "Z" * 901 not in rendered
+    assert "Y" * 361 not in rendered
+    assert "…" in rendered
