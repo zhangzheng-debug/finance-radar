@@ -8,10 +8,21 @@ Type=simple
 User=finance-radar
 Group=finance-radar
 WorkingDirectory=/opt/finance-radar/current
+Slice=finance-radar.slice
 EnvironmentFile=/etc/finance-radar.env
 ExecStart=/opt/finance-radar/venv/bin/python -m uvicorn app.api.main:app --host 127.0.0.1 --port 18000 --workers 1
 Restart=on-failure
 RestartSec=5
+# The API is small but long-lived. Keep its ceiling in the versioned unit so a
+# rebuilt host does not depend on an opaque `systemctl set-property` drop-in.
+MemoryHigh=320M
+MemoryMax=430M
+MemorySwapMax=128M
+TasksMax=128
+MemoryAccounting=true
+OOMPolicy=stop
+OOMScoreAdjust=-500
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

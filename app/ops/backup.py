@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -65,6 +66,29 @@ def _table_counts(connection: sqlite3.Connection, tables: tuple[str, ...]) -> di
     return {table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]) for table in tables}
 
 
+def application_table_counts(connection: sqlite3.Connection) -> dict[str, int]:
+    """Return an exact inventory of every application table in a SQLite file.
+
+    The compact ``database_counts`` / ``operations_counts`` summaries below
+    remain useful to existing callers, but a recovery receipt cannot treat a
+    hand-picked subset as proof that the whole ledger was copied.  The
+    manifest therefore records every non-internal SQLite table (including the
+    schema-version table) and its count.  A verifier can reject both a missing
+    historic table and an unaccounted-for future one.
+    """
+    names = [
+        str(row[0])
+        for row in connection.execute(
+            """SELECT name FROM sqlite_master
+               WHERE type='table' AND name NOT LIKE 'sqlite_%'
+               ORDER BY name"""
+        ).fetchall()
+    ]
+    if not names:
+        raise RuntimeError("SQLite component has no application tables")
+    return _table_counts(connection, tuple(names))
+
+
 def database_counts(connection: sqlite3.Connection) -> dict[str, int]:
     """Durable ledger row counts retained for backward-compatible callers."""
     return _table_counts(connection, COUNT_TABLES)
@@ -124,10 +148,12 @@ def _online_backup_from_open_connection(
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
     source_counts = count_reader(source_connection)
+    table_counts = application_table_counts(source_connection)
     with closing(sqlite3.connect(destination, timeout=30)) as destination_connection:
         source_connection.backup(destination_connection, pages=256)
     return {
         "source_counts": source_counts,
+        "table_counts": table_counts,
         "source_bytes": source.stat().st_size,
         "backup_bytes": destination.stat().st_size,
     }
@@ -193,11 +219,13 @@ def _verify_database_restore(
             quick_check = restored_connection.execute("PRAGMA quick_check").fetchone()[0]
             integrity_check = restored_connection.execute("PRAGMA integrity_check").fetchone()[0]
             counts = count_reader(restored_connection)
+            table_counts = application_table_counts(restored_connection)
             schema_version = _database_schema_version(restored_connection, schema_table)
         return {
             "quick_check": quick_check,
             "integrity_check": integrity_check,
             "counts": counts,
+            "table_counts": table_counts,
             "schema_version": schema_version,
             "isolated_restore": True,
         }
@@ -262,13 +290,34 @@ def _remove_staging_path(backup_dir: Path, path: Path) -> None:
         shutil.rmtree(path)
 
 
-def prune_backups(backup_dir: Path, retention: int) -> list[str]:
-    """Retain exactly the newest complete daily backup sets after a verified run."""
+def prune_backups(
+    backup_dir: Path,
+    retention: int,
+    *,
+    verified_path: Path | None = None,
+) -> list[str]:
+    """Retain a verified recovery point plus the requested newest daily sets.
+
+    ``verified_path`` is the bundle that just passed the complete restore
+    drill.  It is deliberately protected ahead of mtime ordering: a skewed
+    timestamp on an older backup must never cause us to delete the recovery
+    point we have just proved usable.
+    """
     keep = max(1, int(retention))
+    children = _direct_backup_children(backup_dir)
+    protected: Path | None = None
+    if verified_path is not None:
+        _assert_direct_backup_child(backup_dir, verified_path)
+        protected = verified_path.resolve()
+        available = {path.resolve() for path in children}
+        if protected not in available:
+            raise ValueError(f"verified backup is not a complete direct child: {verified_path}")
     files = sorted(
-        _direct_backup_children(backup_dir),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
+        children,
+        key=lambda path: (
+            path.resolve() != protected,
+            -path.stat().st_mtime,
+        ),
     )
     removed: list[str] = []
     for path in files[keep:]:
@@ -370,48 +419,107 @@ def _copy_stable_file(source: Path, destination: Path) -> None:
     raise RuntimeError(f"source changed repeatedly while snapshotting: {source}")
 
 
+def _finalize_backup_database(path: Path) -> None:
+    """Checkpoint a staging SQLite copy so its main file is self-contained.
+
+    SQLite may leave ``-wal`` / ``-shm`` siblings after a copied operations
+    database is normalized.  They are not independently receipted payloads,
+    so a recovery bundle must never rely on them.  This runs only against the
+    staging copies, before the manifest is written.
+    """
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"staging database is unavailable for checkpoint: {path}")
+    with closing(sqlite3.connect(path, timeout=30)) as connection:
+        checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if not checkpoint or int(checkpoint[0]) != 0:
+            raise RuntimeError(f"unable to checkpoint staging database: {path}")
+        journal_mode = str(connection.execute("PRAGMA journal_mode=DELETE").fetchone()[0]).lower()
+        if journal_mode != "delete":
+            raise RuntimeError(f"unable to finalize staging database journal mode: {path}")
+    leftovers = [
+        companion
+        for suffix in ("-wal", "-shm", "-journal")
+        if (companion := Path(f"{path}{suffix}")).exists() or companion.is_symlink()
+    ]
+    if leftovers:
+        raise RuntimeError(
+            "staging database still has unreceipted SQLite sidecars: "
+            + ", ".join(str(companion) for companion in leftovers)
+        )
+
+
 def _snapshot_tree(source: Path, bundle_dir: Path, component_name: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Copy regular files and retain a content-addressed manifest for restoration."""
+    """Capture one required evidence/report tree as a complete manifest component.
+
+    A recovery bundle is not allowed to silently omit a configured tree.  A
+    missing directory, symlink, FIFO, or other unsupported node stops the
+    backup before retention runs.  An existing but empty directory is valid:
+    its empty root is retained and explicitly recorded so recovery can
+    distinguish it from an absent component.
+    """
     target_root = bundle_dir / component_name
+    if source.is_symlink():
+        raise ValueError(f"snapshot component may not be a symlink: {source}")
     if not source.exists():
-        return {
-            "present": False,
-            "path": component_name,
-            "files": 0,
-            "bytes": 0,
-            "skipped_symlinks": [],
-        }, []
+        raise FileNotFoundError(f"required snapshot component is missing: {source}")
     if not source.is_dir():
         raise ValueError(f"snapshot component must be a directory: {source}")
+
+    def walk_error(error: OSError) -> None:
+        raise RuntimeError(f"unable to enumerate snapshot component {source}: {error}")
+
+    target_root.mkdir(parents=True, exist_ok=False)
     entries: list[dict[str, Any]] = []
-    skipped_symlinks: list[str] = []
-    for current, dirnames, filenames in os.walk(source, topdown=True, followlinks=False):
+    directories: list[str] = ["."]
+    for current, dirnames, filenames in os.walk(
+        source,
+        topdown=True,
+        followlinks=False,
+        onerror=walk_error,
+    ):
         current_path = Path(current)
-        safe_dirs: list[str] = []
+        current_relative = current_path.relative_to(source)
+        if current_relative != Path("."):
+            (target_root / current_relative).mkdir(parents=True, exist_ok=False)
+            directories.append(current_relative.as_posix())
         for dirname in sorted(dirnames):
             candidate = current_path / dirname
+            relative = candidate.relative_to(source)
             if candidate.is_symlink():
-                skipped_symlinks.append(candidate.relative_to(source).as_posix())
-            else:
-                safe_dirs.append(dirname)
-        dirnames[:] = safe_dirs
+                raise ValueError(f"snapshot component contains a symlinked directory: {relative}")
+            if not candidate.is_dir():
+                raise ValueError(f"snapshot component contains an unsupported directory entry: {relative}")
+        # os.walk will recurse only into the real directories above.  Keep its
+        # own list deterministic and avoid a source-side symlink race being
+        # mistaken for an empty directory in the recovery copy.
+        dirnames[:] = sorted(dirnames)
         for filename in sorted(filenames):
             original = current_path / filename
             relative = original.relative_to(source)
             if original.is_symlink():
-                skipped_symlinks.append(relative.as_posix())
-                continue
+                raise ValueError(f"snapshot component contains a symlinked file: {relative}")
             if not original.is_file():
-                continue
+                raise ValueError(f"snapshot component contains an unsupported file entry: {relative}")
             copied = target_root / relative
             _copy_stable_file(original, copied)
             entries.append(_file_entry(bundle_dir, copied))
+    entries.sort(key=lambda entry: str(entry["path"]))
+    directories.sort()
     return {
         "present": True,
         "path": component_name,
         "files": len(entries),
         "bytes": sum(int(entry["bytes"]) for entry in entries),
-        "skipped_symlinks": skipped_symlinks,
+        # This intentionally duplicates the relevant slice of ``files``.
+        # The component-local inventory makes evidence/report completeness
+        # independently auditable and lets a verifier reject an unmanifested
+        # object even when the SQLite copies are healthy.
+        "file_inventory": [dict(entry) for entry in entries],
+        # Retain empty directories as part of the recovery contract.  In
+        # particular an empty-but-existing root is ``[\".\"]`` rather than a
+        # misleading absent component.
+        "directories": directories,
+        "skipped_symlinks": [],
     }, entries
 
 
@@ -421,6 +529,183 @@ def _safe_bundle_path(bundle_dir: Path, relative: str) -> Path:
     if candidate != root and root not in candidate.parents:
         raise ValueError(f"manifest path escapes backup bundle: {relative}")
     return candidate
+
+
+def _manifest_file_records(bundle_dir: Path, entries: object) -> dict[str, dict[str, Any]]:
+    """Verify and normalize the global file inventory in one recovery bundle."""
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("backup manifest does not contain a file list")
+    records: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("invalid backup manifest entry")
+        relative = entry.get("path")
+        if not isinstance(relative, str) or not relative or relative == "manifest.json":
+            raise ValueError("backup manifest file path is invalid")
+        path = _safe_bundle_path(bundle_dir, relative)
+        normalized = _relative_bundle_path(bundle_dir, path)
+        if normalized != relative or relative in records:
+            raise ValueError(f"backup manifest file path is non-canonical or duplicated: {relative}")
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(f"backup manifest file is unavailable: {relative}")
+        raw_bytes = entry.get("bytes")
+        if isinstance(raw_bytes, bool):
+            raise ValueError(f"backup manifest byte count is invalid: {relative}")
+        try:
+            expected_bytes = int(raw_bytes)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"backup manifest byte count is invalid: {relative}") from exc
+        if expected_bytes < 0 or expected_bytes != path.stat().st_size:
+            raise RuntimeError(f"backup manifest file missing or size changed: {relative}")
+        digest = entry.get("sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError(f"backup manifest hash is invalid: {relative}")
+        if _sha256_file(path) != digest:
+            raise RuntimeError(f"backup manifest hash mismatch: {relative}")
+        records[relative] = {"path": relative, "sha256": digest, "bytes": expected_bytes}
+    return records
+
+
+def _bundle_regular_file_paths(bundle_dir: Path) -> set[str]:
+    """Return every payload file and reject links/special nodes outright."""
+    if bundle_dir.is_symlink() or not bundle_dir.is_dir():
+        raise ValueError(f"backup bundle is not a real directory: {bundle_dir}")
+    files: set[str] = set()
+    for path in bundle_dir.rglob("*"):
+        if path.is_symlink():
+            raise RuntimeError(f"backup bundle contains a symlink: {_relative_bundle_path(bundle_dir, path)}")
+        if path.is_file():
+            relative = _relative_bundle_path(bundle_dir, path)
+            if relative != "manifest.json":
+                files.add(relative)
+        elif not path.is_dir():
+            raise RuntimeError(f"backup bundle contains an unsupported node: {_relative_bundle_path(bundle_dir, path)}")
+    return files
+
+
+def _tree_directories(root: Path) -> list[str]:
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError(f"backup component directory is unavailable: {root}")
+    directories = ["."]
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise RuntimeError(f"backup component contains a symlink: {path}")
+        if path.is_dir():
+            directories.append(path.relative_to(root).as_posix())
+        elif not path.is_file():
+            raise RuntimeError(f"backup component contains an unsupported node: {path}")
+    return sorted(directories)
+
+
+def _component_integer(component: dict[str, Any], field: str, *, component_name: str) -> int:
+    raw = component.get(field)
+    if isinstance(raw, bool):
+        raise ValueError(f"backup manifest {component_name} {field} is invalid")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"backup manifest {component_name} {field} is invalid") from exc
+    if value < 0:
+        raise ValueError(f"backup manifest {component_name} {field} is negative")
+    return value
+
+
+def _verify_tree_component(
+    bundle_dir: Path,
+    component: object,
+    *,
+    component_name: str,
+    records: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], set[str]]:
+    """Verify one required evidence/report component and its local inventory."""
+    if not isinstance(component, dict):
+        raise ValueError(f"backup manifest {component_name} component is invalid")
+    if component.get("present") is not True:
+        raise RuntimeError(
+            f"backup manifest {component_name} component is absent; complete recovery bundles require it"
+        )
+    if component.get("path") != component_name:
+        raise ValueError(f"backup manifest {component_name} path is invalid")
+    if component.get("skipped_symlinks") != []:
+        raise RuntimeError(
+            f"backup manifest {component_name} omitted symlinked data; recovery bundle is incomplete"
+        )
+    root = _safe_bundle_path(bundle_dir, component_name)
+    if root != (bundle_dir / component_name).resolve():
+        raise ValueError(f"backup manifest {component_name} path is non-canonical")
+    actual_directories = _tree_directories(root)
+    raw_directories = component.get("directories")
+    if (
+        not isinstance(raw_directories, list)
+        or any(not isinstance(item, str) or not item for item in raw_directories)
+        or len(raw_directories) != len(set(raw_directories))
+        or sorted(raw_directories) != actual_directories
+    ):
+        raise RuntimeError(f"backup manifest {component_name} directory inventory does not match bundle")
+
+    prefix = f"{component_name}/"
+    actual_paths = {path for path in records if path.startswith(prefix)}
+    raw_inventory = component.get("file_inventory")
+    if not isinstance(raw_inventory, list):
+        raise ValueError(f"backup manifest {component_name} file inventory is missing")
+    declared: dict[str, dict[str, Any]] = {}
+    for entry in raw_inventory:
+        if not isinstance(entry, dict):
+            raise ValueError(f"backup manifest {component_name} file inventory is invalid")
+        relative = entry.get("path")
+        if not isinstance(relative, str) or not relative.startswith(prefix) or relative in declared:
+            raise ValueError(f"backup manifest {component_name} file inventory path is invalid")
+        declared[relative] = {
+            "path": relative,
+            "sha256": entry.get("sha256"),
+            "bytes": entry.get("bytes"),
+        }
+    if set(declared) != actual_paths:
+        raise RuntimeError(f"backup manifest {component_name} file inventory does not cover component data")
+    for relative in actual_paths:
+        if declared[relative] != records[relative]:
+            raise RuntimeError(f"backup manifest {component_name} file inventory differs from verified file entry")
+    files = _component_integer(component, "files", component_name=component_name)
+    total_bytes = _component_integer(component, "bytes", component_name=component_name)
+    actual_bytes = sum(int(records[relative]["bytes"]) for relative in actual_paths)
+    if files != len(actual_paths) or total_bytes != actual_bytes:
+        raise RuntimeError(f"backup manifest {component_name} file/byte totals do not match bundle")
+    return {
+        "present": True,
+        "files": files,
+        "bytes": total_bytes,
+        "directories": actual_directories,
+    }, actual_paths
+
+
+def _manifest_table_counts(component: object, *, component_name: str) -> dict[str, int]:
+    """Read one exact application-table inventory from a recovery manifest."""
+    if not isinstance(component, dict):
+        raise ValueError(f"backup manifest {component_name} component is invalid")
+    raw = component.get("table_counts")
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError(f"backup manifest {component_name} table_counts are missing")
+    normalized: dict[str, int] = {}
+    for name, value in raw.items():
+        if (
+            not isinstance(name, str)
+            or not name
+            or name.startswith("sqlite_")
+            or "\x00" in name
+        ):
+            raise ValueError(f"backup manifest {component_name} table name is invalid")
+        if isinstance(value, bool):
+            raise ValueError(f"backup manifest {component_name} table count is invalid: {name}")
+        try:
+            count = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"backup manifest {component_name} table count is invalid: {name}"
+            ) from exc
+        if count < 0:
+            raise ValueError(f"backup manifest {component_name} table count is negative: {name}")
+        normalized[name] = count
+    return normalized
 
 
 def _light_verification_change_reason_version(value: Any) -> int | None:
@@ -553,25 +838,49 @@ def verify_bundle_restore(bundle_path: Path) -> dict[str, Any]:
     """Verify every retained file, then restore both SQLite components in isolation."""
     bundle_dir = bundle_path.parent if bundle_path.name == "manifest.json" else bundle_path
     manifest_path = bundle_dir / "manifest.json"
-    if not manifest_path.is_file():
+    if bundle_dir.is_symlink() or not manifest_path.is_file() or manifest_path.is_symlink():
         raise FileNotFoundError(manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("format") != SNAPSHOT_FORMAT:
         raise ValueError("unsupported backup manifest format")
-    entries = manifest.get("files")
-    if not isinstance(entries, list):
-        raise ValueError("backup manifest does not contain a file list")
-    for entry in entries:
-        if not isinstance(entry, dict):
-            raise ValueError("invalid backup manifest entry")
-        path = _safe_bundle_path(bundle_dir, str(entry.get("path") or ""))
-        if not path.is_file() or int(entry.get("bytes", -1)) != path.stat().st_size:
-            raise RuntimeError(f"backup manifest file missing or size changed: {entry.get('path')}")
-        if _sha256_file(path) != entry.get("sha256"):
-            raise RuntimeError(f"backup manifest hash mismatch: {entry.get('path')}")
-    components = manifest.get("components") or {}
-    ledger_path = _safe_bundle_path(bundle_dir, str((components.get("ledger") or {}).get("path") or ""))
-    operations_path = _safe_bundle_path(bundle_dir, str((components.get("operations") or {}).get("path") or ""))
+    records = _manifest_file_records(bundle_dir, manifest.get("files"))
+    actual_payload_paths = _bundle_regular_file_paths(bundle_dir)
+    if actual_payload_paths != set(records):
+        raise RuntimeError(
+            "backup manifest file inventory does not exactly match bundle payload: "
+            f"manifest={sorted(records)} actual={sorted(actual_payload_paths)}"
+        )
+    components = manifest.get("components")
+    if not isinstance(components, dict):
+        raise ValueError("backup manifest components are invalid")
+    ledger_component = components.get("ledger")
+    operations_component = components.get("operations")
+    if not isinstance(ledger_component, dict) or not isinstance(operations_component, dict):
+        raise ValueError("backup manifest database components are invalid")
+    ledger_path = _safe_bundle_path(
+        bundle_dir, str(ledger_component.get("path") or "")
+    )
+    operations_path = _safe_bundle_path(
+        bundle_dir, str(operations_component.get("path") or "")
+    )
+    ledger_relative = _relative_bundle_path(bundle_dir, ledger_path)
+    operations_relative = _relative_bundle_path(bundle_dir, operations_path)
+    if ledger_relative not in records or operations_relative not in records:
+        raise RuntimeError("backup manifest database component is not covered by a verified file entry")
+    evidence, evidence_paths = _verify_tree_component(
+        bundle_dir,
+        components.get("evidence"),
+        component_name="evidence",
+        records=records,
+    )
+    reports, report_paths = _verify_tree_component(
+        bundle_dir,
+        components.get("reports"),
+        component_name="reports",
+        records=records,
+    )
+    if set(records) != {ledger_relative, operations_relative, *evidence_paths, *report_paths}:
+        raise RuntimeError("backup manifest contains payload outside its declared recovery components")
     ledger = _verify_database_restore(
         ledger_path,
         count_reader=database_counts,
@@ -586,6 +895,14 @@ def verify_bundle_restore(bundle_path: Path) -> dict[str, Any]:
         raise RuntimeError("ledger restore verification failed")
     if operations["quick_check"] != "ok" or operations["integrity_check"] != "ok":
         raise RuntimeError("operations restore verification failed")
+    if ledger["table_counts"] != _manifest_table_counts(
+        ledger_component, component_name="ledger"
+    ):
+        raise RuntimeError("ledger application-table inventory does not match manifest")
+    if operations["table_counts"] != _manifest_table_counts(
+        operations_component, component_name="operations"
+    ):
+        raise RuntimeError("operations application-table inventory does not match manifest")
     audit_consistency = _formal_audit_consistency(ledger_path, operations_path)
     if audit_consistency["status"] != "PASS":
         raise RuntimeError(
@@ -599,10 +916,12 @@ def verify_bundle_restore(bundle_path: Path) -> dict[str, Any]:
         "schema_version": ledger["schema_version"],
         "operations": operations,
         "ledger": ledger,
+        "evidence": evidence,
+        "reports": reports,
         "formal_audit_consistency": audit_consistency,
         "manifest_verified": True,
         "manifest_sha256": _sha256_file(manifest_path),
-        "files_verified": len(entries),
+        "files_verified": len(records),
         "isolated_restore": True,
     }
 
@@ -649,8 +968,69 @@ def _pid_is_alive(pid: int) -> bool:
 
 
 @contextmanager
-def _backup_lock(backup_dir: Path) -> Iterator[dict[str, Any]]:
-    """Serialize retention safely and recover only provably stale owner locks."""
+def _backup_process_mutex(guard_path: Path) -> Iterator[None]:
+    """Hold a kernel-enforced mutex on one persistent guard-file inode.
+
+    The JSON owner file remains useful operational metadata, but an atomic
+    rename cannot safely reclaim it when two stale-lock contenders race.  This
+    guard is never unlinked, so every process locks the same inode for the full
+    backup/verification/retention transaction.
+    """
+
+    guard_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = guard_path.open("a+b")
+    acquired = False
+    try:
+        # Windows byte-range locks require a byte to exist.  Concurrent first
+        # openers may append more than one sentinel, which is harmless because
+        # every contender locks byte zero.
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"another backup is already running: process mutex busy: {guard_path}"
+                ) from exc
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"another backup is already running: process mutex busy: {guard_path}"
+                ) from exc
+        acquired = True
+        yield
+    finally:
+        if acquired:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                # Closing the descriptor also releases the kernel lock.  Do not
+                # mask a successful backup or its original failure on cleanup.
+                pass
+        handle.close()
+
+
+@contextmanager
+def _backup_owner_lock(backup_dir: Path) -> Iterator[dict[str, Any]]:
+    """Maintain human-readable ownership metadata under the process mutex."""
     backup_dir.mkdir(parents=True, exist_ok=True)
     lock_path = backup_dir / ".finance-radar-backup.lock"
     token = uuid.uuid4().hex
@@ -712,6 +1092,16 @@ def _backup_lock(backup_dir: Path) -> Iterator[dict[str, Any]]:
             pass
 
 
+@contextmanager
+def _backup_lock(backup_dir: Path) -> Iterator[dict[str, Any]]:
+    """Serialize a complete backup and safely recover stale owner metadata."""
+
+    guard_path = backup_dir / ".finance-radar-backup.guard"
+    with _backup_process_mutex(guard_path):
+        with _backup_owner_lock(backup_dir) as lock_state:
+            yield lock_state
+
+
 def create_and_verify(
     source: Path,
     backup_dir: Path,
@@ -721,12 +1111,24 @@ def create_and_verify(
     weekly_retention: int = DEFAULT_WEEKLY_RETENTION,
     evidence_dir: Path | None = None,
     report_dir: Path | None = None,
+    predeploy_bridge: bool = False,
 ) -> dict[str, Any]:
     """Create a self-contained, verified ledger/ops/evidence/reports recovery bundle.
 
     Retention is deliberately applied only after the new bundle's manifest hashes
     and isolated restores both pass.  Therefore a failed daily run cannot delete
     the last known-good recovery point.
+
+    ``predeploy_bridge`` is deliberately narrower than a normal scheduled
+    backup.  It takes the same cross-database barrier, complete bundle, and
+    isolated restore drill, but it never initializes, reconciles, or records
+    anything in the live operations database.  It also preserves the copied
+    operations schema and formal-audit rows exactly: the recovery point must
+    remain usable by the active release if the candidate is rejected.  An
+    unresolved copied audit therefore fails the bridge instead of being
+    normalized with candidate code.  Deployment code uses it to make a
+    recovery point with candidate source before a candidate is allowed to
+    perform an irreversible schema migration.
     """
     if not source.is_file():
         raise FileNotFoundError(source)
@@ -744,15 +1146,32 @@ def create_and_verify(
         if staging.exists():
             raise RuntimeError(f"backup staging path already exists: {staging}")
         try:
-            # Recover only real prepared outbox intents before copying either
-            # database.  Historical v1 rows predate the outbox contract and
-            # must never acquire a retroactive formal audit merely because a
-            # backup ran.  The actual copies are then taken behind a shared
-            # operations -> ledger write barrier below.
-            reconciliation = operations.reconcile_light_verification_mutations(
-                source,
-                include_legacy=False,
-            )
+            if predeploy_bridge:
+                # Do not turn an otherwise read-only pre-cutover recovery gate
+                # into either a live or recovery-copy schema/data migration.
+                # The copied pair is verified below exactly as captured; an
+                # unresolved formal audit must fail this gate rather than be
+                # repaired by code that is not yet allowed to become current.
+                backup_run_reconciliation = {"status": "SKIPPED_PREDEPLOY_BRIDGE"}
+                reconciliation = {"status": "SKIPPED_PREDEPLOY_BRIDGE"}
+            else:
+                # The backup-root lock was acquired immediately above.  It is
+                # the concurrency proof for closing receipts left RUNNING by a
+                # crashed earlier process; no new workflow can be active under
+                # this root while the operations transaction makes those rows
+                # terminal.
+                backup_run_reconciliation = operations.reconcile_abandoned_backup_runs(
+                    exclusive_owner=f"backup-root-lock pid={os.getpid()}"
+                )
+                # Recover only real prepared outbox intents before copying
+                # either database.  Historical v1 rows predate the outbox
+                # contract and must never acquire a retroactive formal audit
+                # merely because a backup ran.  The actual copies are then
+                # taken behind a shared operations -> ledger write barrier.
+                reconciliation = operations.reconcile_light_verification_mutations(
+                    source,
+                    include_legacy=False,
+                )
             started_at = datetime.now(timezone.utc).isoformat()
             staging.mkdir(parents=True, exist_ok=False)
             ledger_path = staging / "ledger.sqlite3"
@@ -763,12 +1182,26 @@ def create_and_verify(
                 operations.path,
                 operations_path,
             )
-            snapshot_audit_reconciliation = _normalize_bundle_formal_audits(
-                operations_path,
-                ledger_path,
-            )
+            if predeploy_bridge:
+                snapshot_audit_reconciliation = {
+                    "status": "PRESERVED_PREDEPLOY_BRIDGE",
+                    "reason": "copied formal audits and SQLite schema are verified without candidate mutation",
+                }
+            else:
+                snapshot_audit_reconciliation = _normalize_bundle_formal_audits(
+                    operations_path,
+                    ledger_path,
+                )
+            # Do not publish a bundle whose apparent SQLite restore depends on
+            # unlisted WAL/SHM sidecars.  The receipt covers the main database
+            # files only, so each staging copy must be checkpointed into one
+            # self-contained file before any hashes or tree inventories are
+            # calculated.
+            _finalize_backup_database(ledger_path)
+            _finalize_backup_database(operations_path)
             with closing(sqlite3.connect(f"file:{operations_path.as_posix()}?mode=ro", uri=True)) as connection:
                 bundled_operations_counts = operations_counts(connection)
+                bundled_operations_table_counts = application_table_counts(connection)
             evidence_component, evidence_entries = _snapshot_tree(evidence_dir, staging, "evidence")
             reports_component, report_entries = _snapshot_tree(report_dir, staging, "reports")
             entries = [
@@ -787,7 +1220,11 @@ def create_and_verify(
                     "level": "cross_database_write_barrier",
                     "ledger": "SQLite online backup while both ledger and operations writers were reserved",
                     "operations": "SQLite online backup while both ledger and operations writers were reserved",
-                    "formal_audit": "copied audit reconciled against copied immutable ledger versions",
+                    "formal_audit": (
+                        "copied audit preserved and verified without candidate mutation"
+                        if predeploy_bridge
+                        else "copied audit reconciled against copied immutable ledger versions"
+                    ),
                     "files": "stable-size-and-mtime copy with SHA-256 manifest",
                 },
                 "retention_policy": {
@@ -796,16 +1233,19 @@ def create_and_verify(
                     "prune_after": "new_bundle_manifest_and_isolated_restore_verified",
                 },
                 "reconciliation": reconciliation,
+                "backup_run_reconciliation": backup_run_reconciliation,
                 "components": {
                     "ledger": {
                         "path": "ledger.sqlite3",
                         "source_counts": ledger_capture["source_counts"],
+                        "table_counts": ledger_capture["table_counts"],
                         "source_bytes": ledger_capture["source_bytes"],
                     },
                     "operations": {
                         "path": "operations.sqlite3",
                         "source_counts": operations_capture["source_counts"],
                         "bundle_counts": bundled_operations_counts,
+                        "table_counts": bundled_operations_table_counts,
                         "source_bytes": operations_capture["source_bytes"],
                     },
                     "evidence": evidence_component,
@@ -827,34 +1267,48 @@ def create_and_verify(
                 )
             if verification["operations"]["counts"] != bundled_operations_counts:
                 raise RuntimeError(
-                    "restored operations row counts differ from its normalized recovery snapshot: "
+                    "restored operations row counts differ from its captured recovery snapshot: "
                     f"snapshot={bundled_operations_counts}, "
                     f"restored={verification['operations']['counts']}"
+                )
+            if verification["ledger"]["table_counts"] != ledger_capture["table_counts"]:
+                raise RuntimeError(
+                    "restored ledger table inventory differs from its online snapshot: "
+                    f"source={ledger_capture['table_counts']}, "
+                    f"restored={verification['ledger']['table_counts']}"
+                )
+            if verification["operations"]["table_counts"] != bundled_operations_table_counts:
+                raise RuntimeError(
+                    "restored operations table inventory differs from its normalized recovery snapshot: "
+                    f"snapshot={bundled_operations_table_counts}, "
+                    f"restored={verification['operations']['table_counts']}"
                 )
             staging.replace(destination)
             final_manifest = destination / "manifest.json"
             backup_bytes = _bundle_bytes(destination)
-            # The run record is created only after the two-database bundle has
-            # passed isolated restore.  It is intentionally not embedded in its
-            # own operations snapshot as a misleading RUNNING record.
-            backup_id = operations.create_backup_run(
-                final_manifest,
-                ledger_capture["source_bytes"],
-                manifest_path=final_manifest,
-                snapshot_kind="recovery_bundle",
-            )
-            operations.finish_backup_run(
-                backup_id,
-                backup_bytes=backup_bytes,
-                quick_check=verification["quick_check"],
-                counts=verification["counts"],
-                manifest_path=final_manifest,
-                components=manifest["components"],
-                snapshot_kind="recovery_bundle",
-            )
+            if not predeploy_bridge:
+                # The run record is created only after the two-database bundle
+                # has passed isolated restore.  It is intentionally not
+                # embedded in its own operations snapshot as a misleading
+                # RUNNING record.
+                backup_id = operations.create_backup_run(
+                    final_manifest,
+                    ledger_capture["source_bytes"],
+                    manifest_path=final_manifest,
+                    snapshot_kind="recovery_bundle",
+                )
+                operations.finish_backup_run(
+                    backup_id,
+                    backup_bytes=backup_bytes,
+                    quick_check=verification["quick_check"],
+                    counts=verification["counts"],
+                    manifest_path=final_manifest,
+                    components=manifest["components"],
+                    snapshot_kind="recovery_bundle",
+                )
             # Only now may the previous daily bundle and all optional weekly
             # copies be removed.  This is the user's single-latest-backup policy.
-            removed = prune_backups(backup_dir, retention)
+            removed = prune_backups(backup_dir, retention, verified_path=destination)
             weekly = create_weekly_snapshot(
                 destination,
                 backup_dir / "weekly",
@@ -870,12 +1324,14 @@ def create_and_verify(
                 "pruned": removed,
                 "weekly_snapshot": weekly,
                 "reconciliation": reconciliation,
+                "backup_run_reconciliation": backup_run_reconciliation,
+                "predeploy_bridge": predeploy_bridge,
             }
         except Exception as exc:
             # Preserve a failed-attempt diagnostic even when failure occurred
             # before a bundle could be published.  A valid pre-existing bundle
             # is never pruned by this path.
-            if backup_id is None:
+            if not predeploy_bridge and backup_id is None:
                 try:
                     backup_id = operations.create_backup_run(
                         manifest_path,
@@ -906,12 +1362,20 @@ def main() -> int:
     backup_parser.add_argument("--report-dir", type=Path, default=settings.ledger_db.parent.parent / "reports")
     backup_parser.add_argument("--retention", type=int, default=DEFAULT_DAILY_RETENTION)
     backup_parser.add_argument("--weekly-retention", type=int, default=DEFAULT_WEEKLY_RETENTION)
+    backup_parser.add_argument(
+        "--predeploy-bridge",
+        action="store_true",
+        help="create a verified recovery bundle without mutating live operations state",
+    )
     verify_parser = subparsers.add_parser("verify", help="verify a legacy backup or full recovery bundle")
     verify_parser.add_argument("backup_path", type=Path)
     subparsers.add_parser("status", help="show latest recorded backup drill")
     args = parser.parse_args()
-    operations = OperationsRepository(settings.operations_db)
     if args.command == "backup":
+        operations = OperationsRepository(
+            settings.operations_db,
+            initialize=not args.predeploy_bridge,
+        )
         result = create_and_verify(
             args.source,
             args.backup_dir,
@@ -920,10 +1384,12 @@ def main() -> int:
             weekly_retention=args.weekly_retention,
             evidence_dir=args.evidence_dir,
             report_dir=args.report_dir,
+            predeploy_bridge=args.predeploy_bridge,
         )
     elif args.command == "verify":
         result = verify_restore(args.backup_path)
     else:
+        operations = OperationsRepository(settings.operations_db)
         result = operations.latest_backup()
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

@@ -27,6 +27,11 @@ try:
 except ModuleNotFoundError:  # Direct execution from scripts/.
     from backup_crypto import decrypt_file
 
+try:
+    from scripts.release_identity import validate_release_id
+except ModuleNotFoundError:  # Direct execution from scripts/.
+    from release_identity import validate_release_id
+
 
 ROOT = Path(__file__).resolve().parents[1]
 STAMP_RE = re.compile(r"finance-radar-migration-(\d{8}T\d{6}Z)\.tgz\.aesgcm$")
@@ -38,6 +43,12 @@ LOCAL_EVIDENCE_MODEL_PATH = "evidence-llm/models/qwen2.5-0.5b-instruct-q4_k_m.gg
 LOCAL_EVIDENCE_MODEL_SHA256 = (
     "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"
 )
+LOCAL_EVIDENCE_MODEL_CAPABILITY_PATH = "config/LOCAL_EVIDENCE_MODEL_CAPABILITY.json"
+LOCAL_EVIDENCE_MODEL_RESTORE_POLICY = "DISABLED_AFTER_RESTORE"
+LOCAL_EVIDENCE_MODEL_CAPABILITY_SCHEMA_VERSION = 1
+MIGRATION_RECOVERY_BUNDLE_RECEIPT_PATH = "config/MIGRATION_RECOVERY_BUNDLE.json"
+MIGRATION_RECOVERY_BUNDLE_MANIFEST_PATH = "config/MIGRATION_RECOVERY_BUNDLE.manifest.json"
+MIGRATION_RECOVERY_BUNDLE_SCHEMA_VERSION = 1
 BLIND_REPORT_FILENAMES = (
     "risk_router_external_blind_v3_report.json",
     "risk_router_external_blind_v2_report.json",
@@ -66,10 +77,27 @@ OPERATIONS_V3_TABLES = (
     "adjudication_samples",
     "adjudication_reviews",
 )
+OPERATIONS_V6_TABLES = (
+    "light_verification_runs",
+    "formal_mutation_audits",
+)
+# Versions 2--4 are historical recovery points.  Version 6 is the currently
+# deployed operations store.  There was no released schema 5 migration, so do
+# not silently accept an unknown intermediate shape.
+SUPPORTED_OPERATIONS_SCHEMA_VERSIONS = frozenset({2, 3, 4, 6})
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def default_workspace_root() -> Path | None:
+    """Keep interactive Windows recovery drills off the constrained C: drive."""
+
+    d_drive_workspace = Path(r"D:\FinanceRadarScratch\migration-audit")
+    if os.name == "nt" and d_drive_workspace.anchor and Path(d_drive_workspace.anchor).is_dir():
+        return d_drive_workspace
+    return None
 
 
 def sha256_file(path: Path) -> str:
@@ -78,6 +106,244 @@ def sha256_file(path: Path) -> str:
         while chunk := handle.read(CHUNK_BYTES):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def inspect_local_evidence_model_contract(
+    hashes: dict[str, str],
+    captures: dict[str, bytes],
+    *,
+    expected_release: str,
+) -> dict[str, Any]:
+    """Validate the optional local-model archive contract.
+
+    New migration archives declare whether an advisory local model was included
+    independently of whether the release happens to carry its systemd unit.
+    The unit is configuration; it is not evidence that a 491 MB model is a
+    required restore dependency.  Archives created before this marker retain
+    their stricter legacy interpretation for compatibility.
+    """
+
+    model_unit = (
+        f"releases/{expected_release}/deployment/systemd/"
+        "finance-radar-evidence-llm.service"
+    )
+    model_hash = hashes.get(LOCAL_EVIDENCE_MODEL_PATH)
+    model_unit_present = model_unit in hashes
+    marker_raw = captures.get(LOCAL_EVIDENCE_MODEL_CAPABILITY_PATH)
+
+    if marker_raw is None:
+        # Legacy archives coupled model presence to the release unit.  Preserve
+        # that gate so an old archive cannot accidentally downgrade a formerly
+        # mandatory captured model into an unverified optional component.
+        if model_unit_present and model_hash != LOCAL_EVIDENCE_MODEL_SHA256:
+            raise ValueError("local evidence model is missing or has an unexpected SHA-256")
+        return {
+            "capability_declared": False,
+            "legacy_archive_contract": True,
+            "installed": model_hash is not None,
+            "archive_includes_model": model_hash is not None,
+            "required_by_release": model_unit_present,
+            "restore_policy": LOCAL_EVIDENCE_MODEL_RESTORE_POLICY,
+            "unit_present": model_unit_present,
+            "included": model_hash is not None,
+            "sha256": model_hash,
+            "pinned_sha256_match": model_hash == LOCAL_EVIDENCE_MODEL_SHA256,
+        }
+
+    try:
+        capability = json.loads(marker_raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("local evidence model capability declaration is not valid JSON") from exc
+    if not isinstance(capability, dict):
+        raise ValueError("local evidence model capability declaration must be an object")
+
+    installed = capability.get("installed")
+    archive_includes_model = capability.get("archive_includes_model")
+    if (
+        capability.get("schema_version") != LOCAL_EVIDENCE_MODEL_CAPABILITY_SCHEMA_VERSION
+        or capability.get("kind") != "local_evidence_model"
+        or type(installed) is not bool
+        or type(archive_includes_model) is not bool
+    ):
+        raise ValueError("local evidence model capability declaration is invalid")
+    if capability.get("restore_policy") != LOCAL_EVIDENCE_MODEL_RESTORE_POLICY:
+        raise ValueError("local evidence model must remain disabled after restore")
+    if archive_includes_model != (model_hash is not None):
+        raise ValueError("local evidence model capability disagrees with archive contents")
+    if archive_includes_model and not installed:
+        raise ValueError("local evidence model capability cannot archive an uninstalled model")
+    if archive_includes_model and model_hash != LOCAL_EVIDENCE_MODEL_SHA256:
+        raise ValueError("local evidence model has an unexpected SHA-256")
+
+    return {
+        "capability_declared": True,
+        "legacy_archive_contract": False,
+        "installed": installed,
+        "archive_includes_model": archive_includes_model,
+        # A current service unit does not make this advisory capability a
+        # required restore dependency.  The activation policy is explicit.
+        "required_by_release": False,
+        "restore_policy": LOCAL_EVIDENCE_MODEL_RESTORE_POLICY,
+        "unit_present": model_unit_present,
+        "included": model_hash is not None,
+        "sha256": model_hash,
+        "pinned_sha256_match": model_hash == LOCAL_EVIDENCE_MODEL_SHA256,
+    }
+
+
+def _migration_bundle_target_path(source_path: str) -> str:
+    """Map one verified recovery-bundle file to its migration destination."""
+
+    source = PurePosixPath(source_path)
+    if source.is_absolute() or not source.parts or any(
+        part in ("", ".", "..") for part in source.parts
+    ):
+        raise ValueError(f"migration bundle source path is unsafe: {source_path!r}")
+    if source_path == "ledger.sqlite3":
+        return "shared/data/finance_radar.sqlite3"
+    if source_path == "operations.sqlite3":
+        return "shared/data/finance_radar_operations.sqlite3"
+    if source.parts[0] == "evidence" and len(source.parts) > 1:
+        return "shared/data/evidence_objects/" + "/".join(source.parts[1:])
+    if source.parts[0] == "reports" and len(source.parts) > 1:
+        return "shared/reports/" + "/".join(source.parts[1:])
+    raise ValueError(f"migration bundle source path is not a recovery component: {source_path!r}")
+
+
+def inspect_migration_recovery_bundle_contract(
+    hashes: dict[str, str],
+    captures: dict[str, bytes],
+) -> dict[str, Any]:
+    """Bind a new migration archive to its verified recovery-bundle payload.
+
+    Historical archives did not retain this source-to-target mapping.  They
+    remain readable for recovery compatibility, but a current archive must
+    prove every staged database/evidence/report file came from one verified
+    bundle rather than a later live-directory copy.
+    """
+
+    receipt_raw = captures.get(MIGRATION_RECOVERY_BUNDLE_RECEIPT_PATH)
+    manifest_raw = captures.get(MIGRATION_RECOVERY_BUNDLE_MANIFEST_PATH)
+    if receipt_raw is None and manifest_raw is None:
+        return {
+            "bound_to_verified_recovery_bundle": False,
+            "legacy_archive_contract": True,
+            "consistency": "legacy_unbound_live_copy",
+        }
+    if receipt_raw is None or manifest_raw is None:
+        raise ValueError("migration recovery-bundle receipt and manifest must be present together")
+    try:
+        receipt = json.loads(receipt_raw.decode("utf-8"))
+        source_manifest = json.loads(manifest_raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("migration recovery-bundle receipt is not valid JSON") from exc
+    if not isinstance(receipt, dict) or not isinstance(source_manifest, dict):
+        raise ValueError("migration recovery-bundle receipt must contain objects")
+    source_manifest_sha256 = hashlib.sha256(manifest_raw).hexdigest()
+    if (
+        receipt.get("schema_version") != MIGRATION_RECOVERY_BUNDLE_SCHEMA_VERSION
+        or receipt.get("consistency") != "verified_full_recovery_bundle"
+        or receipt.get("source_manifest_path") != MIGRATION_RECOVERY_BUNDLE_MANIFEST_PATH
+        or receipt.get("source_manifest_sha256") != source_manifest_sha256
+        or hashes.get(MIGRATION_RECOVERY_BUNDLE_MANIFEST_PATH) != source_manifest_sha256
+    ):
+        raise ValueError("migration recovery-bundle receipt hash contract is invalid")
+    snapshot_id = receipt.get("snapshot_id")
+    if (
+        not isinstance(snapshot_id, str)
+        or not re.fullmatch(r"finance_radar_[A-Za-z0-9_]+", snapshot_id)
+        or source_manifest.get("format") != "finance-radar-recovery-bundle-v1"
+        or source_manifest.get("snapshot_id") != snapshot_id
+    ):
+        raise ValueError("migration recovery-bundle snapshot identity is invalid")
+    source_files = source_manifest.get("files")
+    mapping = receipt.get("mapping")
+    if not isinstance(source_files, list) or not source_files or not isinstance(mapping, list):
+        raise ValueError("migration recovery-bundle inventory is invalid")
+
+    source_records: dict[str, tuple[str, int]] = {}
+    for record in source_files:
+        if not isinstance(record, dict):
+            raise ValueError("migration recovery-bundle source inventory record is invalid")
+        source_path = record.get("path")
+        source_hash = record.get("sha256")
+        source_bytes = record.get("bytes")
+        if (
+            not isinstance(source_path, str)
+            or source_path in source_records
+            or not isinstance(source_hash, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", source_hash)
+            or isinstance(source_bytes, bool)
+        ):
+            raise ValueError("migration recovery-bundle source file record is invalid")
+        try:
+            source_size = int(source_bytes)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("migration recovery-bundle source file size is invalid") from exc
+        if source_size < 0:
+            raise ValueError("migration recovery-bundle source file size is negative")
+        _migration_bundle_target_path(source_path)
+        source_records[source_path] = (source_hash, source_size)
+
+    mapping_records: dict[str, str] = {}
+    target_paths: set[str] = set()
+    for record in mapping:
+        if not isinstance(record, dict):
+            raise ValueError("migration recovery-bundle mapping record is invalid")
+        source_path = record.get("source_path")
+        target_path = record.get("target_path")
+        source_hash = record.get("sha256")
+        source_bytes = record.get("bytes")
+        if (
+            not isinstance(source_path, str)
+            or not isinstance(target_path, str)
+            or source_path in mapping_records
+            or target_path in target_paths
+            or source_path not in source_records
+        ):
+            raise ValueError("migration recovery-bundle mapping identity is invalid")
+        expected_hash, expected_bytes = source_records[source_path]
+        if (
+            source_hash != expected_hash
+            or source_bytes != expected_bytes
+            or target_path != _migration_bundle_target_path(source_path)
+            or hashes.get(target_path) != expected_hash
+        ):
+            raise ValueError("migration recovery-bundle staged payload does not match source receipt")
+        mapping_records[source_path] = target_path
+        target_paths.add(target_path)
+    if set(mapping_records) != set(source_records):
+        raise ValueError("migration recovery-bundle mapping is incomplete")
+    for source_path in ("ledger.sqlite3", "operations.sqlite3"):
+        if source_path not in mapping_records:
+            raise ValueError("migration recovery-bundle is missing a database component")
+
+    # A current archive is allowed to materialize state in only these two
+    # namespaces.  Checking each declared mapping is not sufficient on its
+    # own: without this exact-set comparison a later, unbound live-directory
+    # copy could be smuggled into ``shared/data`` or ``shared/reports`` while
+    # the declared bundle files still matched.  The migration creator emits
+    # exactly this set from the verified source manifest.
+    staged_payload_paths = {
+        path
+        for path in hashes
+        if path.startswith("shared/data/") or path.startswith("shared/reports/")
+    }
+    if staged_payload_paths != target_paths:
+        missing = sorted(target_paths - staged_payload_paths)
+        unexpected = sorted(staged_payload_paths - target_paths)
+        raise ValueError(
+            "migration recovery-bundle staged payload set is not exact: "
+            f"missing={missing[:3]} unexpected={unexpected[:3]}"
+        )
+    return {
+        "bound_to_verified_recovery_bundle": True,
+        "legacy_archive_contract": False,
+        "consistency": "verified_full_recovery_bundle",
+        "snapshot_id": snapshot_id,
+        "source_manifest_sha256": source_manifest_sha256,
+        "mapped_files": len(mapping_records),
+    }
 
 
 def _safe_member_name(name: str, expected_root: str) -> str:
@@ -165,10 +431,20 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
         tables = LEDGER_TABLES if ledger else OPERATIONS_TABLES
         if not ledger and schema_version >= 3:
             tables += OPERATIONS_V3_TABLES
-        counts = {
-            table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-            for table in tables
-        }
+        if not ledger and schema_version >= 6:
+            tables += OPERATIONS_V6_TABLES
+        counts: dict[str, int] = {}
+        for table in tables:
+            try:
+                counts[table] = int(
+                    connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                )
+            except sqlite3.OperationalError as exc:
+                database_name = "ledger" if ledger else "operations"
+                raise ValueError(
+                    f"{database_name} database is missing required table for schema "
+                    f"{schema_version}: {table}"
+                ) from exc
         audit = {}
         if ledger:
             audit = {
@@ -192,8 +468,11 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
         raise ValueError(f"SQLite integrity failure: quick={quick_check} integrity={integrity_check}")
     if ledger and (schema_version != 12 or any(audit.values())):
         raise ValueError(f"ledger safety/schema failure: schema={schema_version} audit={audit}")
-    if not ledger and schema_version not in {2, 3, 4}:
-        raise ValueError(f"operations schema failure: schema={schema_version}; expected 2, 3 or 4")
+    if not ledger and schema_version not in SUPPORTED_OPERATIONS_SCHEMA_VERSIONS:
+        expected_versions = ", ".join(str(version) for version in sorted(SUPPORTED_OPERATIONS_SCHEMA_VERSIONS))
+        raise ValueError(
+            f"operations schema failure: schema={schema_version}; expected one of {expected_versions}"
+        )
     return {
         "bytes": path.stat().st_size,
         "sha256": sha256_file(path),
@@ -212,6 +491,7 @@ def audit_archive(
     *,
     expected_release: str,
     expected_sha256: str,
+    workspace_root: Path | None = None,
 ) -> dict[str, Any]:
     encrypted_archive = encrypted_archive.resolve()
     passphrase_file = passphrase_file.resolve()
@@ -222,12 +502,28 @@ def audit_archive(
         raise ValueError("archive filename does not contain a valid migration stamp")
     stamp = match.group(1)
     expected_root = f"finance-radar-migration-{stamp}"
-    if not re.fullmatch(r"\d{8}T\d{6}Z", expected_release):
-        raise ValueError("expected release id is invalid")
+    try:
+        expected_release = validate_release_id(expected_release)
+    except ValueError as exc:
+        raise ValueError("expected release id is invalid") from exc
     if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256):
         raise ValueError("expected SHA-256 is invalid")
 
-    workdir = Path(tempfile.mkdtemp(prefix="finance-radar-isolated-restore-"))
+    if workspace_root is None:
+        workdir = Path(tempfile.mkdtemp(prefix="finance-radar-isolated-restore-"))
+        workspace_parent = "system-default"
+    else:
+        requested_workspace_root = workspace_root
+        if requested_workspace_root.exists() and requested_workspace_root.is_symlink():
+            raise ValueError("audit workspace root must not be a symlink")
+        workspace_root = requested_workspace_root.resolve()
+        if workspace_root.exists() and not workspace_root.is_dir():
+            raise ValueError("audit workspace root must be a real directory")
+        workspace_root.mkdir(parents=True, exist_ok=True)
+        workdir = Path(
+            tempfile.mkdtemp(prefix="finance-radar-isolated-restore-", dir=workspace_root)
+        )
+        workspace_parent = str(workspace_root)
     plain_archive = workdir / "migration.tgz"
     restored_ledger = workdir / "finance_radar.sqlite3"
     restored_operations = workdir / "finance_radar_operations.sqlite3"
@@ -255,6 +551,9 @@ def audit_archive(
         capture_names = {
             "CURRENT_RELEASE.txt",
             "MANIFEST.sha256",
+            LOCAL_EVIDENCE_MODEL_CAPABILITY_PATH,
+            MIGRATION_RECOVERY_BUNDLE_RECEIPT_PATH,
+            MIGRATION_RECOVERY_BUNDLE_MANIFEST_PATH,
             f"releases/{expected_release}/scripts/official_event_collector.py",
             f"{release_artifacts}/risk_router_model_card.json",
             f"{release_artifacts}/risk_router.sha256",
@@ -354,14 +653,12 @@ def audit_archive(
             raise ValueError(
                 f"required migration material missing: files={missing_required} nginx={nginx_config_count}"
             )
-        model_unit = (
-            f"releases/{expected_release}/deployment/systemd/"
-            "finance-radar-evidence-llm.service"
+        local_evidence_model = inspect_local_evidence_model_contract(
+            hashes,
+            captures,
+            expected_release=expected_release,
         )
-        model_required = model_unit in hashes
-        model_hash = hashes.get(LOCAL_EVIDENCE_MODEL_PATH)
-        if model_required and model_hash != LOCAL_EVIDENCE_MODEL_SHA256:
-            raise ValueError("local evidence model is missing or has an unexpected SHA-256")
+        migration_recovery_bundle = inspect_migration_recovery_bundle_contract(hashes, captures)
         forbidden_names = [
             name
             for name in seen
@@ -459,12 +756,8 @@ def audit_archive(
                 "shadow": True,
                 "no_trading": True,
             },
-            "local_evidence_model": {
-                "required_by_release": model_required,
-                "included": model_hash is not None,
-                "sha256": model_hash,
-                "pinned_sha256_match": model_hash == LOCAL_EVIDENCE_MODEL_SHA256,
-            },
+            "local_evidence_model": local_evidence_model,
+            "migration_recovery_bundle": migration_recovery_bundle,
             "ledger_restore": ledger,
             "operations_restore": operations,
             "boundaries": {
@@ -479,6 +772,7 @@ def audit_archive(
         shutil.rmtree(workdir, ignore_errors=False)
         workdir_cleaned = not workdir.exists()
     result["temporary_workspace_cleaned"] = workdir_cleaned
+    result["temporary_workspace_parent"] = workspace_parent
     return result
 
 
@@ -502,6 +796,20 @@ def render_markdown(payload: dict[str, Any]) -> str:
     operations = payload["operations_restore"]
     boundaries = payload["boundaries"]
     release = payload["release"]
+    local_evidence_model = payload.get("local_evidence_model") or {}
+    migration_recovery_bundle = payload.get("migration_recovery_bundle") or {}
+    capability_declared = local_evidence_model.get("capability_declared", False)
+    legacy_contract = local_evidence_model.get("legacy_archive_contract", True)
+    source_installed = local_evidence_model.get(
+        "installed", local_evidence_model.get("included")
+    )
+    archive_included = local_evidence_model.get("included")
+    restore_policy = local_evidence_model.get(
+        "restore_policy", LOCAL_EVIDENCE_MODEL_RESTORE_POLICY
+    )
+    unit_present = local_evidence_model.get(
+        "unit_present", local_evidence_model.get("required_by_release")
+    )
     snapshot = Path(payload["encrypted_archive"]).parent.name
     lines = [
         "# Encrypted migration archive — full isolated restore audit",
@@ -526,12 +834,23 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Operations: Schema {operations['schema_version']}; quick/integrity `{operations['quick_check']}` / `{operations['integrity_check']}`; {operations['counts']['worker_cycles']:,} worker cycles and {operations['counts']['backup_runs']:,} backup runs.",
         "- Both databases were opened read-only/immutable during the audit.",
         "",
+        "## Migration source consistency",
+        "",
+        f"- Bound to a verified full recovery bundle: `{migration_recovery_bundle.get('bound_to_verified_recovery_bundle', False)}`; legacy contract: `{migration_recovery_bundle.get('legacy_archive_contract', True)}`.",
+        f"- Consistency source: `{migration_recovery_bundle.get('consistency', 'unknown')}`; mapped files: `{migration_recovery_bundle.get('mapped_files', 'n/a')}`.",
+        "",
         "## Shadow model recovery proof",
         "",
         f"- Model: `{release['risk_router_model_version']}`.",
         f"- Blind report: `{release['external_blind_report']}`; gate `{release['external_blind_gate_pass']}`; decision `{release['external_blind_promotion']}`.",
         f"- Artifact/card/report SHA-256 chain matched: `{release['risk_router_hash_chain_match']}`.",
         f"- SHADOW / no-trading: `{release['shadow']}` / `{release['no_trading']}`.",
+        "",
+        "## Optional local evidence model",
+        "",
+        f"- Capability declaration present: `{capability_declared}`; legacy contract: `{legacy_contract}`.",
+        f"- Source installed / archive included: `{source_installed}` / `{archive_included}`; restore policy: `{restore_policy}`.",
+        f"- Model unit present: `{unit_present}`; pinned SHA-256 matched: `{local_evidence_model.get('pinned_sha256_match')}`.",
         "",
         "## Safety boundaries",
         "",
@@ -556,6 +875,12 @@ def main() -> int:
     parser.add_argument("--passphrase-file", type=Path, default=ROOT / "server_migration_backup" / ".backup-passphrase")
     parser.add_argument("--expected-release", required=True)
     parser.add_argument("--expected-sha256", required=True)
+    parser.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=default_workspace_root(),
+        help="directory for temporary decrypted audit material",
+    )
     parser.add_argument("--report", type=Path, default=ROOT / "reports" / "migration_full_restore_latest.json")
     args = parser.parse_args()
     try:
@@ -564,6 +889,7 @@ def main() -> int:
             args.passphrase_file,
             expected_release=args.expected_release,
             expected_sha256=args.expected_sha256,
+            workspace_root=args.workspace_root,
         )
     except Exception as exc:
         failure = {

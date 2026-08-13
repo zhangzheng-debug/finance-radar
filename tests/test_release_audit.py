@@ -80,6 +80,7 @@ def test_release_bundle_is_hash_bound_and_verifies_cross_platform(tmp_path: Path
         "observed_before_output": True,
     }
     assert manifest["security_boundaries"]["deployment_performed"] is False
+    assert "dirty_source_archive_inventory" not in manifest
     assert str(root.resolve()) not in json.dumps(manifest)
 
     output = tmp_path / "records"
@@ -209,6 +210,91 @@ def test_dirty_release_requires_explicit_exception_and_artifact_hash(tmp_path: P
     )
     assert accepted["release"]["readiness"] == "READY_WITH_DECLARED_DIRTY_SOURCE"
     assert accepted["release"]["dirty_source_exception_declared"] is True
+    assert accepted["dirty_source_archive_inventory"]["format"] == (
+        "finance-radar-dirty-source-archive-inventory-v1"
+    )
+
+
+def test_dirty_release_requires_and_verifies_complete_noncritical_runtime_inventory(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    api_module = root / "app" / "api.py"
+    replay_module = root / "app" / "services" / "replay.py"
+    _write(api_module, "from app.services.replay import ReplayService\n")
+    _write(replay_module, "class ReplayService: ...\n")
+    verifications = (parse_verification("pytest=PASS"),)
+
+    omitted = _artifact(
+        tmp_path / "omitted-runtime-module.tgz",
+        members={"app/api.py": api_module.read_bytes()},
+    )
+    with pytest.raises(ValueError, match="exactly the workspace release file inventory"):
+        build_release_manifest(
+            root,
+            release_id="dirty-omitted-runtime",
+            critical_files=("app/api.py",),
+            artifact_paths=(omitted,),
+            verifications=verifications,
+            git_state=DIRTY_GIT,
+            allow_dirty=True,
+            generated_at=FIXED_TIME,
+        )
+
+    artifact = _artifact(
+        tmp_path / "complete-runtime-module.tgz",
+        members={
+            "app/api.py": api_module.read_bytes(),
+            "app/services/replay.py": replay_module.read_bytes(),
+        },
+    )
+    manifest = build_release_manifest(
+        root,
+        release_id="dirty-complete-runtime",
+        critical_files=("app/api.py",),
+        artifact_paths=(artifact,),
+        verifications=verifications,
+        git_state=DIRTY_GIT,
+        allow_dirty=True,
+        generated_at=FIXED_TIME,
+    )
+    records = tmp_path / "records"
+    names = write_release_bundle(manifest, records)
+
+    extracted = tmp_path / "extracted-release"
+    with tarfile.open(artifact, "r:gz") as archive:
+        for member in archive.getmembers():
+            assert member.isfile()
+            target = extracted / member.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            source = archive.extractfile(member)
+            assert source is not None
+            target.write_bytes(source.read())
+    clean_report = verify_release_manifest(
+        records / names["json"],
+        extracted,
+        artifact_paths=(artifact,),
+        require_ready=True,
+        require_sidecar=True,
+        require_artifact=True,
+        verified_at=FIXED_TIME,
+    )
+    assert clean_report["status"] == "PASS"
+
+    (extracted / "app" / "services" / "replay.py").write_text(
+        "class ReplayService: changed = True\n", encoding="utf-8"
+    )
+    report = verify_release_manifest(
+        records / names["json"],
+        extracted,
+        artifact_paths=(artifact,),
+        require_ready=True,
+        require_sidecar=True,
+        require_artifact=True,
+        verified_at=FIXED_TIME,
+    )
+    assert report["status"] == "FAIL"
+    assert {
+        check["name"] for check in report["checks"] if check["status"] == "FAIL"
+    } == {"dirty_source_workspace_inventory"}
 
 
 def test_sensitive_files_and_unsafe_archives_are_rejected(tmp_path: Path) -> None:
@@ -220,6 +306,13 @@ def test_sensitive_files_and_unsafe_archives_are_rejected(tmp_path: Path) -> Non
     unsafe = _artifact(tmp_path / "unsafe.tgz", member_name="../.env")
     with pytest.raises(ValueError, match="unsafe archive member path"):
         inspect_artifact(unsafe)
+
+    streamlit_secret = _artifact(
+        tmp_path / "streamlit-secret.tgz",
+        member_name=".streamlit/secrets.toml",
+    )
+    with pytest.raises(ValueError, match="sensitive archive member path rejected"):
+        inspect_artifact(streamlit_secret)
 
     mismatch_root = tmp_path / "mismatch-workspace"
     _write(mismatch_root / "deployment/test.conf", "expected\n")
@@ -280,6 +373,7 @@ def test_default_release_contract_covers_runtime_mutation_and_edge_boundaries() 
     required = {
         "app/config.py",
         "app/models/risk_router.py",
+        "app/models/evidence_policy.py",
         "app/services/evidence_agent.py",
         "app/services/light_verification.py",
         "app/storage/operations.py",
@@ -290,9 +384,15 @@ def test_default_release_contract_covers_runtime_mutation_and_edge_boundaries() 
         "deployment/systemd/install_local_evidence_model.sh",
         "deployment/systemd/certbot-reload-nginx.sh",
         "deployment/systemd/finance-radar-evidence-llm.service",
+        "deployment/systemd/finance-radar.slice",
+        "deployment/systemd/run_backup_quiesced.sh",
+        "deployment/systemd/verify_backup_receipt.py",
         "scripts/apply_authorized_rough_reviews.py",
         "scripts/official_primary_page_enricher.py",
         "scripts/run_live_cycle.py",
+        "scripts/audit_migration_restore.py",
+        "scripts/prepare_migration_restore.py",
+        "scripts/restore_migration_to_vps.ps1",
     }
     assert required.issubset(DEFAULT_CRITICAL_FILES)
 
@@ -301,7 +401,7 @@ def test_systemd_installer_verifies_optional_manifest_before_cutover() -> None:
     root = Path(__file__).parents[1]
     installer = (root / "deployment/systemd/install_remote.sh").read_text(encoding="utf-8")
     gate = installer.split("# Optional, backward-compatible release gate.", 1)[1].split(
-        "# Mandatory pre-cutover recovery gate.", 1
+        "# Mandatory recovery gates.", 1
     )[0]
 
     assert "RELEASE_MANIFEST=${5:-}" in installer
@@ -373,7 +473,7 @@ def test_release_audit_tool_has_no_commit_or_deployment_commands() -> None:
         "shell=True",
     ):
         assert forbidden not in source
-    assert source.count("subprocess.run(") == 1
+    assert source.count("subprocess.run(") == 2
     assert 'run("rev-parse", "--show-toplevel")' in source
     assert 'run("rev-parse", "HEAD")' in source
     assert 'run("status", "--porcelain=v1", "--untracked-files=all")' in source
@@ -411,7 +511,9 @@ def test_cli_accepts_real_repository_contract_on_windows_or_linux(
         # A deliberately dirty source is a workspace-byte release and must not
         # pretend that a clean Git archive contains the pending changes.
         with tarfile.open(artifact, "w:gz") as archive:
-            for relative in DEFAULT_CRITICAL_FILES:
+            _selection, workspace_files = release_audit._workspace_release_file_records(root)
+            for entry in workspace_files:
+                relative = str(entry["path"])
                 archive.add(root / relative, arcname=relative, recursive=False)
 
     records = tmp_path / "records"

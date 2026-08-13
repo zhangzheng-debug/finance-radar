@@ -8,6 +8,7 @@ Type=simple
 User=finance-radar
 Group=finance-radar
 WorkingDirectory=/opt/finance-radar/current
+Slice=finance-radar.slice
 EnvironmentFile=/etc/finance-radar.env
 # Formal light-verification is deliberately opt-in and must be started through
 # a separately scoped, auditable batch.  The continuous collector may keep
@@ -23,7 +24,12 @@ RestartSec=20
 # process; systemd will then apply the normal restart policy.
 MemoryHigh=380M
 MemoryMax=520M
+MemorySwapMax=256M
 TasksMax=128
+MemoryAccounting=true
+OOMPolicy=stop
+OOMScoreAdjust=500
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

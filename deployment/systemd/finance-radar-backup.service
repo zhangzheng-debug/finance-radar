@@ -4,14 +4,39 @@ After=finance-radar-api.service
 
 [Service]
 Type=oneshot
-User=finance-radar
-Group=finance-radar
+# The root wrapper owns only the stop/start boundary.  It drops to
+# finance-radar for the Python backup itself and restarts the worker only when
+# it was the component that stopped it.  This prevents concurrent worker +
+# restore-drill memory pressure on the 1-GiB host without reviving the worker
+# during the installer's protected cutover bridge.
+User=root
+Group=root
 WorkingDirectory=/opt/finance-radar/current
+Slice=finance-radar.slice
 EnvironmentFile=/etc/finance-radar.env
+# SQLite restore verification can be larger than the host's private /tmp
+# tmpfs. Keep its scratch on the root volume while retaining PrivateTmp for all
+# other temporary files.
+Environment=TMPDIR=/opt/finance-radar/shared/data/.backup-restore-tmp
+ExecStartPre=/usr/bin/test ! -L /opt/finance-radar/shared/data/.backup-restore-tmp
+ExecStartPre=/usr/bin/install -d -m 0700 -o finance-radar -g finance-radar /opt/finance-radar/shared/data/.backup-restore-tmp
 # Retention is intentionally one latest verified daily bundle.  The backup job
 # only removes the previous bundle after the new ledger+operations+manifest
 # restore verification succeeds.
-ExecStart=/opt/finance-radar/venv/bin/python -m app.ops.backup backup --retention 1 --weekly-retention 0
+ExecStart=/usr/local/libexec/finance-radar/run_backup_quiesced.sh
+# A full restore drill can briefly copy both databases and evidence. Bound it
+# independently so a scheduled backup cannot starve the API/worker on the
+# 1-GiB-class production host.
+MemoryHigh=340M
+MemoryMax=460M
+MemorySwapMax=128M
+TasksMax=128
+MemoryAccounting=true
+OOMPolicy=stop
+OOMScoreAdjust=700
+TimeoutStartSec=45min
+TimeoutStopSec=2min
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

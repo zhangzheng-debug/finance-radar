@@ -10,6 +10,7 @@ Type=simple
 User=finance-radar
 Group=finance-radar
 WorkingDirectory=/opt/finance-radar/current
+Slice=finance-radar.slice
 EnvironmentFile=/etc/finance-radar.env
 Environment=FINANCE_RADAR_UI_ROLE=admin
 Environment=FINANCE_RADAR_SHOW_DEBUG=0
@@ -18,7 +19,12 @@ Restart=on-failure
 RestartSec=5
 MemoryHigh=160M
 MemoryMax=256M
+MemorySwapMax=96M
 TasksMax=128
+MemoryAccounting=true
+OOMPolicy=stop
+OOMScoreAdjust=300
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

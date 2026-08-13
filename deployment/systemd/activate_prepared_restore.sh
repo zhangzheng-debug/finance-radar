@@ -7,10 +7,44 @@ EXPECTED_RELEASE=${2:?expected release required}
 PUBLIC_WEB_URL=${3:?public Web URL required}
 CONFIRM=${4:-}
 BASE=/opt/finance-radar
+RELEASE="$BASE/releases/$EXPECTED_RELEASE"
 FAILED_BASE="${BASE}.failed-$(date -u +%Y%m%dT%H%M%SZ)"
+BACKUP_RESTORE_TMPDIR="$BASE/shared/data/.backup-restore-tmp"
+MANAGED_UNIT_PATHS=(
+    /etc/systemd/system/finance-radar.slice
+    /etc/systemd/system/finance-radar-api.service
+    /etc/systemd/system/finance-radar-web.service
+    /etc/systemd/system/finance-radar-admin.service
+    /etc/systemd/system/finance-radar-worker.service
+    /etc/systemd/system/finance-radar-backup.service
+    /etc/systemd/system/finance-radar-backup.timer
+    /etc/systemd/system/finance-radar-evidence-llm.service
+    /usr/local/libexec/finance-radar/run_backup_quiesced.sh
+)
+MANAGED_CONFIG_PATHS=(
+    /etc/finance-radar.env
+    /etc/finance-radar-public.env
+)
+MANAGED_RUNTIME_UNITS=(
+    finance-radar-backup.timer
+    finance-radar-backup.service
+    finance-radar-evidence-llm.service
+    finance-radar-worker.service
+    finance-radar-admin.service
+    finance-radar-web.service
+    finance-radar-api.service
+)
+MANAGED_ENABLEMENT_UNITS=(
+    finance-radar-api.service
+    finance-radar-web.service
+    finance-radar-worker.service
+    finance-radar-backup.timer
+    finance-radar-evidence-llm.service
+)
+BASE_MOVED=0
 
 [ "$(id -u)" -eq 0 ] || { printf 'run as root\n' >&2; exit 2; }
-[[ "$EXPECTED_RELEASE" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || {
+[[ "$EXPECTED_RELEASE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$ ]] || {
     printf 'invalid release id\n' >&2; exit 2;
 }
 [[ "$PUBLIC_WEB_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/radar/?$ ]] || {
@@ -24,19 +58,23 @@ PREPARED=$(realpath -e "$PREPARED")
 [[ "$PREPARED" == /tmp/finance-radar-restore-*.prepared ]] || {
     printf 'prepared directory must use /tmp/finance-radar-restore-*.prepared\n' >&2; exit 2;
 }
-[ ! -e "$BASE" ] || {
+[ ! -e "$BASE" ] && [ ! -L "$BASE" ] || {
     printf 'refusing to overwrite existing %s; use a clean replacement VPS\n' "$BASE" >&2; exit 4;
 }
-compgen -G '/etc/systemd/system/finance-radar-*.service' >/dev/null && {
-    printf 'refusing to overwrite existing Finance Radar service units\n' >&2; exit 4;
-}
-for command in python3 tar sha256sum systemctl curl; do
+for path in "${MANAGED_UNIT_PATHS[@]}" "${MANAGED_CONFIG_PATHS[@]}"; do
+    if [ -e "$path" ] || [ -L "$path" ]; then
+        printf 'refusing to overwrite existing Finance Radar managed path: %s\n' "$path" >&2
+        exit 4
+    fi
+done
+for command in find getent python3 runuser tar sha256sum systemctl curl; do
     command -v "$command" >/dev/null || { printf 'missing prerequisite: %s\n' "$command" >&2; exit 5; }
 done
 
 python3 - "$PREPARED" "$EXPECTED_RELEASE" <<'PY'
 import json
 import pathlib
+import re
 import sys
 
 root = pathlib.Path(sys.argv[1])
@@ -59,34 +97,185 @@ required = [
 missing = [str(path) for path in required if not path.is_file()]
 if missing:
     raise SystemExit(f"prepared restore is incomplete: {missing}")
+local_model = report.get("local_evidence_model") or {}
+if local_model:
+    policy = local_model.get("restore_policy")
+    if policy not in (None, "DISABLED_AFTER_RESTORE"):
+        raise SystemExit("prepared restore local evidence model policy is unsafe")
+
+# New migration archives are bound to a verified recovery bundle during
+# preparation.  Permit a historical archive only when both markers are absent;
+# never silently treat a partially marked or newly marked archive as legacy.
+receipt_path = root / "config" / "MIGRATION_RECOVERY_BUNDLE.json"
+manifest_path = root / "config" / "MIGRATION_RECOVERY_BUNDLE.manifest.json"
+receipt_present = receipt_path.exists() or receipt_path.is_symlink()
+manifest_present = manifest_path.exists() or manifest_path.is_symlink()
+if receipt_present != manifest_present:
+    raise SystemExit("prepared recovery-bundle markers are incomplete")
+bundle = report.get("migration_recovery_bundle")
+if receipt_present:
+    if (
+        receipt_path.is_symlink()
+        or manifest_path.is_symlink()
+        or not receipt_path.is_file()
+        or not manifest_path.is_file()
+        or not isinstance(bundle, dict)
+        or bundle.get("bound_to_verified_recovery_bundle") is not True
+        or bundle.get("legacy_archive_contract") is not False
+        or bundle.get("consistency") != "verified_full_recovery_bundle"
+        or not isinstance(bundle.get("snapshot_id"), str)
+        or not re.fullmatch(r"finance_radar_[A-Za-z0-9_]+", bundle["snapshot_id"])
+        or not isinstance(bundle.get("source_manifest_sha256"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", bundle["source_manifest_sha256"])
+        or isinstance(bundle.get("mapped_files"), bool)
+        or not isinstance(bundle.get("mapped_files"), int)
+        or bundle["mapped_files"] < 2
+    ):
+        raise SystemExit("prepared recovery-bundle verification is invalid")
+elif bundle is not None and (
+    not isinstance(bundle, dict)
+    or bundle.get("bound_to_verified_recovery_bundle") is not False
+    or bundle.get("legacy_archive_contract") is not True
+    or bundle.get("consistency") != "legacy_unbound_live_copy"
+):
+    raise SystemExit("prepared legacy recovery-bundle report is invalid")
 PY
 
 rollback() {
-    systemctl stop finance-radar-api finance-radar-web finance-radar-admin finance-radar-worker 2>/dev/null || true
-    if [ -d "$BASE" ]; then
+    # The replacement preflight above proves none of these paths existed before
+    # activation.  Remove every potentially installed unit/configuration on a
+    # failure so a retry starts from a genuinely clean host, including the
+    # backup timer and advisory model that may otherwise survive a failed API
+    # health gate.
+    systemctl stop "${MANAGED_RUNTIME_UNITS[@]}" 2>/dev/null || true
+    systemctl disable "${MANAGED_ENABLEMENT_UNITS[@]}" 2>/dev/null || true
+    if [ "$BASE_MOVED" -eq 1 ]; then
+        rm -f -- "${MANAGED_UNIT_PATHS[@]}" "${MANAGED_CONFIG_PATHS[@]}"
+        systemctl daemon-reload || true
+    fi
+    if [ -d "$BASE" ] || [ -L "$BASE" ]; then
         mv "$BASE" "$FAILED_BASE" || true
     fi
     printf 'activation failed; staged files retained at %s\n' "$FAILED_BASE" >&2
 }
 trap rollback ERR
 
+ensure_public_web_principal() {
+    if ! getent group finance-radar-web >/dev/null; then
+        groupadd --system finance-radar-web
+    fi
+    if ! getent passwd finance-radar-web >/dev/null; then
+        useradd --system --gid finance-radar-web --home-dir /nonexistent \
+            --shell /usr/sbin/nologin finance-radar-web
+    fi
+}
+
+prepare_backup_restore_tmpdir() {
+    if [ -e "$BACKUP_RESTORE_TMPDIR" ] || [ -L "$BACKUP_RESTORE_TMPDIR" ]; then
+        [ -d "$BACKUP_RESTORE_TMPDIR" ] && [ ! -L "$BACKUP_RESTORE_TMPDIR" ] || {
+            printf 'backup restore temporary path is not a regular directory: %s\n' \
+                "$BACKUP_RESTORE_TMPDIR" >&2
+            return 1
+        }
+    else
+        install -d -m 0700 -o finance-radar -g finance-radar \
+            "$BACKUP_RESTORE_TMPDIR" || return 1
+    fi
+    find "$BACKUP_RESTORE_TMPDIR" -maxdepth 0 -type d -user finance-radar \
+        -group finance-radar -perm 0700 -print -quit \
+        | grep -Fx "$BACKUP_RESTORE_TMPDIR" >/dev/null || {
+            printf 'backup restore temporary directory has unsafe ownership or mode: %s\n' \
+                "$BACKUP_RESTORE_TMPDIR" >&2
+            return 1
+        }
+    runuser -u finance-radar -- test -w "$BACKUP_RESTORE_TMPDIR" && \
+        runuser -u finance-radar -- test -x "$BACKUP_RESTORE_TMPDIR" || {
+            printf 'backup restore temporary directory is unusable by finance-radar: %s\n' \
+                "$BACKUP_RESTORE_TMPDIR" >&2
+            return 1
+        }
+}
+
+grant_public_web_runtime_access() {
+    local path streamlit_dir streamlit_unexpected
+    for path in "$BASE" "$BASE/releases" "$RELEASE"; do
+        [ -d "$path" ] && [ ! -L "$path" ] || {
+            printf 'public Web runtime parent is not a regular directory: %s\n' "$path" >&2
+            return 1
+        }
+    done
+    [ -d "$RELEASE/app" ] && [ ! -L "$RELEASE/app" ] || return 1
+    [ -d "$BASE/venv" ] && [ ! -L "$BASE/venv" ] || return 1
+    # Preserve read+search for the private runtime group so Python can discover
+    # the application package, while the public Web UID receives search only.
+    chmod 0711 "$BASE"
+    chmod 0751 "$BASE/releases" "$RELEASE"
+    find "$RELEASE/app" -type d -exec chmod 0755 {} +
+    find "$RELEASE/app" -type f -exec chmod 0644 {} +
+    chmod 0644 "$RELEASE/requirements.txt"
+    # Streamlit probes $PWD/.streamlit/secrets.toml even when it is absent.
+    # Permit its isolated public account to traverse the public configuration,
+    # but fail closed if a prepared archive contains a Streamlit secret file.
+    streamlit_dir="$RELEASE/.streamlit"
+    if [ -e "$streamlit_dir" ] || [ -L "$streamlit_dir" ]; then
+        [ -d "$streamlit_dir" ] && [ ! -L "$streamlit_dir" ] || return 1
+        [ ! -e "$streamlit_dir/secrets.toml" ] && [ ! -L "$streamlit_dir/secrets.toml" ] || {
+            printf 'refusing a prepared restore that contains Streamlit secrets: %s\n' "$streamlit_dir/secrets.toml" >&2
+            return 1
+        }
+        [ -f "$streamlit_dir/config.toml" ] && [ ! -L "$streamlit_dir/config.toml" ] || return 1
+        streamlit_unexpected="$(find "$streamlit_dir" -mindepth 1 -maxdepth 1 ! -name config.toml -print -quit)"
+        [ -z "$streamlit_unexpected" ] || {
+            printf 'refusing an unexpected Streamlit runtime file in prepared restore\n' >&2
+            return 1
+        }
+        # Search plus one known public config file is the whole public surface.
+        chmod 0711 "$streamlit_dir"
+        chmod 0644 "$streamlit_dir/config.toml"
+        runuser -u finance-radar-web -- test -r "$streamlit_dir/config.toml" || return 1
+    fi
+    find "$BASE/venv" -type d -exec chmod 0755 {} +
+    find "$BASE/venv" -type f -exec chmod a+r {} +
+    find "$BASE/venv" -type f -perm /111 -exec chmod a+rx {} +
+}
+
+assert_private_runtime_import_boundary() {
+    runuser -u finance-radar -- bash -c '
+        set -euo pipefail
+        cd -- "$1"
+        unset PYTHONPATH
+        exec "$2" -B -c "import app; assert app.__file__"
+    ' _ "$RELEASE" "$BASE/venv/bin/python"
+}
+
 if ! getent passwd finance-radar >/dev/null; then
     useradd --system --home-dir "$BASE" --shell /usr/sbin/nologin finance-radar
 fi
+ensure_public_web_principal
 mv "$PREPARED" "$BASE"
+BASE_MOVED=1
 
 python3 - "$BASE" <<'PY'
 import json
 import os
 import pathlib
+import re
 import sys
 
 base = pathlib.Path(sys.argv[1])
+release_pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 plan = json.loads((base / "SYMLINK_PLAN.json").read_text(encoding="utf-8"))
 for item in plan:
+    if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not isinstance(item.get("target"), str):
+        raise SystemExit("unsafe symlink plan entry")
     relative = pathlib.PurePosixPath(item["path"])
     target = pathlib.PurePosixPath(item["target"])
-    if relative.parts[:1] != ("releases",) or relative.name not in {"data", "reports"}:
+    if (
+        len(relative.parts) != 3
+        or relative.parts[0] != "releases"
+        or not release_pattern.fullmatch(relative.parts[1])
+        or relative.name not in {"data", "reports"}
+    ):
         raise SystemExit(f"unsafe link path: {relative}")
     if target not in {
         pathlib.PurePosixPath("/opt/finance-radar/shared/data"),
@@ -109,7 +298,7 @@ else
 fi
 # Recreate rather than copy/filter the minimal public environment. This keeps
 # every administrator, Telegram and provider secret out of the public process.
-install -m 0640 -o root -g finance-radar /dev/null /etc/finance-radar-public.env
+install -m 0600 -o finance-radar-web -g finance-radar-web /dev/null /etc/finance-radar-public.env
 printf '%s\n' \
     'FINANCE_RADAR_API_URL=http://127.0.0.1:18000' \
     'FINANCE_RADAR_UI_ROLE=public' \
@@ -119,26 +308,117 @@ printf '%s\n' \
 python3 -m venv "$BASE/venv"
 "$BASE/venv/bin/python" -m pip install --upgrade pip
 "$BASE/venv/bin/python" -m pip install -r "$BASE/current/requirements.txt"
-chown -R finance-radar:finance-radar "$BASE/releases" "$BASE/shared" "$BASE/config"
+chown -R finance-radar:finance-radar \
+    "$BASE/releases" "$BASE/shared/data" "$BASE/shared/reports" "$BASE/config" "$BASE/venv"
+prepare_backup_restore_tmpdir || {
+    printf 'unable to prepare disk-backed backup restore scratch directory\n' >&2
+    exit 6
+}
+grant_public_web_runtime_access || {
+    printf 'unable to establish public Web runtime access boundary\n' >&2
+    exit 6
+}
+assert_private_runtime_import_boundary || {
+    printf 'private runtime cannot import restored application from its service working directory\n' >&2
+    exit 6
+}
 if [ -d "$BASE/evidence-llm" ]; then
     chown -R finance-radar:finance-radar "$BASE/evidence-llm"
 fi
-if [ -f "$BASE/var/www/finance-radar-terminal/index.html" ]; then
-    install -d -m 0755 -o root -g root /var/www/finance-radar-terminal
-    install -m 0644 -o root -g root \
-        "$BASE/var/www/finance-radar-terminal/index.html" \
-        /var/www/finance-radar-terminal/index.html
+# A restored host publishes only the off-host backup status.  Remove the
+# retired static shell explicitly so an older prepared archive cannot leave a
+# misleading second UI behind.  If this archive has no status document, remove
+# a possibly stale one rather than presenting it as the restored host's state.
+PUBLIC_STATUS_SOURCE="$BASE/var/www/finance-radar-terminal/offhost-status.json"
+PUBLIC_STATUS_TARGET=/var/www/finance-radar-terminal/offhost-status.json
+install -d -m 0755 -o root -g root /var/www/finance-radar-terminal
+rm -f -- /var/www/finance-radar-terminal/index.html
+if [ -f "$PUBLIC_STATUS_SOURCE" ]; then
+    install -m 0644 -o root -g root "$PUBLIC_STATUS_SOURCE" "$PUBLIC_STATUS_TARGET"
+else
+    rm -f -- "$PUBLIC_STATUS_TARGET"
 fi
-install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-api.service" /etc/systemd/system/
-install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-web.service" /etc/systemd/system/
-if [ -f "$BASE/config/etc/systemd/system/finance-radar-admin.service" ]; then
-    install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-admin.service" \
-        /etc/systemd/system/
-elif [ -f "$BASE/current/deployment/systemd/finance-radar-admin.service" ]; then
-    install -m 0644 "$BASE/current/deployment/systemd/finance-radar-admin.service" \
-        /etc/systemd/system/
+install_versioned_unit() {
+    local unit="$1"
+    local versioned="$BASE/current/deployment/systemd/$unit"
+    local archived="$BASE/config/etc/systemd/system/$unit"
+    if [ -f "$versioned" ]; then
+        install -m 0644 "$versioned" /etc/systemd/system/
+    elif [ -f "$archived" ]; then
+        # Compatibility fallback for a historic prepared archive.  A current
+        # release always wins so a restored host receives current limits,
+        # isolation and UI policy rather than stale copied unit files.
+        install -m 0644 "$archived" /etc/systemd/system/
+    elif [ "$unit" = "finance-radar.slice" ]; then
+        write_legacy_slice_fallback
+    else
+        printf 'prepared restore is missing required systemd unit: %s\n' "$unit" >&2
+        return 1
+    fi
+}
+
+write_legacy_slice_fallback() {
+    # Archives made before the slice was introduced contain no candidate file.
+    # Keep their recovery path safe with the same aggregate guardrail as the
+    # current unit; a versioned or archived candidate above always wins.
+    cat > /etc/systemd/system/finance-radar.slice <<'EOF'
+[Unit]
+Description=Finance Radar aggregate resource boundary
+
+[Slice]
+MemoryAccounting=true
+MemoryHigh=600M
+MemoryMax=700M
+MemorySwapMax=384M
+TasksMax=256
+EOF
+    printf 'using safe legacy fallback for finance-radar.slice\n' >&2
+}
+
+for unit in \
+    finance-radar.slice \
+    finance-radar-api.service \
+    finance-radar-web.service \
+    finance-radar-admin.service \
+    finance-radar-worker.service \
+    finance-radar-backup.service \
+    finance-radar-backup.timer; do
+    install_versioned_unit "$unit"
+done
+if [ -f "$BASE/current/deployment/systemd/finance-radar-evidence-llm.service" ] || \
+   [ -f "$BASE/config/etc/systemd/system/finance-radar-evidence-llm.service" ]; then
+    install_versioned_unit finance-radar-evidence-llm.service
+else
+    printf 'optional evidence LLM unit is absent from this prepared archive\n' >&2
 fi
-install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-worker.service" /etc/systemd/system/
+BACKUP_QUIESCE_WRAPPER="$BASE/current/deployment/systemd/run_backup_quiesced.sh"
+[ -f "$BACKUP_QUIESCE_WRAPPER" ] || {
+    printf 'prepared restore is missing the backup quiesce wrapper\n' >&2
+    exit 6
+}
+install -D -m 0750 -o root -g root \
+    "$BACKUP_QUIESCE_WRAPPER" /usr/local/libexec/finance-radar/run_backup_quiesced.sh
+
+assert_public_web_identity_and_boundary() {
+    local user group protect_proc proc_subset
+    user="$(systemctl show finance-radar-web -p User --value)" || return 1
+    group="$(systemctl show finance-radar-web -p Group --value)" || return 1
+    protect_proc="$(systemctl show finance-radar-web -p ProtectProc --value)" || return 1
+    proc_subset="$(systemctl show finance-radar-web -p ProcSubset --value)" || return 1
+    [ "$user" = finance-radar-web ] && [ "$group" = finance-radar-web ] && \
+        [ "$protect_proc" = invisible ] && [ "$proc_subset" = pid ] || return 1
+    runuser -u finance-radar-web -- test -r /etc/finance-radar-public.env || return 1
+    if runuser -u finance-radar-web -- test -r /etc/finance-radar.env || \
+       runuser -u finance-radar-web -- test -r "$RELEASE/.env" || \
+       runuser -u finance-radar-web -- test -r "$BASE/shared/data/finance_radar.sqlite3" || \
+       runuser -u finance-radar-web -- test -r "$BASE/shared/reports"; then
+        return 1
+    fi
+    runuser -u finance-radar-web -- test -r "$RELEASE/app/web/Home.py" || return 1
+    runuser -u finance-radar-web -- test -r "$RELEASE/.streamlit/config.toml" || return 1
+    runuser -u finance-radar-web -- test -x "$BASE/venv/bin/python"
+}
+
 # A recovered host can retain its optional Telegram override.  Refresh that
 # override from the prepared release so it preserves delivery without reviving
 # automatic formal verification.
@@ -148,21 +428,16 @@ if [ -f /etc/systemd/system/finance-radar-worker.service.d/telegram-send.conf ] 
     install -m 0644 "$BASE/current/deployment/systemd/finance-radar-worker-send.conf" \
         /etc/systemd/system/finance-radar-worker.service.d/telegram-send.conf
 fi
-install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-backup.service" /etc/systemd/system/
-install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-backup.timer" /etc/systemd/system/
-if [ -f "$BASE/config/etc/systemd/system/finance-radar-evidence-llm.service" ]; then
-    install -m 0644 "$BASE/config/etc/systemd/system/finance-radar-evidence-llm.service" \
-        /etc/systemd/system/
-fi
 systemctl daemon-reload
-if [ -x "$BASE/evidence-llm/current/llama-server" ] && \
-   [ -s "$BASE/evidence-llm/models/qwen2.5-0.5b-instruct-q4_k_m.gguf" ]; then
-    systemctl enable --now finance-radar-evidence-llm.service
-    for _ in $(seq 1 90); do
-        curl -fsS http://127.0.0.1:18601/health >/dev/null 2>&1 && break
-        sleep 1
-    done
-    curl -fsS http://127.0.0.1:18601/health >/dev/null
+# This model is advisory-only.  A disaster restore must never silently start a
+# 560-MiB workload beside the public UI and collector.  A deliberate operator
+# can later use install_local_evidence_model.sh --activate after its resource
+# gate, with the worker and backup stopped.
+systemctl disable --now finance-radar-evidence-llm.service || true
+if systemctl is-active --quiet finance-radar-evidence-llm.service || \
+   systemctl is-enabled --quiet finance-radar-evidence-llm.service; then
+    printf 'evidence LLM must remain stopped and disabled after recovery\n' >&2
+    exit 6
 fi
 systemctl enable --now finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer
 
@@ -173,7 +448,11 @@ done
 curl -fsS http://127.0.0.1:18000/api/v1/health >/dev/null
 curl -fsS http://127.0.0.1:18501/radar/_stcore/health >/dev/null
 systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer
+assert_public_web_identity_and_boundary || {
+    printf 'public Web identity or private-path isolation is not effective after recovery\n' >&2
+    exit 6
+}
 
 trap - ERR
-printf 'activation=PASS\nrelease=%s\npublic_web=%s\nnginx_tls=pending\n' \
+printf 'activation=PASS\nrelease=%s\npublic_web=%s\nlocal_evidence_model=disabled_after_restore\nnginx_tls=pending\n' \
     "$EXPECTED_RELEASE" "$PUBLIC_WEB_URL"

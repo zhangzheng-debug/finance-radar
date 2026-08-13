@@ -58,10 +58,18 @@ systemctl daemon-reload
 
 printf 'llama_release=%s\nmodel=%s\nmodel_sha256=%s\n' "$TAG" "$model" "$MODEL_SHA256"
 if [ "$ACTIVATE" != "--activate" ]; then
-    printf 'installed_not_activated=true; rerun with --activate after review\n'
+    # Reinstalling model artifacts must not preserve an old boot-enabled model
+    # service by accident.  The local model is optional and advisory only.
+    systemctl disable --now finance-radar-evidence-llm.service >/dev/null 2>&1 || true
+    printf 'installed_not_activated=true; service_disabled=true; rerun with --activate after review\n'
     exit 0
 fi
 
+if systemctl is-active --quiet finance-radar-worker.service || \
+   systemctl is-active --quiet finance-radar-backup.service; then
+    printf 'refusing evidence LLM activation while worker or backup is active; stop the conflicting job first\n' >&2
+    exit 5
+fi
 systemctl enable --now finance-radar-evidence-llm.service
 ready=false
 for _ in $(seq 1 90); do

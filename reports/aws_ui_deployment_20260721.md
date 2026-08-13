@@ -1,3 +1,8 @@
+> **Historical deployment record — superseded.** This document records a
+> 2026-07 static-terminal deployment that was retired on 2026-08-05. It must
+> not be used as current production evidence or as a rollback/deployment runbook;
+> the current public UI has one Streamlit route.
+
 # Finance Radar Evidence Terminal v2 AWS deployment
 
 - Date: 2026-07-21 (Asia/Shanghai)

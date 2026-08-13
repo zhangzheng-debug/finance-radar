@@ -59,7 +59,20 @@ No service exposes order, position, balance, brokerage-account or trade-executio
 
 ## Encrypted migration restore audit
 
-The Windows off-host job does more than download and hash the archive. Before it removes temporary plaintext, it calls `scripts/audit_migration_restore.py` to scan archive paths/links, verify every `MANIFEST.sha256` entry, restore only the ledger and operations SQLite files, run `PRAGMA quick_check` plus `PRAGMA integrity_check`, and verify the immutable current release, external-blind promotion guard and no-trading exclusions.
+The Windows off-host job does more than download and hash the archive. Before it removes temporary plaintext, it calls `scripts/audit_migration_restore.py` to scan archive paths/links, verify every `MANIFEST.sha256` entry, restore only the ledger and operations SQLite files, run `PRAGMA quick_check` plus `PRAGMA integrity_check`, and verify the immutable current release, external-blind promotion guard and no-trading exclusions. It accepts historical operations schemas 2/3/4 and the current schema 6 (including the light-verification and formal-mutation tables).
+
+The advisory local Evidence Agent is declared independently in
+`config/LOCAL_EVIDENCE_MODEL_CAPABILITY.json`. A current unit file does not by
+itself require a GGUF restore dependency: a declared absent model is accepted
+and remains disabled after recovery. Archives created before this declaration
+retain their original stricter model-hash check.
+
+For a current release record, pass the exact ID produced by
+`release_audit.py`: `YYYYMMDDTHHMMSSZ-<12-character-commit>`. The migration
+audit, preparer, Windows orchestrator and Linux activation script share the
+same path-safe 1-to-96-character release-ID contract; historic timestamp-only
+snapshot IDs in the examples below remain accepted for backward-compatible
+recovery.
 
 Manual verification of the accepted snapshot:
 
@@ -67,10 +80,11 @@ Manual verification of the accepted snapshot:
 python scripts/audit_migration_restore.py `
   server_migration_backup/20260719T045536Z/finance-radar-migration-20260719T045536Z.tgz.aesgcm `
   --expected-release 20260719T044852Z `
-  --expected-sha256 ac3ed8ba2a1ebd0f90eddfff921b39f683f17a397bfa9b2d6e074a467b24c1a5
+  --expected-sha256 ac3ed8ba2a1ebd0f90eddfff921b39f683f17a397bfa9b2d6e074a467b24c1a5 `
+  --workspace-root "D:\FinanceRadarScratch\migration-audit"
 ```
 
-The audit never extracts arbitrary archive paths and never prints the environment file or backup passphrase. Its temporary plaintext workspace is removed after success or failure.
+The audit never extracts arbitrary archive paths and never prints the environment file or backup passphrase. Its temporary plaintext workspace is removed after success or failure. On this Windows workstation, migration archives and their large temporary plaintext workspaces default to `D:\FinanceRadarBackups` and `D:\FinanceRadarScratch`; a historic C: archive remains recoverable by passing its explicit archive/key path.
 
 ## Replacement VPS cutover
 
@@ -100,7 +114,7 @@ Only after a clean replacement VPS is available, add the new target and the expl
   -Activate
 ```
 
-Before transferring plaintext, activation runs `scripts/replacement_vps_preflight.py` on the target. It requires a clean x86_64 systemd host, Python/venv runtime modules, the core and Nginx/Certbot/OpenSSL tools, free loopback ports 18000/18501/18601, at least 1 GiB available memory, calculated disk headroom, and a simple HTTPS `/radar` URL. The report is copied back to `reports/replacement_vps_preflight_latest.json`; any false check stops before archive transfer. Activation also refuses the current Singapore IP, refuses an existing `/opt/finance-radar` or Finance Radar unit, and never restores the trading project. Certificate issuance and Nginx cutover remain separate for a replacement host because its new IP/domain is intentionally not embedded in the encrypted archive. By contrast, an in-place release through `install_remote.sh` has a mandatory Nginx candidate install, `nginx -t`, reload and edge-deny check stage. Do not decommission the old VPS until the new endpoint passes the current 19-check product audit, 17-check market audit, and a fresh off-host backup.
+Before transferring plaintext, activation runs `scripts/replacement_vps_preflight.py` on the target. It requires a clean x86_64 systemd host, Python/venv runtime modules, the core and Nginx/Certbot/OpenSSL tools, free loopback ports 18000/18501/18601, at least 1 GiB available memory, calculated disk headroom, and a simple HTTPS `/radar` URL. The report is copied back to `reports/replacement_vps_preflight_latest.json`; any false check stops before archive transfer. Activation also refuses the current Singapore IP, refuses an existing `/opt/finance-radar`, managed Finance Radar unit or managed environment file, and never restores the trading project. A failed activation stops/disables every installed Radar runtime unit, removes the units and environment files it created, reloads systemd, and preserves the staged tree under a timestamped `.failed-*` path. Certificate issuance and Nginx cutover remain separate for a replacement host because its new IP/domain is intentionally not embedded in the encrypted archive. By contrast, an in-place release through `install_remote.sh` has a mandatory Nginx candidate install, `nginx -t`, reload and edge-deny check stage. Do not decommission the old VPS until the new endpoint passes the current 19-check product audit, 17-check market audit, and a fresh off-host backup.
 
 ## Existing non-Docker VPS
 
@@ -120,9 +134,19 @@ MemoryHigh -p MemoryMax -p TasksMax`; inspect any older local drop-ins with
 
 `install_remote.sh` is a health-gated transaction, not an install-only helper.
 After the archive/manifest gate it refuses an active or boot-enabled admin UI and an
-active backup job, starts the current verified two-database backup service, and
-records the resulting snapshot ID and manifest hash. The backup service retains
-only the newest successfully restored daily bundle. It then records the previous release, privately
+active backup job, launches a one-shot resource-bounded candidate backup bridge,
+and records the resulting snapshot ID and manifest hash. The bridge never changes
+`current`, the installed backup unit, or live operations state before cutover; it
+retains the backup service's complete two-database restore verification and accepts
+only a full recovery bundle. The candidate code stays root-owned and is readable,
+not writable, by the runtime account while the root bridge is in progress. Before
+the symlink changes, the verified bundle is physically copied into a root-only
+hold outside shared application data; its schema and formal-audit rows remain in
+the pre-cutover form. The normal backup service retains only the newest
+successfully restored daily bundle. A verified hold is removed only after the
+post-cutover bundle and services pass; a failed cutover preserves its root-only
+hold for recovery review, with two retained failed holds requiring explicit
+operator review before another cutover. It then records the previous release, privately
 snapshots the service units, protected/public environments, Nginx candidate and
 renewal hook, and the shared venv. It switches `current`, enables/restarts only
 API/Web/Worker/backup-timer, verifies both loopback health endpoints, then uses

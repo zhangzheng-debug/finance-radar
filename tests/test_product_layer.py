@@ -74,6 +74,10 @@ class ProductLayerTests(unittest.TestCase):
         )
         connection.commit()
         connection.close()
+        # Complete recovery bundles preserve these two roots even when no
+        # object/report has been written yet.
+        (root / "evidence_objects").mkdir()
+        (root / "reports").mkdir()
         self.settings = Settings(
             ledger_db=self.ledger_path,
             operations_db=root / "ops.sqlite3",
@@ -289,12 +293,17 @@ class ProductLayerTests(unittest.TestCase):
             run = client.post(
                 "/api/v1/events/evt-1/agent/run",
                 headers={"X-Admin-Token": "test-secret"},
+                json={"audit_write_confirmed": True, "evidence_change_confirmed": True},
             )
             self.assertEqual(run.status_code, 200)
             result = run.json()["data"]
             self.assertEqual(result["status"], "EVIDENCE_READY")
             self.assertFalse(result["llm_used"])
             self.assertEqual(result["model_provider"], "deterministic_guarded_fallback")
+            self.assertEqual(
+                result["audit_write_confirmation"],
+                {"confirmed": True, "evidence_change_confirmed": True},
+            )
             self.assertTrue(result["guardrails"]["structured_output"])
             self.assertFalse(result["guardrails"]["model_can_assign_final_s"])
             self.assertEqual(len(result["claims"]), 1)
@@ -308,8 +317,9 @@ class ProductLayerTests(unittest.TestCase):
                 headers={"X-Admin-Token": "test-secret"},
                 json={
                     "actor": "student-reviewer",
-                    "reason": "Verified the exact primary-source passage",
+                    "reason": "Verified SEC 8-K Item 1.03 passage against the incident summary.",
                     "review_status": "REVIEWED_NO_CHANGE",
+                    "reviewer_attestation": True,
                 },
             )
             self.assertEqual(override.status_code, 200)
@@ -334,10 +344,123 @@ class ProductLayerTests(unittest.TestCase):
                     "actor": "student-reviewer",
                     "reason": "No agent decision exists yet",
                     "review_status": "HUMAN_REVIEW",
+                    "reviewer_attestation": True,
                 },
             )
             self.assertEqual(response.status_code, 409)
             self.assertEqual(response.json()["error"]["code"], "AGENT_DECISION_REQUIRED")
+
+    def test_human_override_rejects_agent_decision_after_evidence_changes(self) -> None:
+        with TestClient(create_app(self.settings)) as client:
+            run = client.post(
+                "/api/v1/events/evt-1/agent/run",
+                headers={"X-Admin-Token": "test-secret"},
+                json={"audit_write_confirmed": True, "evidence_change_confirmed": True},
+            )
+            self.assertEqual(run.status_code, 200)
+
+            with closing(sqlite3.connect(self.ledger_path)) as connection:
+                connection.execute(
+                    """UPDATE event_evidence
+                       SET evidence_passage=evidence_passage || ' Material revision.'
+                       WHERE event_id='evt-1'"""
+                )
+                connection.commit()
+
+            response = client.post(
+                "/api/v1/events/evt-1/human-override",
+                headers={"X-Admin-Token": "test-secret"},
+                json={
+                    "actor": "student-reviewer",
+                    "reason": "Reviewed the revised SEC passage against the current incident summary.",
+                    "review_status": "HUMAN_REVIEW",
+                    "reviewer_attestation": True,
+                },
+            )
+
+            self.assertEqual(response.status_code, 409)
+            error = response.json()["error"]
+            self.assertEqual(error["code"], "STALE_AGENT_DECISION")
+            self.assertFalse(error["details"]["receipt_matches"])
+            self.assertEqual(
+                error["details"]["decision_event_version"],
+                error["details"]["current_event_version"],
+            )
+            trace = client.get("/api/v1/events/evt-1/trace").json()["data"]
+            self.assertEqual(trace["human_overrides"], [])
+
+    def test_evidence_agent_requires_explicit_audit_write_confirmation(self) -> None:
+        with TestClient(create_app(self.settings)) as client:
+            response = client.post(
+                "/api/v1/events/evt-1/agent/run",
+                headers={"X-Admin-Token": "test-secret"},
+            )
+            self.assertEqual(response.status_code, 422)
+
+    def test_closed_event_agent_run_requires_evidence_change_confirmation(self) -> None:
+        with closing(sqlite3.connect(self.ledger_path)) as connection:
+            connection.execute("UPDATE canonical_events SET status='verified' WHERE event_id='evt-1'")
+            connection.commit()
+        with TestClient(create_app(self.settings)) as client:
+            response = client.post(
+                "/api/v1/events/evt-1/agent/run",
+                headers={"X-Admin-Token": "test-secret"},
+                json={"audit_write_confirmed": True},
+            )
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(
+                response.json()["error"]["code"],
+                "EVIDENCE_CHANGE_CONFIRMATION_REQUIRED",
+            )
+
+    def test_human_override_rejects_placeholder_attribution(self) -> None:
+        with TestClient(create_app(self.settings)) as client:
+            response = client.post(
+                "/api/v1/events/evt-1/human-override",
+                headers={"X-Admin-Token": "test-secret"},
+                json={
+                    "actor": "defense-reviewer",
+                    "reason": "Verified the exact primary-source passage",
+                    "review_status": "REVIEWED_NO_CHANGE",
+                    "reviewer_attestation": True,
+                },
+            )
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(
+                response.json()["error"]["code"], "SPECIFIC_REVIEWER_ID_REQUIRED"
+            )
+
+    def test_human_override_rejects_whitespace_only_normalized_attribution(self) -> None:
+        with TestClient(create_app(self.settings)) as client:
+            blank_actor = client.post(
+                "/api/v1/events/evt-1/human-override",
+                headers={"X-Admin-Token": "test-secret"},
+                json={
+                    "actor": "   ",
+                    "reason": "A reviewer checked the current evidence for this specific event.",
+                    "review_status": "REVIEWED_NO_CHANGE",
+                    "reviewer_attestation": True,
+                },
+            )
+            self.assertEqual(blank_actor.status_code, 422)
+            self.assertEqual(
+                blank_actor.json()["error"]["code"], "SPECIFIC_REVIEWER_ID_REQUIRED"
+            )
+
+            blank_reason = client.post(
+                "/api/v1/events/evt-1/human-override",
+                headers={"X-Admin-Token": "test-secret"},
+                json={
+                    "actor": "student-reviewer",
+                    "reason": "                    ",
+                    "review_status": "REVIEWED_NO_CHANGE",
+                    "reviewer_attestation": True,
+                },
+            )
+            self.assertEqual(blank_reason.status_code, 422)
+            self.assertEqual(
+                blank_reason.json()["error"]["code"], "SPECIFIC_REVIEW_RATIONALE_REQUIRED"
+            )
 
     def test_evidence_agent_forces_insufficient_when_exact_passage_is_missing(self) -> None:
         with closing(sqlite3.connect(self.ledger_path)) as connection:
@@ -347,6 +470,7 @@ class ProductLayerTests(unittest.TestCase):
             response = client.post(
                 "/api/v1/events/evt-1/agent/run",
                 headers={"X-Admin-Token": "test-secret"},
+                json={"audit_write_confirmed": True, "evidence_change_confirmed": True},
             )
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["data"]["status"], "INSUFFICIENT")
@@ -362,6 +486,23 @@ class ProductLayerTests(unittest.TestCase):
             response = client.post(
                 "/api/v1/events/evt-1/agent/run",
                 headers={"X-Admin-Token": "test-secret"},
+                json={"audit_write_confirmed": True, "evidence_change_confirmed": True},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["data"]["status"], "HUMAN_REVIEW")
+            self.assertEqual(response.json()["data"]["evidence_edges"][0]["relation"], "CONTRADICTS")
+
+    def test_evidence_agent_never_accepts_the_canonical_conflicted_status(self) -> None:
+        with closing(sqlite3.connect(self.ledger_path)) as connection:
+            connection.execute(
+                "UPDATE event_evidence SET evidence_status='conflicted' WHERE event_id='evt-1'"
+            )
+            connection.commit()
+        with TestClient(create_app(self.settings)) as client:
+            response = client.post(
+                "/api/v1/events/evt-1/agent/run",
+                headers={"X-Admin-Token": "test-secret"},
+                json={"audit_write_confirmed": True, "evidence_change_confirmed": True},
             )
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["data"]["status"], "HUMAN_REVIEW")
@@ -457,6 +598,8 @@ class ProductLayerTests(unittest.TestCase):
             Path(self.temp_dir.name) / "backups",
             operations,
             retention=2,
+            evidence_dir=self.settings.evidence_object_dir,
+            report_dir=Path(self.temp_dir.name) / "reports",
         )
         self.assertEqual(result["status"], "VERIFIED")
         self.assertEqual(result["verification"]["quick_check"], "ok")
@@ -489,6 +632,22 @@ class ProductLayerTests(unittest.TestCase):
         self.assertEqual(set(removed), {str(old), f"{old}-wal", f"{old}-shm", f"{old}-journal"})
         self.assertTrue(new.exists())
 
+    def test_backup_retention_protects_the_bundle_just_verified_despite_skewed_mtime(self) -> None:
+        backup_dir = Path(self.temp_dir.name) / "retention-protected"
+        backup_dir.mkdir()
+        skewed_old = backup_dir / "finance_radar_20990101T000000Z.sqlite3"
+        just_verified = backup_dir / "finance_radar_20260102T000000Z.sqlite3"
+        skewed_old.write_bytes(b"old-but-future-dated")
+        just_verified.write_bytes(b"newly-verified")
+        os.utime(skewed_old, (9_999_999, 9_999_999))
+        os.utime(just_verified, (1, 1))
+
+        removed = prune_backups(backup_dir, retention=1, verified_path=just_verified)
+
+        self.assertEqual(removed, [str(skewed_old)])
+        self.assertFalse(skewed_old.exists())
+        self.assertTrue(just_verified.exists())
+
     def test_weekly_snapshot_is_verified_idempotent_and_retained(self) -> None:
         backup_dir = Path(self.temp_dir.name) / "weekly-source"
         backup_dir.mkdir()
@@ -498,6 +657,8 @@ class ProductLayerTests(unittest.TestCase):
             OperationsRepository(self.settings.operations_db),
             retention=14,
             weekly_retention=8,
+            evidence_dir=self.settings.evidence_object_dir,
+            report_dir=Path(self.temp_dir.name) / "reports",
         )
         daily = max(
             (path for path in backup_dir.glob("finance_radar_*") if path.is_dir()),

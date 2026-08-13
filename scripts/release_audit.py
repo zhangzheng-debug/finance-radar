@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import stat
 import subprocess
@@ -15,15 +16,21 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Sequence
 
+try:
+    from scripts.release_identity import validate_release_id
+except ModuleNotFoundError:  # Direct execution from scripts/.
+    from release_identity import validate_release_id
+
 
 SCHEMA_VERSION = 1
 MANIFEST_KIND = "finance-radar-release-manifest"
 ACCEPTANCE_KIND = "finance-radar-release-acceptance"
 MAX_MANIFEST_BYTES = 5 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 100_000
-RELEASE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+MAX_DIRTY_SOURCE_INVENTORY_MEMBERS = 20_000
 CHECK_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
 CHECK_STATUSES = frozenset({"PASS", "FAIL", "SKIPPED", "NOT_RUN"})
+DIRTY_SOURCE_ARCHIVE_INVENTORY_FORMAT = "finance-radar-dirty-source-archive-inventory-v1"
 HIGH_CONFIDENCE_SECRET_PATTERNS: tuple[re.Pattern[bytes], ...] = (
     re.compile(rb"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
     re.compile(rb"\bAKIA[0-9A-Z]{16}\b"),
@@ -42,6 +49,7 @@ DEFAULT_CRITICAL_FILES: tuple[str, ...] = (
     "app/ops/backup.py",
     "app/config.py",
     "app/models/risk_router.py",
+    "app/models/evidence_policy.py",
     "app/services/evidence_agent.py",
     "app/services/light_verification.py",
     "app/storage/ledger.py",
@@ -69,7 +77,10 @@ DEFAULT_CRITICAL_FILES: tuple[str, ...] = (
     "deployment/systemd/finance-radar-backup.service",
     "deployment/systemd/finance-radar-backup.timer",
     "deployment/systemd/finance-radar-evidence-llm.service",
+    "deployment/systemd/finance-radar.slice",
+    "deployment/systemd/run_backup_quiesced.sh",
     "deployment/systemd/install_remote.sh",
+    "deployment/systemd/verify_backup_receipt.py",
     "deployment/systemd/activate_prepared_restore.sh",
     "deployment/systemd/create_migration_backup.sh",
     "deployment/systemd/install_direct_endpoint.sh",
@@ -81,7 +92,11 @@ DEFAULT_CRITICAL_FILES: tuple[str, ...] = (
     "scripts/apply_authorized_rough_reviews.py",
     "scripts/official_primary_page_enricher.py",
     "scripts/run_live_cycle.py",
+    "scripts/audit_migration_restore.py",
+    "scripts/prepare_migration_restore.py",
+    "scripts/restore_migration_to_vps.ps1",
     "scripts/release_audit.py",
+    "scripts/release_identity.py",
 )
 
 
@@ -132,9 +147,7 @@ def assert_no_high_confidence_secret(path: Path) -> None:
 
 
 def _validate_release_id(value: str) -> str:
-    if not RELEASE_ID_PATTERN.fullmatch(value):
-        raise ValueError("release id must use 1-96 ASCII letters, digits, dot, dash or underscore")
-    return value
+    return validate_release_id(value)
 
 
 def _safe_relative_path(value: str) -> str:
@@ -166,6 +179,8 @@ def _is_sensitive_path(path: PurePosixPath) -> bool:
     if base in {
         "credentials.json",
         "secrets.json",
+        "secrets.toml",
+        "credentials.toml",
         "id_rsa",
         "id_ed25519",
         "known_hosts",
@@ -285,6 +300,214 @@ def inspect_artifact(path: Path) -> dict[str, Any]:
     if member_count is not None:
         result["member_count"] = member_count
     return result
+
+
+def _normalized_archive_member_path(name: str) -> str:
+    """Return one safe archive-relative path, normalized across tar/zip producers."""
+
+    _audit_archive_member(name)
+    normalized = PurePosixPath(name.replace("\\", "/")).as_posix()
+    return _safe_relative_path(normalized)
+
+
+def _archive_inventory_members(path: Path) -> tuple[str, list[dict[str, Any]]]:
+    """Read every regular archive member for a dirty-source provenance record.
+
+    The ordinary critical-file list remains intentionally small for clean Git
+    releases.  A declared-dirty release is different: it needs a complete,
+    explicit package inventory so an omitted non-critical runtime module cannot
+    inherit the READY label merely because the curated contract still matches.
+    """
+
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def append_record(
+        *,
+        name: str,
+        kind: str,
+        mode: int,
+        raw: bytes | None = None,
+    ) -> None:
+        relative = _normalized_archive_member_path(name)
+        if relative in seen:
+            raise ValueError("archive contains duplicate normalized paths")
+        seen.add(relative)
+        if kind == "directory":
+            records.append({"path": relative, "kind": kind, "mode": mode})
+            return
+        if raw is None:
+            raise ValueError("archive file inventory is missing member content")
+        content, hash_basis = _canonical_release_bytes(raw)
+        records.append(
+            {
+                "path": relative,
+                "kind": kind,
+                "mode": mode,
+                "bytes": len(content),
+                "sha256": _sha256_bytes(content),
+                "hash_basis": hash_basis,
+            }
+        )
+
+    if zipfile.is_zipfile(path):
+        artifact_type = "zip"
+        with zipfile.ZipFile(path) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_ARCHIVE_MEMBERS:
+                raise ValueError("archive contains too many members")
+            for member in members:
+                raw_name = member.filename.replace("\\", "/")
+                if member.is_dir() and raw_name in {".", "./"}:
+                    continue
+                raw_mode = int(member.external_attr >> 16)
+                if stat.S_ISLNK(raw_mode):
+                    raise ValueError("dirty release archive contains a symbolic link")
+                mode = raw_mode & 0o7777
+                if member.is_dir():
+                    append_record(name=member.filename, kind="directory", mode=mode)
+                else:
+                    with archive.open(member, "r") as handle:
+                        append_record(
+                            name=member.filename,
+                            kind="file",
+                            mode=mode,
+                            raw=handle.read(),
+                        )
+    elif tarfile.is_tarfile(path):
+        artifact_type = "tar"
+        with tarfile.open(path, "r:*") as archive:
+            members = archive.getmembers()
+            if len(members) > MAX_ARCHIVE_MEMBERS:
+                raise ValueError("archive contains too many members")
+            for member in members:
+                raw_name = member.name.replace("\\", "/")
+                if member.isdir() and raw_name in {".", "./"}:
+                    continue
+                if member.issym() or member.islnk() or member.isdev() or member.isfifo():
+                    raise ValueError("dirty release archive contains a link or special member")
+                mode = int(member.mode) & 0o7777
+                if member.isdir():
+                    append_record(name=member.name, kind="directory", mode=mode)
+                elif member.isfile():
+                    handle = archive.extractfile(member)
+                    if handle is None:
+                        raise ValueError("release archive member is unreadable")
+                    with handle:
+                        append_record(name=member.name, kind="file", mode=mode, raw=handle.read())
+                else:
+                    raise ValueError("dirty release archive contains an unsupported member")
+    else:
+        raise ValueError("dirty source inventory requires a tar or zip release archive")
+
+    if not records:
+        raise ValueError("dirty release archive contains no inventory members")
+    if len(records) > MAX_DIRTY_SOURCE_INVENTORY_MEMBERS:
+        raise ValueError("dirty release archive exceeds the complete-inventory member limit")
+    return artifact_type, sorted(records, key=lambda entry: str(entry["path"]))
+
+
+def _workspace_release_file_records(root: Path) -> tuple[str, list[dict[str, Any]]]:
+    """Return the exact safe source-file set intended for a dirty release.
+
+    In a real checkout this deliberately mirrors the normal archive producer's
+    Git selection: tracked files plus unignored untracked files.  The tiny
+    filesystem fallback supports isolated unit tests without weakening a real
+    Git checkout: if `.git` exists but Git cannot enumerate it, release creation
+    fails closed.
+    """
+
+    result = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        selection = "git-tracked-and-unignored"
+        raw_paths = [os.fsdecode(value) for value in result.stdout.split(b"\0") if value]
+    else:
+        if (root / ".git").exists() or (root / ".git").is_symlink():
+            raise ValueError("unable to enumerate Git release files for dirty source")
+        selection = "safe-filesystem-fallback"
+        raw_paths = [
+            path.relative_to(root).as_posix()
+            for path in sorted(root.rglob("*"))
+            if ".git" not in path.relative_to(root).parts and path.is_file()
+        ]
+
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_path in raw_paths:
+        relative = _safe_relative_path(raw_path)
+        if relative in seen:
+            raise ValueError("workspace release file inventory contains duplicate paths")
+        seen.add(relative)
+        candidate = root / Path(*PurePosixPath(relative).parts)
+        if candidate.is_symlink() or not candidate.is_file():
+            raise ValueError(f"workspace release file is missing or not regular: {relative}")
+        content, hash_basis = _canonical_release_bytes(candidate.read_bytes())
+        records.append(
+            {
+                "path": relative,
+                "kind": "file",
+                "bytes": len(content),
+                "sha256": _sha256_bytes(content),
+                "hash_basis": hash_basis,
+            }
+        )
+    if not records:
+        raise ValueError("dirty source workspace contains no release files")
+    if len(records) > MAX_DIRTY_SOURCE_INVENTORY_MEMBERS:
+        raise ValueError("dirty source workspace exceeds the complete-inventory member limit")
+    return selection, sorted(records, key=lambda entry: str(entry["path"]))
+
+
+def _assert_dirty_archive_matches_workspace(
+    workspace_files: Sequence[dict[str, Any]],
+    archive_members: Sequence[dict[str, Any]],
+) -> None:
+    """Prove the candidate archive has every and only intended source file."""
+
+    workspace = {str(entry["path"]): entry for entry in workspace_files}
+    archive = {
+        str(entry["path"]): entry
+        for entry in archive_members
+        if entry.get("kind") == "file"
+    }
+    if set(workspace) != set(archive):
+        raise ValueError("dirty release archive does not contain exactly the workspace release file inventory")
+    for path, source_entry in workspace.items():
+        archive_entry = archive[path]
+        if any(
+            archive_entry.get(field) != source_entry.get(field)
+            for field in ("bytes", "sha256", "hash_basis")
+        ):
+            raise ValueError(f"dirty release archive file does not match workspace: {path}")
+
+
+def build_dirty_source_archive_inventory(root: Path, artifact_paths: Sequence[Path]) -> dict[str, Any]:
+    """Build the full source/package provenance record required for dirty releases."""
+
+    archive_paths = [path for path in artifact_paths if zipfile.is_zipfile(path) or tarfile.is_tarfile(path)]
+    if len(archive_paths) != 1:
+        raise ValueError("a declared-dirty release requires exactly one tar or zip deployment archive")
+    archive_path = archive_paths[0]
+    artifact = inspect_artifact(archive_path)
+    artifact_type, archive_members = _archive_inventory_members(archive_path)
+    selection, workspace_files = _workspace_release_file_records(root)
+    _assert_dirty_archive_matches_workspace(workspace_files, archive_members)
+    return {
+        "format": DIRTY_SOURCE_ARCHIVE_INVENTORY_FORMAT,
+        "source_selection": selection,
+        "artifact": {
+            "name": artifact["name"],
+            "sha256": artifact["sha256"],
+            "bytes": artifact["bytes"],
+            "type": artifact_type,
+        },
+        "workspace_files": workspace_files,
+        "archive_members": archive_members,
+    }
 
 
 def bind_archive_to_critical_files(
@@ -409,6 +632,7 @@ def _release_readiness(
     *,
     allow_dirty: bool,
     explicit_release_id: bool,
+    dirty_source_archive_inventory: dict[str, Any] | None,
 ) -> str:
     statuses = {item["status"] for item in verifications}
     if "FAIL" in statuses:
@@ -419,7 +643,7 @@ def _release_readiness(
         if git_state.get("dirty"):
             if allow_dirty and any(
                 item.get("critical_file_content_check") == "PASS" for item in artifacts
-            ):
+            ) and dirty_source_archive_inventory is not None:
                 return "READY_WITH_DECLARED_DIRTY_SOURCE"
             return "REVIEW_REQUIRED_DIRTY_WORKTREE"
         return "READY"
@@ -498,8 +722,9 @@ def build_release_manifest(
     if not file_records:
         raise ValueError("at least one critical release file is required")
 
+    artifact_path_list = tuple(Path(artifact_path) for artifact_path in artifact_paths)
     artifacts: list[dict[str, Any]] = []
-    for artifact_path in artifact_paths:
+    for artifact_path in artifact_path_list:
         artifact = inspect_artifact(Path(artifact_path))
         artifact["critical_file_content_check"] = bind_archive_to_critical_files(
             Path(artifact_path), file_records
@@ -514,6 +739,10 @@ def build_release_manifest(
     )
     if allow_dirty and git_state.get("dirty") and not has_bound_archive:
         raise ValueError("--allow-dirty requires a release archive bound to all critical files")
+
+    dirty_source_archive_inventory: dict[str, Any] | None = None
+    if allow_dirty and git_state.get("dirty"):
+        dirty_source_archive_inventory = build_dirty_source_archive_inventory(root, artifact_path_list)
 
     verification_records = sorted(
         ({"name": item["name"], "status": item["status"].upper()} for item in verifications),
@@ -531,8 +760,9 @@ def build_release_manifest(
         artifacts,
         allow_dirty=allow_dirty,
         explicit_release_id=explicit_release_id,
+        dirty_source_archive_inventory=dirty_source_archive_inventory,
     )
-    return {
+    manifest: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "kind": MANIFEST_KIND,
         "generated_at_utc": observed_at.isoformat().replace("+00:00", "Z"),
@@ -559,6 +789,9 @@ def build_release_manifest(
             "service_or_cloud_state_changed": False,
         },
     }
+    if dirty_source_archive_inventory is not None:
+        manifest["dirty_source_archive_inventory"] = dirty_source_archive_inventory
+    return manifest
 
 
 def render_release_markdown(manifest: dict[str, Any]) -> str:
@@ -594,6 +827,19 @@ def render_release_markdown(manifest: dict[str, Any]) -> str:
         )
     else:
         lines.append("- No full release artifact was supplied.")
+    dirty_inventory = manifest.get("dirty_source_archive_inventory")
+    if isinstance(dirty_inventory, dict):
+        lines.extend(
+            [
+                "",
+                "## Declared-dirty complete source inventory",
+                "",
+                f"- Source selection: `{dirty_inventory.get('source_selection')}`",
+                f"- Workspace files: `{len(dirty_inventory.get('workspace_files', []))}`",
+                f"- Archive members (path/type/mode/content): `{len(dirty_inventory.get('archive_members', []))}`",
+                "- The archive and extracted release must both match this inventory before cutover.",
+            ]
+        )
     lines.extend(
         [
             "",
@@ -697,6 +943,127 @@ def write_release_bundle(manifest: dict[str, Any], output_dir: Path) -> dict[str
     return {key: name for key, name in zip(("json", "markdown", "rollback", "checksums"), payloads)}
 
 
+def _validate_dirty_source_file_records(value: object, *, label: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"manifest {label} is invalid")
+    if len(value) > MAX_DIRTY_SOURCE_INVENTORY_MEMBERS:
+        raise ValueError(f"manifest {label} exceeds the complete-inventory member limit")
+    seen: set[str] = set()
+    records: list[dict[str, Any]] = []
+    for entry in value:
+        if (
+            not isinstance(entry, dict)
+            or entry.get("kind") != "file"
+            or not isinstance(entry.get("path"), str)
+            or not isinstance(entry.get("bytes"), int)
+            or isinstance(entry.get("bytes"), bool)
+            or entry["bytes"] < 0
+            or not isinstance(entry.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
+            or entry.get("hash_basis") not in {"raw_bytes", "utf8_lf_normalized"}
+        ):
+            raise ValueError(f"manifest {label} file entry is invalid")
+        relative = _safe_relative_path(entry["path"])
+        if relative in seen:
+            raise ValueError(f"manifest {label} contains duplicate paths")
+        seen.add(relative)
+        records.append(entry)
+    return records
+
+
+def _validate_dirty_source_archive_inventory(
+    value: object,
+    *,
+    artifacts: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or value.get("format") != DIRTY_SOURCE_ARCHIVE_INVENTORY_FORMAT:
+        raise ValueError("manifest dirty source archive inventory is invalid")
+    if value.get("source_selection") not in {"git-tracked-and-unignored", "safe-filesystem-fallback"}:
+        raise ValueError("manifest dirty source selection is invalid")
+    artifact = value.get("artifact")
+    if (
+        not isinstance(artifact, dict)
+        or not isinstance(artifact.get("name"), str)
+        or not isinstance(artifact.get("sha256"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"])
+        or not isinstance(artifact.get("bytes"), int)
+        or isinstance(artifact.get("bytes"), bool)
+        or artifact["bytes"] < 0
+        or artifact.get("type") not in {"tar", "zip"}
+    ):
+        raise ValueError("manifest dirty source archive reference is invalid")
+    if not any(
+        item.get("name") == artifact["name"]
+        and item.get("sha256") == artifact["sha256"]
+        and item.get("bytes") == artifact["bytes"]
+        and item.get("type") == artifact["type"]
+        for item in artifacts
+    ):
+        raise ValueError("manifest dirty source archive reference is not a declared artifact")
+
+    workspace_files = _validate_dirty_source_file_records(
+        value.get("workspace_files"), label="dirty source workspace file inventory"
+    )
+    archive_members = value.get("archive_members")
+    if not isinstance(archive_members, list) or not archive_members:
+        raise ValueError("manifest dirty source archive member inventory is invalid")
+    if len(archive_members) > MAX_DIRTY_SOURCE_INVENTORY_MEMBERS:
+        raise ValueError("manifest dirty source archive member inventory exceeds the complete-inventory member limit")
+    seen: set[str] = set()
+    normalized_members: list[dict[str, Any]] = []
+    for entry in archive_members:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            raise ValueError("manifest dirty source archive member is invalid")
+        relative = _safe_relative_path(entry["path"])
+        if relative in seen:
+            raise ValueError("manifest dirty source archive member inventory contains duplicate paths")
+        seen.add(relative)
+        kind = entry.get("kind")
+        mode = entry.get("mode")
+        if kind not in {"file", "directory"} or not isinstance(mode, int) or isinstance(mode, bool) or not 0 <= mode <= 0o7777:
+            raise ValueError("manifest dirty source archive member type or mode is invalid")
+        if kind == "file":
+            _validate_dirty_source_file_records([entry], label="dirty source archive member inventory")
+        elif any(field in entry for field in ("bytes", "sha256", "hash_basis")):
+            raise ValueError("manifest dirty source directory member contains file content fields")
+        normalized_members.append(entry)
+    try:
+        _assert_dirty_archive_matches_workspace(workspace_files, normalized_members)
+    except ValueError as exc:
+        raise ValueError(f"manifest dirty source inventory is inconsistent: {exc}") from exc
+    return value
+
+
+def _verify_dirty_source_workspace_inventory(root: Path, inventory: dict[str, Any]) -> bool:
+    try:
+        for entry in inventory["workspace_files"]:
+            relative = _safe_relative_path(str(entry["path"]))
+            candidate = root / Path(*PurePosixPath(relative).parts)
+            if candidate.is_symlink() or not candidate.is_file():
+                return False
+            content = _entry_content_bytes(candidate.read_bytes(), entry)
+            if len(content) != entry["bytes"] or _sha256_bytes(content) != entry["sha256"]:
+                return False
+    except (KeyError, OSError, ValueError):
+        return False
+    return True
+
+
+def _verify_dirty_source_archive_inventory(path: Path, inventory: dict[str, Any]) -> bool:
+    try:
+        artifact = inspect_artifact(path)
+        expected = inventory["artifact"]
+        if any(
+            artifact.get(field) != expected.get(field)
+            for field in ("name", "sha256", "bytes", "type")
+        ):
+            return False
+        artifact_type, members = _archive_inventory_members(path)
+        return artifact_type == expected["type"] and members == inventory["archive_members"]
+    except (KeyError, OSError, ValueError, tarfile.TarError, zipfile.BadZipFile):
+        return False
+
+
 def _load_manifest(path: Path) -> tuple[dict[str, Any], str]:
     if not path.is_file() or path.is_symlink() or path.stat().st_size > MAX_MANIFEST_BYTES:
         raise ValueError("manifest must be a small regular file")
@@ -715,6 +1082,9 @@ def _load_manifest(path: Path) -> tuple[dict[str, Any], str]:
     _validate_release_id(release["id"])
     if not isinstance(release.get("readiness"), str):
         raise ValueError("manifest release readiness is missing")
+    dirty_exception = release.get("dirty_source_exception_declared", False)
+    if not isinstance(dirty_exception, bool):
+        raise ValueError("manifest dirty source exception declaration is invalid")
     critical_files = manifest.get("critical_files")
     if not isinstance(critical_files, list) or not critical_files:
         raise ValueError("manifest critical file list is invalid")
@@ -756,6 +1126,15 @@ def _load_manifest(path: Path) -> tuple[dict[str, Any], str]:
         if entry["name"] in artifact_names:
             raise ValueError("manifest contains duplicate artifacts")
         artifact_names.add(entry["name"])
+    dirty_inventory = manifest.get("dirty_source_archive_inventory")
+    if dirty_exception:
+        if dirty_inventory is None:
+            raise ValueError("declared-dirty manifest is missing its complete source archive inventory")
+        _validate_dirty_source_archive_inventory(dirty_inventory, artifacts=artifacts)
+    elif dirty_inventory is not None:
+        raise ValueError("clean manifest must not contain a dirty source archive inventory")
+    if release["readiness"] == "READY_WITH_DECLARED_DIRTY_SOURCE" and not dirty_exception:
+        raise ValueError("declared-dirty readiness requires a dirty source exception declaration")
     return manifest, hashlib.sha256(raw).hexdigest()
 
 
@@ -832,20 +1211,32 @@ def verify_release_manifest(
             valid = False
         checks.append({"name": f"file:{entry.get('path', 'invalid')}", "status": "PASS" if valid else "FAIL"})
 
+    dirty_source_archive_inventory = manifest.get("dirty_source_archive_inventory")
+    if isinstance(dirty_source_archive_inventory, dict):
+        checks.append(
+            {
+                "name": "dirty_source_workspace_inventory",
+                "status": "PASS"
+                if _verify_dirty_source_workspace_inventory(root, dirty_source_archive_inventory)
+                else "FAIL",
+            }
+        )
+
     declared_artifacts = manifest.get("artifacts", [])
+    supplied: list[tuple[Path, dict[str, Any]]] = []
     if require_artifact and not declared_artifacts:
         checks.append({"name": "required_release_artifact", "status": "FAIL"})
     if skip_artifacts and declared_artifacts:
         checks.append({"name": "release_artifacts", "status": "SKIPPED"})
     elif declared_artifacts:
-        supplied: list[dict[str, Any]] = []
         for artifact_path in artifact_paths:
-            artifact = inspect_artifact(Path(artifact_path))
+            artifact_path = Path(artifact_path)
+            artifact = inspect_artifact(artifact_path)
             artifact["critical_file_content_check"] = bind_archive_to_critical_files(
                 Path(artifact_path), manifest.get("critical_files", [])
             )
-            supplied.append(artifact)
-        supplied_by_hash = {item["sha256"]: item for item in supplied}
+            supplied.append((artifact_path, artifact))
+        supplied_by_hash = {item["sha256"]: item for _path, item in supplied}
         for entry in declared_artifacts:
             match = supplied_by_hash.get(entry.get("sha256")) if isinstance(entry, dict) else None
             valid = bool(
@@ -858,6 +1249,26 @@ def verify_release_manifest(
             checks.append({"name": f"artifact:{name}", "status": "PASS" if valid else "FAIL"})
     else:
         checks.append({"name": "release_artifacts", "status": "PASS"})
+
+    if isinstance(dirty_source_archive_inventory, dict):
+        if skip_artifacts:
+            checks.append({"name": "dirty_source_archive_inventory", "status": "SKIPPED"})
+        else:
+            expected = dirty_source_archive_inventory["artifact"]
+            matching_paths = [
+                path
+                for path, artifact in supplied
+                if artifact.get("sha256") == expected.get("sha256")
+            ]
+            valid = len(matching_paths) == 1 and _verify_dirty_source_archive_inventory(
+                matching_paths[0], dirty_source_archive_inventory
+            )
+            checks.append(
+                {
+                    "name": "dirty_source_archive_inventory",
+                    "status": "PASS" if valid else "FAIL",
+                }
+            )
 
     statuses = {item["status"] for item in checks}
     status = "FAIL" if "FAIL" in statuses else ("PASS_WITH_SKIPPED" if "SKIPPED" in statuses else "PASS")

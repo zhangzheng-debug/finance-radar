@@ -13,8 +13,10 @@ emergency backup construction.
    service configuration.
 2. **July 28-30:** provision the replacement VPS, run the audit-only restore
    first, then activate on the new host. Keep the old host unchanged.
-3. **After activation:** verify the five services, public HTTPS, all product
-   checks, model health, deep links, keyboard interactions and Telegram dry-run.
+3. **After activation:** verify API, public Web, Worker and backup timer,
+   public HTTPS, all product checks, deep links, keyboard interactions and
+   Telegram dry-run. The advisory local model remains disabled unless an
+   operator separately chooses to enable it after its resource gate.
 4. **Overlap window:** keep both hosts for at least one successful worker cycle
    and one successful encrypted backup from the replacement host.
 5. **Final freeze:** stop writes on the old Finance Radar worker, pull one final
@@ -56,6 +58,9 @@ Evidence Agent runtime: pinned llama.cpp, the 491 MB Qwen2.5 GGUF model, model
 service unit, frozen comparisons, initial failure evidence, and live acceptance
 report. The model file SHA-256 is
 `74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db`.
+That is a historical archive description. New archives record local-model
+presence explicitly and may safely omit this advisory runtime; the model service
+is never auto-started during recovery.
 
 Release `20260719T044852Z` also contains the Calm Institutional five-page
 UI, deterministic public accessibility audit, Nginx `_stcore` canonicalization,
@@ -101,8 +106,15 @@ operator-safe note is:
 ## Audit before a new VPS exists
 
 This command is audit-only by default. It decrypts in a temporary workspace,
-checks every manifest entry, prepares the complete service tree including the
-model, performs no SSH transfer, and removes plaintext afterward.
+checks every manifest entry, prepares the complete service tree and explicit
+optional-model capability declaration, performs no SSH transfer, and removes
+plaintext afterward.
+
+For new release records, use the exact `YYYYMMDDTHHMMSSZ-<12-character-commit>`
+ID emitted by `release_audit.py`. The migration audit, preparation, Windows
+orchestrator and Linux activation paths now enforce the same path-safe release
+ID alphabet. The timestamp-only ID below is an accepted historical recovery
+point, not the format newly generated from Git.
 
 ```powershell
 .\scripts\restore_migration_to_vps.ps1 `
@@ -141,20 +153,24 @@ saved as `reports/replacement_vps_preflight_latest.json`.
   -Activate
 ```
 
-Only a preflight `PASS` permits archive transfer. Activation then restores and health-checks the loopback model before API, Web,
-Worker, and backup services. Nginx/TLS remains a separate step because the
-certificate must match the new IP/domain.
+Only a preflight `PASS` permits archive transfer. Activation restores API, Web,
+Worker and backup services while explicitly stopping/disabling the advisory
+loopback model. Nginx/TLS remains a separate step because the certificate must
+match the new IP/domain.
 
 ## Cutover gate
 
 Keep the old VPS until all of the following are true:
 
-1. Local model `/health`, API, Web, Worker, and backup services pass on loopback.
+1. API, Web, Worker and backup services pass on loopback; the advisory local
+   model is confirmed stopped and disabled.
 2. Nginx and the new certificate pass `nginx -t` and public HTTPS checks.
 3. `python scripts/collect_product_acceptance.py` reports all checks true against
    the new endpoint.
-4. `python scripts/evaluate_local_evidence_model.py` and
-   `python scripts/accept_local_evidence_model.py` both report PASS.
+4. If the operator separately enables the local model, its `/health`,
+   `python scripts/evaluate_local_evidence_model.py` and
+   `python scripts/accept_local_evidence_model.py` all report PASS; otherwise
+   it remains disabled and is not a cutover dependency.
 5. A new off-host encrypted backup is pulled from the replacement host and
    passes a full isolated restore.
 6. Telegram remains dry-run unless the operator explicitly authorizes sending.

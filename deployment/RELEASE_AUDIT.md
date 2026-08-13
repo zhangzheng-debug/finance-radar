@@ -17,6 +17,18 @@ The record consists of four files:
 The SHA-256 sidecar detects corruption and mismatched handoffs; it is not a
 cryptographic signature or proof of who created the release.
 
+## Release identity contract
+
+When Git identity is available, `release_audit.py` derives the release ID as
+`YYYYMMDDTHHMMSSZ-<12-character-commit>`, for example
+`20260804T010203Z-a1b2c3d4e5f6`. The release record, encrypted migration audit,
+restore preparer, Windows orchestrator and Linux activation script use the same
+path-safe contract: 1 to 96 ASCII characters, starting with an alphanumeric
+character and then only letters, digits, `.`, `_` or `-`. This makes the ID one
+safe component below `/opt/finance-radar/releases`; separators, whitespace,
+quotes and shell metacharacters are rejected. Older timestamp-only release IDs
+remain valid for recovery of historical snapshots.
+
 The tool never reads environment values, Git diff contents or Git remotes. It
 rejects `.env`, private-key, session and passphrase filenames, scans critical
 text/code files for high-confidence live credentials, audits tar/zip member
@@ -28,7 +40,10 @@ normal shell output; absolute workspace paths are not written into the record.
 
 - `READY`: clean Git source and every declared verification is `PASS`.
 - `READY_WITH_DECLARED_DIRTY_SOURCE`: the worktree is dirty, the operator used
-  `--allow-dirty`, and a tar/zip containing every critical file was hash-bound.
+  `--allow-dirty`, and exactly one tar/zip was bound to a complete explicit
+  source inventory. The inventory records every packaged path, type/mode and
+  normalized content hash, and requires every tracked or unignored source file
+  to appear in that archive. A partial critical-file-only archive is refused.
 - `READY_WITH_EXPLICIT_SOURCE_ID`: Git identity is unavailable, an explicit
   release ID was supplied, and a complete archive was hash-bound.
 - `REVIEW_REQUIRED_*`: incomplete checks, dirty source without an exception, or
@@ -115,6 +130,9 @@ changing shared data, `/opt/finance-radar/current`, or any service unit:
 - the uploaded archive matches the manifest hash and passes member-path safety;
 - all critical files in the extracted release and inside the archive have the
   expected byte count and SHA-256;
+- for a declared-dirty source, every inventory-listed release file in the
+  extracted tree and every path/type/mode/content record in the supplied archive
+  match the manifest's complete source inventory;
 - declared release readiness starts with `READY`.
 
 The installer stores the verified manifest and acceptance report under the new
@@ -124,11 +142,16 @@ cutovers should use the verified form.
 
 Before any release switch, a verified production cutover also requires the
 manual admin UI to be inactive and not boot-enabled and the backup service to be idle.
-The installer then starts the existing recovery-bundle service itself; only a
-successful two-database restore verification can proceed to cutover. Its
-activation receipt records the fresh snapshot ID and manifest SHA-256. The
-backup policy remains one newest verified daily bundle, so a failed backup never
-deletes the prior recovery point.
+The installer then launches a one-shot, resource-bounded candidate backup bridge;
+it uses candidate source without changing the active service unit or `current`, and
+it does not migrate or write to the live operations database or its recovery-copy
+schema. Only a successful full two-database recovery bundle can proceed to
+cutover. The candidate source remains root-owned and runtime-read-only during the
+bridge, and the verified bundle is physically copied to a root-only hold before
+the release switch. Its activation receipt records the fresh snapshot ID and
+manifest SHA-256. The backup policy remains one newest verified daily bundle, so a
+failed backup never deletes the prior recovery point; exceptional failed-cutover
+holds are retained for review and capped by an explicit two-hold operator gate.
 
 ## Rollback handoff
 

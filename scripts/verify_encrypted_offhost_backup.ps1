@@ -5,11 +5,13 @@ param(
     [Parameter(Mandatory = $true)][string]$RequiredRelease,
     [string]$SshHost = "ubuntu@18.208.34.152",
     [string]$IdentityFile = "C:\Users\MR\.ssh1\id_ed25519",
-    [switch]$SkipRemoteCleanup
+    [switch]$SkipRemoteCleanup,
+    [string]$BackupRoot = "D:\FinanceRadarBackups"
 )
 
 $ErrorActionPreference = "Stop"
-if ($Stamp -notmatch '^[0-9]{8}T[0-9]{6}Z$' -or $RequiredRelease -notmatch '^[0-9]{8}T[0-9]{6}Z$') {
+$releaseIdPattern = '^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$'
+if ($Stamp -notmatch '^[0-9]{8}T[0-9]{6}Z$' -or $RequiredRelease -notmatch $releaseIdPattern) {
     throw "invalid stamp or release id"
 }
 if ($ExpectedSha256 -notmatch '^[0-9a-fA-F]{64}$') {
@@ -17,7 +19,7 @@ if ($ExpectedSha256 -notmatch '^[0-9a-fA-F]{64}$') {
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$backupRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "server_migration_backup"))
+$backupRoot = [System.IO.Path]::GetFullPath($BackupRoot)
 $destination = [System.IO.Path]::GetFullPath((Join-Path $backupRoot $Stamp))
 $rootPrefix = $backupRoot.TrimEnd('\') + '\'
 if (-not $destination.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {

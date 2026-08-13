@@ -1,3 +1,8 @@
+> **Historical infrastructure record — superseded.** The static-terminal
+> cutover described below was retired on 2026-08-05. It is not evidence of the
+> current production route: do not redeploy its artifact, Nginx source, or
+> rollback instructions. The live public UI is the single Streamlit route.
+
 # Finance Radar AWS migration record
 
 - Migration date: 2026-07-21 (Asia/Shanghai)

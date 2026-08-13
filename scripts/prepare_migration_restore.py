@@ -29,6 +29,11 @@ try:
         _safe_member_name,
         _stream_regular_file,
         _validate_link,
+        inspect_local_evidence_model_contract,
+        inspect_migration_recovery_bundle_contract,
+        LOCAL_EVIDENCE_MODEL_CAPABILITY_PATH,
+        MIGRATION_RECOVERY_BUNDLE_MANIFEST_PATH,
+        MIGRATION_RECOVERY_BUNDLE_RECEIPT_PATH,
         sha256_file,
     )
 except ModuleNotFoundError:  # Direct execution from scripts/.
@@ -39,18 +44,29 @@ except ModuleNotFoundError:  # Direct execution from scripts/.
         _safe_member_name,
         _stream_regular_file,
         _validate_link,
+        inspect_local_evidence_model_contract,
+        inspect_migration_recovery_bundle_contract,
+        LOCAL_EVIDENCE_MODEL_CAPABILITY_PATH,
+        MIGRATION_RECOVERY_BUNDLE_MANIFEST_PATH,
+        MIGRATION_RECOVERY_BUNDLE_RECEIPT_PATH,
         sha256_file,
     )
 
+try:
+    from scripts.release_identity import validate_release_id
+except ModuleNotFoundError:  # Direct execution from scripts/.
+    from release_identity import validate_release_id
+
 
 ARCHIVE_RE = re.compile(r"finance-radar-migration-(\d{8}T\d{6}Z)\.tgz$")
-RELEASE_RE = re.compile(r"\d{8}T\d{6}Z")
 FORBIDDEN_PARTS = {"ethusdc-pivot-bot", "server_migration_backup", ".ssh", ".ssh1"}
-CAPTURE_NAMES = {"CURRENT_RELEASE.txt", "MANIFEST.sha256"}
-LOCAL_EVIDENCE_MODEL_PATH = "evidence-llm/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"
-LOCAL_EVIDENCE_MODEL_SHA256 = (
-    "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"
-)
+CAPTURE_NAMES = {
+    "CURRENT_RELEASE.txt",
+    "MANIFEST.sha256",
+    LOCAL_EVIDENCE_MODEL_CAPABILITY_PATH,
+    MIGRATION_RECOVERY_BUNDLE_RECEIPT_PATH,
+    MIGRATION_RECOVERY_BUNDLE_MANIFEST_PATH,
+}
 
 
 def utc_now() -> str:
@@ -77,8 +93,10 @@ def inspect_plain_archive(
     archive_path = archive_path.resolve()
     if not archive_path.is_file():
         raise FileNotFoundError(f"migration archive not found: {archive_path}")
-    if not RELEASE_RE.fullmatch(expected_release):
-        raise ValueError("expected release must use YYYYMMDDTHHMMSSZ")
+    try:
+        expected_release = validate_release_id(expected_release)
+    except ValueError as exc:
+        raise ValueError("expected release id is invalid") from exc
     match = ARCHIVE_RE.fullmatch(archive_path.name)
     if not match:
         raise ValueError("plaintext archive name is not a Finance Radar migration snapshot")
@@ -151,14 +169,15 @@ def inspect_plain_archive(
     missing_required = sorted(required - set(hashes))
     if missing_required:
         raise ValueError(f"required restore files missing: {missing_required}")
-    model_unit = (
-        f"releases/{expected_release}/deployment/systemd/"
-        "finance-radar-evidence-llm.service"
+    local_evidence_model = inspect_local_evidence_model_contract(
+        hashes,
+        captures,
+        expected_release=expected_release,
     )
-    model_required = model_unit in hashes
-    model_hash = hashes.get(LOCAL_EVIDENCE_MODEL_PATH)
-    if model_required and model_hash != LOCAL_EVIDENCE_MODEL_SHA256:
-        raise ValueError("local evidence model is missing or has an unexpected SHA-256")
+    migration_recovery_bundle = inspect_migration_recovery_bundle_contract(
+        hashes,
+        captures,
+    )
     return {
         "archive_sha256": actual_sha256,
         "archive_root": expected_root,
@@ -169,12 +188,8 @@ def inspect_plain_archive(
         "unpacked_bytes": unpacked_bytes,
         "manifest": manifest,
         "links": links,
-        "local_evidence_model": {
-            "required_by_release": model_required,
-            "included": model_hash is not None,
-            "sha256": model_hash,
-            "pinned_sha256_match": model_hash == LOCAL_EVIDENCE_MODEL_SHA256,
-        },
+        "local_evidence_model": local_evidence_model,
+        "migration_recovery_bundle": migration_recovery_bundle,
     }
 
 
@@ -271,6 +286,7 @@ def prepare_restore(
             "symlinks_planned": len(link_plan),
             "activation_required": True,
             "local_evidence_model": inspection["local_evidence_model"],
+            "migration_recovery_bundle": inspection["migration_recovery_bundle"],
             "boundaries": {
                 "existing_destination_overwritten": False,
                 "trading_project_included": False,
@@ -291,6 +307,8 @@ def prepare_restore(
 
 def render_markdown(report: dict[str, Any]) -> str:
     boundaries = report.get("boundaries") or {}
+    local_evidence_model = report.get("local_evidence_model") or {}
+    migration_recovery_bundle = report.get("migration_recovery_bundle") or {}
     return "\n".join(
         [
             "# Finance Radar full service-restore preparation drill",
@@ -307,6 +325,8 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"- Existing destination overwritten: `{boundaries.get('existing_destination_overwritten')}`",
             f"- Trading project included: `{boundaries.get('trading_project_included')}`",
             f"- Archive symlinks followed: `{boundaries.get('archive_symlinks_followed')}`",
+            f"- Optional local evidence model declared/included: `{local_evidence_model.get('capability_declared')}` / `{local_evidence_model.get('included')}`; restore policy: `{local_evidence_model.get('restore_policy')}`.",
+            f"- Recovery source consistency: `{migration_recovery_bundle.get('consistency', 'unknown')}`; bound to verified bundle: `{migration_recovery_bundle.get('bound_to_verified_recovery_bundle', False)}`.",
             "",
             "`PREPARED_NOT_ACTIVATED` proves that the complete authenticated archive can be safely materialized without overwriting a target or starting services. Actual replacement-VPS activation still requires the explicit `--activate` gate.",
             "",

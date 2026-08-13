@@ -46,10 +46,16 @@ def _safe_json(value: Any, default: Any) -> Any:
 class OperationsRepository:
     """Mutable operational state kept separate from the immutable research ledger."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, initialize: bool = True):
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.initialize()
+        # A protected deployment bridge needs to take a recovery snapshot with
+        # candidate code *before* that candidate is allowed to migrate shared
+        # state.  Keep the default unchanged for every normal caller, but let
+        # that bridge open an already-existing database without creating paths,
+        # tables, indexes, or additive columns.
+        if initialize:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.initialize()
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=10)
@@ -1454,6 +1460,44 @@ class OperationsRepository:
             )
             connection.commit()
 
+    def reconcile_abandoned_backup_runs(self, *, exclusive_owner: str) -> dict[str, Any]:
+        """Close orphaned ``RUNNING`` backup receipts under an external lock.
+
+        The caller must already hold the one-per-backup-root workflow lock.
+        The database transaction is deliberately immediate so every stale row
+        receives the same terminal timestamp and error receipt atomically; it
+        never touches a record in any terminal status.
+        """
+        if not isinstance(exclusive_owner, str) or not exclusive_owner.strip():
+            raise ValueError("an exclusive backup workflow owner is required")
+        reconciled_at = utc_now()
+        error = (
+            "ABANDONED_RUNNING_BACKUP_RECONCILED "
+            f"at={reconciled_at}; exclusive_owner={exclusive_owner.strip()}"
+        )[:2000]
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            backup_ids = [
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT backup_id FROM backup_runs WHERE status='RUNNING' ORDER BY created_at,backup_id"
+                ).fetchall()
+            ]
+            if backup_ids:
+                connection.executemany(
+                    """UPDATE backup_runs
+                       SET status='FAILED',error=?,verified_at=?
+                       WHERE backup_id=? AND status='RUNNING'""",
+                    [(error, reconciled_at, backup_id) for backup_id in backup_ids],
+                )
+            connection.commit()
+        return {
+            "reconciled": len(backup_ids),
+            "backup_ids": backup_ids,
+            "reconciled_at": reconciled_at,
+            "exclusive_owner": exclusive_owner.strip(),
+        }
+
     def _backup_row(self, where: str = "", params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         with closing(self.connect()) as connection:
             row = connection.execute(
@@ -1475,18 +1519,26 @@ class OperationsRepository:
         """Return the latest usable recovery point rather than a later failed attempt."""
         return self._backup_row("WHERE status='VERIFIED'")
 
-    def backup_summary(self) -> dict[str, int]:
+    def backup_summary(self) -> dict[str, Any]:
         """Separate historical run records from files retained on this host."""
         with closing(self.connect()) as connection:
             rows = [dict(row) for row in connection.execute(
                 "SELECT backup_path,status FROM backup_runs ORDER BY created_at DESC"
             )]
-        retained_daily = {
-            str(Path(str(row["backup_path"])).resolve())
-            for row in rows
-            if row.get("backup_path")
-            and (Path(str(row["backup_path"])).is_file() or Path(str(row["backup_path"])).is_dir())
-        }
+        retained_daily: set[str] = set()
+        protected_daily = 0
+        for row in rows:
+            if not row.get("backup_path"):
+                continue
+            path = Path(str(row["backup_path"]))
+            try:
+                path.stat()
+            except PermissionError:
+                protected_daily += 1
+                continue
+            except OSError:
+                continue
+            retained_daily.add(str(path.resolve()))
         weekly_files: set[str] = set()
         parent_dirs: set[Path] = set()
         for row in rows:
@@ -1506,14 +1558,20 @@ class OperationsRepository:
             "verified_runs": sum(row.get("status") == "VERIFIED" for row in rows),
             "failed_runs": sum(row.get("status") == "FAILED" for row in rows),
             "running_runs": sum(row.get("status") == "RUNNING" for row in rows),
-            "retained_daily_files": len(retained_daily),
+            "retained_daily_files": None if protected_daily else len(retained_daily),
+            "retained_daily_files_observable": not protected_daily,
+            "protected_daily_records": protected_daily,
             "retained_weekly_files": len(weekly_files),
             "retention_policy": "latest_verified_daily_bundle_only",
         }
 
-    def health(self) -> dict[str, Any]:
+    def health(self, *, run_integrity_check: bool = True) -> dict[str, Any]:
         with closing(self.connect()) as connection:
-            quick_check = connection.execute("PRAGMA quick_check").fetchone()[0]
+            quick_check = (
+                connection.execute("PRAGMA quick_check").fetchone()[0]
+                if run_integrity_check
+                else "deferred"
+            )
             counts = {
                 table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 for table in (
@@ -1532,10 +1590,14 @@ class OperationsRepository:
             }
         audit_reconciliation = self.audit_reconciliation_status()
         return {
-            "status": "ok" if quick_check == "ok" and audit_reconciliation["status"] == "ok" else "degraded",
+            "status": "ok"
+            if (quick_check == "ok" or not run_integrity_check)
+            and audit_reconciliation["status"] == "ok"
+            else "degraded",
             "database": str(self.path),
             "schema_version": OPS_SCHEMA_VERSION,
             "quick_check": quick_check,
+            "integrity_check_source": "live_scan" if run_integrity_check else "not_run",
             "counts": counts,
             "demo_mode": self.demo_mode(),
             "latest_worker_cycle": self.latest_worker_cycle(),
