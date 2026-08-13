@@ -18,7 +18,12 @@ if str(ROOT) not in sys.path:
 
 from app.config import Settings
 from app.models import RiskRouter
-from app.services import EvidenceAgent, LocalEvidenceModelProvider, run_shadow_batch
+from app.services import (
+    EvidenceAgent,
+    LocalEvidenceModelProvider,
+    evidence_receipt_fingerprint,
+    run_shadow_batch,
+)
 from app.storage import EvidenceObjectStore, LedgerRepository, OperationsRepository
 from apply_live_asset_relations import apply_relations
 from apply_live_primary_adjudications import apply_rows
@@ -95,6 +100,43 @@ def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def decision_matches_current_evidence_receipt(
+    decision: dict[str, Any],
+    *,
+    event_id: str,
+    evidence_agent: EvidenceAgent,
+) -> bool:
+    """Return true only when a persisted decision still describes this event.
+
+    Legacy records intentionally fail closed: before the receipt contract was
+    introduced, an agent decision had no durable way to prove it saw the latest
+    event version and evidence state.
+    """
+
+    output = decision.get("output")
+    if not isinstance(output, dict):
+        return False
+    try:
+        recorded_version = int(output.get("event_version"))
+    except (TypeError, ValueError):
+        return False
+    recorded_fingerprint = str(output.get("evidence_receipt_fingerprint") or "")
+    if not recorded_fingerprint:
+        return False
+
+    detail = evidence_agent.ledger.event_detail(event_id)
+    if detail is None:
+        return False
+    current_version = int((detail.get("event") or {}).get("current_version") or 0)
+    if current_version <= 0 or recorded_version != current_version:
+        return False
+    current_evidence = evidence_agent.ledger.event_evidence(event_id)
+    return recorded_fingerprint == evidence_receipt_fingerprint(
+        current_version,
+        current_evidence,
+    )
+
+
 def run_pending_evidence_agents(
     connection: Any,
     evidence_agent: EvidenceAgent,
@@ -123,6 +165,7 @@ def run_pending_evidence_agents(
         "selected": len(rows),
         "run": 0,
         "already_run": 0,
+        "stale_or_legacy_rerun": 0,
         "errors": [],
         "by_job_type": {},
         "no_trading": True,
@@ -133,16 +176,23 @@ def run_pending_evidence_agents(
         job_id = str(row["job_id"])
         job_type = str(row["job_type"])
         result["by_job_type"][job_type] = result["by_job_type"].get(job_type, 0) + 1
-        if operations.agent_decisions(event_id, limit=1):
-            connection.execute(
-                """UPDATE pipeline_jobs
-                   SET status='PENDING_HUMAN_REVIEW',last_error=NULL,updated_at=?
-                   WHERE job_id=? AND job_type=?
-                     AND status='PENDING_EVIDENCE_REVIEW'""",
-                (now, job_id, job_type),
-            )
-            result["already_run"] += 1
-            continue
+        existing = operations.agent_decisions(event_id, limit=1)
+        if existing:
+            if decision_matches_current_evidence_receipt(
+                existing[0],
+                event_id=event_id,
+                evidence_agent=evidence_agent,
+            ):
+                connection.execute(
+                    """UPDATE pipeline_jobs
+                       SET status='PENDING_HUMAN_REVIEW',last_error=NULL,updated_at=?
+                       WHERE job_id=? AND job_type=?
+                         AND status='PENDING_EVIDENCE_REVIEW'""",
+                    (now, job_id, job_type),
+                )
+                result["already_run"] += 1
+                continue
+            result["stale_or_legacy_rerun"] += 1
         try:
             decision = evidence_agent.run(event_id)
             connection.execute(

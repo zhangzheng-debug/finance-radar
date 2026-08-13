@@ -5,12 +5,54 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from app.services import evidence_receipt_fingerprint
+from app.storage import LedgerRepository
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from event_ledger import open_ledger, utc_now
 import run_live_cycle as cycle
+
+
+def _open_pending_candidate_job(path: Path):
+    connection = open_ledger(path)
+    now = utc_now()
+    connection.execute(
+        "INSERT INTO sources VALUES ('src','Source','official_primary','P0',1,1,?,?)",
+        (now, now),
+    )
+    connection.execute(
+        """INSERT INTO raw_observations VALUES (
+           'obs-current','src','stable-current','2026-08-01',?,'Example','Example',
+           'https://example.com/current','hash','{}','captured')""",
+        (now,),
+    )
+    connection.execute(
+        """INSERT INTO canonical_events VALUES (
+           'evt-current',2,'candidate','candidate','regulatory','filing','2026-08-01',
+           ?,?,'stable',NULL,'Example',NULL,NULL,'src',1)""",
+        (now, now),
+    )
+    connection.execute(
+        """INSERT INTO event_versions VALUES (
+           'evt-current',2,?,'candidate','candidate','regulatory','filing',NULL,'{}','fixture')""",
+        (now,),
+    )
+    connection.execute(
+        """INSERT INTO event_evidence VALUES (
+           'ev-current','evt-current','obs-current','https://example.com/current','2026-08-01',NULL,NULL,
+           'A current official evidence passage supports the candidate review.',
+           'evidence',10,'machine_extracted_unreviewed',0,?,?)""",
+        (now, now),
+    )
+    connection.execute(
+        """INSERT INTO pipeline_jobs VALUES (
+           'job-current','evt-current','live_primary_evidence_review','PENDING_EVIDENCE_REVIEW',50,0,?,NULL,'{}',?,?)""",
+        (now, now, now),
+    )
+    connection.commit()
+    return connection
 
 
 class LiveCycleLeaseTests(unittest.TestCase):
@@ -28,12 +70,18 @@ class LiveCycleLeaseTests(unittest.TestCase):
 
     def test_light_followup_with_evidence_advances_to_human_review_without_touching_other_jobs(self) -> None:
         class ExistingDecisionOperations:
+            def __init__(self, decision):
+                self.decision = decision
+
             def agent_decisions(self, event_id: str, *, limit: int = 1):
                 self.assertEqual(event_id, "evt-light")
                 self.assertEqual(limit, 1)
-                return [{"decision_id": "existing"}]
+                return [self.decision]
 
         class NeverRunEvidenceAgent:
+            def __init__(self, ledger):
+                self.ledger = ledger
+
             def run(self, event_id: str):
                 raise AssertionError(f"existing decision should avoid re-running evidence agent for {event_id}")
 
@@ -85,12 +133,28 @@ class LiveCycleLeaseTests(unittest.TestCase):
             )
             connection.commit()
 
+            ledger_repository = LedgerRepository(Path(directory) / "db.sqlite3")
+            detail = ledger_repository.event_detail("evt-light")
+            self.assertIsNotNone(detail)
+            evidence = ledger_repository.event_evidence("evt-light")
+            event_version = int(detail["event"]["current_version"])
             # Bind the local unittest assertion to the simple adapter method.
-            operations = ExistingDecisionOperations()
+            operations = ExistingDecisionOperations(
+                {
+                    "decision_id": "existing",
+                    "output": {
+                        "event_version": event_version,
+                        "evidence_receipt_fingerprint": evidence_receipt_fingerprint(
+                            event_version,
+                            evidence,
+                        ),
+                    },
+                }
+            )
             operations.assertEqual = self.assertEqual
             result = cycle.run_pending_evidence_agents(
                 connection,
-                NeverRunEvidenceAgent(),
+                NeverRunEvidenceAgent(ledger_repository),
                 operations,
                 limit=4,
             )
@@ -102,6 +166,7 @@ class LiveCycleLeaseTests(unittest.TestCase):
             }
             self.assertEqual(result["selected"], 1)
             self.assertEqual(result["already_run"], 1)
+            self.assertEqual(result["stale_or_legacy_rerun"], 0)
             self.assertEqual(result["by_job_type"], {"light_verification_followup": 1})
             self.assertEqual(statuses["light-followup"], "PENDING_HUMAN_REVIEW")
             self.assertEqual(statuses["unrelated-evidence-job"], "PENDING_EVIDENCE_REVIEW")
@@ -110,6 +175,78 @@ class LiveCycleLeaseTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual(tuple(canonical), ("verified", "verified"))
             connection.close()
+
+    def test_legacy_or_stale_evidence_or_version_decision_reruns_the_agent(self) -> None:
+        class ExistingDecisionOperations:
+            def __init__(self, decision):
+                self.decision = decision
+
+            def agent_decisions(self, event_id: str, *, limit: int = 1):
+                self.assertEqual(event_id, "evt-current")
+                self.assertEqual(limit, 1)
+                return [self.decision]
+
+        class RecordingEvidenceAgent:
+            def __init__(self, ledger):
+                self.ledger = ledger
+                self.calls: list[str] = []
+
+            def run(self, event_id: str):
+                self.calls.append(event_id)
+                return {"status": "INSUFFICIENT"}
+
+        for stale_kind in ("legacy", "evidence", "version"):
+            with self.subTest(stale_kind=stale_kind), tempfile.TemporaryDirectory() as directory:
+                db_path = Path(directory) / "db.sqlite3"
+                connection = _open_pending_candidate_job(db_path)
+                ledger_repository = LedgerRepository(db_path)
+                detail = ledger_repository.event_detail("evt-current")
+                self.assertIsNotNone(detail)
+                event_version = int(detail["event"]["current_version"])
+                evidence = ledger_repository.event_evidence("evt-current")
+                recorded_version = event_version
+                recorded_evidence = evidence
+                if stale_kind == "evidence":
+                    recorded_evidence = [dict(item) for item in evidence]
+                    recorded_evidence[0]["evidence_passage"] = "An older superseded passage."
+                elif stale_kind == "version":
+                    recorded_version = event_version - 1
+                output = (
+                    {}
+                    if stale_kind == "legacy"
+                    else {
+                        "event_version": recorded_version,
+                        "evidence_receipt_fingerprint": evidence_receipt_fingerprint(
+                            recorded_version,
+                            recorded_evidence,
+                        ),
+                    }
+                )
+                operations = ExistingDecisionOperations(
+                    {
+                        "decision_id": f"stale-{stale_kind}",
+                        "output": output,
+                    }
+                )
+                operations.assertEqual = self.assertEqual
+                evidence_agent = RecordingEvidenceAgent(ledger_repository)
+
+                result = cycle.run_pending_evidence_agents(
+                    connection,
+                    evidence_agent,
+                    operations,
+                    limit=4,
+                )
+
+                self.assertEqual(evidence_agent.calls, ["evt-current"])
+                self.assertEqual(result["run"], 1)
+                self.assertEqual(result["already_run"], 0)
+                self.assertEqual(result["stale_or_legacy_rerun"], 1)
+                status = connection.execute(
+                    "SELECT status FROM pipeline_jobs WHERE job_id='job-current'"
+                ).fetchone()[0]
+                self.assertEqual(status, "PENDING_HUMAN_REVIEW")
+                connection.close()
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.models.evidence_policy import is_conflicting_evidence_status
 from app.storage import EvidenceObjectStore, LedgerRepository, OperationsRepository
 
 
@@ -20,7 +21,6 @@ MODEL_PROVIDER = "deterministic_guarded_fallback"
 MODEL_SNAPSHOT = "no-llm-configured-v1"
 LOCAL_MODEL_PROVIDER = "local_llama_cpp"
 ALLOWED_AUTHORITY_TIERS = {"P0", "P1", "P2", "P3"}
-CONTRADICTION_MARKERS = {"contradict", "dispute", "denied", "rejected", "retracted"}
 ALLOWED_MODEL_VERDICTS = {"SUPPORTED", "CONTRADICTED", "INSUFFICIENT"}
 FORBIDDEN_SUMMARY_CONTROL = re.compile(
     r"\b(?:EVIDENCE_READY|HUMAN_REVIEW)\b|"
@@ -45,6 +45,39 @@ def _sentences(text: str) -> list[str]:
 
 def _tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]{3,}|[\u4e00-\u9fff]{2,}", text.lower()))
+
+
+EVIDENCE_RECEIPT_FINGERPRINT_VERSION = "evidence-agent-receipt-v1"
+EVIDENCE_RECEIPT_FIELDS = (
+    "evidence_id",
+    "observation_id",
+    "evidence_url",
+    "evidence_passage",
+    "evidence_status",
+    "updated_at",
+    "source_id",
+    "authority_tier",
+)
+
+
+def evidence_receipt_fingerprint(event_version: int, evidence_rows: list[dict[str, Any]]) -> str:
+    """Bind an agent decision to the exact current evidence read model.
+
+    The receipt deliberately includes only canonical evidence/provenance fields
+    that can influence edge generation.  Presentation-only fields cannot make
+    a decision stale, while a changed excerpt, status, source or authority can.
+    """
+
+    receipt = {
+        "contract_version": EVIDENCE_RECEIPT_FINGERPRINT_VERSION,
+        "event_version": int(event_version),
+        "evidence": [
+            {field: str(row.get(field) or "") for field in EVIDENCE_RECEIPT_FIELDS}
+            for row in sorted(evidence_rows, key=lambda item: str(item.get("evidence_id") or ""))
+        ],
+    }
+    canonical = json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class LocalModelContractError(RuntimeError):
@@ -368,10 +401,9 @@ class EvidenceAgent:
                 claims,
                 key=lambda item: len(claim_tokens[item["claim_id"]] & excerpt_tokens),
             )
-            status_text = str(evidence.get("evidence_status") or "").lower()
             relation = (
                 "CONTRADICTS"
-                if any(marker in status_text for marker in CONTRADICTION_MARKERS)
+                if is_conflicting_evidence_status(evidence.get("evidence_status"))
                 else "SUPPORTS"
             )
             object_metadata = self.object_store.put_text(excerpt)
@@ -399,7 +431,12 @@ class EvidenceAgent:
         return edges
 
     @staticmethod
-    def _status(claims: list[dict[str, Any]], edges: list[dict[str, Any]]) -> tuple[str, dict[str, str]]:
+    def _status(
+        claims: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        *,
+        has_conflicting_evidence: bool = False,
+    ) -> tuple[str, dict[str, str]]:
         states: dict[str, str] = {}
         for claim in claims:
             related = [edge for edge in edges if edge["claim_id"] == claim["claim_id"]]
@@ -414,7 +451,7 @@ class EvidenceAgent:
                 states[claim["claim_id"]] = "DISCOVERY_SUPPORTED"
             else:
                 states[claim["claim_id"]] = "INSUFFICIENT"
-        if "HUMAN_REVIEW" in states.values():
+        if has_conflicting_evidence or "HUMAN_REVIEW" in states.values():
             return "HUMAN_REVIEW", states
         if "INSUFFICIENT" in states.values() or "DISCOVERY_SUPPORTED" in states.values():
             return "INSUFFICIENT", states
@@ -437,13 +474,20 @@ class EvidenceAgent:
             lines.append(f"{claim['text']} — {claim_states[claim['claim_id']]} {suffix}")
         return "\n".join(lines)
 
-    def run(self, event_id: str) -> dict[str, Any]:
+    def run(
+        self,
+        event_id: str,
+        *,
+        audit_write_confirmation: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         started = time.perf_counter()
         trace_id = f"agent-trace-{uuid.uuid4().hex}"
         detail = self.ledger.event_detail(event_id)
         if detail is None:
             raise KeyError(event_id)
         evidence_rows = self.ledger.event_evidence(event_id)
+        event_version = int((detail.get("event") or {}).get("current_version") or 0)
+        current_evidence_fingerprint = evidence_receipt_fingerprint(event_version, evidence_rows)
         allowed_domains = sorted(
             {
                 urlparse(str(item.get("evidence_url") or "")).netloc.lower()
@@ -454,7 +498,14 @@ class EvidenceAgent:
         claims = self._extract_claims(event_id, detail)
         plan = self._build_plan(claims, allowed_domains)
         edges = self._propose_edges(event_id, claims, evidence_rows)
-        status, claim_states = self._status(claims, edges)
+        status, claim_states = self._status(
+            claims,
+            edges,
+            has_conflicting_evidence=any(
+                is_conflicting_evidence_status(item.get("evidence_status"))
+                for item in evidence_rows
+            ),
+        )
         for claim in claims:
             claim["verification_state"] = claim_states[claim["claim_id"]]
 
@@ -524,6 +575,9 @@ class EvidenceAgent:
         result = {
             "trace_id": trace_id,
             "event_id": event_id,
+            "event_version": event_version,
+            "evidence_receipt_contract_version": EVIDENCE_RECEIPT_FINGERPRINT_VERSION,
+            "evidence_receipt_fingerprint": current_evidence_fingerprint,
             "status": status,
             "claims": claims,
             "evidence_plan": plan,
@@ -551,6 +605,9 @@ class EvidenceAgent:
                 "no_trading": True,
                 "max_research_rounds": 3,
             },
+            "audit_write_confirmation": audit_write_confirmation
+            if audit_write_confirmation is not None
+            else {"confirmed": False, "source": "non_http_runtime"},
             "latency_ms": round((time.perf_counter() - started) * 1000, 3),
         }
         decision_id = self.operations.record_agent_decision(result)

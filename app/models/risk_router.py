@@ -8,6 +8,7 @@ from typing import Any
 
 import joblib
 
+from .evidence_policy import is_conflicting_evidence_status
 from .risk_scope_gate import GATE_VERSION, assess_risk_scope
 from .semantic_policy_gate import SEMANTIC_POLICY_VERSION, assess_semantic_policy
 
@@ -42,7 +43,7 @@ def _sha256_json(value: Any) -> str:
 def derive_evidence_context(evidence: list[dict[str, Any]]) -> dict[str, Any]:
     """Summarize decision-grade evidence without event taxonomy or market outcomes."""
     statuses = {str(item.get("evidence_status") or "") for item in evidence}
-    if statuses & {"contradicted_by_primary", "conflicted", "rejected_primary"}:
+    if any(is_conflicting_evidence_status(status) for status in statuses):
         state = "CONFLICTED"
         reasons = ["contradictory_primary_evidence"]
     elif statuses & {"confirmed_primary", "accepted_manual_primary_evidence"}:
@@ -251,7 +252,10 @@ class RiskRouter:
             runtime = "fallback"
             decision_source = "KEYWORD_FALLBACK"
             semantic_model_invoked = False
-            confidence_applicable = True
+            # The keyword fallback is a deterministic queueing heuristic, not
+            # a calibrated semantic model.  Keep its score for diagnostics but
+            # never present it as an applicable model confidence.
+            confidence_applicable = False
         latency_ms = (time.perf_counter() - started) * 1000
         return {
             "label": label,

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from app.services import EvidenceAgent, LocalEvidenceModelProvider
+from app.services import EvidenceAgent, LocalEvidenceModelProvider, evidence_receipt_fingerprint
 from scripts.evaluate_local_evidence_model import load_cases
 
 
@@ -127,8 +127,41 @@ def test_valid_local_model_output_is_advisory_and_cannot_change_final_status() -
     assert result["guardrails"]["model_output_advisory_only"] is True
     assert result["guardrails"]["deterministic_gate_authoritative"] is True
     assert result["guardrails"]["no_trading"] is True
+    assert result["event_version"] == 1
+    assert len(result["evidence_receipt_fingerprint"]) == 64
     assert operations.result is not None
     assert operations.result["llm_shadow_output"] == result["llm_shadow_output"]
+
+
+def test_evidence_receipt_fingerprint_binds_version_and_canonical_evidence_fields() -> None:
+    evidence = [
+        {
+            "evidence_id": "evidence-b",
+            "observation_id": "obs-b",
+            "evidence_url": "https://example.test/b",
+            "evidence_passage": "Primary passage B",
+            "evidence_status": "confirmed_primary",
+            "updated_at": "2026-08-05T00:00:00+00:00",
+            "source_id": "sec_edgar",
+            "authority_tier": "P0",
+        },
+        {
+            "evidence_id": "evidence-a",
+            "observation_id": "obs-a",
+            "evidence_url": "https://example.test/a",
+            "evidence_passage": "Primary passage A",
+            "evidence_status": "machine_extracted_unreviewed",
+            "updated_at": "2026-08-05T00:00:00+00:00",
+            "source_id": "sec_edgar",
+            "authority_tier": "P0",
+        },
+    ]
+    fingerprint = evidence_receipt_fingerprint(7, evidence)
+    assert fingerprint == evidence_receipt_fingerprint(7, list(reversed(evidence)))
+    assert fingerprint != evidence_receipt_fingerprint(8, evidence)
+    changed = [dict(row) for row in evidence]
+    changed[0]["evidence_passage"] = "Revised primary passage B"
+    assert fingerprint != evidence_receipt_fingerprint(7, changed)
 
 
 def test_hallucinated_citation_rejects_entire_model_output_and_falls_back() -> None:
