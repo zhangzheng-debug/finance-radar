@@ -14,7 +14,7 @@ Releases use the same version prefixed by `v`.
   systemd shell syntax, high-confidence credential formats, and prohibited
   trading write routes.
 - The most recent recorded full local regression for this branch is
-  `628 passed, 5 skipped`. The exact commit proposed for merge must run the
+  `629 passed, 5 skipped`. The exact commit proposed for merge must run the
   complete suite again in GitHub Actions before this section is released.
 
 ## 2026.07.22.2

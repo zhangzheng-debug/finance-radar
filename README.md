@@ -81,7 +81,7 @@ python -m pytest -q
 python -m pytest -q --cov=app --cov=scripts --cov-report=term-missing
 ```
 
-2026-08-13 在本工作树的完整回归结果为 `628 passed, 5 skipped`。这是带日期的源码验证记录，不代表 AWS 当前运行状态，也不能替代新提交的 GitHub Actions 结果。
+2026-08-13 在本工作树的完整回归结果为 `629 passed, 5 skipped`。这是带日期的源码验证记录，不代表 AWS 当前运行状态，也不能替代新提交的 GitHub Actions 结果。
 
 CI 还会检查编译、测试、秘密模式、交易写路由和部署 Shell 语法。正式发布前必须另外通过 release audit、恢复收据验证和真实 Linux 上线验收。
 

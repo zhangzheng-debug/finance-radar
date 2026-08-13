@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 import shutil
 import subprocess
 
@@ -25,6 +25,21 @@ def _bash() -> str:
 def _write_executable(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8", newline="\n")
     path.chmod(0o755)
+
+
+def _path_for_bash(path: PurePath) -> str:
+    """Return a PATH-safe spelling for native Bash and Git Bash.
+
+    A Windows drive prefix contains ``:`` and would be split as a PATH list by
+    Git Bash, so convert ``C:/...`` to ``/c/...``.  Native POSIX paths have no
+    drive and must pass through unchanged.
+    """
+
+    value = path.as_posix()
+    drive = path.drive
+    if drive:
+        return f"/{drive[0].lower()}{value[len(drive):]}"
+    return value
 
 
 def _run_wrapper(
@@ -155,7 +170,7 @@ exec /usr/bin/readlink -f "$target"
             **os.environ,
             # PATH itself is parsed as POSIX by Git Bash, so a drive-letter
             # path would split at ``C:``.  Use its /c/... spelling here.
-            "FAKE_BIN": f"/{fake_bin.drive[0].lower()}{fake_bin.as_posix()[2:]}",
+            "FAKE_BIN": _path_for_bash(fake_bin),
             "WRAPPER_PATH": WRAPPER.as_posix(),
             "FAKE_STATE": str(state_file),
             "FAKE_LOG": str(log_file),
@@ -179,6 +194,11 @@ exec /usr/bin/readlink -f "$target"
 
 def _calls(tmp_path: Path) -> list[str]:
     return (tmp_path / "calls.log").read_text(encoding="utf-8").splitlines()
+
+
+def test_path_for_bash_handles_windows_and_posix_paths() -> None:
+    assert _path_for_bash(PureWindowsPath("C:/Temp/fake-bin")) == "/c/Temp/fake-bin"
+    assert _path_for_bash(PurePosixPath("/tmp/fake-bin")) == "/tmp/fake-bin"
 
 
 def test_wrapper_quiesces_and_restores_an_active_worker(tmp_path: Path) -> None:
