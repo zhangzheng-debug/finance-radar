@@ -1,8 +1,8 @@
 # Finance Radar 证据、影子模型与终端问题闭环记录
 
-日期：2026-07-23  
-生产环境：AWS `us-east-1`，只读终端  
-生产版本：`/opt/finance-radar/releases/20260723T063259Z`  
+日期：2026-07-23
+生产环境：AWS `us-east-1`，只读终端
+生产版本：`/opt/finance-radar/releases/20260723T063259Z`
 上一可回滚版本：`/opt/finance-radar/releases/20260722T084500Z`
 
 ## 1. 本次解决的问题
