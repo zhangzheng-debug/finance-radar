@@ -13,10 +13,12 @@ def terminal_source() -> str:
     return TERMINAL.read_text(encoding="utf-8")
 
 
-def test_live_search_queries_the_complete_server_index_and_clears_stale_detail() -> None:
+def test_archived_prototype_is_frozen_and_clears_stale_detail() -> None:
     source = terminal_source()
-    assert "/api/v1/events?q=${encodeURIComponent(query)}&limit=100" in source
-    assert 'S.liveBaseEvents = [...DEMO.events]' in source
+    assert "ARCHIVED · FROZEN SNAPSHOT" in source
+    assert "apiFetch(" not in source
+    assert "fetch(" not in source
+    assert "tryLive" not in source
     assert 'S.selectedEvent = "";' in source
     assert "详情区已清空" in source
 
@@ -27,7 +29,7 @@ def test_rule_gates_are_not_presented_as_model_confidence() -> None:
     assert "未调用 · 证据门" in source
     assert "confidenceApplicable" in source
     assert "本次判断由谁完成" in source
-    assert "影子分流已持久化" in source
+    assert "影子模型分流" in source
 
 
 def test_public_terminal_explains_workflow_without_fake_disabled_actions() -> None:
@@ -60,7 +62,7 @@ def test_backup_counts_distinguish_history_from_retained_files() -> None:
     source = terminal_source()
     assert "历史备份运行" in source
     assert "当前保留文件" in source
-    assert "operations.backup_summary" in source
+    assert "backups: { history_runs" in source
     assert "retained_daily_files" in source
     assert "retained_weekly_files" in source
 

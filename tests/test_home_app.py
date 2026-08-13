@@ -131,6 +131,7 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert "正式结论" in rendered
     assert "核验 5 · 排除 1" in rendered
     assert "待补证 / 复核" in rendered
+    assert "实时事件、原始证据与核验进度" not in rendered
     assert "正式处置状态" not in rendered
     assert "Schema" not in rendered
     assert "quick_check" not in rendered
@@ -174,6 +175,68 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     )
     assert not any("工作台" in button.label or "人工复核" in button.label for button in page.button)
     assert any(button.label == "收起当前页预览" for button in page.button)
+
+
+def test_public_verified_event_without_receipt_is_labeled_as_historical(monkeypatch) -> None:
+    def historical_verified_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        data = _fake_api(path, **kwargs)
+        if urllib.parse.urlsplit(path).path == "/api/v1/events/event-a":
+            event = {
+                **data["event"],
+                "status": "verified",
+                "public_state": "verified",
+                "reviewed_at": None,
+            }
+            return {**data, "event": event, "verification_method": {}}
+        return data
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", historical_verified_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "历史已核验记录 · 核验时间与核验留痕未存档" in rendered
+    assert "核验留痕" in rendered
+    assert "历史记录未存档" in rendered
+    assert "正式核验已完成" not in rendered
+
+
+def test_public_verified_event_with_receipt_keeps_formal_label(monkeypatch) -> None:
+    def recorded_verified_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        data = _fake_api(path, **kwargs)
+        if urllib.parse.urlsplit(path).path == "/api/v1/events/event-a":
+            event = {
+                **data["event"],
+                "status": "verified",
+                "public_state": "verified",
+                "reviewed_at": None,
+            }
+            return {
+                **data,
+                "event": event,
+                "verification_method": {
+                    "kind": "light_verification",
+                    "reviewed_at": "2026-08-03T23:00:00+00:00",
+                    "evidence_ids": ["ev-primary-1"],
+                    "score": 74,
+                },
+            }
+        return data
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", recorded_verified_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "正式核验已完成" in rendered
+    assert "历史已核验记录" not in rendered
+    assert "核验留痕" not in rendered
 
 
 def test_public_inline_preview_bounds_long_source_text(monkeypatch) -> None:
@@ -231,8 +294,36 @@ def test_public_collector_marks_missing_success_timestamp_unknown(monkeypatch) -
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(web_common, "api_request", missing_worker_time_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10).run()
-    rendered = "\n".join(str(item.value) for item in page.markdown)
+    rendered = "\n".join(
+        str(item.value) for item in [*page.markdown, *page.warning]
+    )
 
     assert not page.exception
     assert "采集状态" in rendered
-    assert "状态未知" in rendered
+    assert "更新状态未知" in rendered
+    assert "数据更新状态无法确认" in rendered
+    assert "不能视为实时信息" in rendered
+
+
+def test_public_collector_marks_overdue_worker_as_stale_not_realtime(monkeypatch) -> None:
+    def stale_worker_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        if urllib.parse.urlsplit(path).path == "/api/v1/overview":
+            overview = _overview()
+            overview["timing"] = {
+                **overview["timing"],
+                "latest_worker_success_age_seconds": 30 * 60 + 1,
+            }
+            return overview
+        return _fake_api(path, **kwargs)
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", stale_worker_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10).run()
+    rendered = "\n".join(
+        str(item.value) for item in [*page.markdown, *page.error]
+    )
+
+    assert not page.exception
+    assert "数据更新已中断" in rendered
+    assert "不是实时信息" in rendered
+    assert "更新已中断" in rendered

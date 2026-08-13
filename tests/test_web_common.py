@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+from pathlib import Path
 
 import pytest
 
@@ -67,12 +68,36 @@ def test_format_elapsed_uses_a_human_scale_without_hiding_age() -> None:
 def test_accessibility_contract_sets_landmarks_language_focus_and_targets() -> None:
     assert 'setAttribute("lang", "zh-CN")' in ACCESSIBILITY_JS
     assert 'setAttribute("role", "main")' in ACCESSIBILITY_JS
-    assert 'setAttribute("role", "navigation")' in ACCESSIBILITY_JS
+    assert 'setAttribute("role", "navigation")' not in ACCESSIBILITY_JS
+    assert 'removeAttribute("role")' in ACCESSIBILITY_JS
     assert "MutationObserver" in ACCESSIBILITY_JS
     assert ":focus-visible" in ACCESSIBILITY_CSS
     assert "outline: 2px solid var(--fr-cyan)" in ACCESSIBILITY_CSS
     assert "min-height: 44px" in ACCESSIBILITY_CSS
     assert 'a[aria-label="Link to heading"]' in ACCESSIBILITY_CSS
+
+
+def test_shared_shell_has_one_primary_navigation_landmark_and_a_page_h1() -> None:
+    common_source = (Path(__file__).parents[1] / "app" / "web" / "common.py").read_text(
+        encoding="utf-8"
+    )
+    components_source = (
+        Path(__file__).parents[1] / "app" / "web" / "components.py"
+    ).read_text(encoding="utf-8")
+    home_source = (Path(__file__).parents[1] / "app" / "web" / "Home.py").read_text(
+        encoding="utf-8"
+    )
+    assert '<nav class="radar-primary-nav"' in common_source
+    assert "f'<h1 class=\"radar-page-context\">{escape(title)}</h1>'" in common_source
+    assert "f'<h2 class=\"situation-title\"" in common_source
+    assert 'role="navigation"' not in components_source
+    assert '<div class="fr-pagination" role="group"' in home_source
+
+
+def test_public_navigation_does_not_call_stale_data_realtime() -> None:
+    home = next(item for item in web_common.PUBLIC_NAVIGATION if item["key"] == "home")
+    assert home["description"] == "浏览事件、证据摘要与更新状态"
+    assert "实时" not in home["description"]
 
 
 def test_v3_runtime_tokens_are_single_source_and_styles_consume_them() -> None:

@@ -77,14 +77,33 @@ status_strip(
     ]
 )
 
-mode_cols = st.columns(3)
-for column, mode in zip(mode_cols, ["LIVE", "RECENT_CAPTURE", "REPLAY"]):
-    if column.button(mode, width="stretch", type="primary" if mode == health["demo_mode"] else "secondary"):
-        try:
-            api_request(f"/api/v1/demo/mode/{mode}", method="POST")
-            st.rerun()
-        except Exception as exc:
-            render_api_error(exc)
+st.caption(
+    "运行模式（受控写入）：切换会写入系统运行状态。LIVE 仅表示事件读取窗口，"
+    "不代表交易、下单或正式结论变更。"
+)
+mode_options = ["LIVE", "RECENT_CAPTURE", "REPLAY"]
+current_mode = str(health["demo_mode"] or "RECENT_CAPTURE")
+if current_mode not in mode_options:
+    current_mode = "RECENT_CAPTURE"
+with st.form("demo-mode-change"):
+    requested_mode = st.radio(
+        "准备切换到",
+        mode_options,
+        index=mode_options.index(current_mode),
+        horizontal=True,
+    )
+    mode_change_confirmed = st.checkbox("我确认要切换运行模式（会写入系统状态）")
+    if st.form_submit_button("确认切换运行模式（受控写入）", width="stretch"):
+        if requested_mode == current_mode:
+            st.info("所选模式已经生效；没有写入任何变更。")
+        elif not mode_change_confirmed:
+            st.warning("请先确认本次运行模式切换会写入系统状态。")
+        else:
+            try:
+                api_request(f"/api/v1/demo/mode/{requested_mode}", method="POST")
+                st.rerun()
+            except Exception as exc:
+                render_api_error(exc)
 
 tab_sources, tab_market, tab_evidence, tab_worker, tab_backup, tab_model, tab_audit = st.tabs(
     ["事件源", "行情能力", "证据存档", "Worker", "备份恢复", "模型卡", "硬边界审计"]

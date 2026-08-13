@@ -533,14 +533,14 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
 
 <div class="boot-overlay" id="boot-overlay" role="status" aria-live="polite">
   <div class="boot-card">
-    <div class="boot-title">FINANCE RADAR · CONNECTING LIVE READ-ONLY CORE</div>
-    <div class="boot-copy">正在读取事件账本、来源健康与证据状态。连接结果确认前不展示合成数字。</div>
+    <div class="boot-title">ARCHIVED PROTOTYPE · NOT A PRODUCTION UI</div>
+    <div class="boot-copy">这是冻结的历史设计材料，不读取或验证当前生产数据。</div>
     <div class="boot-line" aria-hidden="true"></div>
   </div>
 </div>
 
 <header class="topbar">
-  <div class="brand" title="Finance Radar Evidence Terminal">
+  <div class="brand" title="Archived Finance Radar design prototype">
     <span class="brand-mark" aria-hidden="true"></span>
     <span class="brand-name">FINANCE RADAR</span>
   </div>
@@ -560,7 +560,7 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
   <div class="top-right">
     <button class="mode-badge presentation-toggle" id="presentation-toggle"
             type="button" aria-pressed="false" title="切换答辩投影高可读模式">PRESENT</button>
-    <button class="mode-badge demo" id="mode-badge" title="正在连接同源 API（/finance-radar-api）">CONNECTING…</button>
+    <button class="mode-badge demo" id="mode-badge" title="历史原型状态；不可作为生产验收">ARCHIVED</button>
     <span class="utc-clock" id="utc-clock">--:--:-- UTC</span>
   </div>
 </header>
@@ -568,7 +568,7 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
 <main class="shell">
   <div class="safe-banner" role="note">
     <span aria-hidden="true">◉</span>
-    情报与人工复核系统 · 只读行情 · 不含下单、仓位、余额或交易执行能力 · 模型输出均为 SHADOW
+    历史设计原型已退役 · 非生产 · 不可用于部署、恢复或当前数据验收
   </div>
 
   <!-- ============ 态势室 ============ -->
@@ -709,7 +709,7 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
   <span>只读行情 · 无下单 · 无仓位 · 无余额</span><span class="sep">/</span>
   <span>Ledger Schema 12 · quick_check=ok</span><span class="sep">/</span>
   <span id="footer-snapshot">合成演示快照</span><span class="sep">/</span>
-  <span>Evidence Terminal v3 · AWS 正式只读终端</span>
+  <span>Evidence Terminal v3 · 历史冻结原型 · 非生产</span>
 </footer>
 
 <div class="palette-backdrop" id="palette-backdrop" aria-hidden="true">
@@ -1097,9 +1097,7 @@ const S = {
   route:"situation", selectedEvent:DEMO.events[0].id,
   wb:{ flow:"", family:"", source:"", q:"" },
   replay:{ caseId:DEMO.replays[0].id, step:-1, timer:null },
-  live:false, liveScope:"demo", liveDetailLoading:new Map(), liveBaseEvents:[],
-  searchRequest:0, searchTimer:null,
-  apiBase:(new URLSearchParams(location.search).get("api") || "/finance-radar-api").replace(/\/$/, "")
+  searchTimer:null
 };
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
@@ -1139,67 +1137,6 @@ function evidenceIdentity(item) {
   if (item.id) return `EVIDENCE-ID:${esc(String(item.id).slice(-12))}`;
   return "IDENTITY PENDING";
 }
-async function apiFetch(path, attempts=2) {
-  let lastError;
-  for (let attempt=1; attempt<=attempts; attempt+=1) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 9000);
-      const response = await fetch(`${S.apiBase}${path}`, {
-        headers:{Accept:"application/json"}, cache:"no-store", signal:controller.signal
-      });
-      clearTimeout(timeout);
-      if (!response.ok) {
-        const error = new Error(`HTTP ${response.status} ${path}`);
-        if (response.status < 500 && response.status !== 429) throw error;
-        lastError = error;
-      } else {
-        const payload = await response.json();
-        return payload.data || payload;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-    if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, 300 * attempt));
-  }
-  throw lastError || new Error(`API request failed ${path}`);
-}
-function liveSourceState(source) {
-  const cursor = String(source.cursor_status || "").toUpperCase();
-  if (source.last_error || /ERROR|FAILED|HTTP_/.test(cursor)) return "error";
-  if (!source.enabled || /UNOBSERVED|DISABLED|REGISTERED_ONLY|STATIC_IMPORTED/.test(cursor)) return "idle";
-  if (!source.last_success_at) return "idle";
-  if (/STALE/.test(cursor)) return "watch";
-  return "ok";
-}
-function liveEventFromRow(row) {
-  const company = row.company_name || "未识别主体";
-  const typeLabel = humanize(row.event_type);
-  return {
-    id:row.event_id, time:shortTime(row.last_updated_at), date:row.event_date || "—",
-    company, ticker:row.ticker_at_event || "—", family:row.event_family || "unclassified",
-    type:row.event_type || "unclassified", source:row.discovery_source || "unknown",
-    tier:authorityTier(row), status:row.status || "candidate", polarity:"unknown",
-    route:"SHADOW_PENDING", confidence:0, version:Number(row.current_version || 1),
-    evidenceCount:Number(row.evidence_count || 0), conflict:false,
-    sortAt:row.last_updated_at || row.first_seen_at || row.event_date || "",
-    headline:row.source_title || `${company} · ${typeLabel}`,
-    summary:row.source_summary || row.evidence_excerpt || "实时事件已入账；精确证据与模型分流将在选中后按需读取。",
-    evidence:row.evidence_excerpt ? [{
-      source:row.discovery_source || "unknown", tier:authorityTier(row), id:null,
-      passage:row.evidence_excerpt, status:"PREVIEW", note:"实时事件列表中的证据摘要；选中后加载精确证据对象"
-    }] : [],
-    timeline:[{t:shortTime(row.first_seen_at),kind:"observe",title:"实时事件入账",desc:`${row.discovery_source || "unknown"} · ${row.status || "candidate"}`}],
-    market:{symbol:row.ticker_at_event || "NO TICKER",provider:"live ledger",price:"NOT AVAILABLE",
-      fresh:"NOT CAPTURED",freshState:"watch",available:false,
-      note:"当前只读 API 未返回该事件的可展示行情快照；不使用合成价格填充。",horizons:[]},
-    modelRuntime:"pending", modelDecisionSource:"PENDING", semanticModelInvoked:false,
-    confidenceApplicable:false, modelReason:"尚未加载详情",
-    modelRunCount:0, agentDecisionCount:0, agentLatestStatus:"NOT RUN",
-    humanReviewCount:0, liveDetailLoaded:false
-  };
-}
-
 function spark(values, w=56, h=22, color="var(--fr-cyan)") {
   const min = Math.min(...values), max = Math.max(...values), span = (max-min) || 1;
   const pts = values.map((v,i) =>
@@ -1341,7 +1278,7 @@ function modelDisplay(ev) {
     const pct = ev.confidenceApplicable ? `${Math.round(ev.confidence*100)}%` : "已运行";
     return {value:`${pct} · 旁路模型`, state:"", title:"语义模型已运行，但只写入旁路审计，不改变事件状态"};
   }
-  if (!S.live && Number.isFinite(ev.confidence)) {
+  if (Number.isFinite(ev.confidence)) {
     return {value:`${Math.round(ev.confidence*100)}% · 演示`, state:"", title:"合成演示数据，不是实时模型运行"};
   }
   return {value:"未执行", state:"watch", title:"当前没有可核验的语义模型执行记录"};
@@ -1448,7 +1385,6 @@ function renderWorkbench() {
     const pick = () => {
       S.selectedEvent = item.dataset.id;
       renderWorkbench();
-      if (S.live) void loadLiveEventDetail(item.dataset.id);
     };
     item.addEventListener("click", pick);
     item.addEventListener("keydown", e => { if (e.key==="Enter") pick(); });
@@ -1483,7 +1419,6 @@ function renderWorkbench() {
     </div>
     <h2 class="event-headline">${esc(ev.headline)}</h2>
     <p class="event-summary">${esc(ev.summary)}</p>
-    ${S.live && !ev.liveDetailLoaded ? `<div class="live-detail-note">SYNCING LIVE EVIDENCE + TIMELINE…</div>` : ""}
     ${conflictBanner}${noEvidenceBanner}
     <div class="section-head"><span class="section-title">证据矩阵</span>
       <span class="section-meta">EXACT PASSAGES · CONTENT-ADDRESSED · IMMUTABLE</span></div>
@@ -1542,7 +1477,7 @@ function renderWorkbench() {
     </div>
     <div class="panel identity-card" style="margin-bottom:10px" title="${esc(modelState.title)}">
       <div class="queue-label" style="margin-bottom:6px">本次判断由谁完成</div>
-      <div class="identity-id">${esc(ev.modelDecisionSource || (S.live?"PENDING":"DEMO_FIXTURE"))}</div>
+      <div class="identity-id">${esc(ev.modelDecisionSource || "DEMO_FIXTURE")}</div>
       <div class="identity-meta">${esc(ev.modelReason || modelState.title)}</div>
       <div class="identity-meta" style="margin-top:5px">已持久化影子运行 ${ev.modelRunCount || 0} 次 · Evidence Agent ${ev.agentDecisionCount || 0} 次</div>
     </div>
@@ -1575,7 +1510,6 @@ function renderWorkbench() {
       Evidence Agent 由后台在证据准备好后自动运行；人工复核由授权管理端执行。公开页面没有写入按钮，避免误以为灰色按钮可操作。
     </div>`;
 
-  if (S.live && !ev.liveDetailLoaded) void loadLiveEventDetail(ev.id);
 }
 ["wb-flow","wb-family","wb-source"].forEach(id =>
   $("#"+id).addEventListener("change", e => {
@@ -1830,8 +1764,8 @@ $("#global-search").addEventListener("keydown", e => {
 });
 
 /* ============================================================
-   Live 核心：overview + event list + selected detail/evidence/timeline。
-   回放、盲标样例仍明确使用冻结夹具，绝不伪装成实时数据。
+   归档演示：所有页面只使用内嵌冻结样例。
+   此原型不请求、代理或切换到任何生产 API。
    ============================================================ */
 function ageLabel(value) {
   if (!value) return "NEVER";
@@ -1853,339 +1787,22 @@ function refreshWorkbenchOptions() {
   while (family.options.length > 1) family.remove(1);
   while (source.options.length > 1) source.remove(1);
 }
-async function executeSearch(rawQuery) {
+function executeSearch(rawQuery) {
   const query = String(rawQuery || "").trim();
-  const requestId = ++S.searchRequest;
   S.wb.q = query;
   S.wb.flow = "";
   S.wb.family = "";
   S.wb.source = "";
   $("#global-search").value = query;
-  if (!S.live) {
-    navigate("workbench");
-    return;
-  }
-  try {
-    let nextEvents;
-    if (!query) {
-      nextEvents = [...S.liveBaseEvents];
-    } else {
-      const page = await apiFetch(`/api/v1/events?q=${encodeURIComponent(query)}&limit=100`);
-      if (requestId !== S.searchRequest) return;
-      nextEvents = (Array.isArray(page.items) ? page.items : []).map(liveEventFromRow);
-    }
-    if (requestId !== S.searchRequest) return;
-    DEMO.events = nextEvents.sort((a,b) => String(b.sortAt).localeCompare(String(a.sortAt)));
-    S.selectedEvent = DEMO.events[0]?.id || "";
-    refreshWorkbenchOptions();
-    navigate("workbench");
-    if (S.selectedEvent) void loadLiveEventDetail(S.selectedEvent);
-  } catch (error) {
-    if (requestId !== S.searchRequest) return;
-    DEMO.events = [];
-    S.selectedEvent = "";
-    refreshWorkbenchOptions();
-    navigate("workbench");
-    $("#wb-center").innerHTML = `<div class="gate-banner risk"><b>SEARCH FAILED</b> — ${esc(error.message)}</div>`;
-  }
+  navigate("workbench");
 }
-function setModeBadge(mode, detail="") {
+function setModeBadge() {
   const badge = $("#mode-badge");
   badge.classList.remove("demo", "error");
-  if (mode === "live") {
-    badge.textContent = "LIVE CORE · READ ONLY";
-    badge.title = "实时范围：态势、来源、事件列表、所选事件详情、证据与时间线；回放及盲标样例为冻结夹具。";
-  } else if (mode === "loading") {
-    badge.classList.add("demo"); badge.textContent = "CONNECTING…";
-    badge.title = "正在连接只读 API";
-  } else if (mode === "error") {
-    badge.classList.add("error"); badge.textContent = "DEMO · API OFFLINE";
-    badge.title = detail || "只读 API 不可达；当前所有事件均为明确标记的合成演示快照。";
-  } else {
-    badge.classList.add("demo"); badge.textContent = "DEMO SNAPSHOT";
-    badge.title = "点击连接同源只读 API；本地开发请使用 dev_server.py 代理。";
-  }
+  badge.classList.add("demo");
+  badge.textContent = "ARCHIVED · FROZEN SNAPSHOT";
+  badge.title = "归档演示原型：仅使用内嵌冻结样例，不连接或切换到生产 API。";
 }
-function applyLiveOverview(data) {
-  const counts = data.counts || {};
-  DEMO.counts = {
-    ...DEMO.counts, ...counts,
-    market_metrics:counts.event_market_metrics ?? counts.market_metrics ?? "—"
-  };
-  DEMO.event_status = {verified:0,candidate:0,weak:0,rejected:0,...(data.event_status || {})};
-  DEMO.review_queue = Number(data.review_queue || 0);
-  const cycle = Number(data.timing?.worker_cycle_duration_seconds);
-  if (Number.isFinite(cycle)) DEMO.worker.cycle_seconds = cycle;
-  DEMO.worker.latest = data.latest_worker_cycle?.status || data.status?.toUpperCase() || "UNKNOWN";
-  if (data.latest_backup?.created_at) DEMO.backups.local_latest = compactTimestamp(data.latest_backup.created_at);
-  if (Array.isArray(data.source_health)) {
-    DEMO.sources = data.source_health.map(source => ({
-      id:source.source_id || source.name || "unknown",
-      tier:authorityTier(source), state:liveSourceState(source),
-      age:ageLabel(source.last_success_at), cursor:source.cursor_status || "UNOBSERVED"
-    }));
-  }
-}
-function applyLiveHealth(data) {
-  const ledger = data?.ledger || {}, operations = data?.operations || {};
-  const counts = operations.counts || {}, worker = operations.latest_worker_cycle || {};
-  const window24h = operations.worker_window_24h || {};
-  DEMO.ops.api_status = String(data?.status || "unknown").toUpperCase();
-  DEMO.ops.quick_check = ledger.quick_check || operations.quick_check || "UNKNOWN";
-  DEMO.counts.evidence_objects = counts.evidence_objects ?? DEMO.counts.evidence_objects;
-  DEMO.worker.cycles = Number(counts.worker_cycles ?? DEMO.worker.cycles);
-  DEMO.worker.observed_hours = Number(window24h.observed_hours || 0).toFixed(1);
-  DEMO.worker.latest = worker.status || DEMO.worker.latest;
-  const started = new Date(worker.started_at || 0), finished = new Date(worker.finished_at || 0);
-  if (!Number.isNaN(started.getTime()) && !Number.isNaN(finished.getTime())) {
-    DEMO.worker.cycle_seconds = Math.max(0, (finished - started) / 1000);
-  }
-  DEMO.ops.replay_runs = Number(counts.replay_runs ?? DEMO.ops.replay_runs);
-  DEMO.model.runs = Number(counts.model_runs ?? DEMO.model.runs);
-  const backupSummary = operations.backup_summary || {};
-  DEMO.backups.history_runs = Number(backupSummary.historical_runs ?? counts.backup_runs ?? 0);
-  DEMO.backups.verified_runs = Number(backupSummary.verified_runs ?? DEMO.backups.history_runs);
-  DEMO.backups.failed_runs = Number(backupSummary.failed_runs ?? 0);
-  DEMO.backups.running_runs = Number(backupSummary.running_runs ?? 0);
-  DEMO.backups.retained_daily_files = Number(
-    backupSummary.retained_daily_files ?? DEMO.backups.retained_daily_files
-  );
-  DEMO.backups.retained_weekly_files = Number(
-    backupSummary.retained_weekly_files ?? DEMO.backups.retained_weekly_files
-  );
-  const backup = operations.latest_backup || {};
-  if (backup.created_at) DEMO.backups.local_latest = compactTimestamp(backup.created_at);
-}
-function applyLiveAdjudication(data) {
-  DEMO.adjudication = {
-    ...DEMO.adjudication,
-    status:data?.status || "UNKNOWN",
-    samples:Number(data?.samples || 0),
-    valid_annotations:Number(data?.valid_annotations || 0),
-    blind_v2_frozen:Boolean(data?.blind_v2_frozen),
-    live:true
-  };
-}
-function applyOffhostStatus(data) {
-  if (!data?.full_restore_verified || data?.status !== "VERIFIED") return;
-  DEMO.backups.offhost_latest = compactTimestamp(data.verified_at || data.created_at);
-  DEMO.backups.offhost_state = "VERIFIED";
-  DEMO.backups.restore_drill = "PASS";
-}
-function applyLiveModel(data) {
-  const metrics = data?.model_card?.metrics || {};
-  const external = data?.external_blind || {};
-  const blind = external.semantic_substantive_metrics || external.metrics || {};
-  DEMO.model.mode = data?.shadow ? "SHADOW" : "UNKNOWN";
-  DEMO.model.model_version = data?.model_version || external.model_version || "UNKNOWN";
-  DEMO.model.promotion_decision = external.promotion_decision || (external.gate_pass ? "QUALIFIED_SHADOW" : "HOLD_SHADOW");
-  DEMO.model.evaluation_name = String(external.evaluation_type || "EXTERNAL BLIND").replace(/_/g, " ").toUpperCase();
-  if (Number.isFinite(metrics.coverage)) DEMO.model.coverage = metrics.coverage;
-  if (Number.isFinite(metrics.covered_accuracy)) DEMO.model.covered_accuracy = metrics.covered_accuracy;
-  if (Number.isFinite(metrics.abstain_rate)) DEMO.model.abstain_rate = metrics.abstain_rate;
-  if (Number.isFinite(blind.risk_recall)) DEMO.model.blind_recall = blind.risk_recall;
-  if (Number.isFinite(blind.non_target_false_risk_rate)) DEMO.model.blind_false_risk = blind.non_target_false_risk_rate;
-  if (Number.isFinite(blind.covered_accuracy ?? blind.accuracy)) {
-    DEMO.model.blind_accuracy = blind.covered_accuracy ?? blind.accuracy;
-  }
-  DEMO.model.gate_pass = Boolean(external.gate_pass);
-  if (Array.isArray(data?.recent_runs)) DEMO.model.runs = data.recent_runs.length;
-}
-function timelineFromLive(items, fallback) {
-  if (!Array.isArray(items) || !items.length) return fallback;
-  const kindMap = {observation:"observe",event_version:"revise",evidence:"evidence",gate:"gate",withdraw:"withdraw"};
-  return items.map(item => {
-    const payload = item.payload || {};
-    const kind = kindMap[item.kind] || "observe";
-    return {
-      t:shortTime(item.at), kind,
-      title:payload.title || (item.kind === "event_version" ? `事件版本 v${payload.version || "?"}` : humanize(item.kind)),
-      desc:payload.change_reason || payload.source_id || payload.status || payload.relation_type || "实时账本时间线记录"
-    };
-  });
-}
-function marketFromLive(detail, fallback) {
-  const snapshots = Array.isArray(detail?.market_snapshots) ? detail.market_snapshots : [];
-  const jobs = Array.isArray(detail?.market_jobs) ? detail.market_jobs : [];
-  const assets = Array.isArray(detail?.assets) ? detail.assets : [];
-  if (!snapshots.length) {
-    const mapped = assets.find(item => item.market_observation_allowed) || assets[0];
-    if (!mapped) return fallback;
-    return {
-      symbol:mapped.provider_symbol || mapped.symbol || fallback.symbol,
-      provider:"READ-ONLY OBSERVER",
-      price:"NOT CAPTURED",
-      fresh:"NO SNAPSHOT",
-      freshState:"watch",
-      available:false,
-      note:"标的关系已入账，但尚无可展示的真实行情快照；不使用合成价格或事后补值。",
-      horizons:[]
-    };
-  }
-  const latest = [...snapshots].sort((a,b) => String(b.captured_at).localeCompare(String(a.captured_at)))[0];
-  const matchingJobs = jobs.filter(job => job.asset_id === latest.asset_id && job.provider === latest.provider);
-  const horizonLabels = {t_plus_5m:"T+5M",t_plus_30m:"T+30M",t_plus_1d:"T+1D"};
-  const horizons = matchingJobs.filter(job => horizonLabels[job.observation_window]).map(job => {
-    const captured = snapshots.find(item => item.market_job_id === job.market_job_id);
-    if (captured) return {label:horizonLabels[job.observation_window],value:captured.price,state:"evidence"};
-    if (job.status === "MISSED_WINDOW") return {label:horizonLabels[job.observation_window],value:"MISSED",state:"watch"};
-    return {label:horizonLabels[job.observation_window],value:job.status || "PENDING",state:"watch"};
-  });
-  return {
-    symbol:latest.provider_symbol || fallback.symbol,
-    provider:String(latest.provider || "READ ONLY").toUpperCase(),
-    price:`${latest.price} ${latest.currency || ""}`.trim(),
-    fresh:`${ageLabel(latest.captured_at)} AGO`,
-    freshState:"ok",
-    available:true,
-    note:`真实只读快照 · ${latest.data_scope || "post_event_audit"} · ${latest.freshness_status || "freshness unknown"}；不用于模型特征或交易。`,
-    horizons
-  };
-}
-async function loadLiveEventDetail(eventId) {
-  if (!S.live) return;
-  const event = DEMO.events.find(item => item.id === eventId);
-  if (!event || event.liveDetailLoaded) return;
-  if (S.liveDetailLoading.has(eventId)) return S.liveDetailLoading.get(eventId);
-  const encoded = encodeURIComponent(eventId);
-  const job = (async () => {
-    try {
-      // Sequential reads are intentional: the public demo endpoint is stable
-      // under bounded traffic but may reset concurrent TLS streams.
-      const detail = await apiFetch(`/api/v1/events/${encoded}`);
-      const evidenceData = await apiFetch(`/api/v1/events/${encoded}/evidence`);
-      const timelineData = await apiFetch(`/api/v1/events/${encoded}/timeline`);
-      const traceData = await apiFetch(`/api/v1/events/${encoded}/trace`);
-      const row = detail.event || {};
-      const facts = detail.current_version?.facts || {};
-      const evidence = Array.isArray(evidenceData.items) ? evidenceData.items : [];
-      const shadow = detail.model_shadow_output || {};
-      const modelRuns = Array.isArray(traceData.model_runs) ? traceData.model_runs : [];
-      const agentDecisions = Array.isArray(traceData.agent_decisions) ? traceData.agent_decisions : [];
-      const humanOverrides = Array.isArray(traceData.human_overrides) ? traceData.human_overrides : [];
-      const decisionReasons = shadow.evidence_gate?.reasons
-        || shadow.semantic_policy_gate?.reasons
-        || shadow.scope_gate?.reasons
-        || shadow.reasons
-        || [];
-      event.company = row.company_name || event.company;
-      event.ticker = row.ticker_at_event || event.ticker;
-      event.family = row.event_family || event.family;
-      event.type = row.event_type || event.type;
-      event.source = row.discovery_source || event.source;
-      event.tier = authorityTier(detail.assessment || row || event);
-      event.status = row.status || event.status;
-      event.version = Number(row.current_version || event.version);
-      event.route = shadow.label || "SHADOW_PENDING";
-      event.confidence = Number(shadow.confidence || 0);
-      event.modelRuntime = shadow.runtime || "unknown";
-      event.modelDecisionSource = shadow.decision_source
-        || (shadow.runtime === "structured_evidence_gate" ? "DETERMINISTIC_EVIDENCE_GATE"
-          : shadow.runtime === "semantic_policy_gate" ? "DETERMINISTIC_SEMANTIC_POLICY_GATE"
-          : shadow.runtime === "trained_semantic" ? "TRAINED_SEMANTIC_MODEL"
-          : "UNKNOWN");
-      event.semanticModelInvoked = shadow.semantic_model_invoked === true
-        || shadow.runtime === "trained_semantic";
-      event.confidenceApplicable = shadow.confidence_applicable === true
-        || event.semanticModelInvoked;
-      event.modelReason = Array.isArray(decisionReasons) && decisionReasons.length
-        ? decisionReasons.join(" · ")
-        : `runtime=${event.modelRuntime}`;
-      event.modelRunCount = modelRuns.length;
-      event.agentDecisionCount = agentDecisions.length;
-      event.agentLatestStatus = agentDecisions[0]?.status || "NOT RUN";
-      event.humanReviewCount = humanOverrides.length;
-      event.headline = facts.source_title || event.headline;
-      event.summary = facts.source_summary || evidence[0]?.observation_summary || event.summary;
-      event.evidenceCount = Number(detail.evidence_count ?? evidence.length);
-      event.evidence = evidence.map(item => ({
-        id:item.evidence_id, source:item.source_id || item.source_name || event.source,
-        tier:authorityTier(item), passage:item.evidence_passage || item.observation_summary || "未提供可展示段落",
-        status:String(item.evidence_status || "UNREVIEWED").toUpperCase(),
-        note:`${item.source_name || item.form || "实时证据"} · ${item.filing_date || "日期未知"}`
-      }));
-      event.conflict = event.evidence.some(item => /CONFLICT|CONTRADICT/.test(item.status));
-      event.timeline = timelineFromLive(timelineData.items, event.timeline);
-      if (modelRuns[0]) {
-        const output = modelRuns[0].output || {};
-        event.timeline.push({
-          t:shortTime(modelRuns[0].created_at), kind:"revise",
-          title:"影子分流已持久化",
-          desc:`${output.execution_status || "SHADOW_RECORDED"} · ${output.label || event.route} · ${output.decision_source || event.modelDecisionSource}`
-        });
-      }
-      if (agentDecisions[0]) {
-        event.timeline.push({
-          t:shortTime(agentDecisions[0].created_at), kind:"gate",
-          title:"Evidence Agent 已完成",
-          desc:`${agentDecisions[0].status || "RECORDED"} · 证据 IDs ${agentDecisions[0].evidence_ids?.length || 0}`
-        });
-      }
-      event.market = marketFromLive(detail, event.market);
-      event.liveDetailLoaded = true;
-    } catch (error) {
-      event.liveDetailLoaded = true;
-      event.summary += `（详情同步失败：${error.message}；保留实时列表摘要。）`;
-    } finally {
-      S.liveDetailLoading.delete(eventId);
-      if (S.route === "workbench" && S.selectedEvent === eventId) renderWorkbench();
-    }
-  })();
-  S.liveDetailLoading.set(eventId, job);
-  return job;
-}
-async function tryLive() {
-  if (S.live) return;
-  setModeBadge("loading");
-  try {
-    const [overview, candidatePage, verifiedPage, weakPage, rejectedPage, health] = await Promise.all([
-      apiFetch("/api/v1/overview"),
-      apiFetch("/api/v1/events?status=candidate&limit=100"),
-      apiFetch("/api/v1/events?status=verified&limit=50"),
-      apiFetch("/api/v1/events?status=weak&limit=25"),
-      apiFetch("/api/v1/events?status=rejected&limit=25"),
-      apiFetch("/api/v1/health")
-    ]);
-    const liveRows = [candidatePage, verifiedPage, weakPage, rejectedPage]
-      .flatMap(page => Array.isArray(page.items) ? page.items : []);
-    if (!liveRows.length) throw new Error("实时事件列表为空");
-    applyLiveOverview(overview);
-    applyLiveHealth(health);
-    DEMO.events = liveRows.map(liveEventFromRow)
-      .sort((a,b) => String(b.sortAt).localeCompare(String(a.sortAt)));
-    S.liveBaseEvents = [...DEMO.events];
-    DEMO.families = [...new Set(DEMO.events.map(event => event.family))]
-      .sort().map(value => [value, humanize(value)]);
-    DEMO.families.forEach(([value,label]) => { FAMILY_LABEL[value] = label; });
-    resetWorkbenchOptions();
-    S.selectedEvent = DEMO.events[0].id;
-    S.live = true; S.liveScope = "core";
-    setModeBadge("live");
-    $("#footer-snapshot").textContent = "LIVE CORE API · " + new Date().toISOString().slice(0,16) + "Z";
-    renderSituation();
-    if (S.route === "workbench") renderWorkbench();
-    const auxiliary = await Promise.allSettled([
-      apiFetch("/api/v1/model/status"), apiFetch("/api/v1/adjudication/status"),
-      fetch("/radar/offhost-status.json", {cache:"no-store"}).then(response => {
-        if (!response.ok) throw new Error(`HTTP ${response.status} offhost status`);
-        return response.json();
-      })
-    ]);
-    if (auxiliary[0].status === "fulfilled") applyLiveModel(auxiliary[0].value);
-    if (auxiliary[1].status === "fulfilled") applyLiveAdjudication(auxiliary[1].value);
-    if (auxiliary[2].status === "fulfilled") applyOffhostStatus(auxiliary[2].value);
-    renderSituation(); renderOps(); renderAdjudication();
-    await loadLiveEventDetail(S.selectedEvent);
-  } catch (error) {
-    S.live = false; S.liveScope = "demo";
-    setModeBadge("error", `API 连接失败：${error.message}。当前为合成演示快照；同源部署或本地 dev_server.py 可启用实时核心数据。`);
-    $("#footer-snapshot").textContent = "合成演示快照 · API OFFLINE";
-  } finally {
-    $("#boot-overlay").classList.add("hidden");
-  }
-}
-$("#mode-badge").addEventListener("click", tryLive);
-
 function syncFooterReserve() {
   const footer = document.querySelector(".boundary-footer");
   if (footer) document.documentElement.style.setProperty("--fr-footer-reserve", `${Math.ceil(footer.getBoundingClientRect().height)}px`);
@@ -2213,8 +1830,8 @@ $("#footer-snapshot").textContent = "合成演示快照 " + DEMO.snapshot.replac
 renderSituation(); renderOps(); renderAdjudication(); resetReplay();
 const initial = (location.hash.match(/^#\/(\w+)/) || [])[1];
 navigate(["situation","workbench","replay","ops","adjudication"].includes(initial) ? initial : "situation");
-if (location.protocol !== "file:") tryLive();
-else { setModeBadge("demo"); $("#boot-overlay").classList.add("hidden"); }
+setModeBadge();
+$("#boot-overlay").classList.add("hidden");
 </script>
 </body>
 </html>

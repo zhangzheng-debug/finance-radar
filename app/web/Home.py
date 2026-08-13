@@ -162,6 +162,21 @@ def public_time_value(value: object, *, date_only: bool = False) -> str:
     return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def has_recorded_public_verification(verification: dict[str, object] | None) -> bool:
+    """Return true only for a public verification receipt with a timestamp.
+
+    A canonical event may be marked ``verified`` by an older historical import
+    without carrying a current verification receipt.  The public UI must not
+    turn that status alone into a claim that a formal verification record is
+    available.
+    """
+
+    if not isinstance(verification, dict):
+        return False
+    reviewed_at = " ".join(str(verification.get("reviewed_at") or "").split())
+    return bool(reviewed_at)
+
+
 def public_time_markup(event: dict[str, object], detail: dict[str, object], verification: dict[str, object] | None) -> str:
     """Render the five reader-facing clocks for a selected event."""
     version = detail.get("current_version") or {}
@@ -177,12 +192,21 @@ def public_time_markup(event: dict[str, object], detail: dict[str, object], veri
         or facts.get("published_at")
     )
     verified_at = (verification or {}).get("reviewed_at") or event.get("reviewed_at")
+    historical_verified_without_receipt = (
+        public_event_state(event) == "verified"
+        and not has_recorded_public_verification(verification)
+    )
     values = (
         ("事件日", public_time_value(event.get("event_date"), date_only=True)),
         ("来源发布", public_time_value(published_at)),
         ("系统发现", public_time_value(event.get("first_seen_at"))),
         ("最后更新", public_time_value(event.get("last_updated_at"))),
-        ("核验记录", public_time_value(verified_at)),
+        (
+            "核验留痕" if historical_verified_without_receipt else "核验记录",
+            "历史记录未存档"
+            if historical_verified_without_receipt
+            else public_time_value(verified_at),
+        ),
     )
     cells = "".join(
         '<div class="event-time-cell"><span>{}</span><strong>{}</strong></div>'.format(
@@ -284,12 +308,34 @@ except Exception as exc:
     render_api_error(exc)
     st.stop()
 
+public_timing = overview.get("timing") or {}
+public_worker_age = public_timing.get("latest_worker_success_age_seconds")
+try:
+    public_worker_age_seconds = float(public_worker_age)
+except (TypeError, ValueError):
+    public_worker_age_seconds = None
+public_worker_fresh = (
+    public_worker_age_seconds is not None and public_worker_age_seconds <= 30 * 60
+)
+public_worker_stale = UI_ROLE != "admin" and public_worker_age_seconds is not None and not public_worker_fresh
+public_worker_unknown = UI_ROLE != "admin" and public_worker_age_seconds is None
+
 header(
     "态势总览",
-    "实时事件、原始证据与核验进度" if UI_ROLE != "admin" else "事件流、复核队列与运行态总览",
+    "事件记录、原始证据与核验进度" if UI_ROLE != "admin" else "事件流、复核队列与运行态总览",
     overview["demo_mode"] if UI_ROLE == "admin" else None,
 )
 no_trading_banner()
+if public_worker_stale:
+    st.error(
+        "数据更新已中断：最近一次成功采集为 "
+        f"{format_elapsed(public_worker_age)} 前。以下内容是历史事件记录，不是实时信息。"
+    )
+elif public_worker_unknown:
+    st.warning(
+        "数据更新状态无法确认：没有获得最近一次成功采集时间。"
+        "以下内容是事件记录，不能视为实时信息。"
+    )
 
 active_flow = str(st.query_params.get("preview_flow") or "全部事件")
 if active_flow not in FLOW_PRESETS:
@@ -412,15 +458,18 @@ if UI_ROLE == "admin":
 else:
     latest_worker = overview.get("latest_worker_cycle") or {}
     worker_status = str(latest_worker.get("status") or "").upper()
-    worker_has_finished_time = worker_age is not None
-    worker_fresh = worker_has_finished_time and float(worker_age) <= 1800
-    collector_ok = worker_status in {"SUCCESS", "COMPLETED", "OK"} and worker_fresh
+    worker_has_finished_time = public_worker_age_seconds is not None
+    collector_ok = worker_status in {"SUCCESS", "COMPLETED", "OK"} and public_worker_fresh
     collector_label = (
         "正常"
         if collector_ok
-        else ("状态未知" if not worker_status or not worker_has_finished_time else "需关注")
+        else (
+            "更新状态未知"
+            if not worker_has_finished_time
+            else ("更新已中断" if not public_worker_fresh else "最近采集异常")
+        )
     )
-    collector_state = "ok" if collector_ok else "watch"
+    collector_state = "ok" if collector_ok else ("risk" if public_worker_stale or public_worker_unknown else "watch")
     formally_verified = max(0, int(public_funnel.get("verified") or 0))
     formally_excluded = max(0, int(public_funnel.get("excluded") or 0))
     review_needed = sum(
@@ -666,7 +715,11 @@ if preview_event_id:
                     or ""
                 )
                 review_copy = {
-                    "verified": "正式核验已完成",
+                    "verified": (
+                        "正式核验已完成"
+                        if has_recorded_public_verification(public_verification)
+                        else "历史已核验记录 · 核验时间与核验留痕未存档"
+                    ),
                     "excluded": "线索已排除",
                     "insufficient": "证据不足，不形成结论",
                     "rough_reviewed": "粗审已完成，尚未正式核验",
@@ -871,12 +924,12 @@ elif UI_ROLE != "admin":
         else '<span aria-disabled="true">下一页 →</span>'
     )
     st.markdown(
-        '<nav class="fr-pagination" aria-label="事件分页">'
+        '<div class="fr-pagination" role="group" aria-label="事件分页">'
         f'{previous_link}'
         f'<span class="fr-pagination-status">第 {public_page} / {total_pages} 页</span>'
         f'{next_link}'
         '<a href="./#live-events" target="_self">清除全部筛选</a>'
-        '</nav>',
+        '</div>',
         unsafe_allow_html=True,
     )
 else:

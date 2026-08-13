@@ -28,6 +28,7 @@ def test_next_action_keeps_missing_evidence_in_abstention_path() -> None:
     assert guidance["code"] == "MISSING_EVIDENCE"
     assert guidance["priority"] == "先补证据"
     assert any("P0/P1" in step for step in guidance["steps"])
+    assert any("会写入审计和关联证据记录" in step for step in guidance["steps"])
 
 
 def test_next_action_explains_shadow_risk_is_only_review_routing() -> None:

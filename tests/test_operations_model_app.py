@@ -149,3 +149,53 @@ def test_operations_page_degrades_when_model_card_metrics_are_missing(monkeypatc
 
     assert not page.exception
     assert "评估指标尚未生成" in rendered
+
+
+def test_operations_mode_change_requires_explicit_confirmation(monkeypatch) -> None:
+    writes: list[str] = []
+
+    def tracked_api(
+        path: str, *, method: str = "GET", json_body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if method == "POST":
+            writes.append(path)
+            return {"mode": path.rsplit("/", 1)[-1]}
+        return _fake_api(path, method=method, json_body=json_body)
+
+    monkeypatch.setattr(web_common, "api_request", tracked_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10).run()
+    assert not page.exception
+    assert any(
+        checkbox.label == "我确认要切换运行模式（会写入系统状态）"
+        for checkbox in page.checkbox
+    )
+
+    page.radio[0].set_value("LIVE")
+    page.run()
+    submit = next(
+        button
+        for button in page.button
+        if button.label == "确认切换运行模式（受控写入）"
+    )
+    submit.click()
+    page.run()
+
+    assert writes == []
+    assert any("请先确认本次运行模式切换会写入系统状态" in str(item.value) for item in page.warning)
+
+    confirmation = next(
+        checkbox
+        for checkbox in page.checkbox
+        if checkbox.label == "我确认要切换运行模式（会写入系统状态）"
+    )
+    confirmation.set_value(True)
+    page.run()
+    submit = next(
+        button
+        for button in page.button
+        if button.label == "确认切换运行模式（受控写入）"
+    )
+    submit.click()
+    page.run()
+
+    assert writes == ["/api/v1/demo/mode/LIVE"]

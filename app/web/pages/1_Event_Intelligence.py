@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from app.web.common import (
+    SHOW_DEBUG,
     api_request,
     header,
     install_style,
@@ -19,8 +20,10 @@ from app.web.common import (
     section_header,
 )
 from app.web.components import (
+    EVENT_FAMILY_LABELS,
     FLOW_PRESETS,
     adjacent_event_id,
+    evidence_summary,
     event_button_label,
     facet_counts,
     facet_values,
@@ -255,17 +258,28 @@ with list_col:
 try:
     detail = api_request(f"/api/v1/events/{selected_id}")
     evidence = api_request(f"/api/v1/events/{selected_id}/evidence")["items"]
-    timeline = api_request(f"/api/v1/events/{selected_id}/timeline")["items"]
-    trace = api_request(f"/api/v1/events/{selected_id}/trace")
 except Exception as exc:
     with evidence_col:
         render_api_error(exc)
     st.stop()
 
+timeline: list[dict[str, object]] = []
+trace: dict[str, object] = {}
+timeline_error: Exception | None = None
+trace_error: Exception | None = None
+try:
+    timeline = api_request(f"/api/v1/events/{selected_id}/timeline")["items"]
+except Exception as exc:
+    timeline_error = exc
+try:
+    trace = api_request(f"/api/v1/events/{selected_id}/trace")
+except Exception as exc:
+    trace_error = exc
+
 event = detail["event"]
 version = detail.get("current_version") or {}
 facts = version.get("facts") or {}
-model = detail["model_shadow_output"]
+model = detail.get("model_shadow_output") or {}
 company = event.get("company_name") or event.get("event_id")
 event_type = str(event.get("event_type") or "event").replace("_", " ")
 summary = facts.get("evidence_summary") or event.get("evidence_excerpt") or "尚无结构化事件摘要。"
@@ -309,110 +323,206 @@ with evidence_col:
     else:
         st.warning("没有证据边：系统必须保持待复核或弃权，不能自动升级。")
 
+    if timeline_error or trace_error:
+        st.info("附加审计追踪暂不可用；当前事件摘要、原始证据和复核提示仍来自核心账本记录。")
+
     decisions = trace.get("agent_decisions") or []
-    if decisions:
-        latest = decisions[0]
-        output = latest.get("output") or {}
-        with st.container(border=True):
-            st.caption(
-                f"EVIDENCE AGENT · {latest.get('status')} · provider={latest.get('model_provider')} · "
-                f"llm_used={output.get('llm_used')}"
-            )
-            st.write(output.get("cited_summary") or "暂无带引文摘要")
-            claims = output.get("claims") or []
-            edges = output.get("evidence_edges") or []
-            if claims:
-                st.dataframe(pd.DataFrame(claims), width="stretch", hide_index=True)
-            if edges:
-                edge_rows = [
-                    {
-                        "claim": edge.get("claim_id"),
-                        "relation": edge.get("relation"),
-                        "tier": edge.get("authority_tier"),
-                        "exact_excerpt": edge.get("exact_excerpt"),
-                        "sha256": edge.get("object_sha256"),
-                        "source": edge.get("source_url"),
-                    }
-                    for edge in edges
-                ]
-                st.dataframe(
-                    pd.DataFrame(edge_rows),
-                    width="stretch",
-                    hide_index=True,
-                    column_config={"source": st.column_config.LinkColumn()},
-                )
 
-    with st.expander(f"版本时间线 · {len(timeline)} 条"):
-        for item in timeline:
-            st.caption(f"{item.get('at')} · {item.get('kind')}")
-            st.json(item.get("payload") or {}, expanded=False)
+    # 日常审核者先看事件、证据和行动建议；运行时、原始对象和流程记录仅在
+    # 需要复现或取证时展开，避免把开发状态误读为正式结论。
+    if SHOW_DEBUG:
+        with st.expander("审计追踪（开发/取证）", expanded=False):
+            st.caption("仅供开发排障、证据取证和审计复盘；不构成日常审核结论。")
+            if decisions:
+                latest = decisions[0]
+                output = latest.get("output") or {}
+                with st.container(border=True):
+                    st.caption(
+                        f"EVIDENCE AGENT · {latest.get('status')} · provider={latest.get('model_provider')} · "
+                        f"llm_used={output.get('llm_used')}"
+                    )
+                    st.write(output.get("cited_summary") or "暂无带引文摘要")
+                    claims = output.get("claims") or []
+                    edges = output.get("evidence_edges") or []
+                    if claims:
+                        st.dataframe(pd.DataFrame(claims), width="stretch", hide_index=True)
+                    if edges:
+                        edge_rows = [
+                            {
+                                "claim": edge.get("claim_id"),
+                                "relation": edge.get("relation"),
+                                "tier": edge.get("authority_tier"),
+                                "exact_excerpt": edge.get("exact_excerpt"),
+                                "sha256": edge.get("object_sha256"),
+                                "source": edge.get("source_url"),
+                            }
+                            for edge in edges
+                        ]
+                        st.dataframe(
+                            pd.DataFrame(edge_rows),
+                            width="stretch",
+                            hide_index=True,
+                            column_config={"source": st.column_config.LinkColumn()},
+                        )
 
-    with st.expander("流水线追踪与原始事件"):
-        trace_tabs = st.tabs(["流水线", "告警", "证据对象", "原始数据"])
-        with trace_tabs[0]:
-            st.dataframe(pd.DataFrame(trace.get("pipeline_jobs") or []), width="stretch", hide_index=True)
-        with trace_tabs[1]:
-            st.dataframe(pd.DataFrame(trace.get("alerts") or []), width="stretch", hide_index=True)
-        with trace_tabs[2]:
-            st.dataframe(pd.DataFrame(trace.get("evidence_objects") or []), width="stretch", hide_index=True)
-        with trace_tabs[3]:
-            st.json(detail, expanded=False)
+            if timeline_error:
+                st.info("版本时间线暂不可用；不会影响当前事件与证据的阅读。")
+            else:
+                with st.expander(f"版本时间线 · {len(timeline)} 条"):
+                    for item in timeline:
+                        st.caption(f"{item.get('at')} · {item.get('kind')}")
+                        st.json(item.get("payload") or {}, expanded=False)
+
+            if trace_error:
+                st.info("流水线追踪暂不可用；不会把它当作事件或证据缺失。")
+            else:
+                with st.expander("流水线追踪与原始事件"):
+                    trace_tabs = st.tabs(["流水线", "告警", "证据对象", "原始数据"])
+                    with trace_tabs[0]:
+                        st.dataframe(pd.DataFrame(trace.get("pipeline_jobs") or []), width="stretch", hide_index=True)
+                    with trace_tabs[1]:
+                        st.dataframe(pd.DataFrame(trace.get("alerts") or []), width="stretch", hide_index=True)
+                    with trace_tabs[2]:
+                        st.dataframe(pd.DataFrame(trace.get("evidence_objects") or []), width="stretch", hide_index=True)
+                    with trace_tabs[3]:
+                        st.json(detail, expanded=False)
+
+            with st.expander("内部标识、模型与运行时"):
+                st.caption("以下标识与运行数据仅用于复现、排障和审计，不是日常复核结论。")
+                st.code(event["event_id"], language=None)
+                family_key = str(event.get("event_family") or "")
+                st.write(f"事件族：{EVENT_FAMILY_LABELS.get(family_key, family_key or '—')}")
+                st.write(f"版本 {event.get('current_version')} · 人工等级 {event.get('manual_grade') or '—'}")
+                st.write(f"模型 `{model.get('model_version')}`")
+                st.caption(f"运行时={model.get('runtime')} · 延迟={float(model.get('latency_ms') or 0):.2f}ms")
+                st.caption("判断维度（内部复盘）· 各维度相互独立")
+                render_score_rail(score_dimensions(event, evidence, model, current_version=version))
+
+            if detail.get("market_snapshots") or detail.get("market_metrics"):
+                with st.expander("行情审计原始记录"):
+                    st.caption("原始快照和事件后指标仅用于审计，不用于训练特征或交易触发。")
+                    if detail.get("market_snapshots"):
+                        st.dataframe(pd.DataFrame(detail["market_snapshots"]), width="stretch", hide_index=True)
+                    if detail.get("market_metrics"):
+                        st.dataframe(pd.DataFrame(detail["market_metrics"]), width="stretch", hide_index=True)
 
 with context_col:
+    workflow_status = str(event.get("status") or "candidate").lower()
+    review_state_label = {
+        "candidate": "待复核",
+        "weak": "证据不足",
+        "verified": "已核验",
+        "rejected": "已排除",
+    }.get(workflow_status, "待复核")
+    review_state_copy = {
+        "candidate": "尚未形成正式结论；请先核对原始证据与事件事实。",
+        "weak": "现有材料不足以闭合事实，需要补充或缩小事件陈述。",
+        "verified": "正式核验已完成；仅在来源修订或出现新增事实时重新打开。",
+        "rejected": "当前已排除；仅在出现新增高权威证据时重新打开。",
+    }.get(workflow_status, "请依据原始证据进行人工复核。")
+    review_evidence = evidence_summary(evidence)
+    with st.container(border=True):
+        st.caption("当前复核状态")
+        st.write(f"**{review_state_label}** · {review_state_copy}")
+        state_cols = st.columns(2, gap="small")
+        state_cols[0].caption(
+            f"关联证据：{review_evidence['count']} 条 · 最高权威 {review_evidence['highest_authority']}"
+        )
+        state_cols[1].caption(
+            "证据冲突：发现冲突，优先人工核对"
+            if review_evidence["conflict"]
+            else "证据冲突：当前未发现"
+        )
+
     render_next_action_prompt(next_action_guidance(event, evidence, model, trace=trace))
-    st.caption("判断维度 · 各维度相互独立")
-    render_score_rail(score_dimensions(event, evidence, model, current_version=version))
-    st.caption("风险路由仅用于不利事件分流，不代表交易方向或收益预测。")
 
     section_header("只读行情上下文", "POST-EVENT · NO TRADING")
     render_market_context(detail)
     st.caption("T+窗口从首个真实观察快照起算；错过采集即显示 MISSED，不用最新报价回填，也不证明因果或交易方向。")
 
-    with st.container(border=True):
-        st.caption("事件身份")
-        st.code(event["event_id"], language=None)
-        st.write(f"版本 **{event.get('current_version')}** · 人工等级 **{event.get('manual_grade') or '—'}**")
-        st.write(f"事件族 `{event.get('event_family') or '—'}`")
-        st.write(f"模型 `{model.get('model_version')}`")
-        st.caption(f"运行时={model.get('runtime')} · 延迟={float(model.get('latency_ms') or 0):.2f}ms")
-
-    if detail.get("market_snapshots") or detail.get("market_metrics"):
-        with st.expander("行情审计原始记录"):
-            st.caption("原始快照和事件后指标仅用于审计，不用于训练特征或交易触发。")
-            if detail.get("market_snapshots"):
-                st.dataframe(pd.DataFrame(detail["market_snapshots"]), width="stretch", hide_index=True)
-            if detail.get("market_metrics"):
-                st.dataframe(pd.DataFrame(detail["market_metrics"]), width="stretch", hide_index=True)
-
-    st.caption("运行会写入可追溯的代理审计和关联证据记录，不会改写事件结论，也不触发交易。")
-    if st.button("运行证据代理（写入审计与证据记录）", type="primary", width="stretch"):
+    def run_evidence_agent(*, evidence_change_confirmed: bool) -> None:
         try:
-            result = api_request(f"/api/v1/events/{selected_id}/agent/run", method="POST")
+            result = api_request(
+                f"/api/v1/events/{selected_id}/agent/run",
+                method="POST",
+                json_body={
+                    "audit_write_confirmed": True,
+                    "evidence_change_confirmed": evidence_change_confirmed,
+                },
+            )
             st.success(f"{result['status']} · {result['trace_id']}")
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
 
+    if workflow_status in {"verified", "rejected"}:
+        with st.expander("有新增或修订证据时重新取证（受控写入）", expanded=False):
+            st.caption(
+                "当前已有正式结论。重新运行会写入新的代理审计与关联证据记录，"
+                "但不会自动改写正式结论或触发交易。"
+            )
+            with st.form(f"rerun-evidence-agent-{selected_id}"):
+                evidence_change_confirmed = st.checkbox(
+                    "我确认已有新增或修订证据，需要创建新的审计记录",
+                    key=f"rerun-evidence-confirmed-{selected_id}",
+                )
+                if st.form_submit_button("确认重新运行证据代理（受控写入）", width="stretch"):
+                    if not evidence_change_confirmed:
+                        st.warning("请先确认确有新增或修订证据，避免对已完成结论重复写入。")
+                    else:
+                        run_evidence_agent(evidence_change_confirmed=True)
+    else:
+        with st.form(f"run-evidence-agent-{selected_id}"):
+            st.caption("运行会写入可追溯的代理审计和关联证据记录，不会改写事件结论，也不触发交易。")
+            audit_write_confirmed = st.checkbox(
+                "我确认本次运行会新增审计与证据记录，且仅用于当前事件的证据判断。",
+                key=f"run-evidence-confirmed-{selected_id}",
+            )
+            if st.form_submit_button("确认运行证据代理（受控写入）", type="primary", width="stretch"):
+                if not audit_write_confirmed:
+                    st.warning("请先确认本次受控写入的用途。")
+                else:
+                    run_evidence_agent(evidence_change_confirmed=False)
+
     if decisions:
         latest = decisions[0]
         with st.expander("人工复核记录"):
-            st.caption("会写入人工复核记录；不触发交易，也不会自动改写事件的正式结论。")
+            st.caption("会写入不可变的人工复核记录；不触发交易，也不会自动改写事件的正式结论。")
             with st.form(f"human-override-{selected_id}"):
-                actor = st.text_input("审核者", value="defense-reviewer")
+                actor = st.text_input(
+                    "审核者标识（姓名、工号或组织 ID）",
+                    placeholder="例如：li.ming / R-042",
+                )
                 review_status = st.selectbox(
                     "复核结果", ["REVIEWED_NO_CHANGE", "HUMAN_REVIEW", "INSUFFICIENT"]
                 )
-                reason = st.text_input("复核理由", value="已逐条核对精确引文")
-                if st.form_submit_button("记录人工复核", width="stretch"):
-                    try:
-                        saved = api_request(
-                            f"/api/v1/events/{selected_id}/human-override",
-                            method="POST",
-                            json_body={"actor": actor, "reason": reason, "review_status": review_status},
-                        )
-                        st.success(f"已记录 {saved['override_id']}")
-                    except Exception as exc:
-                        st.error(str(exc))
+                reason = st.text_area(
+                    "复核理由（请说明核对了哪条证据，以及为何得出本次结论）",
+                    placeholder="例如：核对 SEC 8-K 第 1.01 项原文与事件摘要；未发现与当前结论相冲突的主证据。",
+                    max_chars=1000,
+                )
+                reviewer_attestation = st.checkbox(
+                    "我确认以上身份和理由由本人填写，将作为不可变审计记录保存。",
+                    key=f"reviewer-attestation-{selected_id}",
+                )
+                if st.form_submit_button("记录人工复核（会写入）", width="stretch"):
+                    if not reviewer_attestation:
+                        st.warning("请先确认身份和事件特定理由，再写入人工复核记录。")
+                    else:
+                        try:
+                            saved = api_request(
+                                f"/api/v1/events/{selected_id}/human-override",
+                                method="POST",
+                                json_body={
+                                    "actor": actor,
+                                    "reason": reason,
+                                    "review_status": review_status,
+                                    "reviewer_attestation": True,
+                                },
+                            )
+                            st.success(f"已记录 {saved['override_id']}")
+                        except Exception as exc:
+                            st.error(str(exc))
 
     overrides = trace.get("human_overrides") or []
     if overrides:

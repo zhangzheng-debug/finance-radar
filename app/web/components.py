@@ -1003,7 +1003,7 @@ def command_palette_markup(facets: dict[str, Any]) -> str:
         for name, meta, url in commands
     )
     return (
-        '<div class="command-palette" role="navigation" aria-label="终端快捷命令">'
+        '<div class="command-palette" role="group" aria-label="终端快捷命令">'
         '<span class="command-palette-label">快捷命令</span>'
         f"{links}</div>"
     )
@@ -1241,7 +1241,7 @@ def next_action_guidance(
             "steps": (
                 "优先找到 P0/P1 原始来源并确认主体与日期",
                 "截取能够直接支持事件事实的精确段落",
-                "运行只读证据代理生成可追溯记录后再人工判断",
+                "运行证据代理（会写入审计和关联证据记录）后再人工判断",
             ),
         }
     elif workflow == "rejected":
@@ -1305,7 +1305,7 @@ def next_action_guidance(
         final_step = (
             "核对代理引用后，在人工复核记录中写明结论"
             if has_agent_trace
-            else "需要结构化比对时，先运行只读证据代理"
+            else "需要结构化比对时，先运行证据代理（会写入审计和关联证据记录）"
         )
         guidance = {
             "code": "EVIDENCE_REVIEW",

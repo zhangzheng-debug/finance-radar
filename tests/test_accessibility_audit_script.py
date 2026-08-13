@@ -6,16 +6,29 @@ from pathlib import Path
 SCRIPT = Path(__file__).parents[1] / "scripts" / "audit_public_accessibility.js"
 
 
-def test_public_accessibility_audit_covers_all_product_pages_and_core_gates() -> None:
+def test_accessibility_audit_separates_public_and_tunnel_scoped_admin_pages() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
     for route in (
         "Situation Room",
-        "Event Intelligence",
         "Replay Lab",
+        "Method and Boundaries",
+        "Admin Overview",
+        "Event Intelligence",
         "Operations and Model",
         "Adjudication Studio",
     ):
         assert route in source
+    assert 'argument("scope", "public")' in source
+    assert "targetsByScope" in source
+    assert "--scope must be public or admin" in source
+    assert "Nginx route" in source
+    assert "authenticated loopback tunnel" in source
+    assert "limitations: \"machine accessibility audit" in source
+    assert 'scope: "machine accessibility audit' not in source
+
+
+def test_accessibility_audit_keeps_core_gates_for_each_scoped_run() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
     for gate in (
         "main_landmark_count",
         "navigation_landmark_count",

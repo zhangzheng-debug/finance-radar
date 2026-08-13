@@ -29,7 +29,7 @@ PUBLIC_NAVIGATION: tuple[dict[str, str], ...] = (
         "path": "Home.py",
         "url": "./",
         "label": "态势总览",
-        "description": "浏览实时事件与原始证据摘要",
+        "description": "浏览事件、证据摘要与更新状态",
     },
     {
         "key": "replay",
@@ -162,10 +162,13 @@ export default function(component) {
       main.setAttribute("role", "main");
       main.setAttribute("aria-label", "Finance Radar 主工作区");
     }
-    const navigation = document.querySelector('[data-testid="stSidebarContent"]');
-    if (navigation) {
-      navigation.setAttribute("role", "navigation");
-      navigation.setAttribute("aria-label", "Finance Radar 页面导航");
+    const sidebar = document.querySelector('[data-testid="stSidebarContent"]');
+    if (sidebar) {
+      // The rendered primary <nav> owns the only navigation landmark.  Giving
+      // its generic Streamlit parent the same role creates duplicate landmarks
+      // for assistive technology.
+      sidebar.removeAttribute("role");
+      sidebar.removeAttribute("aria-label");
     }
   };
   applyContract();
@@ -676,7 +679,7 @@ def header(title: str, subtitle: str, mode: str | None = None) -> None:
         '<span class="radar-brand">FINANCE RADAR</span>'
         '</span>'
         '<span class="radar-divider">/</span>'
-        f'<span class="radar-page-context">{escape(title)}</span>'
+        f'<h1 class="radar-page-context">{escape(title)}</h1>'
         '<span class="radar-spacer"></span>'
         f'{mode_markup}'
         '</div>'
@@ -699,7 +702,7 @@ def situation_brief(
         '<section class="situation-brief" aria-labelledby="situation-brief-title">'
         '<div>'
         '<div class="situation-eyebrow">EVIDENCE DESK · 先证据，后判断</div>'
-        f'<h1 class="situation-title" id="situation-brief-title">{escape(title)}</h1>'
+        f'<h2 class="situation-title" id="situation-brief-title">{escape(title)}</h2>'
         f'<p class="situation-copy">{escape(copy)}</p>'
         '</div>'
         '<div class="situation-focus" role="status">'
