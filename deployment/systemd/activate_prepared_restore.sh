@@ -211,10 +211,12 @@ grant_public_web_runtime_access() {
     done
     [ -d "$RELEASE/app" ] && [ ! -L "$RELEASE/app" ] || return 1
     [ -d "$BASE/venv" ] && [ ! -L "$BASE/venv" ] || return 1
-    # Preserve read+search for the private runtime group so Python can discover
-    # the application package, while the public Web UID receives search only.
+    # Python's FileFinder must enumerate the candidate root to discover app.
+    # The root may expose names, but non-public files remain 0640 and unreadable
+    # to the isolated public UID.
     chmod 0711 "$BASE"
-    chmod 0751 "$BASE/releases" "$RELEASE"
+    chmod 0751 "$BASE/releases"
+    chmod 0755 "$RELEASE"
     find "$RELEASE/app" -type d -exec chmod 0755 {} +
     find "$RELEASE/app" -type f -exec chmod 0644 {} +
     chmod 0644 "$RELEASE/requirements.txt" "$RELEASE/requirements.lock"
@@ -246,6 +248,15 @@ grant_public_web_runtime_access() {
 
 assert_private_runtime_import_boundary() {
     runuser -u finance-radar -- bash -c '
+        set -euo pipefail
+        cd -- "$1"
+        unset PYTHONPATH
+        exec "$2" -B -c "import app; assert app.__file__"
+    ' _ "$RELEASE" "$BASE/venv/bin/python"
+}
+
+assert_public_runtime_import_boundary() {
+    runuser -u finance-radar-web -- bash -c '
         set -euo pipefail
         cd -- "$1"
         unset PYTHONPATH
@@ -331,6 +342,10 @@ grant_public_web_runtime_access || {
 }
 assert_private_runtime_import_boundary || {
     printf 'private runtime cannot import restored application from its service working directory\n' >&2
+    exit 6
+}
+assert_public_runtime_import_boundary || {
+    printf 'public Web runtime cannot import restored application from its service working directory\n' >&2
     exit 6
 }
 if [ -d "$BASE/evidence-llm" ]; then
@@ -429,7 +444,8 @@ assert_public_web_identity_and_boundary() {
     fi
     runuser -u finance-radar-web -- test -r "$RELEASE/app/web/Home.py" || return 1
     runuser -u finance-radar-web -- test -r "$RELEASE/.streamlit/config.toml" || return 1
-    runuser -u finance-radar-web -- test -x "$BASE/venv/bin/python"
+    runuser -u finance-radar-web -- test -x "$BASE/venv/bin/python" || return 1
+    assert_public_runtime_import_boundary
 }
 
 # A recovered host can retain its optional Telegram override.  Refresh that
