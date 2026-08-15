@@ -1,8 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { chromium } = require(
-  "C:/Users/MR/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules/playwright"
-);
+const { chromium } = require(process.env.FINANCE_RADAR_PLAYWRIGHT_MODULE || "playwright");
 
 function argument(name, fallback = "") {
   const prefix = `--${name}=`;
@@ -202,10 +200,11 @@ async function focusAudit(page) {
 }
 
 (async () => {
-  const baseUrl = argument(
-    "base-url",
-    "https://radar.18-208-34-152.sslip.io:8443/radar"
-  ).replace(/\/$/, "");
+  const configuredBaseUrl = argument("base-url", process.env.FINANCE_RADAR_PUBLIC_WEB_URL || "");
+  if (!configuredBaseUrl) {
+    throw new Error("--base-url or FINANCE_RADAR_PUBLIC_WEB_URL is required");
+  }
+  const baseUrl = configuredBaseUrl.replace(/\/$/, "");
   const output = path.resolve(
     argument("output", "reports/accessibility_public_latest.json")
   );

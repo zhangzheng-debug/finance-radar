@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import ipaddress
+import secrets
 import time
 import uuid
-from collections import defaultdict, deque
+from collections import OrderedDict, deque
 from datetime import date, datetime, timezone
+from itertools import islice
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable, Literal
@@ -41,6 +44,26 @@ GENERIC_REVIEW_REASONS = frozenset(
         "n/a",
     }
 )
+
+
+def _rate_limit_client_key(request: Request, trusted_proxy_hosts: tuple[str, ...]) -> str:
+    """Return a bounded-rate key without trusting caller-controlled proxy headers.
+
+    The production API listens on loopback.  Only a connection that actually
+    arrives from a configured proxy host may supply ``X-Real-IP``; direct
+    callers cannot manufacture new buckets with ``X-Forwarded-For``.
+    """
+
+    client_host = request.client.host if request.client else "unknown"
+    if client_host not in trusted_proxy_hosts:
+        return client_host
+    real_ip = request.headers.get("X-Real-IP", "").strip()
+    if not real_ip:
+        return client_host
+    try:
+        return str(ipaddress.ip_address(real_ip))
+    except ValueError:
+        return client_host
 
 
 def _backup_artifact_visibility(path: Path) -> tuple[bool | None, str]:
@@ -203,8 +226,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.evidence_agent = evidence_agent
     application.state.evidence_object_store = evidence_object_store
     application.state.adjudication = adjudication
-    rate_buckets: dict[str, deque[float]] = defaultdict(deque)
+    rate_buckets: OrderedDict[str, deque[float]] = OrderedDict()
     rate_lock = Lock()
+    application.state.rate_buckets = rate_buckets
+    application.state.rate_bucket_limit = settings.api_rate_limit_max_clients
 
     @application.middleware("http")
     async def trace_middleware(request: Request, call_next: Callable[..., Any]):
@@ -212,12 +237,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         limit = settings.api_rate_limit_per_minute
         rate_remaining: int | None = None
         if limit > 0 and request.url.path.startswith("/api/"):
-            forwarded = request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
-            client_host = request.client.host if request.client else "unknown"
-            key = forwarded or client_host
+            key = _rate_limit_client_key(request, settings.api_trusted_proxy_hosts)
             now = time.monotonic()
             with rate_lock:
-                bucket = rate_buckets[key]
+                # Opportunistically retire the oldest expired keys.  The hard
+                # cardinality cap below is the final memory-safety boundary.
+                for stale_key in tuple(islice(rate_buckets, 64)):
+                    stale_bucket = rate_buckets[stale_key]
+                    while stale_bucket and now - stale_bucket[0] >= 60:
+                        stale_bucket.popleft()
+                    if not stale_bucket:
+                        del rate_buckets[stale_key]
+                bucket = rate_buckets.get(key)
+                if bucket is None:
+                    while len(rate_buckets) >= settings.api_rate_limit_max_clients:
+                        rate_buckets.popitem(last=False)
+                    bucket = deque()
+                    rate_buckets[key] = bucket
+                else:
+                    rate_buckets.move_to_end(key)
                 while bucket and now - bucket[0] >= 60:
                     bucket.popleft()
                 if len(bucket) >= limit:
@@ -278,8 +316,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "message": "admin token is not configured; all mutation endpoints are disabled",
                 },
             )
-        if x_admin_token != settings.admin_token:
+        if not secrets.compare_digest(x_admin_token or "", settings.admin_token):
             raise HTTPException(403, {"code": "ADMIN_TOKEN_REQUIRED", "message": "valid X-Admin-Token required"})
+
+    def require_reviewer(
+        x_reviewer_token: str | None = Header(default=None),
+        x_admin_token: str | None = Header(default=None),
+    ) -> None:
+        if settings.admin_token and secrets.compare_digest(x_admin_token or "", settings.admin_token):
+            return
+        if not settings.reviewer_token:
+            if settings.admin_token:
+                raise HTTPException(
+                    403,
+                    {"code": "REVIEWER_TOKEN_REQUIRED", "message": "valid reviewer or admin token required"},
+                )
+            raise HTTPException(
+                503,
+                {
+                    "code": "REVIEWER_MUTATIONS_DISABLED",
+                    "message": "reviewer token is not configured; reviewer operations are disabled",
+                },
+            )
+        if not secrets.compare_digest(x_reviewer_token or "", settings.reviewer_token):
+            raise HTTPException(
+                403,
+                {"code": "REVIEWER_TOKEN_REQUIRED", "message": "valid X-Reviewer-Token required"},
+            )
+
+    def require_operator(
+        x_operator_token: str | None = Header(default=None),
+        x_admin_token: str | None = Header(default=None),
+    ) -> None:
+        if settings.admin_token and secrets.compare_digest(x_admin_token or "", settings.admin_token):
+            return
+        if not settings.operator_token:
+            if settings.admin_token:
+                raise HTTPException(
+                    403,
+                    {"code": "OPERATOR_TOKEN_REQUIRED", "message": "valid operator or admin token required"},
+                )
+            raise HTTPException(
+                503,
+                {
+                    "code": "OPERATOR_MUTATIONS_DISABLED",
+                    "message": "operator token is not configured; operator operations are disabled",
+                },
+            )
+        if not secrets.compare_digest(x_operator_token or "", settings.operator_token):
+            raise HTTPException(
+                403,
+                {"code": "OPERATOR_TOKEN_REQUIRED", "message": "valid X-Operator-Token required"},
+            )
 
     def public_backup_status(value: dict[str, Any] | None) -> dict[str, Any] | None:
         if value is None:
@@ -522,6 +610,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
         return envelope(request, data)
 
+    @application.get("/api/v1/product/metrics")
+    def product_metrics(request: Request, window_days: int = Query(30, ge=1, le=365)):
+        return envelope(request, ledger.product_metrics(window_days=window_days))
+
     @application.get("/api/v1/sources/health")
     def sources_health(request: Request):
         return envelope(request, {"items": ledger.list_source_health()})
@@ -530,7 +622,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def market_capabilities(request: Request):
         return envelope(request, ledger.market_capabilities())
 
-    @application.get("/api/v1/evidence/archive")
+    @application.get("/api/v1/evidence/archive", dependencies=[Depends(require_operator)])
     def evidence_archive(request: Request):
         data = operations.evidence_archive_summary()
         eligibility = ledger.evidence_snapshot_eligibility()
@@ -659,7 +751,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         event_or_404(event_id)
         return envelope(request, {"items": ledger.event_evidence(event_id)})
 
-    @application.get("/api/v1/events/{event_id}/trace")
+    @application.get("/api/v1/events/{event_id}/trace", dependencies=[Depends(require_reviewer)])
     def event_trace(request: Request, event_id: str):
         event_or_404(event_id)
         data = ledger.event_trace(event_id)
@@ -674,7 +766,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         return envelope(request, data)
 
-    @application.post("/api/v1/events/{event_id}/agent/run", dependencies=[Depends(require_admin)])
+    @application.post("/api/v1/events/{event_id}/agent/run", dependencies=[Depends(require_operator)])
     def run_evidence_agent(
         request: Request,
         event_id: str,
@@ -701,7 +793,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ),
         )
 
-    @application.post("/api/v1/events/{event_id}/human-override", dependencies=[Depends(require_admin)])
+    @application.post("/api/v1/events/{event_id}/human-override", dependencies=[Depends(require_reviewer)])
     def record_human_override(request: Request, event_id: str, payload: HumanOverrideRequest):
         event_or_404(event_id)
         actor, reason = validate_human_override_attribution(payload)
@@ -774,13 +866,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
-    @application.get("/api/v1/model/status")
+    @application.get("/api/v1/model/status", dependencies=[Depends(require_operator)])
     def model_status(request: Request):
         data = router.status()
         data["recent_runs"] = operations.model_runs(limit=20)
         return envelope(request, data)
 
-    @application.get("/api/v1/adjudication/status")
+    @application.get("/api/v1/adjudication/status", dependencies=[Depends(require_reviewer)])
     def adjudication_status(request: Request):
         report = adjudication.pre_freeze_report()
         report.pop("annotations", None)
@@ -802,7 +894,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get(
         "/api/v1/adjudication/queue",
-        dependencies=[Depends(require_admin)],
+        dependencies=[Depends(require_reviewer)],
     )
     def adjudication_queue(
         request: Request,
@@ -823,7 +915,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.post(
         "/api/v1/adjudication/samples/{sample_id}/reviews",
-        dependencies=[Depends(require_admin)],
+        dependencies=[Depends(require_reviewer)],
     )
     def submit_adjudication_review(
         request: Request,
@@ -856,7 +948,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def replay_cases(request: Request):
         return envelope(request, {"items": replay.cases(), "recent_runs": operations.replay_runs()})
 
-    @application.post("/api/v1/replays/{case_id}/run", dependencies=[Depends(require_admin)])
+    @application.post("/api/v1/replays/{case_id}/run", dependencies=[Depends(require_operator)])
     def replay_run(request: Request, case_id: str):
         try:
             operations.set_demo_mode("REPLAY")
@@ -864,7 +956,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ReplayCaseNotFound as exc:
             raise HTTPException(404, {"code": "REPLAY_CASE_NOT_FOUND", "message": f"replay case not found: {case_id}"}) from exc
 
-    @application.post("/api/v1/replays/{case_id}/reset", dependencies=[Depends(require_admin)])
+    @application.post("/api/v1/replays/{case_id}/reset", dependencies=[Depends(require_operator)])
     def replay_reset(request: Request, case_id: str):
         try:
             return envelope(request, {"case_id": case_id, "deleted_runs": replay.reset(case_id)})
@@ -875,7 +967,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def get_demo_mode(request: Request):
         return envelope(request, {"mode": operations.demo_mode(settings.demo_mode)})
 
-    @application.post("/api/v1/demo/mode/{mode}", dependencies=[Depends(require_admin)])
+    @application.post("/api/v1/demo/mode/{mode}", dependencies=[Depends(require_operator)])
     def set_demo_mode(request: Request, mode: str):
         try:
             return envelope(request, {"mode": operations.set_demo_mode(mode)})

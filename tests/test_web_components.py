@@ -27,6 +27,7 @@ from app.web.components import (
     source_health_state,
     terminal_search_state,
     saved_flow_payload,
+    saved_public_flow_payload,
     source_option_label,
 )
 
@@ -224,6 +225,7 @@ def test_saved_flow_payload_normalizes_and_bounds_browser_only_state() -> None:
         50,
         source="  sec_current_filings  ",
     ) == {
+        "scope": "reviewer",
         "flow": "已核验",
         "family": "enforcement action",
         "source": "sec_current_filings",
@@ -239,7 +241,7 @@ def test_saved_flow_payload_normalizes_and_bounds_browser_only_state() -> None:
 
 
 def test_saved_flow_component_is_device_local_bounded_and_safe() -> None:
-    assert 'storageKey = "finance-radar.saved-flows.v1"' in SAVED_FLOW_JS
+    assert 'finance-radar.saved-flows.${currentScope}.v2' in SAVED_FLOW_JS
     assert "我的信息流" in SAVED_FLOW_HTML
     assert "const maxFlows = 8" in SAVED_FLOW_JS
     assert 'url.searchParams.delete("event_id")' in SAVED_FLOW_JS
@@ -250,6 +252,27 @@ def test_saved_flow_component_is_device_local_bounded_and_safe() -> None:
     assert "XMLHttpRequest" not in SAVED_FLOW_JS
     assert 'aria-live="polite"' in SAVED_FLOW_HTML
     assert 'aria-label="本机保存的信息流"' in SAVED_FLOW_HTML
+
+
+def test_public_saved_flow_payload_keeps_only_bounded_research_filters() -> None:
+    assert saved_public_flow_payload(
+        "pending_verification",
+        "  earnings  ",
+        "  ACME   filing ",
+        "最近 24 小时",
+        "latest",
+        24,
+        source=" sec ",
+    ) == {
+        "scope": "public",
+        "state": "pending_verification",
+        "family": "earnings",
+        "source": "sec",
+        "q": "ACME filing",
+        "period": "最近 24 小时",
+        "sort": "latest",
+        "page_size": "24",
+    }
 
 
 def test_facets_preserve_deep_links_and_render_data_backed_safe_commands() -> None:

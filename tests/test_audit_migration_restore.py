@@ -89,6 +89,8 @@ def _fixture(
     _write(root / "CURRENT_RELEASE.txt", f"/opt/finance-radar/releases/{RELEASE}\n")
     _write(release / "app/api/main.py", "app = 'api'\n")
     _write(release / "app/web/Home.py", "page = 'home'\n")
+    _write(release / "app/web/Reviewer.py", "page = 'reviewer'\n")
+    _write(release / "app/web/Operator.py", "page = 'operator'\n")
     _write(
         release / "scripts/official_event_collector.py",
         "ecb_press ecb_statistical_press eia_press nvidia_official_news\n",
@@ -123,6 +125,7 @@ def _fixture(
         ),
     )
     _write(release / "requirements.txt", "fastapi\n")
+    _write(release / "requirements.lock", "fastapi==1.0 --hash=sha256:fixture\n")
     if legacy_model_unit or declared_absent_local_model:
         _write(
             release / "deployment/systemd/finance-radar-evidence-llm.service",

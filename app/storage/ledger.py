@@ -226,6 +226,207 @@ class LedgerRepository:
             "source_health": self.list_source_health(),
         }
 
+    def product_metrics(
+        self,
+        *,
+        now: datetime | None = None,
+        window_days: int = 30,
+    ) -> dict[str, Any]:
+        """Measure user-value signals without substituting engineering health.
+
+        Every metric declares its sample and source. Metrics that need a human
+        sampling programme remain explicitly unavailable instead of receiving a
+        proxy score from model output or test counts.
+        """
+        measured_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        window_days = min(365, max(1, int(window_days)))
+        cutoff = measured_at.timestamp() - window_days * 86400
+        cutoff_iso = datetime.fromtimestamp(cutoff, timezone.utc).isoformat()
+        now_iso = measured_at.isoformat()
+
+        def percentile(values: list[float], fraction: float) -> float | None:
+            if not values:
+                return None
+            ordered = sorted(values)
+            index = max(0, min(len(ordered) - 1, int((len(ordered) - 1) * fraction + 0.5)))
+            return ordered[index]
+
+        with closing(self.connect()) as connection:
+            latency_rows = connection.execute(
+                """SELECT (julianday(local_received_at)-julianday(source_published_at))*86400.0 AS seconds
+                   FROM raw_observations
+                   WHERE source_published_at IS NOT NULL
+                     AND TRIM(source_published_at)!=''
+                     AND local_received_at>=?
+                     AND julianday(local_received_at)>=julianday(source_published_at)""",
+                (cutoff_iso,),
+            ).fetchall()
+            latencies = [float(row["seconds"]) for row in latency_rows if row["seconds"] is not None]
+            linked_observations = int(
+                connection.execute("SELECT COUNT(*) FROM event_observations").fetchone()[0]
+            )
+            linked_events = int(
+                connection.execute("SELECT COUNT(DISTINCT event_id) FROM event_observations").fetchone()[0]
+            )
+            total_events = int(connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0])
+            cited_events = int(
+                connection.execute(
+                    """SELECT COUNT(*) FROM canonical_events e
+                       WHERE EXISTS (
+                         SELECT 1 FROM event_evidence ev
+                         WHERE ev.event_id=e.event_id
+                           AND ev.evidence_url IS NOT NULL AND TRIM(ev.evidence_url)!=''
+                           AND ev.evidence_passage IS NOT NULL AND TRIM(ev.evidence_passage)!=''
+                       )"""
+                ).fetchone()[0]
+            )
+            closed_events = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM canonical_events WHERE status IN ('verified','rejected')"
+                ).fetchone()[0]
+            )
+            conflict_events = int(
+                connection.execute(
+                    """SELECT COUNT(DISTINCT event_id) FROM event_evidence
+                       WHERE LOWER(evidence_status) LIKE '%conflict%'
+                          OR LOWER(evidence_status) LIKE '%disput%'"""
+                ).fetchone()[0]
+            )
+            queue_rows = connection.execute(
+                """SELECT (julianday(?)-julianday(MIN(j.created_at)))*86400.0 AS seconds
+                   FROM pipeline_jobs j
+                   JOIN canonical_events e ON e.event_id=j.event_id
+                   WHERE e.status IN ('candidate','weak')
+                     AND j.status IN (
+                       'PENDING_PRIMARY_EVIDENCE',
+                       'PENDING_EVIDENCE_REVIEW',
+                       'PENDING_HUMAN_REVIEW'
+                     )
+                   GROUP BY j.event_id""",
+                (now_iso,),
+            ).fetchall()
+            queue_ages = [max(0.0, float(row["seconds"])) for row in queue_rows if row["seconds"] is not None]
+            trust_violations = int(
+                connection.execute(
+                    """SELECT
+                         (SELECT COUNT(*) FROM canonical_events WHERE no_trading!=1) +
+                         (SELECT COUNT(*) FROM event_evidence WHERE auto_verification_allowed!=0) +
+                         (SELECT COUNT(*) FROM event_market_metrics WHERE allowed_as_model_feature!=0)"""
+                ).fetchone()[0]
+            )
+
+        def measured(
+            metric_id: str,
+            value: float,
+            unit: str,
+            sample_size: int,
+            source: str,
+        ) -> dict[str, Any]:
+            return {
+                "id": metric_id,
+                "status": "MEASURED",
+                "value": round(value, 2),
+                "unit": unit,
+                "sample_size": sample_size,
+                "source": source,
+            }
+
+        def unavailable(metric_id: str, reason: str, source: str) -> dict[str, Any]:
+            return {
+                "id": metric_id,
+                "status": "UNAVAILABLE",
+                "value": None,
+                "unit": None,
+                "sample_size": 0,
+                "source": source,
+                "reason": reason,
+            }
+
+        metrics: list[dict[str, Any]] = []
+        p50 = percentile(latencies, 0.50)
+        p95 = percentile(latencies, 0.95)
+        metrics.append(
+            measured("capture_latency_p50", p50, "seconds", len(latencies), "raw_observations")
+            if p50 is not None
+            else unavailable("capture_latency_p50", "no comparable source and receipt timestamps", "raw_observations")
+        )
+        metrics.append(
+            measured("capture_latency_p95", p95, "seconds", len(latencies), "raw_observations")
+            if p95 is not None
+            else unavailable("capture_latency_p95", "no comparable source and receipt timestamps", "raw_observations")
+        )
+        metrics.append(
+            measured(
+                "duplicate_compression_rate",
+                100.0 * max(0, linked_observations - linked_events) / linked_observations,
+                "percent",
+                linked_observations,
+                "event_observations",
+            )
+            if linked_observations
+            else unavailable("duplicate_compression_rate", "no linked observations", "event_observations")
+        )
+        metrics.append(
+            measured(
+                "citable_evidence_coverage",
+                100.0 * cited_events / total_events,
+                "percent",
+                total_events,
+                "canonical_events+event_evidence",
+            )
+            if total_events
+            else unavailable("citable_evidence_coverage", "no canonical events", "canonical_events+event_evidence")
+        )
+        metrics.append(
+            measured(
+                "evidence_closure_rate",
+                100.0 * closed_events / total_events,
+                "percent",
+                total_events,
+                "canonical_events",
+            )
+            if total_events
+            else unavailable("evidence_closure_rate", "no canonical events", "canonical_events")
+        )
+        metrics.append(
+            measured(
+                "evidence_conflict_rate",
+                100.0 * conflict_events / total_events,
+                "percent",
+                total_events,
+                "canonical_events+event_evidence",
+            )
+            if total_events
+            else unavailable("evidence_conflict_rate", "no canonical events", "canonical_events+event_evidence")
+        )
+        queue_p95 = percentile(queue_ages, 0.95)
+        metrics.append(
+            measured("review_queue_age_p95", queue_p95, "seconds", len(queue_ages), "pipeline_jobs")
+            if queue_p95 is not None
+            else unavailable("review_queue_age_p95", "no open review jobs", "pipeline_jobs")
+        )
+        metrics.append(measured("boundary_violations", float(trust_violations), "count", total_events, "ledger_constraints"))
+        metrics.append(
+            unavailable(
+                "formal_conclusion_accuracy",
+                "requires an independent human sample; model output and test counts are not substitutes",
+                "human_quality_sample",
+            )
+        )
+        metrics.append(
+            unavailable(
+                "reader_time_to_source",
+                "client-side interaction telemetry is not enabled",
+                "browser_interaction_measurement",
+            )
+        )
+        return {
+            "measured_at": measured_at.isoformat(),
+            "window": {"days": window_days, "starts_at": cutoff_iso},
+            "metrics": metrics,
+            "engineering_health_is_not_product_quality": True,
+        }
+
     @staticmethod
     def _rough_review_metadata(payload_json: Any, updated_at: Any) -> dict[str, str | None]:
         payload = _json(payload_json, {})

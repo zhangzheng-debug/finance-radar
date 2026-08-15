@@ -15,6 +15,8 @@ MANAGED_UNIT_PATHS=(
     /etc/systemd/system/finance-radar-api.service
     /etc/systemd/system/finance-radar-web.service
     /etc/systemd/system/finance-radar-admin.service
+    /etc/systemd/system/finance-radar-reviewer.service
+    /etc/systemd/system/finance-radar-operator.service
     /etc/systemd/system/finance-radar-worker.service
     /etc/systemd/system/finance-radar-backup.service
     /etc/systemd/system/finance-radar-backup.timer
@@ -31,6 +33,8 @@ MANAGED_RUNTIME_UNITS=(
     finance-radar-evidence-llm.service
     finance-radar-worker.service
     finance-radar-admin.service
+    finance-radar-reviewer.service
+    finance-radar-operator.service
     finance-radar-web.service
     finance-radar-api.service
 )
@@ -89,6 +93,7 @@ if (root / "CURRENT_RELEASE.txt").read_text(encoding="utf-8").strip() != expecte
     raise SystemExit("CURRENT_RELEASE mismatch")
 required = [
     root / "releases" / release / "requirements.txt",
+    root / "releases" / release / "requirements.lock",
     root / "shared" / "data" / "finance_radar.sqlite3",
     root / "shared" / "data" / "finance_radar_operations.sqlite3",
     root / "config" / "etc" / "finance-radar.env",
@@ -212,7 +217,7 @@ grant_public_web_runtime_access() {
     chmod 0751 "$BASE/releases" "$RELEASE"
     find "$RELEASE/app" -type d -exec chmod 0755 {} +
     find "$RELEASE/app" -type f -exec chmod 0644 {} +
-    chmod 0644 "$RELEASE/requirements.txt"
+    chmod 0644 "$RELEASE/requirements.txt" "$RELEASE/requirements.lock"
     # Streamlit probes $PWD/.streamlit/secrets.toml even when it is absent.
     # Permit its isolated public account to traverse the public configuration,
     # but fail closed if a prepared archive contains a Streamlit secret file.
@@ -291,6 +296,12 @@ PY
 ln -s "$BASE/releases/$EXPECTED_RELEASE" "$BASE/current"
 install -m 0640 -o root -g finance-radar \
     "$BASE/config/etc/finance-radar.env" /etc/finance-radar.env
+if ! grep -q '^FINANCE_RADAR_REVIEWER_TOKEN=' /etc/finance-radar.env; then
+    printf 'FINANCE_RADAR_REVIEWER_TOKEN=%s\n' "$(openssl rand -hex 32)" >> /etc/finance-radar.env
+fi
+if ! grep -q '^FINANCE_RADAR_OPERATOR_TOKEN=' /etc/finance-radar.env; then
+    printf 'FINANCE_RADAR_OPERATOR_TOKEN=%s\n' "$(openssl rand -hex 32)" >> /etc/finance-radar.env
+fi
 if grep -q '^FINANCE_RADAR_WEB_URL=' /etc/finance-radar.env; then
     sed -i "s#^FINANCE_RADAR_WEB_URL=.*#FINANCE_RADAR_WEB_URL=$PUBLIC_WEB_URL#" /etc/finance-radar.env
 else
@@ -307,7 +318,7 @@ printf '%s\n' \
 
 python3 -m venv "$BASE/venv"
 "$BASE/venv/bin/python" -m pip install --upgrade pip
-"$BASE/venv/bin/python" -m pip install -r "$BASE/current/requirements.txt"
+"$BASE/venv/bin/python" -m pip install --require-hashes -r "$BASE/current/requirements.lock"
 chown -R finance-radar:finance-radar \
     "$BASE/releases" "$BASE/shared/data" "$BASE/shared/reports" "$BASE/config" "$BASE/venv"
 prepare_backup_restore_tmpdir || {
@@ -380,6 +391,8 @@ for unit in \
     finance-radar-api.service \
     finance-radar-web.service \
     finance-radar-admin.service \
+    finance-radar-reviewer.service \
+    finance-radar-operator.service \
     finance-radar-worker.service \
     finance-radar-backup.service \
     finance-radar-backup.timer; do

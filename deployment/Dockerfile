@@ -8,8 +8,8 @@ WORKDIR /app
 
 RUN groupadd --gid 10001 radar && useradd --uid 10001 --gid radar --create-home radar
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --upgrade pip && pip install -r /app/requirements.txt
+COPY requirements.lock /app/requirements.lock
+RUN pip install --upgrade pip && pip install --require-hashes -r /app/requirements.lock
 
 COPY app /app/app
 COPY scripts /app/scripts

@@ -273,12 +273,13 @@ while IFS= read -r file; do
 done < <(
     find /etc/nginx -maxdepth 3 -type f -print0 2>/dev/null \
         | xargs -0 grep -IlE \
-            'radar\.(167-172-69-16|18-208-34-152)\.sslip\.io|finance-radar-api|/radar/' \
+            'finance-radar-api|/radar/' \
         || true
 )
 
 certbot certificates > "$STAGE/config/CERTIFICATE_STATUS.txt" 2>&1 || true
 systemctl status finance-radar.slice finance-radar-api finance-radar-web finance-radar-admin \
+    finance-radar-reviewer finance-radar-operator \
     finance-radar-worker finance-radar-backup.timer finance-radar-evidence-llm.service --no-pager \
     > "$STAGE/config/SERVICE_STATUS.txt" 2>&1 || true
 "$BASE/venv/bin/python" --version > "$STAGE/config/PYTHON_VERSION.txt" 2>&1

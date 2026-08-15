@@ -14,7 +14,7 @@ from app.web.common import (
     query_path,
     render_api_error,
     render_primary_navigation,
-    require_admin_ui,
+    require_ui_role,
     restore_deep_link,
     section_header,
     status_strip,
@@ -23,7 +23,7 @@ from app.web.common import (
 
 st.set_page_config(page_title="双人盲审 · Finance Radar", page_icon="◇", layout="wide")
 install_style()
-require_admin_ui()
+require_ui_role("reviewer", "admin")
 restore_deep_link("Adjudication_Studio")
 render_primary_navigation("adjudication")
 header(

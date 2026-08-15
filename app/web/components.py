@@ -289,7 +289,8 @@ SAVED_FLOW_CSS = """
 SAVED_FLOW_JS = """
 export default function(component) {
   const { data, parentElement } = component;
-  const storageKey = "finance-radar.saved-flows.v1";
+  const currentScope = data?.current?.scope === "public" ? "public" : "reviewer";
+  const storageKey = `finance-radar.saved-flows.${currentScope}.v2`;
   const maxFlows = 8;
   const manager = parentElement.querySelector(".saved-flow-manager");
   const nameInput = manager.querySelector("#saved-flow-name");
@@ -299,9 +300,26 @@ export default function(component) {
 
   const cleanText = (value, maxLength) => String(value ?? "").replace(/\\s+/g, " ").trim().slice(0, maxLength);
   const cleanConfig = (value) => {
+    if (currentScope === "public") {
+      const state = ["", "verified", "excluded", "insufficient", "rough_reviewed", "pending_verification"].includes(value?.state) ? value.state : "";
+      const period = ["", "最近 24 小时", "最近 7 天", "最近 30 天", "最近 90 天"].includes(value?.period) ? value.period : "";
+      const sort = ["latest", "event_date", "subject"].includes(value?.sort) ? value.sort : "latest";
+      const pageSize = ["12", "24", "48"].includes(String(value?.page_size)) ? String(value.page_size) : "24";
+      return {
+        scope: "public",
+        state,
+        family: cleanText(value?.family, 80),
+        source: cleanText(value?.source, 80),
+        q: cleanText(value?.q, 120),
+        period,
+        sort,
+        page_size: pageSize,
+      };
+    }
     const flow = ["待复核", "已核验", "弱证据", "全部事件", "已拒绝"].includes(value?.flow) ? value.flow : "待复核";
     const limit = ["15", "25", "50", "100"].includes(String(value?.limit)) ? String(value.limit) : "25";
     return {
+      scope: "reviewer",
       flow,
       family: cleanText(value?.family, 80),
       source: cleanText(value?.source, 80),
@@ -319,6 +337,18 @@ export default function(component) {
   const writeFlows = (flows) => localStorage.setItem(storageKey, JSON.stringify(flows.slice(0, maxFlows)));
   const flowUrl = (config) => {
     const url = new URL(window.location.href);
+    if (currentScope === "public") {
+      ["flow", "family", "source", "q", "limit", "event_id", "preview_event_id", "preview_page"].forEach((key) => url.searchParams.delete(key));
+      config.state ? url.searchParams.set("preview_state", config.state) : url.searchParams.delete("preview_state");
+      config.family ? url.searchParams.set("preview_family", config.family) : url.searchParams.delete("preview_family");
+      config.source ? url.searchParams.set("preview_source", config.source) : url.searchParams.delete("preview_source");
+      config.q ? url.searchParams.set("preview_query", config.q) : url.searchParams.delete("preview_query");
+      config.period ? url.searchParams.set("preview_period", config.period) : url.searchParams.delete("preview_period");
+      url.searchParams.set("preview_sort", config.sort);
+      url.searchParams.set("preview_page_size", config.page_size);
+      url.hash = "live-events";
+      return url.toString();
+    }
     url.searchParams.delete("reset");
     url.searchParams.delete("event_id");
     url.searchParams.set("flow", config.flow);
@@ -480,6 +510,7 @@ def saved_flow_payload(
     normalized_flow = flow if flow in FLOW_PRESETS else "待复核"
     normalized_limit = limit if limit in (15, 25, 50, 100) else 25
     return {
+        "scope": "reviewer",
         "flow": normalized_flow,
         "family": " ".join(str(family or "").split())[:80],
         "source": " ".join(str(source or "").split())[:80],
@@ -501,6 +532,81 @@ def render_saved_flow_manager(
     mount_args = {
         "key": "event-workbench-saved-flows",
         "data": {"current": saved_flow_payload(flow, family, query, limit, source=source)},
+        "height": 76,
+        "width": "stretch",
+    }
+    try:
+        _saved_flow_component(**mount_args)
+    except ValueError as exc:
+        if "is not registered" not in str(exc):
+            raise
+        _saved_flow_component = st.components.v2.component(
+            "finance_radar_saved_flows",
+            html=SAVED_FLOW_HTML,
+            css=SAVED_FLOW_CSS,
+            js=SAVED_FLOW_JS,
+        )
+        _saved_flow_component(**mount_args)
+
+
+def saved_public_flow_payload(
+    state: str,
+    family: str,
+    query: str,
+    period: str,
+    sort: str,
+    page_size: int,
+    *,
+    source: str = "",
+) -> dict[str, str]:
+    """Normalize a public, browser-only research view without server state."""
+    normalized_state = state if state in PUBLIC_STATE_LABELS else ""
+    normalized_period = period if period in {
+        "",
+        "最近 24 小时",
+        "最近 7 天",
+        "最近 30 天",
+        "最近 90 天",
+    } else ""
+    normalized_sort = sort if sort in {"latest", "event_date", "subject"} else "latest"
+    normalized_page_size = page_size if page_size in {12, 24, 48} else 24
+    return {
+        "scope": "public",
+        "state": normalized_state,
+        "family": " ".join(str(family or "").split())[:80],
+        "source": " ".join(str(source or "").split())[:80],
+        "q": " ".join(str(query or "").split())[:120],
+        "period": normalized_period,
+        "sort": normalized_sort,
+        "page_size": str(normalized_page_size),
+    }
+
+
+def render_saved_public_flow_manager(
+    state: str,
+    family: str,
+    query: str,
+    period: str,
+    sort: str,
+    page_size: int,
+    *,
+    source: str = "",
+) -> None:
+    """Render public saved research views, persisted only in this browser."""
+    global _saved_flow_component
+    mount_args = {
+        "key": "public-saved-flows",
+        "data": {
+            "current": saved_public_flow_payload(
+                state,
+                family,
+                query,
+                period,
+                sort,
+                page_size,
+                source=source,
+            )
+        },
         "height": 76,
         "width": "stretch",
     }

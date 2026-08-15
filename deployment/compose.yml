@@ -9,6 +9,8 @@ x-radar-environment: &radar-environment
   FINANCE_RADAR_WEB_URL: ${FINANCE_RADAR_PUBLIC_URL:-http://localhost}
   FINANCE_RADAR_DEMO_MODE: ${FINANCE_RADAR_DEMO_MODE:-RECENT_CAPTURE}
   FINANCE_RADAR_ADMIN_TOKEN: ${FINANCE_RADAR_ADMIN_TOKEN:-change-me-before-public-deploy}
+  FINANCE_RADAR_REVIEWER_TOKEN: ${FINANCE_RADAR_REVIEWER_TOKEN:-change-me-reviewer}
+  FINANCE_RADAR_OPERATOR_TOKEN: ${FINANCE_RADAR_OPERATOR_TOKEN:-change-me-operator}
 
 x-radar-public-web-environment: &radar-public-web-environment
   FINANCE_RADAR_API_URL: http://api:8000
@@ -76,6 +78,38 @@ services:
       FINANCE_RADAR_SHOW_DEBUG: "0"
     command: ["python", "-m", "streamlit", "run", "app/web/Admin.py", "--server.address", "0.0.0.0", "--server.port", "8502", "--server.baseUrlPath", "radar-admin", "--server.headless", "true", "--browser.gatherUsageStats", "false"]
     ports: ["127.0.0.1:18502:8502"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  reviewer:
+    <<: *radar-service
+    profiles: ["reviewer"]
+    env_file: []
+    environment:
+      FINANCE_RADAR_API_URL: http://api:8000
+      FINANCE_RADAR_UI_ROLE: reviewer
+      FINANCE_RADAR_REVIEWER_TOKEN: ${FINANCE_RADAR_REVIEWER_TOKEN:?set a reviewer token}
+      FINANCE_RADAR_SHOW_DEBUG: "0"
+    volumes: []
+    command: ["python", "-m", "streamlit", "run", "app/web/Reviewer.py", "--server.address", "0.0.0.0", "--server.port", "8503", "--server.baseUrlPath", "radar-review", "--server.headless", "true", "--browser.gatherUsageStats", "false"]
+    ports: ["127.0.0.1:18503:8503"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  operator:
+    <<: *radar-service
+    profiles: ["operator"]
+    env_file: []
+    environment:
+      FINANCE_RADAR_API_URL: http://api:8000
+      FINANCE_RADAR_UI_ROLE: operator
+      FINANCE_RADAR_OPERATOR_TOKEN: ${FINANCE_RADAR_OPERATOR_TOKEN:?set an operator token}
+      FINANCE_RADAR_SHOW_DEBUG: "0"
+    volumes: []
+    command: ["python", "-m", "streamlit", "run", "app/web/Operator.py", "--server.address", "0.0.0.0", "--server.port", "8504", "--server.baseUrlPath", "radar-ops", "--server.headless", "true", "--browser.gatherUsageStats", "false"]
+    ports: ["127.0.0.1:18504:8504"]
     depends_on:
       api:
         condition: service_healthy

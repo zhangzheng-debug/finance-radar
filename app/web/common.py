@@ -16,8 +16,12 @@ import streamlit as st
 
 API_URL = os.getenv("FINANCE_RADAR_API_URL", "http://127.0.0.1:8000").rstrip("/")
 ADMIN_TOKEN = os.getenv("FINANCE_RADAR_ADMIN_TOKEN")
+REVIEWER_TOKEN = os.getenv("FINANCE_RADAR_REVIEWER_TOKEN")
+OPERATOR_TOKEN = os.getenv("FINANCE_RADAR_OPERATOR_TOKEN")
 SHOW_DEBUG = os.getenv("FINANCE_RADAR_SHOW_DEBUG") == "1"
-UI_ROLE = "admin" if os.getenv("FINANCE_RADAR_UI_ROLE", "public").strip().lower() == "admin" else "public"
+UI_ROLES = frozenset({"public", "reviewer", "operator", "admin"})
+_configured_ui_role = os.getenv("FINANCE_RADAR_UI_ROLE", "public").strip().lower()
+UI_ROLE = _configured_ui_role if _configured_ui_role in UI_ROLES else "public"
 DEEP_LINK_STATE_KEY = "_finance_radar_deep_link"
 DESIGN_TOKENS_V3 = Path(__file__).with_name("design_tokens_v3.css").read_text(encoding="utf-8")
 STYLE_V3 = Path(__file__).with_name("style_v3.css").read_text(encoding="utf-8")
@@ -94,7 +98,44 @@ ADMIN_NAVIGATION: tuple[dict[str, str], ...] = (
 )
 
 
-PRIMARY_NAVIGATION = ADMIN_NAVIGATION if UI_ROLE == "admin" else PUBLIC_NAVIGATION
+REVIEWER_NAVIGATION: tuple[dict[str, str], ...] = (
+    {
+        "key": "reviewer_home",
+        "path": "Reviewer.py",
+        "url": "./",
+        "label": "复核概览",
+        "description": "聚焦待核验证据与人工判断",
+    },
+    ADMIN_NAVIGATION[1],
+    ADMIN_NAVIGATION[2],
+    ADMIN_NAVIGATION[4],
+    ADMIN_NAVIGATION[5],
+)
+
+
+OPERATOR_NAVIGATION: tuple[dict[str, str], ...] = (
+    {
+        "key": "operator_home",
+        "path": "Operator.py",
+        "url": "./",
+        "label": "运维概览",
+        "description": "查看服务、来源、备份与模型运行",
+    },
+    ADMIN_NAVIGATION[3],
+    ADMIN_NAVIGATION[5],
+)
+
+
+def navigation_for_role(role: str) -> tuple[dict[str, str], ...]:
+    return {
+        "public": PUBLIC_NAVIGATION,
+        "reviewer": REVIEWER_NAVIGATION,
+        "operator": OPERATOR_NAVIGATION,
+        "admin": ADMIN_NAVIGATION,
+    }.get(role, PUBLIC_NAVIGATION)
+
+
+PRIMARY_NAVIGATION = navigation_for_role(UI_ROLE)
 
 
 ACCESSIBILITY_CSS = """
@@ -189,13 +230,21 @@ class ApiError(RuntimeError):
     pass
 
 
-def require_admin_ui() -> None:
-    """Stop an internal page before it can render in the public UI process."""
-    if UI_ROLE == "admin":
+def require_ui_role(*allowed_roles: str) -> None:
+    """Stop a page before it renders outside its declared internal role."""
+    if UI_ROLE in allowed_roles:
         return
-    st.error("此页面仅限内部管理环境。")
-    st.caption("公开界面不会开放复核写入、运行控制、模型治理或盲审工具。")
+    st.error("当前内部角色无权访问此页面。" if UI_ROLE != "public" else "此页面仅限内部管理环境。")
+    st.caption(
+        "公开界面不会开放复核写入、运行控制、模型治理或盲审工具；"
+        "复核、运维和管理员工作面也彼此隔离。"
+    )
     st.stop()
+
+
+def require_admin_ui() -> None:
+    """Backward-compatible strict guard for the administrator landing page."""
+    require_ui_role("admin")
 
 
 def restore_deep_link(page_slug: str) -> None:
@@ -212,14 +261,18 @@ def restore_deep_link(page_slug: str) -> None:
 
 def render_primary_navigation(active: str) -> None:
     """Render a stable Chinese navigation layer without changing page routes."""
-    navigation = ADMIN_NAVIGATION if UI_ROLE == "admin" else PUBLIC_NAVIGATION
+    navigation = navigation_for_role(UI_ROLE)
     current = next((item for item in navigation if item["key"] == active), None)
     if current is None:
-        internal_keys = {item["key"] for item in ADMIN_NAVIGATION} - {
+        internal_keys = {
+            item["key"]
+            for role_navigation in (REVIEWER_NAVIGATION, OPERATOR_NAVIGATION, ADMIN_NAVIGATION)
+            for item in role_navigation
+        } - {
             item["key"] for item in PUBLIC_NAVIGATION
         }
-        if UI_ROLE != "admin" and active in internal_keys:
-            require_admin_ui()
+        if active in internal_keys:
+            require_ui_role("reviewer", "operator", "admin")
         raise ValueError(f"Unknown primary navigation key: {active}")
 
     links = "".join(
@@ -233,13 +286,19 @@ def render_primary_navigation(active: str) -> None:
         )
         for item in navigation
     )
+    role_section = {
+        "public": "公开浏览",
+        "reviewer": "人工复核",
+        "operator": "运行维护",
+        "admin": "系统管理",
+    }.get(UI_ROLE, "公开浏览")
     with st.sidebar:
         st.markdown(
             '<div class="radar-sidebar-brand">'
             '<span class="radar-sidebar-mark" aria-hidden="true">◎</span>'
             '<div><strong>FINANCE RADAR</strong><span>证据情报终端</span></div>'
             '</div>'
-            f'<div class="radar-sidebar-section">{"内部管理" if UI_ROLE == "admin" else "公开浏览"}</div>'
+            f'<div class="radar-sidebar-section">{role_section}</div>'
             '<nav class="radar-primary-nav" aria-label="主要页面">'
             f'{links}'
             '</nav>'
@@ -250,7 +309,7 @@ def render_primary_navigation(active: str) -> None:
             '</div>'
             '<div class="radar-sidebar-boundary">'
             '<span aria-hidden="true">◈</span> '
-            f'{"内部授权环境 · 操作留痕 · 不触发交易" if UI_ROLE == "admin" else "只读情报 · 证据驱动核验 · 不触发交易"}'
+            f'{"只读情报 · 证据驱动核验 · 不触发交易" if UI_ROLE == "public" else "内部最小权限 · 操作留痕 · 不触发交易"}'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -263,10 +322,33 @@ def api_request(
     json_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_method = method.upper()
-    if UI_ROLE != "admin" and normalized_method not in {"GET", "HEAD"}:
-        raise ApiError("公开界面只允许只读请求")
+    if normalized_method not in {"GET", "HEAD"}:
+        reviewer_write = bool(
+            re.fullmatch(r"/api/v1/events/[^/]+/human-override", path)
+            or re.fullmatch(r"/api/v1/adjudication/samples/[^/]+/reviews", path)
+        )
+        operator_write = bool(
+            re.fullmatch(r"/api/v1/events/[^/]+/agent/run", path)
+            or re.fullmatch(r"/api/v1/replays/[^/]+/(?:run|reset)", path)
+            or re.fullmatch(r"/api/v1/demo/mode/[^/]+", path)
+        )
+        allowed = (
+            UI_ROLE == "admin"
+            or (UI_ROLE == "reviewer" and reviewer_write)
+            or (UI_ROLE == "operator" and operator_write)
+        )
+        if not allowed:
+            raise ApiError(
+                "公开界面只允许只读请求"
+                if UI_ROLE == "public"
+                else "当前界面角色不允许此写入请求"
+            )
     headers = {"Accept": "application/json"}
-    if UI_ROLE == "admin" and ADMIN_TOKEN:
+    if UI_ROLE == "reviewer" and REVIEWER_TOKEN:
+        headers["X-Reviewer-Token"] = REVIEWER_TOKEN
+    elif UI_ROLE == "operator" and OPERATOR_TOKEN:
+        headers["X-Operator-Token"] = OPERATOR_TOKEN
+    elif UI_ROLE == "admin" and ADMIN_TOKEN:
         headers["X-Admin-Token"] = ADMIN_TOKEN
     body = None
     if json_body is not None:

@@ -16,21 +16,23 @@ Finance Radar 不是交易终端，也不是自动事实裁判。系统收集全
 
 ## 产品层与后台层
 
-当前实现有两套独立运行面：
+当前实现有四套独立运行面：
 
 | 层 | 面向谁 | 内容 | 暴露方式 |
 |---|---|---|---|
 | Public | 普通用户与演示观众 | 态势总览、证据演示、方法与边界 | 公网只读 Streamlit |
-| Admin | 复核者、开发者、运维者 | 事件工作台、人工复核、模型、trace、运行与备份 | 仅服务器回环，按需 SSH 隧道 |
+| Reviewer | 人工复核者 | 事件证据、人工判断、双人盲审 | 仅服务器回环，独立令牌与按需 SSH 隧道 |
+| Operator | 运维者 | 来源、Worker、备份、Shadow 模型与运行诊断 | 仅服务器回环，独立令牌与按需 SSH 隧道 |
+| Admin | 开发者与紧急管理员 | Reviewer 与 Operator 的全权超集 | 仅服务器回环，独立全权令牌与按需 SSH 隧道 |
 
-公网 Nginx 不暴露 API、管理页面或内部路径。后续将按[产品章程](docs/PRODUCT_CHARTER.md)把 Reviewer/Operator 从 Developer/Admin 中进一步分离；当前不得把这一规划写成已完成能力。
+公网 Nginx 不暴露 API、管理页面或内部路径。Reviewer、Operator 和 Admin 使用不同入口与 API 能力合同；它们仍是回环、按需启动的轻量角色层，不冒充完整账户系统。
 
 ## 关键安全边界
 
 - `NO TRADING`：不连接下单接口，不读取账户、余额、仓位，不生成仓位建议。
 - `NO AUTO VERIFY`：模型和 Worker 不得自行把事件升级为正式 `VERIFIED`。
 - `NO LEAKAGE`：事件后行情、旧标签和模型输出不得进入盲审输入。
-- Public 与 Admin 使用不同导航、环境、服务身份和系统权限。
+- Public、Reviewer、Operator 与 Admin 使用不同导航、环境令牌和 API 权限；三种内部 UI 互斥启动。
 - Telegram 默认只做 dry-run；真实外发必须单独、显式授权并使用 `--send`。
 - Evidence Agent 的本地 LLM 是可选、回环、advisory-only 服务；部署和恢复不会默认启用它。
 - 本机备份策略为每天一次、仅在新备份完成隔离恢复验证后替换上一份；事件账本和原文证据不按该保留策略删除。
@@ -48,7 +50,7 @@ Finance Radar 不是交易终端，也不是自动事实裁判。系统收集全
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements-dev.lock
 powershell -ExecutionPolicy Bypass -File scripts/start_product.ps1
 ```
 
@@ -81,15 +83,15 @@ python -m pytest -q
 python -m pytest -q --cov=app --cov=scripts --cov-report=term-missing
 ```
 
-2026-08-13 在本工作树的完整回归结果为 `629 passed, 5 skipped`。这是带日期的源码验证记录，不代表 AWS 当前运行状态，也不能替代新提交的 GitHub Actions 结果。
+本分支的最终回归结果会在 [CURRENT_STATE.md](CURRENT_STATE.md) 与审计报告中绑定到精确提交；本地通过不代表 AWS 当前运行状态，也不能替代新提交的 GitHub Actions 结果。
 
 CI 还会检查编译、测试、秘密模式、交易写路由和部署 Shell 语法。正式发布前必须另外通过 release audit、恢复收据验证和真实 Linux 上线验收。
 
 ## 部署
 
-主部署形态是 AWS 上的 systemd + Nginx：API、Public Web、Admin、Worker、备份和可选 Evidence LLM 分离运行，并由 systemd slice 约束总内存与任务数。Docker Compose + Caddy 仅是可移植备选形态。
+主部署形态是 AWS 上的 systemd + Nginx：API、Public Web、三种按需内部 UI、Worker、备份和可选 Evidence LLM 分离运行，并由 systemd slice 约束总内存与任务数。Docker Compose + Caddy 仅是可移植备选形态。
 
-最后一次文档化的公网入口为 <https://radar.18-208-34-152.sslip.io:8443/radar/>。本次仓库审计没有现场登录 AWS，因此不能据此声称该地址或 Worker 现在仍然健康；实时状态需要单独核验。
+公网入口不写死在仓库中；部署时必须显式传入 `https://YOUR_DOMAIN[:PORT]/radar/`，当前实际域名与运行状态以部署后现场验收记录为准。
 
 安装、回滚、备份、迁移和恢复流程见 [deployment/README.md](deployment/README.md) 与 [docs/SERVER_MIGRATION_HANDOFF.md](docs/SERVER_MIGRATION_HANDOFF.md)。原新加坡 Finance Radar 实例已经退出产品拓扑，历史报告中的新加坡地址仅作历史证据。
 
@@ -100,7 +102,7 @@ app/api/       内部 FastAPI 合同
 app/models/    影子风险路由与证据策略
 app/services/  回放、Evidence Agent 与人工裁决服务
 app/storage/   事件账本和运维状态库
-app/web/       Public/Admin Streamlit 界面
+app/web/       Public/Reviewer/Operator/Admin Streamlit 界面
 app/workers/   连续采集与通知调度
 deployment/    systemd/Nginx 与恢复发布流程
 replay/cases/  冻结回放案例

@@ -10,7 +10,7 @@ from app.web.common import (
     no_trading_banner,
     render_api_error,
     render_primary_navigation,
-    require_admin_ui,
+    require_ui_role,
     restore_deep_link,
     status_strip,
 )
@@ -19,7 +19,7 @@ from app.web.components import age_label, source_health_state
 
 st.set_page_config(page_title="运行与模型 · Finance Radar", page_icon="▦", layout="wide")
 install_style()
-require_admin_ui()
+require_ui_role("operator", "admin")
 restore_deep_link("Operations_and_Model")
 render_primary_navigation("operations")
 

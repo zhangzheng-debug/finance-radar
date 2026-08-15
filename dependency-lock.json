@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "python_version": "3.12",
+  "resolver": "uv 0.12.1",
+  "files": {
+    "requirements.txt": "715fb6481d5590e5958dd7719bdb45cc18d0aae9a5247fa00720e41532e658e0",
+    "requirements-dev.txt": "9f6cac9a3f99ec65045762ea7d2bbb15fd04b7ed5e1ae3ca4980405ef4f7993e",
+    "requirements.lock": "e563ca9d88914be8130caa4399118e9a8ec63c2ffac10c8089314654efea802d",
+    "requirements-dev.lock": "d1b557844d7c64f0d037ce107378f068c532d46d1f744639690f5ab47138c33a"
+  }
+}

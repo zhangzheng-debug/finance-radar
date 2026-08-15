@@ -23,11 +23,27 @@ def test_compose_public_web_does_not_load_dotenv_or_admin_token() -> None:
 
 def test_compose_admin_is_opt_in_and_bound_to_host_loopback() -> None:
     source = (ROOT / "deployment/compose.yml").read_text(encoding="utf-8")
-    admin = source.split("\n  admin:\n", 1)[1].split("\n  worker:\n", 1)[0]
+    admin = source.split("\n  admin:\n", 1)[1].split("\n  reviewer:\n", 1)[0]
     assert 'profiles: ["admin"]' in admin
     assert "FINANCE_RADAR_UI_ROLE: admin" in admin
     assert 'ports: ["127.0.0.1:18502:8502"]' in admin
     assert '"app/web/Admin.py"' in admin
+
+
+def test_compose_scoped_internal_profiles_use_distinct_tokens_and_loopback_ports() -> None:
+    source = (ROOT / "deployment/compose.yml").read_text(encoding="utf-8")
+    reviewer = source.split("\n  reviewer:\n", 1)[1].split("\n  operator:\n", 1)[0]
+    operator = source.split("\n  operator:\n", 1)[1].split("\n  worker:\n", 1)[0]
+    assert "FINANCE_RADAR_UI_ROLE: reviewer" in reviewer
+    assert "FINANCE_RADAR_REVIEWER_TOKEN" in reviewer
+    assert 'ports: ["127.0.0.1:18503:8503"]' in reviewer
+    assert '"app/web/Reviewer.py"' in reviewer
+    assert "FINANCE_RADAR_ADMIN_TOKEN" not in reviewer
+    assert "FINANCE_RADAR_UI_ROLE: operator" in operator
+    assert "FINANCE_RADAR_OPERATOR_TOKEN" in operator
+    assert 'ports: ["127.0.0.1:18504:8504"]' in operator
+    assert '"app/web/Operator.py"' in operator
+    assert "FINANCE_RADAR_ADMIN_TOKEN" not in operator
 
 
 def test_compose_worker_and_backup_keep_the_production_safety_defaults() -> None:
@@ -44,6 +60,8 @@ def test_portable_caddy_edge_returns_not_found_for_backend_routes() -> None:
     assert "@private_backend path /api/* /docs* /openapi.json /finance-radar-api*" in source
     for internal_path in (
         "/radar-admin*",
+        "/radar-review*",
+        "/radar-ops*",
         "/Event_Intelligence*",
         "/Operations_and_Model*",
         "/Adjudication_Studio*",

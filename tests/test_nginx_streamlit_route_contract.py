@@ -19,6 +19,8 @@ def test_only_public_nested_streamlit_routes_are_canonicalized() -> None:
         assert "proxy_pass http://127.0.0.1:18501" in source
         assert 'proxy_set_header Upgrade $http_upgrade' in source
         assert 'proxy_set_header Connection "upgrade"' in source
+        assert "proxy_set_header X-Forwarded-For $remote_addr" in source
+        assert "$proxy_add_x_forwarded_for" not in source
         assert "return 302 /radar/?_page=$1&$args" in source
 
 
@@ -35,6 +37,10 @@ def test_internal_pages_and_backend_are_denied_at_public_edge() -> None:
         assert "location ^~ /finance-radar-api/" in source
         assert "location = /radar-admin" in source
         assert "location ^~ /radar-admin/" in source
+        assert "location = /radar-review" in source
+        assert "location ^~ /radar-review/" in source
+        assert "location = /radar-ops" in source
+        assert "location ^~ /radar-ops/" in source
         assert "proxy_pass http://127.0.0.1:18000" not in source
 
 

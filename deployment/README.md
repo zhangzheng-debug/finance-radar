@@ -11,7 +11,7 @@ systemd installer gate are documented in
 
 1. Install Docker Engine and the Compose plugin.
 2. Copy the repository and existing `data/finance_radar.sqlite3` to the VPS.
-3. Create `.env` from `.env.example`; set a strong `FINANCE_RADAR_ADMIN_TOKEN`, public domain and SEC user agent. The token is for the API and the manual internal admin UI only; the public Web service must never receive it.
+3. Create `.env` from `.env.example`; set distinct strong `FINANCE_RADAR_REVIEWER_TOKEN`, `FINANCE_RADAR_OPERATOR_TOKEN` and `FINANCE_RADAR_ADMIN_TOKEN` values, plus the public domain and SEC user agent. These tokens are for loopback internal UIs only; the public Web service must never receive them.
 4. Give container UID 10001 write access to `data/`, `artifacts/` and `reports/`.
 5. Train or copy the risk-router artifact before starting the stack.
 
@@ -34,12 +34,20 @@ docker compose -f deployment/compose.yml exec api \
 
 The public `web` container does not load `.env`; it receives only its private
 API URL, `FINANCE_RADAR_UI_ROLE=public`, and debug-off. When internal access is
-needed, the opt-in `admin` profile binds only to host loopback port 18502:
+needed, use exactly one opt-in internal profile. All bind only to host loopback:
 
 ```bash
 docker compose -f deployment/compose.yml --profile admin up -d admin
 # Open an SSH tunnel to 127.0.0.1:18502, then browse /radar-admin/ locally.
 docker compose -f deployment/compose.yml --profile admin stop admin
+
+docker compose -f deployment/compose.yml --profile reviewer up -d reviewer
+# Reviewer: 127.0.0.1:18503/radar-review/ (human review only)
+docker compose -f deployment/compose.yml --profile reviewer stop reviewer
+
+docker compose -f deployment/compose.yml --profile operator up -d operator
+# Operator: 127.0.0.1:18504/radar-ops/ (runtime/model operations only)
+docker compose -f deployment/compose.yml --profile operator stop operator
 ```
 
 Enable Telegram only after a dry-run and explicit operator review:
@@ -95,7 +103,7 @@ Run the Windows orchestrator without `-Activate` first. This uses the encrypted 
 ```powershell
 .\scripts\restore_migration_to_vps.ps1 `
   -EncryptedArchive "server_migration_backup\20260719T045536Z\finance-radar-migration-20260719T045536Z.tgz.aesgcm" `
-  -PassphraseFile "C:\Users\MR\Documents\FinanceRadar-Recovery\finance-radar-backup-passphrase.txt" `
+  -PassphraseFile "D:\FinanceRadarRecovery\finance-radar-backup-passphrase.txt" `
   -ExpectedRelease 20260719T044852Z `
   -ExpectedSha256 ac3ed8ba2a1ebd0f90eddfff921b39f683f17a397bfa9b2d6e074a467b24c1a5
 ```
@@ -107,7 +115,7 @@ Only after a clean replacement VPS is available, add the new target and the expl
   -SshHost root@NEW_VPS_IP `
   -IdentityFile "C:\path\to\new-vps-key" `
   -EncryptedArchive "server_migration_backup\20260719T045536Z\finance-radar-migration-20260719T045536Z.tgz.aesgcm" `
-  -PassphraseFile "C:\Users\MR\Documents\FinanceRadar-Recovery\finance-radar-backup-passphrase.txt" `
+  -PassphraseFile "D:\FinanceRadarRecovery\finance-radar-backup-passphrase.txt" `
   -ExpectedRelease 20260719T044852Z `
   -ExpectedSha256 ac3ed8ba2a1ebd0f90eddfff921b39f683f17a397bfa9b2d6e074a467b24c1a5 `
   -PublicWebUrl "https://NEW_DOMAIN/radar" `
@@ -133,7 +141,7 @@ MemoryHigh -p MemoryMax -p TasksMax`; inspect any older local drop-ins with
 `systemctl cat finance-radar-worker` before manually removing them.
 
 `install_remote.sh` is a health-gated transaction, not an install-only helper.
-After the archive/manifest gate it refuses an active or boot-enabled admin UI and an
+After the archive/manifest gate it refuses any active or boot-enabled internal UI and an
 active backup job, launches a one-shot resource-bounded candidate backup bridge,
 and records the resulting snapshot ID and manifest hash. The bridge never changes
 `current`, the installed backup unit, or live operations state before cutover; it
@@ -154,8 +162,8 @@ the versioned direct-endpoint installer to run `nginx -t`, reload Nginx and
 check the public page plus expected `404` denials. Any failure restores the
 previous symlink and touched files, reloads the prior Nginx configuration, and
 restarts the prior services; the failed release remains on disk for inspection.
-The manual loopback admin service is neither enabled nor allowed to be active
-during this cutover; an existing operator session makes the installer stop
+The manual loopback Reviewer, Operator and Admin services are neither enabled nor allowed to be active
+during this cutover; an existing internal session makes the installer stop
 before the symlink change rather than terminating that session.
 
 The Evidence Agent also has an optional, independent loopback service on port
@@ -189,29 +197,40 @@ The command rejects a missing, expired, mismatched or broader contract. It
 records the authorization context with every attempted mutation; no market
 outcome, order, position, balance or trading endpoint is involved.
 
-Primary public endpoint:
-
-- `https://radar.18-208-34-152.sslip.io:8443/radar/`
+Primary public endpoint is deployment-specific and must be passed explicitly as
+`https://YOUR_DOMAIN[:PORT]/radar/`; it is not a repository constant.
 
 The public edge returns `404` for `/finance-radar-api/`, the internal page
-slugs, and `/radar-admin/`. FastAPI remains available only at
+slugs, `/radar-review/`, `/radar-ops/` and `/radar-admin/`. FastAPI remains available only at
 `http://127.0.0.1:18000` on the server. The one deliberately public operational
 artifact is `/radar/offhost-status.json`, a no-cache file written by the
 off-host backup job.
 
-The internal administration UI is a manual, non-enabled systemd service. It
-loads the protected environment, listens only on `127.0.0.1:18502`, and is not
-referenced by Nginx. Start it only for an SSH-tunnel session, then stop it:
+The three internal UIs are manual, non-enabled, mutually conflicting systemd
+services. They load only their scoped token (Admin is the explicit full-access
+exception), listen on loopback, and are not referenced by Nginx. Start exactly
+one for an SSH-tunnel session, then stop it:
 
 ```bash
 sudo systemctl start finance-radar-admin
 ssh -N -L 18502:127.0.0.1:18502 ubuntu@YOUR_SERVER
 # Browse http://127.0.0.1:18502/radar-admin/ on the operator workstation.
 sudo systemctl stop finance-radar-admin
+
+sudo systemctl start finance-radar-reviewer
+ssh -N -L 18503:127.0.0.1:18503 ubuntu@YOUR_SERVER
+# Browse http://127.0.0.1:18503/radar-review/ for evidence review.
+sudo systemctl stop finance-radar-reviewer
+
+sudo systemctl start finance-radar-operator
+ssh -N -L 18504:127.0.0.1:18504 ubuntu@YOUR_SERVER
+# Browse http://127.0.0.1:18504/radar-ops/ for runtime operations.
+sudo systemctl stop finance-radar-operator
 ```
 
-There is intentionally no `[Install]` section in the admin unit, so it cannot
-be enabled as a boot service. Do not add a public Nginx route for port 18502.
+There is intentionally no `[Install]` section in any internal UI unit, so none
+can be enabled as a boot service. Do not add a public Nginx route for ports
+18502, 18503 or 18504.
 
 The retired Singapore/Cloudflare route is no longer part of production. The AWS direct endpoint uses a Let's Encrypt certificate and Certbot renewal hook. Every Nginx installer validates with `nginx -t`, retains a timestamped rollback copy, and restores it automatically if reload fails; the in-place release transaction additionally performs the versioned candidate install and expected `404` edge checks before it reports success. Existing Xray and WireGuard listeners remain outside the Finance Radar deployment scope.
 

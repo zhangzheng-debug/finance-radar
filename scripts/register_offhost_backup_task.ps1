@@ -3,11 +3,17 @@ param(
     [string]$TaskName = "FinanceRadar-Offhost-Backup",
     [string]$At = "02:30",
     [string]$BackupScript = "",
-    [string]$SshHost = "ubuntu@18.208.34.152",
-    [string]$IdentityFile = "C:\Users\MR\.ssh1\id_ed25519"
+    [string]$SshHost = $env:FINANCE_RADAR_SSH_HOST,
+    [string]$IdentityFile = $env:FINANCE_RADAR_SSH_IDENTITY_FILE
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $SshHost) {
+    throw "SshHost is required; pass -SshHost or set FINANCE_RADAR_SSH_HOST"
+}
+if (-not $IdentityFile) {
+    throw "IdentityFile is required; pass -IdentityFile or set FINANCE_RADAR_SSH_IDENTITY_FILE"
+}
 if (-not $BackupScript) {
     $BackupScript = Join-Path $PSScriptRoot "pull_server_migration_backup.ps1"
 }

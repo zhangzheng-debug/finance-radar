@@ -1,10 +1,10 @@
 [Unit]
-Description=Finance Radar Internal Administration (manual, loopback only)
+Description=Finance Radar Human Review (manual, loopback only)
 Documentation=file:/opt/finance-radar/current/deployment/README.md
 After=network-online.target finance-radar-api.service
 Wants=network-online.target
 Requires=finance-radar-api.service
-Conflicts=finance-radar-reviewer.service finance-radar-operator.service
+Conflicts=finance-radar-admin.service finance-radar-operator.service
 
 [Service]
 Type=simple
@@ -13,9 +13,10 @@ Group=finance-radar
 WorkingDirectory=/opt/finance-radar/current
 Slice=finance-radar.slice
 EnvironmentFile=/etc/finance-radar.env
-Environment=FINANCE_RADAR_UI_ROLE=admin
+Environment=FINANCE_RADAR_UI_ROLE=reviewer
 Environment=FINANCE_RADAR_SHOW_DEBUG=0
-ExecStart=/opt/finance-radar/venv/bin/python -B -m streamlit run app/web/Admin.py --server.address 127.0.0.1 --server.port 18502 --server.baseUrlPath radar-admin --server.headless true --browser.gatherUsageStats false
+UnsetEnvironment=FINANCE_RADAR_ADMIN_TOKEN FINANCE_RADAR_OPERATOR_TOKEN
+ExecStart=/opt/finance-radar/venv/bin/python -B -m streamlit run app/web/Reviewer.py --server.address 127.0.0.1 --server.port 18503 --server.baseUrlPath radar-review --server.headless true --browser.gatherUsageStats false
 Restart=on-failure
 RestartSec=5
 MemoryHigh=160M
@@ -32,5 +33,5 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/finance-radar/shared/data /opt/finance-radar/shared/reports
 
-# Intentionally no [Install] section: operators start this unit manually for a
-# short-lived SSH-tunnel session. It cannot be enabled as a boot-time service.
+# Manual SSH-tunnel session only. No [Install] section means it cannot be
+# enabled as a boot-time service.

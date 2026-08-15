@@ -3,12 +3,18 @@ param(
     [Parameter(Mandatory = $true)][string]$Stamp,
     [Parameter(Mandatory = $true)][string]$ExpectedSha256,
     [Parameter(Mandatory = $true)][string]$RequiredRelease,
-    [string]$SshHost = "ubuntu@18.208.34.152",
-    [string]$IdentityFile = "C:\Users\MR\.ssh1\id_ed25519",
+    [string]$SshHost = $env:FINANCE_RADAR_SSH_HOST,
+    [string]$IdentityFile = $env:FINANCE_RADAR_SSH_IDENTITY_FILE,
     [string]$BackupRoot = "D:\FinanceRadarBackups"
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $SshHost) {
+    throw "SshHost is required; pass -SshHost or set FINANCE_RADAR_SSH_HOST"
+}
+if (-not $IdentityFile) {
+    throw "IdentityFile is required; pass -IdentityFile or set FINANCE_RADAR_SSH_IDENTITY_FILE"
+}
 $remoteUser = ($SshHost -split "@", 2)[0]
 $remotePrivilege = if ($remoteUser -eq "root") { "" } else { "sudo " }
 $releaseIdPattern = '^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$'

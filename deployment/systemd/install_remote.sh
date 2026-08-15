@@ -7,7 +7,7 @@ RELEASE_ID=${2:?release id required}
 EXPECTED_SHA256=${3:?archive sha256 required}
 SOURCE_ENV=${4:-/tmp/finance-radar-source.env}
 RELEASE_MANIFEST=${5:-}
-PUBLIC_WEB_URL=${6:-https://radar.18-208-34-152.sslip.io:8443/radar}
+PUBLIC_WEB_URL=${6:-${FINANCE_RADAR_PUBLIC_WEB_URL:-}}
 BASE=/opt/finance-radar
 RELEASE="$BASE/releases/$RELEASE_ID"
 SHARED="$BASE/shared"
@@ -25,6 +25,10 @@ LEGACY_STATIC_RETIRE_DIR=/etc/nginx/finance-radar-retired
 }
 [[ "$EXPECTED_SHA256" =~ ^[0-9A-Fa-f]{64}$ ]] || {
     printf 'invalid archive sha256\n' >&2
+    exit 2
+}
+[ -n "$PUBLIC_WEB_URL" ] || {
+    printf 'public Web URL is required as argument 6 or FINANCE_RADAR_PUBLIC_WEB_URL\n' >&2
     exit 2
 }
 [[ "$PUBLIC_WEB_URL" =~ ^https://([A-Za-z0-9.-]+)(:([0-9]{1,5}))?/radar/?$ ]] || {
@@ -160,7 +164,7 @@ grant_public_web_runtime_access() {
     chmod 0751 "$BASE/releases" "$RELEASE"
     find "$RELEASE/app" -type d -exec chmod 0755 {} +
     find "$RELEASE/app" -type f -exec chmod 0644 {} +
-    chmod 0644 "$RELEASE/requirements.txt"
+    chmod 0644 "$RELEASE/requirements.txt" "$RELEASE/requirements.lock"
     # Streamlit probes $PWD/.streamlit/secrets.toml even when it is absent.
     # The isolated public UID must traverse the project config directory for
     # that probe and for the public config.toml, but a release must never carry
@@ -642,6 +646,28 @@ require_predeploy_verified_backup() {
             return 1
             ;;
     esac
+    local internal_unit internal_unit_state
+    for internal_unit in finance-radar-reviewer finance-radar-operator; do
+        if systemctl is-active --quiet "$internal_unit"; then
+            printf '%s is active; stop the manual loopback session before backup/cutover\n' "$internal_unit" >&2
+            return 1
+        fi
+        internal_unit_state="$(systemctl show "$internal_unit" --property=UnitFileState --value 2>/dev/null || true)"
+        case "$internal_unit_state" in
+            enabled|enabled-runtime|linked|linked-runtime|alias|indirect|generated)
+                printf '%s is boot-enabled (%s); keep internal UIs disabled before backup/cutover\n' \
+                    "$internal_unit" "$internal_unit_state" >&2
+                return 1
+                ;;
+            disabled|static|masked|masked-runtime|not-found|"")
+                ;;
+            *)
+                printf '%s has an unrecognized unit-file state: %s\n' \
+                    "$internal_unit" "$internal_unit_state" >&2
+                return 1
+                ;;
+        esac
+    done
     local receipt
     # The candidate bridge protects a coordinated ledger + operations recovery
     # point.  A legacy ledger-only SQLite file is useful only for explicit
@@ -803,6 +829,8 @@ ROLLBACK_PATHS=(
     /etc/systemd/system/finance-radar-api.service
     /etc/systemd/system/finance-radar-web.service
     /etc/systemd/system/finance-radar-admin.service
+    /etc/systemd/system/finance-radar-reviewer.service
+    /etc/systemd/system/finance-radar-operator.service
     /etc/systemd/system/finance-radar-worker.service
     /etc/systemd/system/finance-radar-backup.service
     /etc/systemd/system/finance-radar-backup.timer
@@ -1633,12 +1661,21 @@ else
 fi
 chown -R finance-radar:finance-radar "$SHARED/data" "$SHARED/reports"
 
-DIRECT_ENDPOINT_CANDIDATE="$RELEASE/deployment/systemd/nginx-radar-direct.conf"
+DIRECT_ENDPOINT_TEMPLATE="$RELEASE/deployment/systemd/nginx-radar-direct.conf"
+DIRECT_ENDPOINT_CANDIDATE="/tmp/finance-radar-nginx-$RELEASE_ID.conf"
 DIRECT_ENDPOINT_INSTALLER="$RELEASE/deployment/systemd/install_direct_endpoint.sh"
 DIRECT_ENDPOINT_HOOK="$RELEASE/deployment/systemd/certbot-reload-nginx.sh"
-for required_file in "$DIRECT_ENDPOINT_CANDIDATE" "$DIRECT_ENDPOINT_INSTALLER" "$DIRECT_ENDPOINT_HOOK"; do
+for required_file in "$DIRECT_ENDPOINT_TEMPLATE" "$DIRECT_ENDPOINT_INSTALLER" "$DIRECT_ENDPOINT_HOOK"; do
     [ -f "$required_file" ] || abort_cutover "required edge deployment file missing: $required_file" 4
 done
+sed \
+    -e "s/__FINANCE_RADAR_DOMAIN__/$PUBLIC_EDGE_HOST/g" \
+    -e "s/__FINANCE_RADAR_PORT__/$PUBLIC_EDGE_PORT/g" \
+    "$DIRECT_ENDPOINT_TEMPLATE" > "$DIRECT_ENDPOINT_CANDIDATE"
+chmod 0600 "$DIRECT_ENDPOINT_CANDIDATE"
+if grep -Eq '__FINANCE_RADAR_(DOMAIN|PORT)__' "$DIRECT_ENDPOINT_CANDIDATE"; then
+    abort_cutover "versioned Nginx candidate still contains an unresolved placeholder" 4
+fi
 CANDIDATE_SERVER_NAME="$(awk '$1 == "server_name" { sub(/;$/, "", $2); print $2; exit }' "$DIRECT_ENDPOINT_CANDIDATE")"
 [ "$CANDIDATE_SERVER_NAME" = "$PUBLIC_EDGE_HOST" ] || \
     abort_cutover "public Web host does not match the versioned Nginx candidate" 4
@@ -1651,7 +1688,7 @@ if [ ! -x "$BASE/venv/bin/python" ]; then
     python3 -m venv "$BASE/venv"
 fi
 "$BASE/venv/bin/python" -m pip install --upgrade pip
-"$BASE/venv/bin/python" -m pip install -r "$RELEASE/requirements.txt"
+"$BASE/venv/bin/python" -m pip install --require-hashes -r "$RELEASE/requirements.lock"
 # pip runs as root during installation. With the deployment umask, newly
 # installed packages would otherwise be unreadable to the unprivileged service
 # account and could silently force the model into its fallback path.
@@ -1665,6 +1702,8 @@ assert_private_runtime_import_boundary || \
 
 if [ ! -f /etc/finance-radar.env ]; then
     ADMIN_TOKEN=$(openssl rand -hex 32)
+    REVIEWER_TOKEN=$(openssl rand -hex 32)
+    OPERATOR_TOKEN=$(openssl rand -hex 32)
     install -m 0640 -o root -g finance-radar /dev/null /etc/finance-radar.env
     printf '%s\n' \
         'PYTHONUNBUFFERED=1' \
@@ -1678,6 +1717,8 @@ if [ ! -f /etc/finance-radar.env ]; then
         "FINANCE_RADAR_WEB_URL=$PUBLIC_WEB_URL" \
         'FINANCE_RADAR_DEMO_MODE=RECENT_CAPTURE' \
         "FINANCE_RADAR_ADMIN_TOKEN=$ADMIN_TOKEN" \
+        "FINANCE_RADAR_REVIEWER_TOKEN=$REVIEWER_TOKEN" \
+        "FINANCE_RADAR_OPERATOR_TOKEN=$OPERATOR_TOKEN" \
         > /etc/finance-radar.env
 else
     sed -i 's#/opt/finance-radar/current/data#/opt/finance-radar/shared/data#g' /etc/finance-radar.env
@@ -1689,6 +1730,12 @@ else
     if ! grep -q '^FINANCE_RADAR_EVIDENCE_OBJECT_DIR=' /etc/finance-radar.env; then
         printf '%s\n' 'FINANCE_RADAR_EVIDENCE_OBJECT_DIR=/opt/finance-radar/shared/data/evidence_objects' >> /etc/finance-radar.env
     fi
+fi
+if ! grep -q '^FINANCE_RADAR_REVIEWER_TOKEN=' /etc/finance-radar.env; then
+    printf 'FINANCE_RADAR_REVIEWER_TOKEN=%s\n' "$(openssl rand -hex 32)" >> /etc/finance-radar.env
+fi
+if ! grep -q '^FINANCE_RADAR_OPERATOR_TOKEN=' /etc/finance-radar.env; then
+    printf 'FINANCE_RADAR_OPERATOR_TOKEN=%s\n' "$(openssl rand -hex 32)" >> /etc/finance-radar.env
 fi
 if grep -q '^FINANCE_RADAR_RELEASE_ID=' /etc/finance-radar.env; then
     sed -i "s#^FINANCE_RADAR_RELEASE_ID=.*#FINANCE_RADAR_RELEASE_ID=$RELEASE_ID#" \
@@ -1710,6 +1757,8 @@ printf '%s\n' \
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-api.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-web.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-admin.service" /etc/systemd/system/
+install -m 0644 "$RELEASE/deployment/systemd/finance-radar-reviewer.service" /etc/systemd/system/
+install -m 0644 "$RELEASE/deployment/systemd/finance-radar-operator.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-worker.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar.slice" /etc/systemd/system/
 # Keep an operator-installed Telegram sender override, but refresh it from the
@@ -1736,6 +1785,9 @@ assert_bounded_backup_unit || \
 
 if systemctl is-active --quiet finance-radar-admin; then
     abort_cutover 'finance-radar-admin is active; stop the manual loopback session before cutover' 5
+fi
+if systemctl is-active --quiet finance-radar-reviewer finance-radar-operator; then
+    abort_cutover 'a scoped internal UI is active; stop reviewer/operator sessions before cutover' 5
 fi
 if systemctl is-active --quiet finance-radar-backup.service; then
     abort_cutover 'finance-radar-backup.service is active; wait for the verified backup to finish before cutover' 5
@@ -1894,6 +1946,9 @@ assert_public_web_identity_and_boundary || \
 if systemctl is-active --quiet finance-radar-admin; then
     abort_cutover 'finance-radar-admin became active during cutover' 6
 fi
+if systemctl is-active --quiet finance-radar-reviewer finance-radar-operator; then
+    abort_cutover 'a scoped internal UI became active during cutover' 6
+fi
 
 # Treat the public edge as part of the release rather than a follow-up manual
 # step. The candidate installer validates Nginx, reloads it atomically and
@@ -1915,6 +1970,8 @@ assert_public_release_marker || \
 for denied_path in \
     /finance-radar-api/ \
     /radar-admin/ \
+    /radar-review/ \
+    /radar-ops/ \
     /radar/Event_Intelligence \
     '/radar/?_page=Operations_and_Model'; do
     assert_edge_status "$denied_path" 404 || \

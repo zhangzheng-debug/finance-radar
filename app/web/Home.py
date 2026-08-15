@@ -40,6 +40,7 @@ from app.web.components import (
     render_command_palette,
     render_flow_shortcuts,
     render_next_action_prompt,
+    render_saved_public_flow_manager,
     source_health_state,
     terminal_search_state,
 )
@@ -308,6 +309,14 @@ except Exception as exc:
     render_api_error(exc)
     st.stop()
 
+product_quality: dict[str, object] | None = None
+try:
+    product_quality = api_request("/api/v1/product/metrics")
+except Exception:
+    # Product metrics are deliberately non-critical to event browsing. Their
+    # absence stays visible below instead of taking down the evidence feed.
+    product_quality = None
+
 public_timing = overview.get("timing") or {}
 public_worker_age = public_timing.get("latest_worker_success_age_seconds")
 try:
@@ -427,6 +436,59 @@ if UI_ROLE != "admin":
         '查看事件与证据 <span aria-hidden="true">↓</span></a>',
         unsafe_allow_html=True,
     )
+    workspace_cols = st.columns(3, gap="small")
+    workspace_actions = (
+        ("今日新增", {"preview_period": "最近 24 小时", "preview_sort": "latest"}),
+        ("需要关注", {"preview_state": "pending_verification", "preview_sort": "latest"}),
+        ("继续跟进", {"preview_state": "rough_reviewed", "preview_sort": "latest"}),
+    )
+    for column, (label, updates) in zip(workspace_cols, workspace_actions, strict=True):
+        if column.button(label, width="stretch", key=f"public-workspace-{label}"):
+            for key in (
+                "preview_state",
+                "preview_period",
+                "preview_event_id",
+                "preview_page",
+            ):
+                st.query_params.pop(key, None)
+            for key, value in updates.items():
+                st.query_params[key] = value
+            st.rerun()
+    st.caption("三个入口分别回答：今天发生了什么、哪些事实仍待核验、哪些粗审线索需要继续补证。")
+    with st.expander("产品质量指标 · 30 天窗口", expanded=False):
+        if product_quality is None:
+            st.caption("当前无法测量产品质量指标；事件与证据浏览仍可继续。")
+        else:
+            metric_map = {
+                str(item.get("id")): item
+                for item in (product_quality.get("metrics") or [])
+                if isinstance(item, dict)
+            }
+
+            def metric_text(metric_id: str, *, seconds: bool = False) -> str:
+                metric = metric_map.get(metric_id) or {}
+                if metric.get("status") != "MEASURED":
+                    return "未测量"
+                value = metric.get("value")
+                if seconds:
+                    return format_elapsed(value)
+                if metric.get("unit") == "percent":
+                    return f"{float(value or 0):.1f}%"
+                return str(value)
+
+            quality_cols = st.columns(4, gap="small")
+            quality_cols[0].metric("发现延迟 P95", metric_text("capture_latency_p95", seconds=True))
+            quality_cols[1].metric("可引用证据覆盖", metric_text("citable_evidence_coverage"))
+            quality_cols[2].metric("事实闭合率", metric_text("evidence_closure_rate"))
+            quality_cols[3].metric("待复核年龄 P95", metric_text("review_queue_age_p95", seconds=True))
+            unavailable_count = sum(
+                item.get("status") != "MEASURED"
+                for item in metric_map.values()
+            )
+            st.caption(
+                f"样本量与数据源随每项指标返回；{unavailable_count} 项当前明确标记为未测量。"
+                "测试通过数和服务健康不替代用户价值。"
+            )
 
 if UI_ROLE == "admin":
     with st.form("terminal-global-search", border=False):
@@ -445,6 +507,15 @@ if UI_ROLE == "admin":
         if search_state["q"]:
             st.query_params["preview_query"] = search_state["q"]
         st.rerun()
+    render_saved_public_flow_manager(
+        public_state,
+        public_family,
+        preview_query,
+        public_period if public_period != "全部时间" else "",
+        public_sort,
+        public_page_size,
+        source=public_source,
+    )
     status_items = [
         ("待复核", f"{review_queue:,}", "watch" if review_queue else "ok"),
         ("已核验证据", f"{event_status.get('verified', 0):,}", "ok"),

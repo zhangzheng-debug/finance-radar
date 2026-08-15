@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,7 +15,7 @@ import httpx
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BASE = "https://radar.18-208-34-152.sslip.io:8443/finance-radar-api"
+DEFAULT_BASE = os.environ.get("FINANCE_RADAR_AUDIT_API_URL")
 REQUIRED_PROVIDERS = {
     "binance_public": ("PERSISTED_EVENT_OBSERVATION", "SERVER_DIRECT"),
     "twelve_data": ("PERSISTED_EVENT_OBSERVATION", "SERVER_DIRECT"),
@@ -160,7 +161,7 @@ def render_markdown(report: dict[str, Any]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default=DEFAULT_BASE)
+    parser.add_argument("--base-url", default=DEFAULT_BASE, required=DEFAULT_BASE is None)
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument(
         "--json-output",

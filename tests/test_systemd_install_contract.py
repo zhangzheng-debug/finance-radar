@@ -14,6 +14,8 @@ WORKER_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-ra
 WORKER_SEND_OVERRIDE = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-worker-send.conf"
 WEB_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-web.service"
 ADMIN_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-admin.service"
+REVIEWER_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-reviewer.service"
+OPERATOR_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-operator.service"
 ACTIVATOR = Path(__file__).parents[1] / "deployment" / "systemd" / "activate_prepared_restore.sh"
 SLICE_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar.slice"
 LLM_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-evidence-llm.service"
@@ -60,9 +62,16 @@ def test_remote_installer_keeps_venv_readable_by_service_account() -> None:
 
 def test_remote_installer_uses_explicit_current_public_url() -> None:
     source = INSTALLER.read_text(encoding="utf-8")
-    assert "PUBLIC_WEB_URL=${6:-https://radar.18-208-34-152.sslip.io:8443/radar}" in source
+    candidate = (INSTALLER.parent / "nginx-radar-direct.conf").read_text(encoding="utf-8")
+    assert "PUBLIC_WEB_URL=${6:-${FINANCE_RADAR_PUBLIC_WEB_URL:-}}" in source
+    assert "public Web URL is required as argument 6 or FINANCE_RADAR_PUBLIC_WEB_URL" in source
     assert '"FINANCE_RADAR_WEB_URL=$PUBLIC_WEB_URL"' in source
-    assert "radar.167-172-69-16.sslip.io" not in source
+    assert 's/__FINANCE_RADAR_DOMAIN__/$PUBLIC_EDGE_HOST/g' in source
+    assert 's/__FINANCE_RADAR_PORT__/$PUBLIC_EDGE_PORT/g' in source
+    assert "server_name __FINANCE_RADAR_DOMAIN__;" in candidate
+    assert "listen __FINANCE_RADAR_PORT__ ssl;" in candidate
+    assert "/etc/letsencrypt/live/__FINANCE_RADAR_DOMAIN__/" in candidate
+    assert "18.208.34.152" not in source + candidate
 
 
 def test_long_running_units_restart_worker_disable_formal_auto_verify_and_keep_one_bundle() -> None:
@@ -223,6 +232,30 @@ def test_admin_ui_is_manual_loopback_only_and_installed_without_enablement() -> 
     assert "finance-radar-admin" not in enable_line
 
 
+def test_scoped_internal_uis_are_manual_loopback_only_and_mutually_exclusive() -> None:
+    reviewer = REVIEWER_UNIT.read_text(encoding="utf-8")
+    operator = OPERATOR_UNIT.read_text(encoding="utf-8")
+    installer = INSTALLER.read_text(encoding="utf-8")
+    assert "Environment=FINANCE_RADAR_UI_ROLE=reviewer" in reviewer
+    assert "UnsetEnvironment=FINANCE_RADAR_ADMIN_TOKEN FINANCE_RADAR_OPERATOR_TOKEN" in reviewer
+    assert "app/web/Reviewer.py" in reviewer
+    assert "--server.port 18503" in reviewer
+    assert "--server.baseUrlPath radar-review" in reviewer
+    assert "Environment=FINANCE_RADAR_UI_ROLE=operator" in operator
+    assert "UnsetEnvironment=FINANCE_RADAR_ADMIN_TOKEN FINANCE_RADAR_REVIEWER_TOKEN" in operator
+    assert "app/web/Operator.py" in operator
+    assert "--server.port 18504" in operator
+    assert "--server.baseUrlPath radar-ops" in operator
+    for source in (reviewer, operator):
+        assert "\n[Install]\n" not in source
+        assert "MemoryMax=256M" in source
+        assert "Conflicts=" in source
+    assert "FINANCE_RADAR_REVIEWER_TOKEN" in installer
+    assert "FINANCE_RADAR_OPERATOR_TOKEN" in installer
+    assert "finance-radar-reviewer.service" in installer
+    assert "finance-radar-operator.service" in installer
+
+
 def test_restore_recreates_public_environment_and_never_enables_admin() -> None:
     source = ACTIVATOR.read_text(encoding="utf-8")
     assert "install -m 0600 -o finance-radar-web -g finance-radar-web /dev/null /etc/finance-radar-public.env" in source
@@ -244,13 +277,15 @@ def test_restore_recreates_public_environment_and_never_enables_admin() -> None:
     assert 'chmod 0711 "$streamlit_dir"' in source
     assert 'chmod 0644 "$streamlit_dir/config.toml"' in source
     assert 'test -r "$RELEASE/.streamlit/config.toml"' in source
-    public_env_block = source.split("/etc/finance-radar-public.env", 1)[1].split(
+    public_env_block = source.split("# Recreate rather than copy/filter", 1)[1].split(
         "python3 -m venv", 1
     )[0]
     assert "FINANCE_RADAR_API_URL=http://127.0.0.1:18000" in public_env_block
     assert "FINANCE_RADAR_UI_ROLE=public" in public_env_block
     assert "FINANCE_RADAR_SHOW_DEBUG=0" in public_env_block
     assert "FINANCE_RADAR_ADMIN_TOKEN" not in public_env_block
+    assert "FINANCE_RADAR_REVIEWER_TOKEN" not in public_env_block
+    assert "FINANCE_RADAR_OPERATOR_TOKEN" not in public_env_block
     enable_line = next(
         line for line in source.splitlines() if line.startswith("systemctl enable --now finance-radar-api")
     )
@@ -371,6 +406,8 @@ def test_in_place_installer_rolls_back_services_and_edge_on_any_cutover_failure(
     for denied_path in (
         "/finance-radar-api/",
         "/radar-admin/",
+        "/radar-review/",
+        "/radar-ops/",
         "/radar/Event_Intelligence",
         "Operations_and_Model",
     ):
@@ -384,6 +421,7 @@ def test_in_place_installer_requires_a_fresh_verified_backup_before_cutover() ->
 
     assert 'systemctl is-active --quiet finance-radar-admin' in source
     assert 'systemctl show finance-radar-admin --property=UnitFileState --value' in source
+    assert "finance-radar-reviewer finance-radar-operator" in source
     assert 'disabled|static|masked|masked-runtime|not-found|""' in source
     assert 'enabled|enabled-runtime|linked|linked-runtime|alias|indirect|generated' in source
     assert 'systemctl is-active --quiet finance-radar-backup.service' in source

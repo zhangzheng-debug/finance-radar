@@ -28,7 +28,7 @@ FORBIDDEN_NAME_PARTS = (
 )
 SECRET_PATTERNS = (
     re.compile(rb"\b\d{8,12}:[A-Za-z0-9_-]{30,}\b"),
-    re.compile(rb"FINANCE_RADAR_ADMIN_TOKEN\s*=\s*[^\s]+", re.I),
+    re.compile(rb"FINANCE_RADAR_(?:ADMIN|REVIEWER|OPERATOR)_TOKEN\s*=\s*[^\s]+", re.I),
     re.compile(rb"TELEGRAM_(?:BOT_TOKEN|API_HASH)\s*=\s*[^\s]+", re.I),
 )
 EVIDENCE_FILES = (

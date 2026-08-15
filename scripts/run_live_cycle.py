@@ -8,6 +8,8 @@ import datetime as dt
 import json
 import os
 import sys
+import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -60,10 +62,24 @@ from telegram_mtproto_listener import load_dotenv
 DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
 DEFAULT_ENV = ROOT / ".env"
 DEFAULT_REPORT = ROOT / "reports" / "live_cycle_latest.json"
+CYCLE_LEASE_MIN_TTL_SECONDS = 900
+CYCLE_LEASE_RENEW_INTERVAL_SECONDS = 60.0
 
 
-def acquire_cycle_lease(connection: Any, *, ttl_seconds: int = 300) -> str | None:
-    now = dt.datetime.now(dt.timezone.utc)
+def cycle_lease_ttl_seconds(timeout: float) -> int:
+    """Bind the lease to at least twice the outer worker's child timeout."""
+
+    outer_timeout = max(120, int(timeout * 20))
+    return max(CYCLE_LEASE_MIN_TTL_SECONDS, outer_timeout * 2)
+
+
+def acquire_cycle_lease(
+    connection: Any,
+    *,
+    ttl_seconds: int = CYCLE_LEASE_MIN_TTL_SECONDS,
+    now: dt.datetime | None = None,
+) -> str | None:
+    now = now or dt.datetime.now(dt.timezone.utc)
     token = str(uuid.uuid4())
     connection.execute("BEGIN IMMEDIATE")
     try:
@@ -89,11 +105,83 @@ def acquire_cycle_lease(connection: Any, *, ttl_seconds: int = 300) -> str | Non
         raise
 
 
+def renew_cycle_lease(
+    connection: Any,
+    token: str,
+    *,
+    ttl_seconds: int = CYCLE_LEASE_MIN_TTL_SECONDS,
+    now: dt.datetime | None = None,
+) -> bool:
+    reference = now or dt.datetime.now(dt.timezone.utc)
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        cursor = connection.execute(
+            """UPDATE runtime_leases SET expires_at=?
+               WHERE lease_name='live_cycle' AND lease_token=?""",
+            ((reference + dt.timedelta(seconds=ttl_seconds)).isoformat(), token),
+        )
+        connection.commit()
+        return cursor.rowcount == 1
+    except Exception:
+        connection.rollback()
+        raise
+
+
 def release_cycle_lease(connection: Any, token: str) -> None:
     connection.execute(
         "DELETE FROM runtime_leases WHERE lease_name='live_cycle' AND lease_token=?", (token,)
     )
     connection.commit()
+
+
+class CycleLeaseHeartbeat:
+    """Renew the live-cycle lease on a separate SQLite connection."""
+
+    def __init__(
+        self,
+        db_path: Path,
+        token: str,
+        *,
+        ttl_seconds: int,
+        interval_seconds: float = CYCLE_LEASE_RENEW_INTERVAL_SECONDS,
+    ) -> None:
+        self.db_path = db_path
+        self.token = token
+        self.ttl_seconds = ttl_seconds
+        self.interval_seconds = min(max(0.05, interval_seconds), max(0.05, ttl_seconds / 3))
+        self.lost = False
+        self.last_error: str | None = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="finance-radar-cycle-lease",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=max(2.0, self.interval_seconds * 2))
+
+    def _run(self) -> None:
+        connection = open_ledger(self.db_path)
+        try:
+            while not self._stop.wait(self.interval_seconds):
+                try:
+                    if not renew_cycle_lease(
+                        connection,
+                        self.token,
+                        ttl_seconds=self.ttl_seconds,
+                    ):
+                        self.lost = True
+                        return
+                    self.last_error = None
+                except Exception as exc:
+                    self.last_error = f"{type(exc).__name__}: {exc}"
+        finally:
+            connection.close()
 
 
 def load_json(path: Path) -> Any:
@@ -462,11 +550,14 @@ def main() -> int:
     load_dotenv(args.env_file)
     settings = Settings.from_env()
     connection = open_ledger(args.db)
-    lease = acquire_cycle_lease(connection)
+    lease_ttl = cycle_lease_ttl_seconds(args.timeout)
+    lease = acquire_cycle_lease(connection, ttl_seconds=lease_ttl)
     if lease is None:
         connection.close()
         print("live_cycle=skipped reason=lease_held")
         return 3
+    heartbeat = CycleLeaseHeartbeat(args.db, lease, ttl_seconds=lease_ttl)
+    heartbeat.start()
     try:
         operations = OperationsRepository(settings.operations_db)
         evidence_object_store = EvidenceObjectStore(settings.evidence_object_dir)
@@ -499,8 +590,13 @@ def main() -> int:
             evidence_agent=evidence_agent,
         )
     finally:
+        heartbeat.stop()
         release_cycle_lease(connection, lease)
         connection.close()
+    if heartbeat.lost:
+        result.setdefault("errors", []).append("live_cycle_lease_lost")
+    elif heartbeat.last_error:
+        result["lease_heartbeat_warning"] = heartbeat.last_error
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(stable_json(result))

@@ -114,7 +114,7 @@ sudo deployment/systemd/install_remote.sh \
   "$ARCHIVE_SHA256" \
   /tmp/finance-radar-source.env \
   "/tmp/$RELEASE_ID.release-manifest.json" \
-  "https://radar.18-208-34-152.sslip.io:8443/radar"
+  "https://YOUR_DOMAIN:8443/radar"
 ```
 
 Place `<release-id>.release-records.SHA256` beside the JSON manifest. When the

@@ -8,6 +8,7 @@ import streamlit as st
 
 from app.web.common import (
     SHOW_DEBUG,
+    UI_ROLE,
     api_request,
     header,
     install_style,
@@ -15,7 +16,7 @@ from app.web.common import (
     query_path,
     render_api_error,
     render_primary_navigation,
-    require_admin_ui,
+    require_ui_role,
     restore_deep_link,
     section_header,
 )
@@ -41,7 +42,7 @@ from app.web.components import (
 
 st.set_page_config(page_title="事件工作台 · Finance Radar", page_icon="◇", layout="wide")
 install_style()
-require_admin_ui()
+require_ui_role("reviewer", "admin")
 restore_deep_link("Event_Intelligence")
 render_primary_navigation("events")
 
@@ -455,7 +456,7 @@ with context_col:
         except Exception as exc:
             st.error(str(exc))
 
-    if workflow_status in {"verified", "rejected"}:
+    if UI_ROLE == "admin" and workflow_status in {"verified", "rejected"}:
         with st.expander("有新增或修订证据时重新取证（受控写入）", expanded=False):
             st.caption(
                 "当前已有正式结论。重新运行会写入新的代理审计与关联证据记录，"
@@ -471,7 +472,7 @@ with context_col:
                         st.warning("请先确认确有新增或修订证据，避免对已完成结论重复写入。")
                     else:
                         run_evidence_agent(evidence_change_confirmed=True)
-    else:
+    elif UI_ROLE == "admin":
         with st.form(f"run-evidence-agent-{selected_id}"):
             st.caption("运行会写入可追溯的代理审计和关联证据记录，不会改写事件结论，也不触发交易。")
             audit_write_confirmed = st.checkbox(
@@ -483,6 +484,9 @@ with context_col:
                     st.warning("请先确认本次受控写入的用途。")
                 else:
                     run_evidence_agent(evidence_change_confirmed=False)
+
+    if UI_ROLE == "reviewer":
+        st.caption("证据代理运行属于 Operator/Admin 权限；Reviewer 只核对证据并记录人工判断。")
 
     if decisions:
         latest = decisions[0]

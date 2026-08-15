@@ -9,6 +9,18 @@ from app.ops.backup import create_and_verify
 from app.storage import OperationsRepository
 
 
+def run_once(settings: Settings, *, retention: int, weekly_retention: int) -> dict:
+    operations = OperationsRepository(settings.operations_db)
+    backup_dir = settings.ledger_db.parent / "operational_backups"
+    return create_and_verify(
+        settings.ledger_db,
+        backup_dir,
+        operations,
+        retention=retention,
+        weekly_retention=weekly_retention,
+    )
+
+
 def main() -> int:
     settings = Settings.from_env()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -21,15 +33,11 @@ def main() -> int:
     )
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
-    operations = OperationsRepository(settings.operations_db)
-    backup_dir = settings.ledger_db.parent / "operational_backups"
     exit_code = 0
     while True:
         try:
-            result = create_and_verify(
-                settings.ledger_db,
-                backup_dir,
-                operations,
+            result = run_once(
+                settings,
                 retention=args.retention,
                 weekly_retention=args.weekly_retention,
             )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -67,6 +68,57 @@ class LiveCycleLeaseTests(unittest.TestCase):
             self.assertIsNotNone(second)
             cycle.release_cycle_lease(connection, second)
             connection.close()
+
+    def test_lease_ttl_covers_twice_the_outer_worker_timeout(self) -> None:
+        self.assertEqual(cycle.cycle_lease_ttl_seconds(30), 1200)
+        self.assertEqual(cycle.cycle_lease_ttl_seconds(5), 900)
+
+    def test_cycle_lease_can_be_renewed_by_its_current_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            connection = open_ledger(Path(directory) / "db.sqlite3")
+            start = cycle.dt.datetime(2026, 8, 15, tzinfo=cycle.dt.timezone.utc)
+            token = cycle.acquire_cycle_lease(connection, ttl_seconds=10, now=start)
+            self.assertIsNotNone(token)
+            self.assertTrue(
+                cycle.renew_cycle_lease(
+                    connection,
+                    token,
+                    ttl_seconds=10,
+                    now=start + cycle.dt.timedelta(seconds=8),
+                )
+            )
+            self.assertIsNone(
+                cycle.acquire_cycle_lease(
+                    connection,
+                    ttl_seconds=10,
+                    now=start + cycle.dt.timedelta(seconds=11),
+                )
+            )
+            cycle.release_cycle_lease(connection, token)
+            connection.close()
+
+    def test_lease_heartbeat_keeps_a_long_cycle_single_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "db.sqlite3"
+            connection = open_ledger(db_path)
+            token = cycle.acquire_cycle_lease(connection, ttl_seconds=1)
+            self.assertIsNotNone(token)
+            heartbeat = cycle.CycleLeaseHeartbeat(
+                db_path,
+                token,
+                ttl_seconds=1,
+                interval_seconds=0.05,
+            )
+            heartbeat.start()
+            try:
+                time.sleep(1.2)
+                self.assertIsNone(cycle.acquire_cycle_lease(connection, ttl_seconds=1))
+                self.assertFalse(heartbeat.lost)
+                self.assertIsNone(heartbeat.last_error)
+            finally:
+                heartbeat.stop()
+                cycle.release_cycle_lease(connection, token)
+                connection.close()
 
     def test_light_followup_with_evidence_advances_to_human_review_without_touching_other_jobs(self) -> None:
         class ExistingDecisionOperations:

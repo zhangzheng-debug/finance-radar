@@ -17,9 +17,13 @@ class Settings:
     replay_dir: Path = ROOT / "replay" / "cases"
     demo_mode: str = "RECENT_CAPTURE"
     admin_token: str | None = None
+    reviewer_token: str | None = None
+    operator_token: str | None = None
     api_base_url: str = "http://127.0.0.1:8000"
     web_base_url: str = "http://127.0.0.1:8501"
     api_rate_limit_per_minute: int = 180
+    api_rate_limit_max_clients: int = 4096
+    api_trusted_proxy_hosts: tuple[str, ...] = ("127.0.0.1", "::1")
     evidence_llm_url: str | None = None
     evidence_llm_model: str = "qwen2.5-0.5b-instruct-q4_k_m"
     evidence_llm_timeout_seconds: float = 30.0
@@ -37,11 +41,25 @@ class Settings:
             replay_dir=Path(os.getenv("FINANCE_RADAR_REPLAY_DIR", cls.replay_dir)).resolve(),
             demo_mode=os.getenv("FINANCE_RADAR_DEMO_MODE", "RECENT_CAPTURE").upper(),
             admin_token=os.getenv("FINANCE_RADAR_ADMIN_TOKEN") or None,
+            reviewer_token=os.getenv("FINANCE_RADAR_REVIEWER_TOKEN") or None,
+            operator_token=os.getenv("FINANCE_RADAR_OPERATOR_TOKEN") or None,
             api_base_url=os.getenv("FINANCE_RADAR_API_URL", "http://127.0.0.1:8000").rstrip("/"),
             web_base_url=os.getenv("FINANCE_RADAR_WEB_URL", "http://127.0.0.1:8501").rstrip("/"),
             api_rate_limit_per_minute=max(
                 0,
                 int(os.getenv("FINANCE_RADAR_API_RATE_LIMIT_PER_MINUTE", "180")),
+            ),
+            api_rate_limit_max_clients=max(
+                1,
+                int(os.getenv("FINANCE_RADAR_API_RATE_LIMIT_MAX_CLIENTS", "4096")),
+            ),
+            api_trusted_proxy_hosts=tuple(
+                host.strip()
+                for host in os.getenv(
+                    "FINANCE_RADAR_API_TRUSTED_PROXY_HOSTS",
+                    "127.0.0.1,::1",
+                ).split(",")
+                if host.strip()
             ),
             evidence_llm_url=os.getenv("FINANCE_RADAR_EVIDENCE_LLM_URL") or None,
             evidence_llm_model=os.getenv(

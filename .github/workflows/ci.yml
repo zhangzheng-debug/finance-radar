@@ -40,6 +40,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - run: python scripts/verify_dependency_locks.py
       - name: Guard high-confidence secrets and trading write routes
         shell: bash
         run: |
@@ -69,7 +70,8 @@ jobs:
                       rb"(?m)^[ \t]*['\"]?(?:export[ \t]+)?(?:TELEGRAM_BOT_TOKEN|TELEGRAM_API_HASH|API_SECRET|API_HASH|"
                       rb"AWS_SECRET_ACCESS_KEY|CLOUDFLARE_API_TOKEN|OPENAI_API_KEY|GITHUB_TOKEN|"
                       rb"TWELVE_DATA_API_KEY|MARKETAUX_API_TOKEN|APCA_API_KEY_ID|"
-                      rb"APCA_API_SECRET_KEY|FINANCE_RADAR_ADMIN_TOKEN)[ \t]*=[ \t]*['\"]?([^\s'\"#]+)"
+                      rb"APCA_API_SECRET_KEY|FINANCE_RADAR_ADMIN_TOKEN|FINANCE_RADAR_REVIEWER_TOKEN|"
+                      rb"FINANCE_RADAR_OPERATOR_TOKEN)[ \t]*=[ \t]*['\"]?([^\s'\"#]+)"
                   ),
               ),
           )
@@ -158,6 +160,6 @@ jobs:
               raise SystemExit(1)
           print("repository safety gate passed")
           PY
-      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pip install --require-hashes -r requirements-dev.lock
       - run: python -m compileall -q app scripts tests
       - run: pytest -q --cov=app --cov=scripts --cov-report=term-missing --cov-report=xml

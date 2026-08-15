@@ -137,6 +137,42 @@ def test_admin_api_request_can_attach_configured_token(monkeypatch) -> None:
     assert captured[0].get_header("X-admin-token") == "internal-only"
 
 
+@pytest.mark.parametrize(
+    ("role", "token_name", "header_name", "path", "method"),
+    [
+        ("reviewer", "REVIEWER_TOKEN", "X-reviewer-token", "/api/v1/events/e1/human-override", "POST"),
+        ("operator", "OPERATOR_TOKEN", "X-operator-token", "/api/v1/events/e1/agent/run", "POST"),
+    ],
+)
+def test_scoped_ui_attaches_only_its_own_token(
+    monkeypatch, role: str, token_name: str, header_name: str, path: str, method: str
+) -> None:
+    captured: list[object] = []
+
+    def fake_urlopen(request: object, *, timeout: int) -> _JsonResponse:
+        captured.append(request)
+        return _JsonResponse()
+
+    monkeypatch.setattr(web_common, "UI_ROLE", role)
+    monkeypatch.setattr(web_common, token_name, "scoped-secret")
+    monkeypatch.setattr(web_common, "ADMIN_TOKEN", "must-stay-private")
+    monkeypatch.setattr(web_common.urllib.request, "urlopen", fake_urlopen)
+    assert api_request(path, method=method) == {"ok": True}
+    assert captured[0].get_header(header_name) == "scoped-secret"
+    assert captured[0].get_header("X-admin-token") is None
+
+
+def test_reviewer_cannot_run_operator_action_before_network(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "reviewer")
+    monkeypatch.setattr(
+        web_common.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("cross-role write reached the network"),
+    )
+    with pytest.raises(ApiError, match="角色不允许"):
+        api_request("/api/v1/events/e1/agent/run", method="POST")
+
+
 def test_public_api_rejects_writes_before_network_access(monkeypatch) -> None:
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(

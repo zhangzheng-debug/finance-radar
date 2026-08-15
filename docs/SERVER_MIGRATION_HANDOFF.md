@@ -128,8 +128,9 @@ Accepted result: `AUDIT_ONLY_PASS` and `PREPARED_NOT_ACTIVATED`.
 
 ## Activate only on the replacement VPS
 
-Do not run this against the current `167.172.69.16` server. The orchestrator
-blocks that IP unless explicitly overridden and refuses a non-empty target.
+Do not run this against the retired historical `167.172.69.16` server. The
+orchestrator keeps that address on a denylist unless explicitly overridden and
+refuses a non-empty target. This address is not a statement of current hosting.
 
 Provision a clean x86_64 systemd host first. On Ubuntu/Debian the minimum tools
 are `python3`, `python3-venv`, `tar`, `curl`, `nginx`, `certbot`,

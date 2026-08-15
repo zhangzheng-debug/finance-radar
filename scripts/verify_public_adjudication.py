@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -122,11 +123,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--api-base",
-        default="https://radar.18-208-34-152.sslip.io:8443/finance-radar-api",
+        default=os.environ.get("FINANCE_RADAR_AUDIT_API_URL"),
+        required=os.environ.get("FINANCE_RADAR_AUDIT_API_URL") is None,
     )
     parser.add_argument(
         "--web-url",
-        default="https://radar.18-208-34-152.sslip.io:8443/radar/Adjudication_Studio",
+        default=os.environ.get("FINANCE_RADAR_REVIEWER_WEB_URL"),
+        required=os.environ.get("FINANCE_RADAR_REVIEWER_WEB_URL") is None,
     )
     parser.add_argument(
         "--diagnostics",

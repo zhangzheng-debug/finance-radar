@@ -161,7 +161,10 @@ def inspect_plain_archive(
     required = {
         f"releases/{expected_release}/app/api/main.py",
         f"releases/{expected_release}/app/web/Home.py",
+        f"releases/{expected_release}/app/web/Reviewer.py",
+        f"releases/{expected_release}/app/web/Operator.py",
         f"releases/{expected_release}/requirements.txt",
+        f"releases/{expected_release}/requirements.lock",
         "shared/data/finance_radar.sqlite3",
         "shared/data/finance_radar_operations.sqlite3",
         "config/etc/finance-radar.env",

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$SshHost = "",
-    [string]$IdentityFile = "C:\Users\MR\.ssh1\id_ed25519",
+    [string]$SshHost = $env:FINANCE_RADAR_SSH_HOST,
+    [string]$IdentityFile = $env:FINANCE_RADAR_SSH_IDENTITY_FILE,
     [Parameter(Mandatory = $true)]
     [string]$EncryptedArchive,
     [string]$PassphraseFile = "",
@@ -12,8 +12,7 @@ param(
     [ValidatePattern('^[0-9a-fA-F]{64}$')]
     [string]$ExpectedSha256,
     [string]$PublicWebUrl = "",
-    [switch]$Activate,
-    [switch]$AllowCurrentServer
+    [switch]$Activate
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,7 +32,9 @@ if (-not $PassphraseFile) {
     }
 }
 $PassphraseFile = [System.IO.Path]::GetFullPath($PassphraseFile)
-$IdentityFile = [System.IO.Path]::GetFullPath($IdentityFile)
+if ($IdentityFile) {
+    $IdentityFile = [System.IO.Path]::GetFullPath($IdentityFile)
+}
 
 if (-not (Test-Path -LiteralPath $EncryptedArchive -PathType Leaf)) {
     throw "encrypted migration archive not found: $EncryptedArchive"
@@ -45,8 +46,8 @@ if ($Activate) {
     if (-not $SshHost -or $SshHost -notmatch '^(?:[A-Za-z0-9_.-]+@)?[A-Za-z0-9_.-]+$') {
         throw "a simple user@host SSH target is required for activation"
     }
-    if ($SshHost -match '(^|@)167\.172\.69\.16$' -and -not $AllowCurrentServer) {
-        throw "refusing the current VPS; activation is only for a clean replacement host"
+    if (-not $IdentityFile) {
+        throw "IdentityFile is required for activation; pass it or set FINANCE_RADAR_SSH_IDENTITY_FILE"
     }
     if (-not (Test-Path -LiteralPath $IdentityFile -PathType Leaf)) {
         throw "SSH identity not found: $IdentityFile"

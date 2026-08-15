@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import ssl
 import sys
@@ -15,8 +16,8 @@ import httpx
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BASE = "https://radar.18-208-34-152.sslip.io:8443/finance-radar-api"
-DEFAULT_WEB = "https://radar.18-208-34-152.sslip.io:8443/radar"
+DEFAULT_BASE = os.environ.get("FINANCE_RADAR_AUDIT_API_URL")
+DEFAULT_WEB = os.environ.get("FINANCE_RADAR_PUBLIC_WEB_URL")
 FORBIDDEN_ROUTE_TERMS = ("orders", "positions", "balances", "brokerage", "trade_execution")
 
 
@@ -223,8 +224,8 @@ def collect(base_url: str, web_url: str, timeout: float) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Collect a reproducible live acceptance snapshot.")
-    parser.add_argument("--base-url", default=DEFAULT_BASE)
-    parser.add_argument("--web-url", default=DEFAULT_WEB)
+    parser.add_argument("--base-url", default=DEFAULT_BASE, required=DEFAULT_BASE is None)
+    parser.add_argument("--web-url", default=DEFAULT_WEB, required=DEFAULT_WEB is None)
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--output", type=Path, default=ROOT / "reports" / "product_acceptance_live_latest.json")
     args = parser.parse_args()

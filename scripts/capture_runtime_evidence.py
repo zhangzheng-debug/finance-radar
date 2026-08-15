@@ -16,7 +16,7 @@ import httpx
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_API = "https://radar.18-208-34-152.sslip.io:8443/finance-radar-api"
+DEFAULT_API = os.environ.get("FINANCE_RADAR_AUDIT_API_URL")
 
 
 def utc_now() -> datetime:
@@ -233,7 +233,7 @@ def capture_once(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--api-base", default=DEFAULT_API)
+    parser.add_argument("--api-base", default=DEFAULT_API, required=DEFAULT_API is None)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "reports" / "runtime_evidence")
     parser.add_argument("--known-last-non-success")
     args = parser.parse_args()

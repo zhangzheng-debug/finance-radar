@@ -118,6 +118,23 @@ class ProductLayerTests(unittest.TestCase):
         self.assertEqual(source["cursor_status"], "STATIC_IMPORTED")
         self.assertIsNotNone(source["last_success_at"])
 
+    def test_product_metrics_report_samples_and_unavailable_states_honestly(self) -> None:
+        report = LedgerRepository(self.ledger_path).product_metrics(window_days=30)
+        metrics = {item["id"]: item for item in report["metrics"]}
+        self.assertEqual(report["window"]["days"], 30)
+        self.assertTrue(report["engineering_health_is_not_product_quality"])
+        self.assertEqual(metrics["citable_evidence_coverage"]["status"], "MEASURED")
+        self.assertEqual(metrics["citable_evidence_coverage"]["value"], 100.0)
+        self.assertEqual(metrics["evidence_closure_rate"]["value"], 100.0)
+        self.assertEqual(metrics["boundary_violations"]["value"], 0.0)
+        self.assertEqual(metrics["formal_conclusion_accuracy"]["status"], "UNAVAILABLE")
+        self.assertIn("human", metrics["formal_conclusion_accuracy"]["source"])
+
+        with TestClient(create_app(self.settings)) as client:
+            response = client.get("/api/v1/product/metrics?window_days=30")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["window"]["days"], 30)
+
     def test_overview_separates_rough_reviewed_from_pending_review(self) -> None:
         connection = open_ledger(self.ledger_path)
         now = utc_now()
@@ -247,7 +264,10 @@ class ProductLayerTests(unittest.TestCase):
             self.assertEqual(market.status_code, 200)
             self.assertEqual(len(market.json()["data"]["providers"]), 3)
             self.assertTrue(market.json()["data"]["boundary"]["read_only"])
-            archive = client.get("/api/v1/evidence/archive")
+            archive = client.get(
+                "/api/v1/evidence/archive",
+                headers={"X-Admin-Token": "test-secret"},
+            )
             self.assertEqual(archive.status_code, 200)
             self.assertTrue(archive.json()["data"]["policy"]["immutable"])
             self.assertIn("coverage", archive.json()["data"])
@@ -284,7 +304,43 @@ class ProductLayerTests(unittest.TestCase):
         with TestClient(create_app(settings)) as client:
             response = client.post("/api/v1/replays/positive_earnings_non_target/run")
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["error"]["code"], "ADMIN_MUTATIONS_DISABLED")
+        self.assertEqual(response.json()["error"]["code"], "OPERATOR_MUTATIONS_DISABLED")
+
+    def test_reviewer_and_operator_tokens_enforce_distinct_capabilities(self) -> None:
+        settings = replace(
+            self.settings,
+            reviewer_token="review-secret",
+            operator_token="operate-secret",
+        )
+        with TestClient(create_app(settings)) as client:
+            reviewer_headers = {"X-Reviewer-Token": "review-secret"}
+            operator_headers = {"X-Operator-Token": "operate-secret"}
+
+            self.assertEqual(
+                client.get("/api/v1/events/evt-1/trace", headers=reviewer_headers).status_code,
+                200,
+            )
+            self.assertEqual(
+                client.get("/api/v1/adjudication/status", headers=reviewer_headers).status_code,
+                200,
+            )
+            self.assertEqual(
+                client.get("/api/v1/model/status", headers=reviewer_headers).status_code,
+                403,
+            )
+
+            self.assertEqual(
+                client.get("/api/v1/model/status", headers=operator_headers).status_code,
+                200,
+            )
+            self.assertEqual(
+                client.get("/api/v1/evidence/archive", headers=operator_headers).status_code,
+                200,
+            )
+            self.assertEqual(
+                client.get("/api/v1/events/evt-1/trace", headers=operator_headers).status_code,
+                403,
+            )
 
     def test_structured_evidence_agent_persists_trace_objects_and_override(self) -> None:
         with TestClient(create_app(self.settings)) as client:
@@ -324,13 +380,19 @@ class ProductLayerTests(unittest.TestCase):
             )
             self.assertEqual(override.status_code, 200)
             self.assertTrue(override.json()["data"]["no_trading"])
-            trace = client.get("/api/v1/events/evt-1/trace").json()["data"]
+            trace = client.get(
+                "/api/v1/events/evt-1/trace",
+                headers={"X-Admin-Token": "test-secret"},
+            ).json()["data"]
             self.assertEqual(len(trace["agent_decisions"]), 1)
             self.assertEqual(len(trace["human_overrides"]), 1)
             self.assertEqual(len(trace["evidence_objects"]), 1)
             self.assertEqual(trace["evidence_objects"][0]["object_kind"], "EXACT_EXCERPT")
             self.assertTrue(trace["evidence_objects"][0]["integrity_verified"])
-            archive = client.get("/api/v1/evidence/archive").json()["data"]
+            archive = client.get(
+                "/api/v1/evidence/archive",
+                headers={"X-Admin-Token": "test-secret"},
+            ).json()["data"]
             self.assertEqual(archive["exact_excerpts"], 1)
             self.assertEqual(archive["source_snapshots"], 0)
             self.assertEqual(archive["integrity_failures_in_recent_sample"], 0)
@@ -386,7 +448,10 @@ class ProductLayerTests(unittest.TestCase):
                 error["details"]["decision_event_version"],
                 error["details"]["current_event_version"],
             )
-            trace = client.get("/api/v1/events/evt-1/trace").json()["data"]
+            trace = client.get(
+                "/api/v1/events/evt-1/trace",
+                headers={"X-Admin-Token": "test-secret"},
+            ).json()["data"]
             self.assertEqual(trace["human_overrides"], [])
 
     def test_evidence_agent_requires_explicit_audit_write_confirmation(self) -> None:
@@ -527,6 +592,63 @@ class ProductLayerTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 429)
         self.assertEqual(blocked.headers["Retry-After"], "60")
         self.assertEqual(blocked.json()["error"]["code"], "RATE_LIMITED")
+
+    def test_untrusted_forwarded_for_cannot_create_fresh_rate_buckets(self) -> None:
+        settings = replace(self.settings, api_rate_limit_per_minute=2)
+        application = create_app(settings)
+        with TestClient(application, client=("198.51.100.20", 50000)) as client:
+            first = client.get("/api/v1/health", headers={"X-Forwarded-For": "203.0.113.1"})
+            second = client.get("/api/v1/health", headers={"X-Forwarded-For": "203.0.113.2"})
+            blocked = client.get("/api/v1/health", headers={"X-Forwarded-For": "203.0.113.3"})
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(blocked.status_code, 429)
+        self.assertEqual(list(application.state.rate_buckets), ["198.51.100.20"])
+
+    def test_trusted_proxy_uses_only_a_valid_x_real_ip(self) -> None:
+        settings = replace(
+            self.settings,
+            api_rate_limit_per_minute=1,
+            api_trusted_proxy_hosts=("127.0.0.1",),
+        )
+        with TestClient(create_app(settings), client=("127.0.0.1", 50000)) as client:
+            first = client.get("/api/v1/health", headers={"X-Real-IP": "203.0.113.10"})
+            blocked = client.get(
+                "/api/v1/health",
+                headers={"X-Real-IP": "203.0.113.10", "X-Forwarded-For": "198.51.100.8"},
+            )
+            other = client.get("/api/v1/health", headers={"X-Real-IP": "203.0.113.11"})
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(blocked.status_code, 429)
+        self.assertEqual(other.status_code, 200)
+
+    def test_rate_bucket_cardinality_has_a_hard_memory_bound(self) -> None:
+        settings = replace(
+            self.settings,
+            api_rate_limit_per_minute=100,
+            api_rate_limit_max_clients=8,
+            api_trusted_proxy_hosts=("127.0.0.1",),
+        )
+        application = create_app(settings)
+        with TestClient(application, client=("127.0.0.1", 50000)) as client:
+            for suffix in range(1, 33):
+                response = client.get(
+                    "/api/v1/health",
+                    headers={"X-Real-IP": f"198.51.100.{suffix}"},
+                )
+                self.assertEqual(response.status_code, 200)
+        self.assertEqual(application.state.rate_bucket_limit, 8)
+        self.assertLessEqual(len(application.state.rate_buckets), 8)
+
+    def test_admin_token_authentication_uses_constant_time_comparison(self) -> None:
+        with patch("app.api.main.secrets.compare_digest", return_value=False) as compare:
+            with TestClient(create_app(self.settings)) as client:
+                response = client.post(
+                    "/api/v1/replays/missing/run",
+                    headers={"X-Admin-Token": "wrong"},
+                )
+        self.assertEqual(response.status_code, 403)
+        compare.assert_called_once_with("wrong", "test-secret")
 
     def test_router_abstains_routes_positive_and_flags_downside(self) -> None:
         router = RiskRouter(Path(self.temp_dir.name) / "missing.joblib")

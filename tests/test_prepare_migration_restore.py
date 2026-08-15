@@ -41,7 +41,10 @@ def _plain_fixture(
     _write(root / "CURRENT_RELEASE.txt", f"/opt/finance-radar/releases/{RELEASE}\n")
     _write(release / "app/api/main.py", "app = 'api'\n")
     _write(release / "app/web/Home.py", "page = 'home'\n")
+    _write(release / "app/web/Reviewer.py", "page = 'reviewer'\n")
+    _write(release / "app/web/Operator.py", "page = 'operator'\n")
     _write(release / "requirements.txt", "fastapi\n")
+    _write(release / "requirements.lock", "fastapi==1.0 --hash=sha256:fixture\n")
     _write(root / "shared/data/finance_radar.sqlite3", b"ledger")
     _write(root / "shared/data/finance_radar_operations.sqlite3", b"operations")
     _write(root / "shared/reports/status.md", "verified\n")
@@ -362,13 +365,15 @@ def test_activation_script_has_explicit_gates_and_stops_before_nginx() -> None:
     assert "nginx_tls=pending" in script
 
 
-def test_windows_cutover_orchestrator_defaults_to_audit_only_and_blocks_current_vps() -> None:
+def test_windows_cutover_orchestrator_defaults_to_audit_only_and_requires_explicit_target() -> None:
     script = (
         Path(__file__).resolve().parents[1] / "scripts" / "restore_migration_to_vps.ps1"
     ).read_text(encoding="utf-8")
     assert "if (-not $Activate)" in script
     assert "AUDIT_ONLY_PASS" in script
-    assert "refusing the current VPS" in script
+    assert "IdentityFile is required for activation" in script
+    assert "FINANCE_RADAR_SSH_HOST" in script
+    assert "167.172.69.16" not in script
     assert "replacement VPS is not clean" in script
     assert "replacement_vps_preflight.py" in script
     assert "--require-edge-tools" in script

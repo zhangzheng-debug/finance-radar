@@ -36,7 +36,9 @@ HIGH_CONFIDENCE_SECRET_PATTERNS: tuple[re.Pattern[bytes], ...] = (
     re.compile(rb"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(rb"\b(?:ghp_|github_pat_)[A-Za-z0-9_]{20,}\b"),
     re.compile(rb"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b"),
-    re.compile(rb"FINANCE_RADAR_ADMIN_TOKEN\s*=\s*['\"]?[0-9A-Fa-f]{32,}"),
+    re.compile(
+        rb"FINANCE_RADAR_(?:ADMIN|REVIEWER|OPERATOR)_TOKEN\s*=\s*['\"]?[0-9A-Fa-f]{32,}"
+    ),
     re.compile(rb"\b\d{8,12}:[A-Za-z0-9_-]{30,}\b"),
 )
 
@@ -45,6 +47,8 @@ HIGH_CONFIDENCE_SECRET_PATTERNS: tuple[re.Pattern[bytes], ...] = (
 # bound to the release without enumerating unrelated or secret local files.
 DEFAULT_CRITICAL_FILES: tuple[str, ...] = (
     "requirements.txt",
+    "requirements.lock",
+    "dependency-lock.json",
     "app/api/main.py",
     "app/ops/backup.py",
     "app/config.py",
@@ -57,6 +61,8 @@ DEFAULT_CRITICAL_FILES: tuple[str, ...] = (
     "app/workers/continuous.py",
     "app/web/Home.py",
     "app/web/Admin.py",
+    "app/web/Reviewer.py",
+    "app/web/Operator.py",
     "app/web/common.py",
     "app/web/components.py",
     "app/web/design_tokens_v3.css",
@@ -72,6 +78,8 @@ DEFAULT_CRITICAL_FILES: tuple[str, ...] = (
     "deployment/systemd/finance-radar-api.service",
     "deployment/systemd/finance-radar-web.service",
     "deployment/systemd/finance-radar-admin.service",
+    "deployment/systemd/finance-radar-reviewer.service",
+    "deployment/systemd/finance-radar-operator.service",
     "deployment/systemd/finance-radar-worker.service",
     "deployment/systemd/finance-radar-worker-send.conf",
     "deployment/systemd/finance-radar-backup.service",
