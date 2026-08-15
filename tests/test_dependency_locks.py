@@ -30,7 +30,28 @@ def test_dependency_lock_verifier_detects_input_drift(tmp_path: Path) -> None:
     assert any("hash mismatch: requirements.txt" in item for item in report["failures"])
 
 
+def test_dependency_lock_verifier_accepts_equivalent_crlf_checkout(tmp_path: Path) -> None:
+    for name in (
+        "dependency-lock.json",
+        "requirements.txt",
+        "requirements-dev.txt",
+        "requirements.lock",
+        "requirements-dev.lock",
+    ):
+        data = (ROOT / name).read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        if name != "dependency-lock.json":
+            data = data.replace(b"\n", b"\r\n")
+        (tmp_path / name).write_bytes(data)
+
+    report = verify(tmp_path)
+
+    assert report["status"] == "PASS", report
+
+
 def test_dependency_lock_metadata_declares_supported_python() -> None:
     metadata = json.loads((ROOT / "dependency-lock.json").read_text(encoding="utf-8"))
+    assert metadata["schema_version"] == 2
     assert metadata["python_version"] == "3.12"
     assert metadata["resolver"] == "uv 0.12.1"
+    assert metadata["digest_algorithm"] == "sha256-canonical-text-v1"
+    assert metadata["text_normalization"] == "crlf-and-cr-to-lf"

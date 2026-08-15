@@ -47,7 +47,9 @@ HIGH_CONFIDENCE_SECRET_PATTERNS: tuple[re.Pattern[bytes], ...] = (
 # bound to the release without enumerating unrelated or secret local files.
 DEFAULT_CRITICAL_FILES: tuple[str, ...] = (
     "requirements.txt",
+    "requirements-dev.txt",
     "requirements.lock",
+    "requirements-dev.lock",
     "dependency-lock.json",
     "app/api/main.py",
     "app/ops/backup.py",
@@ -105,6 +107,7 @@ DEFAULT_CRITICAL_FILES: tuple[str, ...] = (
     "scripts/restore_migration_to_vps.ps1",
     "scripts/release_audit.py",
     "scripts/release_identity.py",
+    "scripts/verify_dependency_locks.py",
 )
 
 

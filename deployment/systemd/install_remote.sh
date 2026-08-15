@@ -260,6 +260,15 @@ else
     printf 'release_manifest=not_supplied\n'
 fi
 
+# Verify the dependency input/lock binding from the extracted candidate itself.
+# This catches platform line-ending conversions and stale metadata before any
+# backup, shared-data migration, package installation or service cutover.
+python3 "$RELEASE/scripts/verify_dependency_locks.py" || {
+    printf 'candidate dependency lock verification failed\n' >&2
+    exit 4
+}
+printf 'dependency_lock=verified\n'
+
 # Mandatory recovery gates. A code/config rollback without a fresh recovery
 # point is not a safe cutover.  The first release on an older host is allowed
 # to bridge a legacy, verified ledger-only SQLite snapshot, but it must finish

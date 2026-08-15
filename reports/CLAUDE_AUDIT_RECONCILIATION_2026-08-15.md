@@ -33,7 +33,7 @@
 - 日期、限流、令牌、版本、Nginx 与 Worker 定向回归：通过；
 - 发布/迁移/恢复契约定向回归：通过；
 - 依赖输入和两个 lock 的 SHA-256 绑定校验：通过；
-- Python 3.12 锁定环境位于 D 盘，完整回归为 `660 passed, 5 skipped, 20 subtests passed`；
+- Python 3.12 锁定环境位于 D 盘，归档锁修复后完整回归为 `663 passed, 5 skipped, 20 subtests passed`；
 - 应用与脚本覆盖率为 55%，覆盖率文件写入 D 盘而非仓库；
 - 9 个 systemd Shell 脚本 `bash -n` 通过，3 个 Playwright 脚本 `node --check` 通过；
 - GitHub Actions、候选发布审计和 AWS 现场验收：尚待候选提交形成后执行。
@@ -51,3 +51,14 @@
 本记录不证明 AWS 当前健康或已经部署修复。只有精确候选 SHA 通过完整测试和 GitHub
 Actions，并在已认证的 AWS 目标上完成备份恢复、Nginx 公网拒绝、systemd、Worker、
 事件新鲜度、内存和回滚验收后，才能把修复写成生产完成。
+
+## 发布候选隔离恢复补记
+
+PR #4 合并后形成的首个候选 `20260815T015844Z-96db114f59a5` 虽然清单状态为
+`READY`，但 D 盘隔离解包后运行依赖绑定校验失败。原因是元数据绑定 LF 字节，
+Windows Git 归档导出 CRLF lock 文件。该候选已明确标记 `REJECTED`，没有上传或部署。
+
+修复将文本摘要规范为 LF 语义、把运行/开发 lock 和校验器全部纳入发布关键文件，
+并要求 Linux 安装器从已解包候选运行校验器后才允许备份、安装依赖或切换服务。
+这证明清单 `READY` 不能替代恢复形态的自校验，也说明本轮发布门实际拦截了一个会在
+Windows/Linux 间漂移的候选。

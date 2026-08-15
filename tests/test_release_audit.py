@@ -369,6 +369,18 @@ def test_default_release_contract_files_exist() -> None:
     assert missing == []
 
 
+def test_release_contract_binds_dependency_lock_verification() -> None:
+    required = {
+        "requirements.txt",
+        "requirements-dev.txt",
+        "requirements.lock",
+        "requirements-dev.lock",
+        "dependency-lock.json",
+        "scripts/verify_dependency_locks.py",
+    }
+    assert required.issubset(DEFAULT_CRITICAL_FILES)
+
+
 def test_default_release_contract_covers_runtime_mutation_and_edge_boundaries() -> None:
     required = {
         "app/config.py",

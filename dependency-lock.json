@@ -1,7 +1,9 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "python_version": "3.12",
   "resolver": "uv 0.12.1",
+  "digest_algorithm": "sha256-canonical-text-v1",
+  "text_normalization": "crlf-and-cr-to-lf",
   "files": {
     "requirements.txt": "715fb6481d5590e5958dd7719bdb45cc18d0aae9a5247fa00720e41532e658e0",
     "requirements-dev.txt": "9f6cac9a3f99ec65045762ea7d2bbb15fd04b7ed5e1ae3ca4980405ef4f7993e",

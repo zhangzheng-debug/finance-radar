@@ -20,6 +20,9 @@ Releases use the same version prefixed by `v`.
   files, preserving one representative and complete Git recoverability.
 - Replaced executable AWS endpoint and workstation Playwright path constants
   with explicit deployment parameters or environment variables.
+- Made dependency-lock digests portable across LF/CRLF checkouts and required
+  the extracted systemd candidate to verify both runtime and development locks
+  before any backup, package installation or cutover mutation.
 
 - Consolidated the public product around one read-only Streamlit UI and marked
   the retired static prototype and its deployment records as historical only.
