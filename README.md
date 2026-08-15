@@ -2,7 +2,7 @@
 
 > 面向个人研究者的只读金融事件证据雷达：持续发现多源事件，压缩重复报道，把人快速带回原始证据、修订时间线与事后行情；证据不足时明确保留不确定性。
 
-[当前状态](CURRENT_STATE.md) · [产品章程](docs/PRODUCT_CHARTER.md) · [2026-08-13 目标一致性审计](reports/PROJECT_ALIGNMENT_AUDIT_2026-08-13.md) · [部署说明](deployment/README.md)
+[当前状态](CURRENT_STATE.md) · [产品章程](docs/PRODUCT_CHARTER.md) · [下一阶段计划](docs/NEXT_PHASE_PLAN_2026-08-15.md) · [2026-08-13 目标一致性审计](reports/PROJECT_ALIGNMENT_AUDIT_2026-08-13.md) · [部署说明](deployment/README.md)
 
 Finance Radar 不是交易终端，也不是自动事实裁判。系统收集全极性金融事件，小模型只参与候选排序或解释建议；正式结论必须受确定性证据门和人工判断约束。代码中没有订单、持仓、余额或交易执行接口。
 
