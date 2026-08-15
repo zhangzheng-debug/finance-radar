@@ -13,17 +13,21 @@ from app.web.common import (
     no_trading_banner,
     query_path,
     render_api_error,
+    render_primary_navigation,
+    require_ui_role,
     restore_deep_link,
     section_header,
     status_strip,
 )
 
 
-st.set_page_config(page_title="Adjudication Studio · Finance Radar", page_icon="◇", layout="wide")
+st.set_page_config(page_title="双人盲审 · Finance Radar", page_icon="◇", layout="wide")
 install_style()
+require_ui_role("reviewer", "admin")
 restore_deep_link("Adjudication_Studio")
+render_primary_navigation("adjudication")
 header(
-    "Adjudication Studio",
+    "双人盲审",
     "V3 预冻结双人盲标：只提交独立判断轴，系统随后派生路由标签",
     "HUMAN ONLY",
 )

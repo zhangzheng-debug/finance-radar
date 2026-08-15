@@ -3,14 +3,22 @@ param(
     [Parameter(Mandatory = $true)][string]$Stamp,
     [Parameter(Mandatory = $true)][string]$ExpectedSha256,
     [Parameter(Mandatory = $true)][string]$RequiredRelease,
-    [string]$SshHost = "ubuntu@18.208.34.152",
-    [string]$IdentityFile = "C:\Users\MR\.ssh1\id_ed25519"
+    [string]$SshHost = $env:FINANCE_RADAR_SSH_HOST,
+    [string]$IdentityFile = $env:FINANCE_RADAR_SSH_IDENTITY_FILE,
+    [string]$BackupRoot = "D:\FinanceRadarBackups"
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $SshHost) {
+    throw "SshHost is required; pass -SshHost or set FINANCE_RADAR_SSH_HOST"
+}
+if (-not $IdentityFile) {
+    throw "IdentityFile is required; pass -IdentityFile or set FINANCE_RADAR_SSH_IDENTITY_FILE"
+}
 $remoteUser = ($SshHost -split "@", 2)[0]
 $remotePrivilege = if ($remoteUser -eq "root") { "" } else { "sudo " }
-if ($Stamp -notmatch '^[0-9]{8}T[0-9]{6}Z$' -or $RequiredRelease -notmatch '^[0-9]{8}T[0-9]{6}Z$') {
+$releaseIdPattern = '^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$'
+if ($Stamp -notmatch '^[0-9]{8}T[0-9]{6}Z$' -or $RequiredRelease -notmatch $releaseIdPattern) {
     throw "invalid stamp or release id"
 }
 if ($ExpectedSha256 -notmatch '^[0-9a-fA-F]{64}$') {
@@ -18,7 +26,8 @@ if ($ExpectedSha256 -notmatch '^[0-9a-fA-F]{64}$') {
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$backupRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "server_migration_backup"))
+$backupRoot = [System.IO.Path]::GetFullPath($BackupRoot)
+$auditWorkspaceRoot = [System.IO.Path]::GetFullPath("D:\FinanceRadarScratch\migration-audit")
 $destination = [System.IO.Path]::GetFullPath((Join-Path $backupRoot $Stamp))
 $rootPrefix = $backupRoot.TrimEnd('\') + '\'
 if (-not $destination.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -66,6 +75,7 @@ $fullRestoreReport = Join-Path $destination "full-restore-verification.json"
     --passphrase-file $passphrase `
     --expected-release $RequiredRelease `
     --expected-sha256 $actualSha256 `
+    --workspace-root $auditWorkspaceRoot `
     --report $fullRestoreReport
 if ($LASTEXITCODE -ne 0) {
     throw "full isolated migration restore audit failed"

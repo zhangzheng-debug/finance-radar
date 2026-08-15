@@ -8,6 +8,7 @@ from typing import Any
 
 import joblib
 
+from .evidence_policy import is_conflicting_evidence_status
 from .risk_scope_gate import GATE_VERSION, assess_risk_scope
 from .semantic_policy_gate import SEMANTIC_POLICY_VERSION, assess_semantic_policy
 
@@ -23,6 +24,7 @@ POSITIVE_TERMS = {
 }
 
 EVIDENCE_GATE_VERSION = "structured-evidence-gate-v1"
+INPUT_CONTRACT_VERSION = "risk-router-decision-input-v2"
 MACHINE_PRIMARY_SOURCES = {
     "bls_key_indicators", "cftc_enforcement", "ecb_press", "ecb_statistical_press",
     "fda_medwatch", "fdic_press_releases", "federal_reserve_press", "ftc_press",
@@ -30,15 +32,26 @@ MACHINE_PRIMARY_SOURCES = {
 }
 
 
+def _stable_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _sha256_json(value: Any) -> str:
+    return hashlib.sha256(_stable_json(value).encode("utf-8")).hexdigest()
+
+
 def derive_evidence_context(evidence: list[dict[str, Any]]) -> dict[str, Any]:
     """Summarize decision-grade evidence without event taxonomy or market outcomes."""
     statuses = {str(item.get("evidence_status") or "") for item in evidence}
-    if statuses & {"contradicted_by_primary", "conflicted", "rejected_primary"}:
+    if any(is_conflicting_evidence_status(status) for status in statuses):
         state = "CONFLICTED"
         reasons = ["contradictory_primary_evidence"]
     elif statuses & {"confirmed_primary", "accepted_manual_primary_evidence"}:
         state = "PRIMARY_SUPPORTED_REVIEWED"
         reasons = ["reviewed_primary_exact_passage"]
+    elif "accepted_light_primary_evidence" in statuses:
+        state = "PRIMARY_SUPPORTED_LIGHT_VERIFIED"
+        reasons = ["bounded_light_primary_exact_passage"]
     elif any(
         str(item.get("evidence_status") or "") == "machine_extracted_unreviewed"
         and str(item.get("source_id") or "") in MACHINE_PRIMARY_SOURCES
@@ -70,8 +83,10 @@ class RiskRouter:
         self.model_card_path = Path(model_card_path) if model_card_path else self.artifact_path.with_name("risk_router_model_card.json")
         self.bundle: dict[str, Any] | None = None
         self.load_error: str | None = None
+        self.artifact_sha256: str | None = None
         if self.artifact_path.is_file():
             try:
+                self.artifact_sha256 = hashlib.sha256(self.artifact_path.read_bytes()).hexdigest()
                 self.bundle = joblib.load(self.artifact_path)
             except Exception as exc:  # model corruption must degrade visibly, not crash the API
                 self.load_error = f"{type(exc).__name__}: {exc}"
@@ -91,7 +106,6 @@ class RiskRouter:
     def predict(self, text: str, evidence_context: dict[str, Any] | None = None) -> dict[str, Any]:
         started = time.perf_counter()
         text = " ".join((text or "").split())[:20000]
-        input_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         scope_gate = assess_risk_scope(text)
         normalized = text.lower()
         negative_hits = sum(term in normalized for term in NEGATIVE_TERMS)
@@ -104,13 +118,57 @@ class RiskRouter:
             "reason_codes": ["legacy_call_without_structured_evidence"],
             "evidence_count": None,
         }
+        # ``input_sha256`` is an audit identity, not merely a text hash.  It
+        # includes every value that can affect a gate/model decision so a changed
+        # evidence state or threshold can never be silently deduplicated.
+        decision_configuration = {
+            "model_version": model_version,
+            "artifact_sha256": self.artifact_sha256,
+            "architecture": architecture,
+            "abstain_threshold": self.bundle.get("abstain_threshold") if self.bundle else 0.62,
+            "risk_rescue_floor": self.bundle.get("risk_rescue_floor") if self.bundle else None,
+            "risk_rescue_margin": self.bundle.get("risk_rescue_margin") if self.bundle else None,
+            "semantic_risk_threshold": self.bundle.get("semantic_risk_threshold") if self.bundle else None,
+            "scope_gate_version": GATE_VERSION,
+            "semantic_policy_gate_version": SEMANTIC_POLICY_VERSION,
+            "evidence_gate_version": EVIDENCE_GATE_VERSION,
+        }
+        input_contract = {
+            "version": INPUT_CONTRACT_VERSION,
+            "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "text_characters": len(text),
+            "evidence_context_sha256": _sha256_json(evidence_gate),
+            "decision_configuration": decision_configuration,
+        }
+        input_hash = _sha256_json(
+            {
+                "input_contract_version": INPUT_CONTRACT_VERSION,
+                "normalized_text": text,
+                "evidence_context": evidence_gate,
+                "decision_configuration": decision_configuration,
+            }
+        )
+        call_counts = {
+            "scope_gate_calls": 1,
+            "evidence_gate_calls": 0,
+            "semantic_policy_gate_calls": 0,
+            "trained_model_calls": 0,
+            "fallback_heuristic_calls": 0,
+            "external_model_calls": 0,
+        }
         evidence_primary = str(evidence_gate.get("state") or "").startswith("PRIMARY_SUPPORTED")
         if architecture == "structured_evidence_gate_plus_binary_semantic_router_v1" and not evidence_primary:
+            call_counts["evidence_gate_calls"] = 1
             confidence = 1.0
             label = "ABSTAIN"
             probability_map = {"RISK_REVIEW": 0.0, "NON_TARGET": 0.0, "ABSTAIN": 1.0}
             runtime = "structured_evidence_gate"
+            decision_source = "DETERMINISTIC_EVIDENCE_GATE"
+            semantic_model_invoked = False
+            confidence_applicable = False
         elif architecture == "structured_evidence_gate_plus_binary_semantic_router_v1":
+            call_counts["evidence_gate_calls"] = 1
+            call_counts["semantic_policy_gate_calls"] = 1
             semantic_policy = assess_semantic_policy(text)
             if semantic_policy.decision != "DEFER_TO_MODEL":
                 label = semantic_policy.decision
@@ -120,9 +178,13 @@ class RiskRouter:
                     "NON_TARGET": 0.99 if label == "NON_TARGET" else 0.01,
                 }
                 runtime = "semantic_policy_gate"
+                decision_source = "DETERMINISTIC_SEMANTIC_POLICY_GATE"
+                semantic_model_invoked = False
+                confidence_applicable = False
             elif self.bundle:
                 pipeline = self.bundle["pipeline"]
                 probabilities = pipeline.predict_proba([text])[0]
+                call_counts["trained_model_calls"] = 1
                 classes = [str(item) for item in pipeline.classes_]
                 probability_map = {item_label: float(value) for item_label, value in zip(classes, probabilities)}
                 risk_probability = probability_map.get("RISK_REVIEW", 0.0)
@@ -130,9 +192,16 @@ class RiskRouter:
                 label = "RISK_REVIEW" if risk_probability >= semantic_threshold else "NON_TARGET"
                 confidence = probability_map[label]
                 runtime = "trained_semantic_artifact"
+                decision_source = "TRAINED_SEMANTIC_MODEL"
+                semantic_model_invoked = True
+                confidence_applicable = True
             else:  # pragma: no cover
                 label, confidence, probability_map = self._fallback(text)
+                call_counts["fallback_heuristic_calls"] = 1
                 runtime = "fallback"
+                decision_source = "KEYWORD_FALLBACK"
+                semantic_model_invoked = False
+                confidence_applicable = True
         elif scope_gate.decision in {"REJECT_NOISE", "REJECT_NON_TARGET"}:
             confidence = 0.94 if scope_gate.decision == "REJECT_NOISE" else min(
                 0.68 + 0.05 * max(positive_hits, len(scope_gate.positive_cues)), 0.93
@@ -140,14 +209,21 @@ class RiskRouter:
             label = "NON_TARGET"
             probability_map = {"RISK_REVIEW": 1 - confidence, "NON_TARGET": confidence}
             runtime = "scope_guardrail"
+            decision_source = "LEGACY_SCOPE_GUARDRAIL"
+            semantic_model_invoked = False
+            confidence_applicable = False
         elif scope_gate.decision in {"ABSTAIN_INSUFFICIENT", "ADMIT_CONTEXT"}:
             confidence = 0.5
             label = "ABSTAIN"
             probability_map = {"RISK_REVIEW": 0.5, "NON_TARGET": 0.5}
             runtime = "scope_guardrail"
+            decision_source = "LEGACY_SCOPE_GUARDRAIL"
+            semantic_model_invoked = False
+            confidence_applicable = False
         elif self.bundle:
             pipeline = self.bundle["pipeline"]
             probabilities = pipeline.predict_proba([text])[0]
+            call_counts["trained_model_calls"] = 1
             classes = [str(item) for item in pipeline.classes_]
             probability_map = {label: float(value) for label, value in zip(classes, probabilities)}
             best_label = max(probability_map, key=probability_map.get)
@@ -167,9 +243,19 @@ class RiskRouter:
             else:
                 label = best_label if best_label == "ABSTAIN" or confidence >= threshold else "ABSTAIN"
             runtime = "trained_artifact"
+            decision_source = "TRAINED_SEMANTIC_MODEL"
+            semantic_model_invoked = True
+            confidence_applicable = True
         else:
             label, confidence, probability_map = self._fallback(text)
+            call_counts["fallback_heuristic_calls"] = 1
             runtime = "fallback"
+            decision_source = "KEYWORD_FALLBACK"
+            semantic_model_invoked = False
+            # The keyword fallback is a deterministic queueing heuristic, not
+            # a calibrated semantic model.  Keep its score for diagnostics but
+            # never present it as an applicable model confidence.
+            confidence_applicable = False
         latency_ms = (time.perf_counter() - started) * 1000
         return {
             "label": label,
@@ -180,6 +266,13 @@ class RiskRouter:
             "scope_gate": scope_gate.as_dict(),
             "evidence_gate": evidence_gate,
             "architecture": architecture,
+            "decision_source": decision_source,
+            "semantic_model_invoked": semantic_model_invoked,
+            "confidence_applicable": confidence_applicable,
+            "call_kind": decision_source,
+            "call_counts": call_counts,
+            "model_call_count": int(call_counts["trained_model_calls"]),
+            "input_contract": input_contract,
             "shadow": True,
             "no_trading": True,
             "input_sha256": input_hash,

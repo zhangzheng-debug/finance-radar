@@ -1,8 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { chromium } = require(
-  "C:/Users/MR/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules/playwright"
-);
+const { chromium } = require(process.env.FINANCE_RADAR_PLAYWRIGHT_MODULE || "playwright");
 
 function argument(name, fallback = "") {
   const prefix = `--${name}=`;
@@ -202,21 +200,39 @@ async function focusAudit(page) {
 }
 
 (async () => {
-  const baseUrl = argument(
-    "base-url",
-    "https://radar.167-172-69-16.sslip.io:8443/radar"
-  ).replace(/\/$/, "");
+  const configuredBaseUrl = argument("base-url", process.env.FINANCE_RADAR_PUBLIC_WEB_URL || "");
+  if (!configuredBaseUrl) {
+    throw new Error("--base-url or FINANCE_RADAR_PUBLIC_WEB_URL is required");
+  }
+  const baseUrl = configuredBaseUrl.replace(/\/$/, "");
   const output = path.resolve(
     argument("output", "reports/accessibility_public_latest.json")
   );
   const markdownOutput = output.replace(/\.json$/i, ".md");
-  const targets = [
-    ["Situation Room", `${baseUrl}/`],
-    ["Event Intelligence", `${baseUrl}/Event_Intelligence`],
-    ["Replay Lab", `${baseUrl}/Replay_Lab`],
-    ["Operations and Model", `${baseUrl}/Operations_and_Model`],
-    ["Adjudication Studio", `${baseUrl}/Adjudication_Studio`],
-  ];
+  const scope = argument("scope", "public").trim().toLowerCase();
+  const targetsByScope = {
+    // These are the only pages intentionally reachable through the public
+    // Nginx route.  A 404 for a management route is a security success, not an
+    // accessibility failure.
+    public: [
+      ["Situation Room", `${baseUrl}/`],
+      ["Replay Lab", `${baseUrl}/Replay_Lab`],
+      ["Method and Boundaries", `${baseUrl}/Method_and_Boundaries`],
+    ],
+    // Run this scope only through the authenticated loopback tunnel, with
+    // --base-url=http://127.0.0.1:18502/radar-admin (or its equivalent).
+    admin: [
+      ["Admin Overview", `${baseUrl}/`],
+      ["Event Intelligence", `${baseUrl}/?_page=Event_Intelligence`],
+      ["Operations and Model", `${baseUrl}/?_page=Operations_and_Model`],
+      ["Adjudication Studio", `${baseUrl}/?_page=Adjudication_Studio`],
+      ["Method and Boundaries", `${baseUrl}/?_page=Method_and_Boundaries`],
+    ],
+  };
+  const targets = targetsByScope[scope];
+  if (!targets) {
+    throw new Error("--scope must be public or admin");
+  }
   const browser = await chromium.launch({ headless: true, channel: "chrome" });
   const pages = [];
   try {
@@ -288,9 +304,10 @@ async function focusAudit(page) {
   const report = {
     schema_version: 1,
     generated_at_utc: new Date().toISOString(),
+    scope,
     target: baseUrl,
     status,
-    scope: "machine accessibility audit; not a substitute for assistive-technology user testing",
+    limitations: "machine accessibility audit; not a substitute for assistive-technology user testing",
     thresholds: {
       one_main_landmark: true,
       one_navigation_landmark: true,

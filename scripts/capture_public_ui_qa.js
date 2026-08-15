@@ -1,8 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { chromium } = require(
-  "C:/Users/MR/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules/playwright"
-);
+const { chromium } = require(process.env.FINANCE_RADAR_PLAYWRIGHT_MODULE || "playwright");
 
 function argument(name, fallback = "") {
   const prefix = `--${name}=`;
@@ -19,7 +17,8 @@ function integerArgument(name, fallback) {
 }
 
 (async () => {
-  const url = argument("url", "https://radar.167-172-69-16.sslip.io:8443/radar/");
+  const url = argument("url", process.env.FINANCE_RADAR_PUBLIC_WEB_URL || "");
+  if (!url) throw new Error("--url or FINANCE_RADAR_PUBLIC_WEB_URL is required");
   const output = path.resolve(argument("output", "reports/ui_qa_latest/page.png"));
   const diagnosticsOutput = path.resolve(
     argument("diagnostics", output.replace(/\.png$/i, ".json"))

@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import os
 import hashlib
+import re
 from html import escape
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
@@ -14,8 +16,126 @@ import streamlit as st
 
 API_URL = os.getenv("FINANCE_RADAR_API_URL", "http://127.0.0.1:8000").rstrip("/")
 ADMIN_TOKEN = os.getenv("FINANCE_RADAR_ADMIN_TOKEN")
+REVIEWER_TOKEN = os.getenv("FINANCE_RADAR_REVIEWER_TOKEN")
+OPERATOR_TOKEN = os.getenv("FINANCE_RADAR_OPERATOR_TOKEN")
 SHOW_DEBUG = os.getenv("FINANCE_RADAR_SHOW_DEBUG") == "1"
+UI_ROLES = frozenset({"public", "reviewer", "operator", "admin"})
+_configured_ui_role = os.getenv("FINANCE_RADAR_UI_ROLE", "public").strip().lower()
+UI_ROLE = _configured_ui_role if _configured_ui_role in UI_ROLES else "public"
 DEEP_LINK_STATE_KEY = "_finance_radar_deep_link"
+DESIGN_TOKENS_V3 = Path(__file__).with_name("design_tokens_v3.css").read_text(encoding="utf-8")
+STYLE_V3 = Path(__file__).with_name("style_v3.css").read_text(encoding="utf-8")
+
+
+PUBLIC_NAVIGATION: tuple[dict[str, str], ...] = (
+    {
+        "key": "home",
+        "path": "Home.py",
+        "url": "./",
+        "label": "态势总览",
+        "description": "浏览事件、证据摘要与更新状态",
+    },
+    {
+        "key": "replay",
+        "path": "pages/2_Replay_Lab.py",
+        "url": "./Replay_Lab",
+        "label": "证据演示",
+        "description": "用精选案例理解证据判断过程",
+    },
+    {
+        "key": "method",
+        "path": "pages/5_Method_and_Boundaries.py",
+        "url": "./Method_and_Boundaries",
+        "label": "方法与边界",
+        "description": "了解来源、时间、置信度与使用边界",
+    },
+)
+
+
+ADMIN_NAVIGATION: tuple[dict[str, str], ...] = (
+    {
+        "key": "admin_home",
+        "path": "Admin.py",
+        "url": "./",
+        "label": "管理概览",
+        "description": "内部运行、复核队列与服务态势",
+    },
+    {
+        "key": "events",
+        "path": "pages/1_Event_Intelligence.py",
+        "url": "./?_page=Event_Intelligence",
+        "label": "人工复核",
+        "description": "逐条核验证据并记录人工判断",
+    },
+    {
+        "key": "replay",
+        "path": "pages/2_Replay_Lab.py",
+        "url": "./?_page=Replay_Lab",
+        "label": "证据回放",
+        "description": "用冻结时钟检查完整判断链路",
+    },
+    {
+        "key": "operations",
+        "path": "pages/3_Operations_and_Model.py",
+        "url": "./?_page=Operations_and_Model",
+        "label": "运行与模型",
+        "description": "服务健康、数据来源与模型状态",
+    },
+    {
+        "key": "adjudication",
+        "path": "pages/4_Adjudication_Studio.py",
+        "url": "./?_page=Adjudication_Studio",
+        "label": "双人盲审",
+        "description": "独立人工标注与分歧处理",
+    },
+    {
+        "key": "method",
+        "path": "pages/5_Method_and_Boundaries.py",
+        "url": "./?_page=Method_and_Boundaries",
+        "label": "方法与边界",
+        "description": "核对对外口径与系统硬边界",
+    },
+)
+
+
+REVIEWER_NAVIGATION: tuple[dict[str, str], ...] = (
+    {
+        "key": "reviewer_home",
+        "path": "Reviewer.py",
+        "url": "./",
+        "label": "复核概览",
+        "description": "聚焦待核验证据与人工判断",
+    },
+    ADMIN_NAVIGATION[1],
+    ADMIN_NAVIGATION[2],
+    ADMIN_NAVIGATION[4],
+    ADMIN_NAVIGATION[5],
+)
+
+
+OPERATOR_NAVIGATION: tuple[dict[str, str], ...] = (
+    {
+        "key": "operator_home",
+        "path": "Operator.py",
+        "url": "./",
+        "label": "运维概览",
+        "description": "查看服务、来源、备份与模型运行",
+    },
+    ADMIN_NAVIGATION[3],
+    ADMIN_NAVIGATION[5],
+)
+
+
+def navigation_for_role(role: str) -> tuple[dict[str, str], ...]:
+    return {
+        "public": PUBLIC_NAVIGATION,
+        "reviewer": REVIEWER_NAVIGATION,
+        "operator": OPERATOR_NAVIGATION,
+        "admin": ADMIN_NAVIGATION,
+    }.get(role, PUBLIC_NAVIGATION)
+
+
+PRIMARY_NAVIGATION = navigation_for_role(UI_ROLE)
 
 
 ACCESSIBILITY_CSS = """
@@ -83,10 +203,13 @@ export default function(component) {
       main.setAttribute("role", "main");
       main.setAttribute("aria-label", "Finance Radar 主工作区");
     }
-    const navigation = document.querySelector('[data-testid="stSidebarNav"]');
-    if (navigation) {
-      navigation.setAttribute("role", "navigation");
-      navigation.setAttribute("aria-label", "Finance Radar 页面导航");
+    const sidebar = document.querySelector('[data-testid="stSidebarContent"]');
+    if (sidebar) {
+      // The rendered primary <nav> owns the only navigation landmark.  Giving
+      // its generic Streamlit parent the same role creates duplicate landmarks
+      // for assistive technology.
+      sidebar.removeAttribute("role");
+      sidebar.removeAttribute("aria-label");
     }
   };
   applyContract();
@@ -107,6 +230,23 @@ class ApiError(RuntimeError):
     pass
 
 
+def require_ui_role(*allowed_roles: str) -> None:
+    """Stop a page before it renders outside its declared internal role."""
+    if UI_ROLE in allowed_roles:
+        return
+    st.error("当前内部角色无权访问此页面。" if UI_ROLE != "public" else "此页面仅限内部管理环境。")
+    st.caption(
+        "公开界面不会开放复核写入、运行控制、模型治理或盲审工具；"
+        "复核、运维和管理员工作面也彼此隔离。"
+    )
+    st.stop()
+
+
+def require_admin_ui() -> None:
+    """Backward-compatible strict guard for the administrator landing page."""
+    require_ui_role("admin")
+
+
 def restore_deep_link(page_slug: str) -> None:
     """Restore query parameters captured by Home's fresh deep-link bootstrap."""
     transfer = st.session_state.get(DEEP_LINK_STATE_KEY)
@@ -119,36 +259,147 @@ def restore_deep_link(page_slug: str) -> None:
             st.query_params[key] = str(value)
 
 
+def render_primary_navigation(active: str) -> None:
+    """Render a stable Chinese navigation layer without changing page routes."""
+    navigation = navigation_for_role(UI_ROLE)
+    current = next((item for item in navigation if item["key"] == active), None)
+    if current is None:
+        internal_keys = {
+            item["key"]
+            for role_navigation in (REVIEWER_NAVIGATION, OPERATOR_NAVIGATION, ADMIN_NAVIGATION)
+            for item in role_navigation
+        } - {
+            item["key"] for item in PUBLIC_NAVIGATION
+        }
+        if active in internal_keys:
+            require_ui_role("reviewer", "operator", "admin")
+        raise ValueError(f"Unknown primary navigation key: {active}")
+
+    links = "".join(
+        '<a class="radar-primary-link{}" href="{}" target="_self"{}>'
+        '<span>{}</span><small>{}</small></a>'.format(
+            " is-active" if item["key"] == active else "",
+            escape(item["url"], quote=True),
+            ' aria-current="page"' if item["key"] == active else "",
+            escape(item["label"]),
+            escape(item["description"]),
+        )
+        for item in navigation
+    )
+    role_section = {
+        "public": "公开浏览",
+        "reviewer": "人工复核",
+        "operator": "运行维护",
+        "admin": "系统管理",
+    }.get(UI_ROLE, "公开浏览")
+    with st.sidebar:
+        st.markdown(
+            '<div class="radar-sidebar-brand">'
+            '<span class="radar-sidebar-mark" aria-hidden="true">◎</span>'
+            '<div><strong>FINANCE RADAR</strong><span>证据情报终端</span></div>'
+            '</div>'
+            f'<div class="radar-sidebar-section">{role_section}</div>'
+            '<nav class="radar-primary-nav" aria-label="主要页面">'
+            f'{links}'
+            '</nav>'
+            '<div class="radar-sidebar-current">'
+            '<span>当前工作面</span>'
+            f'<strong>{escape(current["label"])}</strong>'
+            f'<p>{escape(current["description"])}</p>'
+            '</div>'
+            '<div class="radar-sidebar-boundary">'
+            '<span aria-hidden="true">◈</span> '
+            f'{"只读情报 · 证据驱动核验 · 不触发交易" if UI_ROLE == "public" else "内部最小权限 · 操作留痕 · 不触发交易"}'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+
 def api_request(
     path: str,
     *,
     method: str = "GET",
     json_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    normalized_method = method.upper()
+    if normalized_method not in {"GET", "HEAD"}:
+        reviewer_write = bool(
+            re.fullmatch(r"/api/v1/events/[^/]+/human-override", path)
+            or re.fullmatch(r"/api/v1/adjudication/samples/[^/]+/reviews", path)
+        )
+        operator_write = bool(
+            re.fullmatch(r"/api/v1/events/[^/]+/agent/run", path)
+            or re.fullmatch(r"/api/v1/replays/[^/]+/(?:run|reset)", path)
+            or re.fullmatch(r"/api/v1/demo/mode/[^/]+", path)
+        )
+        allowed = (
+            UI_ROLE == "admin"
+            or (UI_ROLE == "reviewer" and reviewer_write)
+            or (UI_ROLE == "operator" and operator_write)
+        )
+        if not allowed:
+            raise ApiError(
+                "公开界面只允许只读请求"
+                if UI_ROLE == "public"
+                else "当前界面角色不允许此写入请求"
+            )
     headers = {"Accept": "application/json"}
-    if ADMIN_TOKEN:
+    if UI_ROLE == "reviewer" and REVIEWER_TOKEN:
+        headers["X-Reviewer-Token"] = REVIEWER_TOKEN
+    elif UI_ROLE == "operator" and OPERATOR_TOKEN:
+        headers["X-Operator-Token"] = OPERATOR_TOKEN
+    elif UI_ROLE == "admin" and ADMIN_TOKEN:
         headers["X-Admin-Token"] = ADMIN_TOKEN
     body = None
     if json_body is not None:
         body = json.dumps(json_body, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(f"{API_URL}{path}", method=method, headers=headers, data=body)
+    request = urllib.request.Request(
+        f"{API_URL}{path}", method=normalized_method, headers=headers, data=body
+    )
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise ApiError(f"API {exc.code}: {body[:500]}") from exc
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise ApiError(f"API unavailable at {API_URL}: {exc}") from exc
+        raise ApiError(f"API {exc.code}") from exc
+    except json.JSONDecodeError as exc:
+        raise ApiError("API returned invalid data") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise ApiError(f"API unavailable ({type(exc).__name__})") from exc
+    if not isinstance(payload, dict):
+        raise ApiError("API returned invalid data")
     if "error" in payload:
-        raise ApiError(payload["error"].get("message", "unknown API error"))
-    return payload["data"]
+        error = payload.get("error")
+        raw_code = str(
+            (error.get("code") or "REQUEST_FAILED")
+            if isinstance(error, dict)
+            else "REQUEST_FAILED"
+        ).upper()
+        safe_code = raw_code if re.fullmatch(r"[A-Z0-9_]{1,64}", raw_code) else "REQUEST_FAILED"
+        raise ApiError(f"API error {safe_code}")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise ApiError("API returned invalid data")
+    return data
 
 
 def query_path(path: str, **params: Any) -> str:
     clean = {key: value for key, value in params.items() if value not in (None, "")}
     return path + ("?" + urllib.parse.urlencode(clean) if clean else "")
+
+
+def format_elapsed(seconds: float | int | None) -> str:
+    """Render an operational age in a human-scale unit without hiding staleness."""
+    if seconds is None:
+        return "—"
+    value = max(0.0, float(seconds))
+    if value >= 86400:
+        return f"{value / 86400:.1f} 天"
+    if value >= 3600:
+        return f"{value / 3600:.1f} 小时"
+    if value >= 60:
+        return f"{value / 60:.1f} 分钟"
+    return f"{int(value)} 秒"
 
 
 def install_style() -> None:
@@ -473,6 +724,8 @@ def install_style() -> None:
         unsafe_allow_html=True,
     )
     st.markdown(f"<style>{ACCESSIBILITY_CSS}</style>", unsafe_allow_html=True)
+    st.markdown(f"<style>{DESIGN_TOKENS_V3}</style>", unsafe_allow_html=True)
+    st.markdown(f"<style>{STYLE_V3}</style>", unsafe_allow_html=True)
     _install_accessibility_contract()
 
 
@@ -503,13 +756,42 @@ def header(title: str, subtitle: str, mode: str | None = None) -> None:
     mode_markup = f'<span class="mode-badge">{escape(mode)}</span>' if mode else ""
     st.markdown(
         '<div class="radar-commandbar">'
+        '<span class="radar-brand-lockup">'
+        '<span class="radar-brand-mark" aria-hidden="true">◎</span>'
         '<span class="radar-brand">FINANCE RADAR</span>'
+        '</span>'
         '<span class="radar-divider">/</span>'
-        f'<h1 class="radar-title">{escape(title)}</h1>'
+        f'<h1 class="radar-page-context">{escape(title)}</h1>'
         '<span class="radar-spacer"></span>'
         f'{mode_markup}'
         '</div>'
         f'<div class="radar-subtitle">{escape(subtitle)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def situation_brief(
+    title: str,
+    copy: str,
+    *,
+    focus_label: str,
+    focus_value: Any,
+    focus_state: str = "",
+) -> None:
+    """Render a single calm orientation block with one explicit priority."""
+    safe_state = focus_state if focus_state in {"ok", "watch", "risk"} else ""
+    st.markdown(
+        '<section class="situation-brief" aria-labelledby="situation-brief-title">'
+        '<div>'
+        '<div class="situation-eyebrow">EVIDENCE DESK · 先证据，后判断</div>'
+        f'<h2 class="situation-title" id="situation-brief-title">{escape(title)}</h2>'
+        f'<p class="situation-copy">{escape(copy)}</p>'
+        '</div>'
+        '<div class="situation-focus" role="status">'
+        f'<div class="situation-focus-label">{escape(focus_label)}</div>'
+        f'<div class="situation-focus-value {safe_state}">{escape(str(focus_value))}</div>'
+        '</div>'
+        '</section>',
         unsafe_allow_html=True,
     )
 
@@ -588,7 +870,7 @@ def render_api_error(exc: Exception) -> None:
         '</div>',
         unsafe_allow_html=True,
     )
-    if SHOW_DEBUG:
+    if UI_ROLE == "admin" and SHOW_DEBUG:
         with st.expander("Developer diagnostics"):
             st.code(f"{type(exc).__name__}: {exc}", language=None)
             st.code(f"python -m uvicorn app.api.main:app --port 8000\nAPI target: {API_URL}", language=None)

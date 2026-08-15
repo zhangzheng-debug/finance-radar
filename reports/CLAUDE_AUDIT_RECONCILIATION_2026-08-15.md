@@ -1,0 +1,53 @@
+# Claude 仓库审计对账与处置记录
+
+- 对账日期：2026-08-15（Asia/Singapore）
+- Claude 原审计提交：`ba5388d926ca7eabfb388fc9cc3c6a3c312b2cbf`
+- Claude 受检提交：`main@7b1c5d1b0884b4aa663fa94ee2f422a79211cc1b`
+- 当前开发基线：`codex/sec-shadow-evidence-clarity@325d6fbbaa4616eec7e996a388987e3c6b542e43b`
+- 当前状态：本地候选工作树已完成全量门禁；尚未形成候选提交、GitHub CI 或 AWS 生产验收
+
+本文件不修改 Claude 的原始报告。原报告保存在
+[`repository_audit_20260814.md`](repository_audit_20260814.md)，本文件只记录它与当前
+分支的差异、处置决定和验收证据。
+
+## 结论对账
+
+| 原发现 | 当前分支复核 | 处置 |
+|---|---|---|
+| A-01 日期测试炸弹 | 2026-08-15 已复现原失败 | 为采集时效判断注入可控时钟并增加边界测试 |
+| A-02 伪造 XFF 绕过限流 | 中间件仍信任首段 XFF；当前候选边缘已隐藏 FastAPI，但生产拓扑未现场确认 | 仅信任配置的直接代理和有效 `X-Real-IP`，忽略任意 XFF |
+| A-03 旧新加坡入口 | 根 README 与部署说明已收敛；`.agent/deployment_runbook.md` 仍过期 | 重写 runbook 为无硬编码、现场核验优先的操作索引 |
+| B-01 限流桶无限增长 | 确认 | OrderedDict + 过期清理 + 客户端硬上限，并补伪造来源洪泛测试 |
+| B-02 管理令牌普通比较 | 确认 | 改用 `secrets.compare_digest` |
+| B-03 版本三处不一致 | `VERSION` 已为 2026.07.22.2，但应用仍报告 0.1.0 | 应用版本直接读取 `VERSION`；候选版本统一为 `2026.08.15.1` 并新增一致性测试 |
+| B-04 常驻 Worker 覆盖不足 | continuous 核心已有覆盖；notifier、Compose backup wrapper 和租约续期不足 | 补入口测试；长周期租约增加独立 SQLite heartbeat |
+| C-01 基础设施细节入库 | 当前脚本默认值和历史报告仍包含地址 | 当前脚本配置外置；历史报告保留日期，不重写历史 |
+| C-02 可再生产物和重复渲染 | 确认 | 从当前树删除 coverage 与重复快照，保留清单和代表性证据 |
+| C-03 依赖未锁定 | 确认 | 新增 Python 3.12 运行/开发 hash lock 与绑定校验器 |
+| C-04 备份式历史 | 历史事实，不应重写 | 后续保持小步、可解释提交 |
+| C-05 PR #4 停滞且范围过大 | 确认，136 文件 | 分组复核、全量门禁后合并，不继续叠加无关模型功能 |
+| C-06 `.gitignore` 的 `-w` | 确认 | 删除并以 CI `git diff --check` 防回归 |
+
+## 当前验证
+
+- 日期、限流、令牌、版本、Nginx 与 Worker 定向回归：通过；
+- 发布/迁移/恢复契约定向回归：通过；
+- 依赖输入和两个 lock 的 SHA-256 绑定校验：通过；
+- Python 3.12 锁定环境位于 D 盘，完整回归为 `660 passed, 5 skipped, 20 subtests passed`；
+- 应用与脚本覆盖率为 55%，覆盖率文件写入 D 盘而非仓库；
+- 9 个 systemd Shell 脚本 `bash -n` 通过，3 个 Playwright 脚本 `node --check` 通过；
+- GitHub Actions、候选发布审计和 AWS 现场验收：尚待候选提交形成后执行。
+
+## 审计后的产品收敛
+
+- 权限面已从 Public/Admin 拆为 Public、Reviewer、Operator、Admin；三个内部入口只监听回环、手工启动且互斥。
+- 公共首页增加“今日新增 / 需要关注 / 继续跟进”和浏览器本机保存视图，不新增账户或服务端画像数据。
+- 新增独立产品 KPI 接口；不能由现有账本可靠计算的正式结论准确率和读者到达原文用时明确返回 `UNAVAILABLE`，不以工程测试冒充产品价值。
+- 运行地址、证书域名和本机 Playwright 路径已从可执行脚本移出，部署必须显式提供当前端点。
+- 仓库仅删除 SHA-256 完全相同的重复 PNG 和生成的 coverage 文件；剩余报告 278 个、24,298,877 字节，所有删除均可从 Git 历史恢复。
+
+## 发布边界
+
+本记录不证明 AWS 当前健康或已经部署修复。只有精确候选 SHA 通过完整测试和 GitHub
+Actions，并在已认证的 AWS 目标上完成备份恢复、Nginx 公网拒绝、systemd、Worker、
+事件新鲜度、内存和回滚验收后，才能把修复写成生产完成。

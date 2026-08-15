@@ -1,3 +1,7 @@
+> **历史设计档案，非部署方案。** `prototype/index.html` 只保留为冻结的
+> 设计材料，不能直连生产 API、不能由 FastAPI/Nginx 提供，也不能与
+> Streamlit 并行部署。任何可复用设计原则都须在当前单一 UI 中重新评审。
+
 # Finance Radar 设计系统 · Calm Institutional v2「Obsidian」
 
 > 目标读者：codex（整合方）与后续维护者。
@@ -141,6 +145,6 @@ TradingView、OpenBB Workspace 均为顶部导航）。Streamlit 原生 sidebar
    内 CSS 字符串改动，不动 DOM 结构，AppTest 结构回归不受影响。
 2. **第二批**：命令面板 overlay、时间线 glyph、冲突卡。新增两个
    v2 组件（有 saved_flow 先例），需补 AppTest。
-3. **第三批（原型形态）**：顶部导航 + 三栏 Workbench。等 P0/P1 全绿、
-   课程答辩结束后再考虑；届时可评估是否用原型的静态壳直连 API
-   （仍无 React、无构建链，符合 spec 的技术栈禁令）。
+3. **第三批（原型形态）**：顶部导航 + 三栏 Workbench。若未来重新评审，
+   只能将必要的交互原则迁入当前单一 Streamlit UI；不得恢复原型静态壳或
+   新增第二条公开部署路径。

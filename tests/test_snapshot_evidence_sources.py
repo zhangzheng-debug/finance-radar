@@ -158,6 +158,25 @@ def test_pdf_detection_and_size_contract() -> None:
     assert not snapshots.host_allowed("sec_current_filings", "https://www.sec.gov:bad/file.pdf")
     assert snapshots.host_allowed("sec_edgar", "https://data.sec.gov/submissions/example.json")
     assert snapshots.host_allowed("bls_key_indicators", "https://www.bls.gov/news.release/x.htm")
+    assert snapshots.host_allowed(
+        "dvids_centcom_public_affairs",
+        "https://www.dvidshub.net/news/570021/example",
+    )
+    assert snapshots.host_allowed(
+        "ostium_official_x",
+        "https://x.com/Ostium/status/2077412452392652917",
+    )
+    assert not snapshots.host_allowed(
+        "ostium_official_x",
+        "https://x.com/OtherAccount/status/2077412452392652917",
+    )
+    assert not snapshots.host_allowed(
+        "ostium_official_x", "https://x.com/Ostium"
+    )
+    assert snapshots.canonical_source_url(
+        "ostium_official_x",
+        "https://x.com/Ostium/status/2077412452392652917#context",
+    ) == "https://x.com/Ostium/status/2077412452392652917"
     assert snapshots.canonical_source_url(
         "fda_medwatch", "http://www.fda.gov/medical-devices/recall?x=1#section"
     ) == "https://www.fda.gov/medical-devices/recall?x=1"

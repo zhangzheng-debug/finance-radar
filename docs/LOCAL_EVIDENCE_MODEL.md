@@ -1,11 +1,12 @@
 # 本地 Evidence Agent 小模型
 
-更新时间：2026-07-19
+更新时间：2026-08-05
 
 ## 结论
 
-Finance Radar 已在新加坡 VPS 上部署真实本地小模型，但它被刻意限制为
-“证据摘要写手”，不是事实裁判、风险分类器或交易模型。事件最终状态仍由
+Finance Radar 的本地小模型属于可选的咨询能力；它被刻意限制为“证据摘要写手”，
+不是事实裁判、风险分类器或交易模型。标准部署和灾难恢复路径均默认保持它禁用，
+只有操作者通过独立资源门后才可手动启用。事件最终状态仍由
 确定性证据图决定：矛盾强制人工复核、证据不足强制弃权、只有 P0 支持才能
 进入 `EVIDENCE_READY`。模型既不能修改这些规则，也不能调用任何交易能力。
 
@@ -14,7 +15,9 @@ Finance Radar 已在新加坡 VPS 上部署真实本地小模型，但它被刻�
 - 模型：`Qwen2.5-0.5B-Instruct-GGUF`，`Q4_K_M`，约 491 MB。
 - 推理服务：固定版本 `llama.cpp b10068`。
 - 监听：`127.0.0.1:18601`，不向公网开放。
-- 资源保护：`MemoryHigh=900M`、`MemoryMax=1100M`、`CPUQuota=150%`。
+- 资源保护：模型 unit 使用 `MemoryHigh=460M`、`MemoryMax=560M`、
+  `MemorySwapMax=128M`、`CPUQuota=150%`，并置于总上限为
+  `MemoryHigh=600M` / `MemoryMax=700M` 的 `finance-radar.slice` 内。
 - API：只有配置了回环 URL 才调用模型；超时、非法 JSON、未知 claim、伪造
   citation、提示注入或越过控制边界时，整次模型输出作废并回退确定性结果。
 - 模型职责：把服务器生成的 `authoritative_review_records` 写成简短中性摘要。
@@ -54,9 +57,15 @@ python scripts/accept_local_evidence_model.py
 
 ## 迁移
 
-`create_migration_backup.sh` 会把模型、固定 llama.cpp 运行时、systemd unit、
-比较报告和应用配置一起纳入加密异机快照。恢复脚本先启动并健康检查回环模型，
-再启动 API；模型恢复失败时激活事务失败，不会静默假装模型在线。
+`create_migration_backup.sh` 会把模型能力写入
+`config/LOCAL_EVIDENCE_MODEL_CAPABILITY.json`，并仅在运行时完整时归档模型与固定
+llama.cpp 运行时。归档元数据明确区分“源主机安装过模型”和“本次归档包含模型”；
+模型缺失且元数据声明为可选时，审计和预恢复仍可通过。
+
+恢复脚本始终禁用并停止本地模型，不会为了恢复 Radar 的 API/Web/Worker/备份服务而
+自动拉起它。若需要恢复模型，由操作者在确认内存余量、停掉 Worker 与备份任务后，
+另行执行 `install_local_evidence_model.sh --activate`。旧归档仍按其原有的严格模型
+哈希契约审计，不会被新的可选规则静默放宽。
 
 上游资料：
 

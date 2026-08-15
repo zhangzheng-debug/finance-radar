@@ -9,6 +9,8 @@ data/
 config/telegram_channels.json
 .pytest_cache/
 .coverage
+coverage.xml
+coverage.json
 htmlcov/
 tmp/
 server_migration_backup/
@@ -22,4 +24,7 @@ artifacts/offline_demo/current/
 .deploy_context.json
 finance-radar-deploy-*.tgz
 *.tgz.aesgcm
--w
+# Local-only inspection output from dry-run evidence verification.  These are
+# regenerated on demand and must not become part of a traceable release.
+reports/light_verification_dryrun_local*.json
+reports/light_verification_dryrun_local*.md

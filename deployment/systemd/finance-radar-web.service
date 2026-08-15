@@ -6,18 +6,43 @@ Requires=finance-radar-api.service
 
 [Service]
 Type=simple
-User=finance-radar
-Group=finance-radar
+# The public Web process must not share the API/worker UID: otherwise a Web
+# compromise can potentially inspect same-UID process state, including private
+# API environment variables.  Its own tiny environment is readable only by
+# this dedicated system account.
+User=finance-radar-web
+Group=finance-radar-web
 WorkingDirectory=/opt/finance-radar/current
-EnvironmentFile=/etc/finance-radar.env
-ExecStart=/opt/finance-radar/venv/bin/python -m streamlit run app/web/Home.py --server.address 127.0.0.1 --server.port 18501 --server.baseUrlPath radar --server.headless true --browser.gatherUsageStats false
+Slice=finance-radar.slice
+EnvironmentFile=/etc/finance-radar-public.env
+Environment=FINANCE_RADAR_UI_ROLE=public
+Environment=FINANCE_RADAR_SHOW_DEBUG=0
+UnsetEnvironment=FINANCE_RADAR_ADMIN_TOKEN
+ExecStart=/opt/finance-radar/venv/bin/python -B -m streamlit run app/web/Home.py --server.address 127.0.0.1 --server.port 18501 --server.baseUrlPath radar --server.headless true --browser.gatherUsageStats false
 Restart=on-failure
 RestartSec=5
+MemoryHigh=160M
+MemoryMax=256M
+MemorySwapMax=96M
+TasksMax=128
+MemoryAccounting=true
+OOMPolicy=stop
+OOMScoreAdjust=-400
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectProc=invisible
+ProcSubset=pid
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/finance-radar/shared/data /opt/finance-radar/shared/reports
+PrivateDevices=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+InaccessiblePaths=-/etc/finance-radar.env -/opt/finance-radar/current/.env -/opt/finance-radar/shared/data -/opt/finance-radar/shared/reports
 
 [Install]
 WantedBy=multi-user.target

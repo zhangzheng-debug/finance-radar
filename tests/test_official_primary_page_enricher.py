@@ -186,6 +186,63 @@ class OfficialPrimaryPageEnricherTests(unittest.TestCase):
         self.assertEqual(job["status"], "PENDING_EVIDENCE_REVIEW")
         self.assertEqual(tuple(event), ("candidate", "candidate", None))
 
+    def test_light_followup_evidence_need_is_prioritized_without_closing_the_task(self) -> None:
+        ordinary_event = self.add_candidate(
+            source_id="fda_medwatch",
+            title="Heart Pump Recall: Ordinary queue event",
+            url="https://www.fda.gov/ordinary-queue-event",
+        )
+        followup_event = self.add_candidate(
+            source_id="fda_medwatch",
+            title="Heart Pump Recall: Evidence follow-up event",
+            url="https://www.fda.gov/evidence-followup-event",
+        )
+        now = utc_now()
+        # Legacy reconciliation may reopen a weak/verified v1 record without
+        # changing its canonical status.  Its explicitly queued follow-up must
+        # still get bounded official-source evidence collection.
+        self.connection.execute(
+            "UPDATE canonical_events SET status='weak',label_status='weak' WHERE event_id=?",
+            (followup_event,),
+        )
+        self.connection.execute(
+            """INSERT INTO pipeline_jobs VALUES (
+               'light-followup-priority',?,'light_verification_followup','PENDING_EVIDENCE_REVIEW',
+               95,0,?,NULL,'{}',?,?)""",
+            (followup_event, now, now, now),
+        )
+        self.connection.commit()
+
+        rows = enricher.pending_rows(self.connection, limit=2)
+        self.assertEqual(rows[0]["event_id"], followup_event)
+        self.assertEqual(rows[1]["event_id"], ordinary_event)
+
+        def fetcher(url: str, user_agent: str, timeout: float) -> enricher.FetchResult:
+            return enricher.FetchResult(
+                b"<html><body><p>The company is recalling affected heart pump devices after a failure that may cause serious injuries.</p></body></html>",
+                url,
+            )
+
+        result = enricher.enrich(
+            self.connection,
+            cache_dir=self.root / "cache",
+            user_agent="FinanceRadar test@example.com",
+            limit=1,
+            timeout=1,
+            max_chars=500,
+            fetcher=fetcher,
+        )
+        followup = self.connection.execute(
+            "SELECT status FROM pipeline_jobs WHERE job_id='light-followup-priority'"
+        ).fetchone()
+        canonical = self.connection.execute(
+            "SELECT status,label_status FROM canonical_events WHERE event_id=?",
+            (followup_event,),
+        ).fetchone()
+        self.assertEqual(result["light_followup_selected"], 1)
+        self.assertEqual(followup["status"], "PENDING_EVIDENCE_REVIEW")
+        self.assertEqual(tuple(canonical), ("weak", "weak"))
+
     def test_extended_official_hosts_require_https(self) -> None:
         self.assertTrue(
             enricher.host_allowed(
@@ -202,6 +259,51 @@ class OfficialPrimaryPageEnricherTests(unittest.TestCase):
                 "ecb_press", "http://www.ecb.europa.eu/press/pr/date/2026/html/example.en.html"
             )
         )
+        self.assertEqual(
+            enricher.canonical_official_url(
+                "fda_medwatch", "http://www.fda.gov/example-recall?lot=1#notice"
+            ),
+            "https://www.fda.gov/example-recall?lot=1",
+        )
+        self.assertIsNone(
+            enricher.canonical_official_url(
+                "fda_medwatch", "http://user@www.fda.gov/example-recall"
+            )
+        )
+        self.assertIsNone(
+            enricher.canonical_official_url(
+                "fda_medwatch", "http://www.fda.gov:8080/example-recall"
+            )
+        )
+
+    def test_registered_http_url_is_upgraded_before_fetch(self) -> None:
+        self.add_candidate(
+            source_id="fda_medwatch",
+            title="Heart Pump Recall: Example removes affected devices",
+            url="http://www.fda.gov/example-recall",
+        )
+        fetched_urls: list[str] = []
+
+        def fetcher(url: str, user_agent: str, timeout: float) -> enricher.FetchResult:
+            fetched_urls.append(url)
+            return enricher.FetchResult(
+                b"<html><body><p>The recall may cause serious injuries or deaths.</p></body></html>",
+                url,
+            )
+
+        result = enricher.enrich(
+            self.connection,
+            cache_dir=self.root / "cache",
+            user_agent="FinanceRadar test@example.com",
+            limit=10,
+            timeout=1,
+            max_chars=500,
+            fetcher=fetcher,
+        )
+
+        self.assertEqual(fetched_urls, ["https://www.fda.gov/example-recall"])
+        self.assertEqual(result["http_upgraded_to_https"], 1)
+        self.assertEqual(result["passages"], 1)
 
     def test_material_facts_outrank_keyword_heavy_page_title(self) -> None:
         self.add_candidate(

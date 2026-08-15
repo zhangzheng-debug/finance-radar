@@ -180,9 +180,10 @@ def load_rows(db_path: Path) -> list[dict[str, Any]]:
                            ORDER BY CASE ev.evidence_status
                                WHEN 'confirmed_primary' THEN 0
                                WHEN 'accepted_manual_primary_evidence' THEN 1
-                               WHEN 'machine_extracted_unreviewed' THEN 2
-                               WHEN 'candidate_passage' THEN 3
-                               WHEN 'no_keyword_passage' THEN 4
+                               WHEN 'accepted_light_primary_evidence' THEN 2
+                               WHEN 'machine_extracted_unreviewed' THEN 3
+                               WHEN 'candidate_passage' THEN 4
+                               WHEN 'no_keyword_passage' THEN 5
                                ELSE 5 END,
                                COALESCE(ev.passage_score,0) DESC,ev.updated_at DESC
                        ) AS evidence_rank
@@ -224,7 +225,7 @@ def evidence_state(row: dict[str, Any], text: str) -> str:
         return "INSUFFICIENT"
     if source_id == "opennews_free" or authority.startswith("P2"):
         return "DISCOVERY_ONLY"
-    if status in {"confirmed_primary", "accepted_manual_primary_evidence"}:
+    if status in {"confirmed_primary", "accepted_manual_primary_evidence", "accepted_light_primary_evidence"}:
         return "PRIMARY_SUPPORTED"
     if authority.startswith(("P0", "P1")) and status == "machine_extracted_unreviewed":
         return "PRIMARY_SUPPORTED"
@@ -412,7 +413,7 @@ def strict_evidence_row(row: dict[str, Any]) -> bool:
     passage = normalize(row["text"])
     if row["audit_context"].get("ai_strict_override"):
         return True
-    if evidence_status in {"confirmed_primary", "accepted_manual_primary_evidence"}:
+    if evidence_status in {"confirmed_primary", "accepted_manual_primary_evidence", "accepted_light_primary_evidence"}:
         return True
     return (
         row["source_group"] in STRICT_OFFICIAL_PAGE_SOURCES

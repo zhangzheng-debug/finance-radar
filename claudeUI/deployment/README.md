@@ -1,25 +1,21 @@
-# AWS static terminal deployment
+# Archived static prototype — not a deployment path
 
-The production UI is the single-file `../prototype/index.html`. It is served by
-Nginx at `/radar/` and reads the existing same-origin, read-only API at
-`/finance-radar-api`.
+This directory is retained only as a historical design reference. It must not
+be copied to Nginx, served at `/radar/`, or used as an alternate production
+frontend. The old static terminal can fall back to synthetic snapshots and
+expects a public API route which production now deliberately denies.
 
-Production paths:
+There is one authoritative production UI and one release chain:
 
-- UI artifact: `/var/www/finance-radar-terminal/index.html`
-- Nginx config: `/etc/nginx/conf.d/finance-radar-aws.conf`
-- Deployment backups: `/opt/finance-radar/ui-backups/<UTC timestamp>/`
+- Public UI: Streamlit behind `deployment/systemd/nginx-radar-direct.conf` at
+  `/radar/`.
+- Private review UI: loopback-only `finance-radar-admin.service`, opened only
+  through an authenticated operator tunnel.
+- Deployment: `deployment/systemd/install_remote.sh` plus its versioned release
+  manifest and post-cutover recovery-bundle gate.
 
-The existing `finance-radar-web.service` is intentionally left active as a
-rollback backend on `127.0.0.1:18501`. The UI cutover changes only Nginx routing;
-it does not restart the API, worker, model, database, backup timer, Xray, or
-WireGuard.
-
-Rollback:
-
-```bash
-sudo cp /opt/finance-radar/ui-backups/<UTC timestamp>/finance-radar-aws.conf \
-  /etc/nginx/conf.d/finance-radar-aws.conf
-sudo nginx -t
-sudo systemctl reload nginx
-```
+`nginx-finance-radar-static.conf` is intentionally inert and contains no Nginx
+`server` block. Keeping it in this archive prevents an old operational note
+from becoming an accidental second production surface. For design exploration, open `../prototype/index.html`
+locally and treat every displayed snapshot as design-only unless it is
+explicitly integrated into the Streamlit production UI.

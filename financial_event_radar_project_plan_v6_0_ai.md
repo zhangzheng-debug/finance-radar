@@ -11,8 +11,10 @@ target_level: standard_95
 project_category: 自拟项目 / 多源新闻聚合Agent增强版
 lifecycle: deployed_read_only_baseline
 public_terminal: https://radar.18-208-34-152.sslip.io:8443/radar/
-formal_release: v2026.07.22.1
-aws_release_path: /opt/finance-radar/releases/20260721T184054Z
+formal_release: v2026.07.22.2
+aws_release_path: /opt/finance-radar/releases/20260722T084500Z
+current_state_source: CURRENT_STATE.md
+product_charter: docs/PRODUCT_CHARTER.md
 execution_mode: read_only
 trading_enabled: false
 automatic_verification_enabled: false
@@ -26,16 +28,18 @@ teacher_approval_required: true
 
 后续 AI 在修改项目前必须按以下顺序读取：
 
-1. 本文件；
-2. `.agent/architecture.md`；
-3. `.agent/coding_conventions.md`；
-4. `.agent/api_contracts.md`；
-5. `.agent/data_model.md`；
-6. `.agent/test_strategy.md`；
-7. `.agent/deployment_runbook.md`；
-8. `.agent/forbidden_zones.md`；
-9. 当前 Git 状态、当前分支、待改文件及相邻测试；
-10. 服务器当前状态，仅在任务明确授权服务器操作时读取。
+1. `docs/PRODUCT_CHARTER.md`，确定稳定目标、用户优先级与边界；
+2. `CURRENT_STATE.md`，区分最新 tag、当前源码与最后一次现场证据；
+3. 本文件，作为课程与工程执行规格；
+4. `.agent/architecture.md`；
+5. `.agent/coding_conventions.md`；
+6. `.agent/api_contracts.md`；
+7. `.agent/data_model.md`；
+8. `.agent/test_strategy.md`；
+9. `.agent/deployment_runbook.md`；
+10. `.agent/forbidden_zones.md`；
+11. 当前 Git 状态、当前分支、待改文件及相邻测试；
+12. 服务器当前状态，仅在任务明确授权服务器操作时读取。
 
 不得依据旧聊天记录推断当前线上状态；凡是会变化的数据必须现场验证。
 旧材料中出现的 `167.172.69.16` 新加坡主机与对应 `sslip.io` 地址只视为迁移历史；当前正式入口以本文件顶部的 AWS 地址和现场健康检查为准。

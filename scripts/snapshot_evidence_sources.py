@@ -61,6 +61,15 @@ SOURCE_HOST_SUFFIXES = {
     "eia_press": ("eia.gov",),
     "us_marad": ("maritime.dot.gov",),
     "us_treasury": ("treasury.gov",),
+    "dvids_centcom_public_affairs": ("dvidshub.net",),
+    "ostium_official_x": ("x.com",),
+}
+
+# Social platforms host unrelated third-party content on one shared domain.
+# Keep those source registrations bound to the manually reviewed official
+# account/status path instead of treating the whole platform as authoritative.
+SOURCE_PATH_PREFIXES = {
+    "ostium_official_x": ("/ostium/status/",),
 }
 
 
@@ -88,10 +97,15 @@ def host_allowed(source_id: str, url: str) -> bool:
     ):
         return False
     host = (parsed.hostname or "").casefold().rstrip(".")
-    return any(
+    host_matches = any(
         host == suffix or host.endswith(f".{suffix}")
         for suffix in SOURCE_HOST_SUFFIXES.get(source_id, ())
     )
+    path_prefixes = SOURCE_PATH_PREFIXES.get(source_id, ())
+    path_matches = not path_prefixes or any(
+        parsed.path.casefold().startswith(prefix) for prefix in path_prefixes
+    )
+    return host_matches and path_matches
 
 
 def canonical_source_url(source_id: str, url: str) -> str | None:
@@ -113,6 +127,11 @@ def canonical_source_url(source_id: str, url: str) -> str | None:
     if not any(
         host == suffix or host.endswith(f".{suffix}")
         for suffix in SOURCE_HOST_SUFFIXES.get(source_id, ())
+    ):
+        return None
+    path_prefixes = SOURCE_PATH_PREFIXES.get(source_id, ())
+    if path_prefixes and not any(
+        parsed.path.casefold().startswith(prefix) for prefix in path_prefixes
     ):
         return None
     scheme = parsed.scheme.casefold()

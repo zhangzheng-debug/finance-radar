@@ -3,20 +3,32 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from app.web.common import api_request, header, install_style, no_trading_banner, render_api_error, restore_deep_link, status_strip
+from app.web.common import (
+    api_request,
+    header,
+    install_style,
+    no_trading_banner,
+    render_api_error,
+    render_primary_navigation,
+    require_ui_role,
+    restore_deep_link,
+    status_strip,
+)
 from app.web.components import age_label, source_health_state
 
 
-st.set_page_config(page_title="Operations & Model · Finance Radar", page_icon="▦", layout="wide")
+st.set_page_config(page_title="运行与模型 · Finance Radar", page_icon="▦", layout="wide")
 install_style()
+require_ui_role("operator", "admin")
 restore_deep_link("Operations_and_Model")
+render_primary_navigation("operations")
 
 try:
     health = api_request("/api/v1/health")
     sources = api_request("/api/v1/sources/health")["items"]
     model = api_request("/api/v1/model/status")
 except Exception as exc:
-    header("Operations & Model", "运行健康、数据游标、备份恢复和模型卡")
+    header("运行与模型", "运行健康、数据游标、备份恢复和模型卡")
     render_api_error(exc)
     st.stop()
 
@@ -32,7 +44,7 @@ try:
 except Exception:
     evidence_archive = None
 
-header("Operations & Model", "运行健康、数据游标、备份恢复和模型卡", health["demo_mode"])
+header("运行与模型", "运行健康、数据游标、备份恢复和模型卡", health["demo_mode"])
 no_trading_banner()
 
 latest_cycle = health["operations"].get("latest_worker_cycle")
@@ -65,14 +77,33 @@ status_strip(
     ]
 )
 
-mode_cols = st.columns(3)
-for column, mode in zip(mode_cols, ["LIVE", "RECENT_CAPTURE", "REPLAY"]):
-    if column.button(mode, width="stretch", type="primary" if mode == health["demo_mode"] else "secondary"):
-        try:
-            api_request(f"/api/v1/demo/mode/{mode}", method="POST")
-            st.rerun()
-        except Exception as exc:
-            render_api_error(exc)
+st.caption(
+    "运行模式（受控写入）：切换会写入系统运行状态。LIVE 仅表示事件读取窗口，"
+    "不代表交易、下单或正式结论变更。"
+)
+mode_options = ["LIVE", "RECENT_CAPTURE", "REPLAY"]
+current_mode = str(health["demo_mode"] or "RECENT_CAPTURE")
+if current_mode not in mode_options:
+    current_mode = "RECENT_CAPTURE"
+with st.form("demo-mode-change"):
+    requested_mode = st.radio(
+        "准备切换到",
+        mode_options,
+        index=mode_options.index(current_mode),
+        horizontal=True,
+    )
+    mode_change_confirmed = st.checkbox("我确认要切换运行模式（会写入系统状态）")
+    if st.form_submit_button("确认切换运行模式（受控写入）", width="stretch"):
+        if requested_mode == current_mode:
+            st.info("所选模式已经生效；没有写入任何变更。")
+        elif not mode_change_confirmed:
+            st.warning("请先确认本次运行模式切换会写入系统状态。")
+        else:
+            try:
+                api_request(f"/api/v1/demo/mode/{requested_mode}", method="POST")
+                st.rerun()
+            except Exception as exc:
+                render_api_error(exc)
 
 tab_sources, tab_market, tab_evidence, tab_worker, tab_backup, tab_model, tab_audit = st.tabs(
     ["事件源", "行情能力", "证据存档", "Worker", "备份恢复", "模型卡", "硬边界审计"]
@@ -189,7 +220,7 @@ with tab_evidence:
         policy = evidence_archive.get("policy") or {}
         st.caption(
             f"immutable={policy.get('immutable')} · content_address={policy.get('content_address')} · "
-            "官方域名/HTTPS/体积上限 · 不自动核验事实 · 不进入模型特征 · no trading"
+            "官方域名/HTTPS/体积上限 · 轻量核验受证据门槛约束 · 不进入模型特征 · no trading"
         )
 
 with tab_worker:
@@ -264,15 +295,21 @@ with tab_backup:
 with tab_model:
     card = model.get("model_card")
     if card:
-        metrics = card["metrics"]
+        metrics = card.get("metrics") or {}
+        dataset = card.get("dataset") or {}
         mcols = st.columns(4)
-        mcols[0].metric("训练样本", card["dataset"]["rows"])
-        mcols[1].metric("覆盖率", f"{metrics['coverage']:.1%}")
-        mcols[2].metric("覆盖样本准确率", f"{metrics['covered_accuracy']:.1%}")
-        mcols[3].metric("弃权率", f"{metrics['abstain_rate']:.1%}")
-        st.write(card["polarity_policy"])
+        mcols[0].metric("训练样本", int(dataset.get("rows") or 0))
+        mcols[1].metric("覆盖率", f"{float(metrics.get('coverage') or 0):.1%}")
+        mcols[2].metric(
+            "覆盖样本准确率",
+            f"{float(metrics.get('covered_accuracy') or 0):.1%}",
+        )
+        mcols[3].metric("弃权率", f"{float(metrics.get('abstain_rate') or 0):.1%}")
+        if not metrics:
+            st.warning("模型卡的评估指标尚未生成；页面已降级显示，不把缺失字段解释为有效结果。")
+        st.write(card.get("polarity_policy") or "极性策略未提供")
         st.write("限制")
-        for limitation in card["limitations"]:
+        for limitation in card.get("limitations") or ["模型卡限制项尚未提供"]:
             st.markdown(f"- {limitation}")
         with st.expander("完整模型卡"):
             st.json(card)

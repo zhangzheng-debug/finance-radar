@@ -1,0 +1,13 @@
+[Unit]
+Description=Finance Radar aggregate resource budget
+Before=finance-radar-api.service finance-radar-web.service finance-radar-worker.service finance-radar-backup.service finance-radar-admin.service finance-radar-reviewer.service finance-radar-operator.service finance-radar-evidence-llm.service
+
+[Slice]
+# The production host has about 1 GiB of RAM.  This is an aggregate guardrail,
+# not a sum of the individual service ceilings: it leaves roughly 250 MiB for
+# the kernel, SSH, Nginx and filesystem cache so a burst in two Radar services
+# cannot turn into a host-wide OOM event.
+MemoryHigh=600M
+MemoryMax=700M
+MemorySwapMax=384M
+TasksMax=256

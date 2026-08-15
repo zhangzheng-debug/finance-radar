@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 import sys
 import tempfile
@@ -169,6 +170,7 @@ class OfficialEventCollectorTests(unittest.TestCase):
             user_agent="test",
             fetcher=fetcher,
             force=True,
+            now=dt.datetime(2026, 7, 16, tzinfo=dt.timezone.utc),
         )
         source = self.connection.execute(
             "SELECT source_type,authority_tier FROM sources WHERE source_id=?",
@@ -180,6 +182,19 @@ class OfficialEventCollectorTests(unittest.TestCase):
         self.assertEqual(source["source_type"], "issuer_official_feed")
         self.assertEqual(source["authority_tier"], "P1_issuer_official")
         self.assertEqual(json.loads(job["payload_json"])["authority_tier"], "P1_issuer_official")
+
+    def test_entry_age_guard_uses_an_injected_clock_at_the_boundary(self) -> None:
+        published = "2026-07-15T18:00:00+00:00"
+        assert collector.entry_is_recent(
+            published,
+            max_age_days=30,
+            now=dt.datetime(2026, 8, 14, 18, 0, tzinfo=dt.timezone.utc),
+        )
+        assert not collector.entry_is_recent(
+            published,
+            max_age_days=30,
+            now=dt.datetime(2026, 8, 14, 18, 0, 1, tzinfo=dt.timezone.utc),
+        )
 
     def test_feed_age_guard_filters_bootstrap_history(self) -> None:
         stale_rss = b"""<?xml version=\"1.0\"?><rss><channel><item>

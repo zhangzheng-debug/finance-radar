@@ -2,6 +2,7 @@
 Description=Finance Radar local Evidence Agent shadow model
 After=network-online.target
 Wants=network-online.target
+Conflicts=finance-radar-worker.service finance-radar-backup.service
 ConditionPathExists=/opt/finance-radar/evidence-llm/models/qwen2.5-0.5b-instruct-q4_k_m.gguf
 
 [Service]
@@ -9,6 +10,7 @@ Type=simple
 User=finance-radar
 Group=finance-radar
 WorkingDirectory=/opt/finance-radar/evidence-llm
+Slice=finance-radar.slice
 Environment=LD_LIBRARY_PATH=/opt/finance-radar/evidence-llm/current
 ExecStart=/opt/finance-radar/evidence-llm/current/llama-server --model /opt/finance-radar/evidence-llm/models/qwen2.5-0.5b-instruct-q4_k_m.gguf --alias qwen2.5-0.5b-instruct-q4_k_m --host 127.0.0.1 --port 18601 --ctx-size 2048 --threads 2 --threads-batch 2 --parallel 1 --batch-size 128 --ubatch-size 128
 Restart=on-failure
@@ -20,10 +22,17 @@ ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=/opt/finance-radar/evidence-llm
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-MemoryHigh=900M
-MemoryMax=1100M
+# This optional advisory-only model is never a prerequisite for the Radar. A
+# 1-GiB-class host must contain it inside its own cgroup rather than letting a
+# manual start compete with the collector and public UI for the whole machine.
+MemoryHigh=460M
+MemoryMax=560M
+MemorySwapMax=128M
 CPUQuota=150%
 TasksMax=128
+MemoryAccounting=true
+OOMPolicy=stop
+OOMScoreAdjust=800
 
 [Install]
 WantedBy=multi-user.target

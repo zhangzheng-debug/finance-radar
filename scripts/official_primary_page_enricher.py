@@ -256,6 +256,35 @@ def host_allowed(source_id: str, url: str) -> bool:
     )
 
 
+def canonical_official_url(source_id: str, url: str) -> str | None:
+    """Upgrade registered official HTTP links to fetch-only HTTPS.
+
+    Some government feeds still publish ``http://`` item links even though the
+    same pages are served over HTTPS.  Only already-registered source domains
+    may be upgraded; user info and non-default ports remain rejected.
+    """
+
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    host = (parsed.hostname or "").casefold().rstrip(".")
+    if not any(
+        host == suffix or host.endswith(f".{suffix}")
+        for suffix in SOURCE_HOST_SUFFIXES.get(source_id, ())
+    ):
+        return None
+    scheme = parsed.scheme.casefold()
+    if scheme == "https" and port in {None, 443}:
+        return urllib.parse.urlunsplit(("https", host, parsed.path, parsed.query, ""))
+    if scheme == "http" and port in {None, 80}:
+        return urllib.parse.urlunsplit(("https", host, parsed.path, parsed.query, ""))
+    return None
+
+
 def fetch_page(url: str, user_agent: str, timeout: float) -> FetchResult:
     request = urllib.request.Request(
         url,
@@ -338,17 +367,36 @@ def pending_rows(connection: Any, *, limit: int, refresh: bool = False) -> list[
     return connection.execute(
         f"""
         SELECT e.event_id,e.event_type,e.event_date,e.status,
-               r.observation_id,r.source_id,r.title,r.canonical_url,r.source_published_at
+               r.observation_id,r.source_id,r.title,r.canonical_url,r.source_published_at,
+               CASE WHEN EXISTS (
+                   SELECT 1
+                   FROM pipeline_jobs light
+                   WHERE light.event_id=e.event_id
+                     AND light.job_type='light_verification_followup'
+                     AND light.status='PENDING_EVIDENCE_REVIEW'
+               ) THEN 1 ELSE 0 END AS light_followup_pending
         FROM canonical_events e
         JOIN event_observations eo ON eo.event_id=e.event_id
         JOIN latest_source_content r ON r.observation_id=eo.observation_id
         LEFT JOIN event_evidence ev
           ON ev.event_id=e.event_id AND ev.observation_id=r.observation_id
-        WHERE e.status='candidate'
+        WHERE (
+              e.status='candidate'
+              OR EXISTS (
+                  SELECT 1
+                  FROM pipeline_jobs explicit_light_followup
+                  WHERE explicit_light_followup.event_id=e.event_id
+                    AND explicit_light_followup.job_type='light_verification_followup'
+                    AND explicit_light_followup.status='PENDING_EVIDENCE_REVIEW'
+              )
+          )
           AND r.source_id IN ({placeholders})
           AND r.canonical_url IS NOT NULL
           {evidence_filter}
-        ORDER BY r.source_published_at DESC,e.event_id
+        -- Follow-up work gets first access to the same bounded official-source
+        -- enrichment path.  This only prioritizes evidence collection; it
+        -- never closes or promotes the follow-up on its own.
+        ORDER BY light_followup_pending DESC,r.source_published_at DESC,e.event_id
         LIMIT ?
         """,
         (*sorted(SUPPORTED_SOURCES), limit),
@@ -406,15 +454,24 @@ def enrich(
         "link_only": 0,
         "errors": [],
         "by_type": {},
+        "http_upgraded_to_https": 0,
         "jobs_advanced": advance_existing_evidence_jobs(connection),
+        "light_followup_selected": 0,
     }
     rows = pending_rows(connection, limit=limit, refresh=refresh)
     result["selected"] = len(rows)
     for row in rows:
-        url = str(row["canonical_url"])
-        if not host_allowed(str(row["source_id"]), url):
-            result["errors"].append(f"{row['event_id']}: disallowed host for {url}")
+        result["light_followup_selected"] += int(row["light_followup_pending"] or 0)
+        source_id = str(row["source_id"])
+        original_url = str(row["canonical_url"])
+        url = canonical_official_url(source_id, original_url)
+        if url is None or not host_allowed(source_id, url):
+            result["errors"].append(
+                f"{row['event_id']}: disallowed host for {original_url}"
+            )
             continue
+        if urllib.parse.urlsplit(original_url).scheme.casefold() == "http":
+            result["http_upgraded_to_https"] += 1
         path = cache_path(cache_dir, url)
         try:
             if path.is_file():
@@ -424,7 +481,7 @@ def enrich(
                 fetched = fetcher(url, user_agent, timeout)
                 payload = fetched.body
                 final_url = fetched.final_url
-                if not host_allowed(str(row["source_id"]), final_url):
+                if not host_allowed(source_id, final_url):
                     raise ValueError(f"redirected to disallowed host: {final_url}")
                 path.write_bytes(payload)
             passage = select_passage(

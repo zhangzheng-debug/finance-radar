@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$SshHost = "ubuntu@18.208.34.152",
-    [string]$IdentityFile = "C:\Users\MR\.ssh1\id_ed25519",
+    [string]$SshHost = $env:FINANCE_RADAR_SSH_HOST,
+    [string]$IdentityFile = $env:FINANCE_RADAR_SSH_IDENTITY_FILE,
     [string]$DestinationRoot = "",
     [string]$PassphraseFile = "",
     [int]$LocalRetention = 7,
@@ -10,11 +10,22 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if (-not $SshHost) {
+    throw "SshHost is required; pass -SshHost or set FINANCE_RADAR_SSH_HOST"
+}
+if (-not $IdentityFile) {
+    throw "IdentityFile is required; pass -IdentityFile or set FINANCE_RADAR_SSH_IDENTITY_FILE"
+}
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $DestinationRoot) {
-    $DestinationRoot = Join-Path $repoRoot "server_migration_backup"
+    # Migration archives can exceed a gigabyte before their encrypted copy and
+    # restore drill are cleaned.  Keep the default off the space-constrained
+    # system drive; callers restoring a historic C: archive can still pass an
+    # explicit -DestinationRoot / -PassphraseFile.
+    $DestinationRoot = "D:\FinanceRadarBackups"
 }
 $DestinationRoot = [System.IO.Path]::GetFullPath($DestinationRoot)
+$auditWorkspaceRoot = [System.IO.Path]::GetFullPath("D:\FinanceRadarScratch\migration-audit")
 if (-not $PassphraseFile) {
     $PassphraseFile = Join-Path $DestinationRoot ".backup-passphrase"
 }
@@ -118,12 +129,14 @@ if ($LASTEXITCODE -ne 0) {
 }
 $archiveRoot = [System.IO.Path]::GetFileNameWithoutExtension($remoteArchive)
 $currentReleasePath = (& tar -xOf $plainArchive "$archiveRoot/CURRENT_RELEASE.txt").Trim()
-if ($LASTEXITCODE -ne 0 -or $currentReleasePath -notmatch '^/opt/finance-radar/releases/([0-9]{8}T[0-9]{6}Z)$') {
+$releaseIdComponent = '[A-Za-z0-9][A-Za-z0-9._-]{0,95}'
+$currentReleasePattern = "^/opt/finance-radar/releases/($releaseIdComponent)$"
+if ($LASTEXITCODE -ne 0 -or $currentReleasePath -notmatch $currentReleasePattern) {
     throw "archive CURRENT_RELEASE.txt is missing or invalid"
 }
 $requiredRelease = [regex]::Match(
     $currentReleasePath,
-    '^/opt/finance-radar/releases/([0-9]{8}T[0-9]{6}Z)$'
+    $currentReleasePattern
 ).Groups[1].Value
 
 $encryptedArchive = $null
@@ -162,6 +175,7 @@ if (-not $KeepPlaintext) {
         --passphrase-file $PassphraseFile `
         --expected-release $requiredRelease `
         --expected-sha256 $localSha256 `
+        --workspace-root $auditWorkspaceRoot `
         --report $fullRestoreReport
     if ($LASTEXITCODE -ne 0) {
         Remove-Item -LiteralPath $roundTripArchive -Force

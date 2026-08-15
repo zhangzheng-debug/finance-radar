@@ -1,3 +1,16 @@
+> **Archived design material — not production.**
+>
+> `claudeUI` is retained as a design reference only. It must not be served at
+> `/radar/`, used to proxy the public API, or treated as a second deployment
+> route. The only production UI is the Streamlit application deployed through
+> `deployment/systemd/install_remote.sh` and
+> `deployment/systemd/nginx-radar-direct.conf`.
+
+> **Retirement rule (2026-08-05).** Any `LIVE`, API, verification, or deployment
+> wording below describes the frozen July prototype only. It is not current
+> release evidence and must not be used to validate, deploy, or restore the
+> production service.
+
 # claudeUI · Finance Radar UI 升级工作区
 
 > Claude 独立工作目录。只包含新增文件，未改动主工程任何代码。
@@ -39,17 +52,18 @@ claudeUI/
 3. **`design/` — 两者共同的规范**。tokens、组件规范、
    与现有类名的迁移映射表、分三批的落地顺序。
 
-## 本地运行与实时 API
+## 历史原型检查（不用于生产验证）
 
 直接双击 `index.html` 会保持 DEMO 模式。浏览器会阻止普通本地静态服务跨域
-读取线上 API，因此实时验收请运行：
+读取线上 API；如需检查冻结原型的历史行为，可运行：
 
 ```powershell
 python .\claudeUI\prototype\dev_server.py
 ```
 
 然后打开 `http://127.0.0.1:8765/index.html`。该代理仅允许 GET/HEAD，所有
-POST/PUT/PATCH/DELETE 请求均返回 405。
+POST/PUT/PATCH/DELETE 请求均返回 405。它不是生产 API 入口，也不能作为
+当前 UI、数据新鲜度或发布验收的依据。
 
 - `LIVE CORE · READ ONLY`：态势、来源、事件、所选详情、证据及时间线来自实时 API；
 - `DEMO · API OFFLINE`：API 不可达，页面明确保持合成快照；

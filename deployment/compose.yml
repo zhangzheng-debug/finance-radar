@@ -9,12 +9,24 @@ x-radar-environment: &radar-environment
   FINANCE_RADAR_WEB_URL: ${FINANCE_RADAR_PUBLIC_URL:-http://localhost}
   FINANCE_RADAR_DEMO_MODE: ${FINANCE_RADAR_DEMO_MODE:-RECENT_CAPTURE}
   FINANCE_RADAR_ADMIN_TOKEN: ${FINANCE_RADAR_ADMIN_TOKEN:-change-me-before-public-deploy}
+  FINANCE_RADAR_REVIEWER_TOKEN: ${FINANCE_RADAR_REVIEWER_TOKEN:-change-me-reviewer}
+  FINANCE_RADAR_OPERATOR_TOKEN: ${FINANCE_RADAR_OPERATOR_TOKEN:-change-me-operator}
+
+x-radar-public-web-environment: &radar-public-web-environment
+  FINANCE_RADAR_API_URL: http://api:8000
+  FINANCE_RADAR_UI_ROLE: public
+  FINANCE_RADAR_SHOW_DEBUG: "0"
 
 x-radar-service: &radar-service
   build:
     context: ..
     dockerfile: deployment/Dockerfile
-  image: finance-radar:local
+  image: finance-radar:${FINANCE_RADAR_RELEASE_ID:-local}
+  labels:
+    org.opencontainers.image.title: Finance Radar
+    org.opencontainers.image.version: ${FINANCE_RADAR_RELEASE_ID:-local}
+    org.opencontainers.image.revision: ${FINANCE_RADAR_GIT_COMMIT:-unknown}
+    finance-radar.release-id: ${FINANCE_RADAR_RELEASE_ID:-local}
   restart: unless-stopped
   env_file:
     - ../.env
@@ -40,6 +52,11 @@ services:
 
   web:
     <<: *radar-service
+    # Do not inherit .env: it can contain provider credentials and the admin
+    # token. The public UI needs only a loopback/container API URL and its role.
+    env_file: []
+    environment: *radar-public-web-environment
+    volumes: []
     command: ["python", "-m", "streamlit", "run", "app/web/Home.py", "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true", "--browser.gatherUsageStats", "false"]
     expose: ["8501"]
     depends_on:
@@ -52,16 +69,65 @@ services:
       retries: 5
       start_period: 20s
 
+  admin:
+    <<: *radar-service
+    profiles: ["admin"]
+    environment:
+      <<: *radar-environment
+      FINANCE_RADAR_UI_ROLE: admin
+      FINANCE_RADAR_SHOW_DEBUG: "0"
+    command: ["python", "-m", "streamlit", "run", "app/web/Admin.py", "--server.address", "0.0.0.0", "--server.port", "8502", "--server.baseUrlPath", "radar-admin", "--server.headless", "true", "--browser.gatherUsageStats", "false"]
+    ports: ["127.0.0.1:18502:8502"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  reviewer:
+    <<: *radar-service
+    profiles: ["reviewer"]
+    env_file: []
+    environment:
+      FINANCE_RADAR_API_URL: http://api:8000
+      FINANCE_RADAR_UI_ROLE: reviewer
+      FINANCE_RADAR_REVIEWER_TOKEN: ${FINANCE_RADAR_REVIEWER_TOKEN:?set a reviewer token}
+      FINANCE_RADAR_SHOW_DEBUG: "0"
+    volumes: []
+    command: ["python", "-m", "streamlit", "run", "app/web/Reviewer.py", "--server.address", "0.0.0.0", "--server.port", "8503", "--server.baseUrlPath", "radar-review", "--server.headless", "true", "--browser.gatherUsageStats", "false"]
+    ports: ["127.0.0.1:18503:8503"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  operator:
+    <<: *radar-service
+    profiles: ["operator"]
+    env_file: []
+    environment:
+      FINANCE_RADAR_API_URL: http://api:8000
+      FINANCE_RADAR_UI_ROLE: operator
+      FINANCE_RADAR_OPERATOR_TOKEN: ${FINANCE_RADAR_OPERATOR_TOKEN:?set an operator token}
+      FINANCE_RADAR_SHOW_DEBUG: "0"
+    volumes: []
+    command: ["python", "-m", "streamlit", "run", "app/web/Operator.py", "--server.address", "0.0.0.0", "--server.port", "8504", "--server.baseUrlPath", "radar-ops", "--server.headless", "true", "--browser.gatherUsageStats", "false"]
+    ports: ["127.0.0.1:18504:8504"]
+    depends_on:
+      api:
+        condition: service_healthy
+
   worker:
     <<: *radar-service
-    command: ["python", "-m", "app.workers.continuous", "--interval", "300"]
+    # The continuous collector must not autonomously apply formal
+    # verification; scoped manual batches remain the only mutation path.
+    command: ["python", "-m", "app.workers.continuous", "--interval", "300", "--no-light-verify"]
     depends_on:
       api:
         condition: service_healthy
 
   backup:
     <<: *radar-service
-    command: ["python", "-m", "app.workers.backup_scheduler", "--interval", "86400", "--retention", "30", "--weekly-retention", "12"]
+    # User-selected retention: keep only the last daily bundle after its
+    # restore verification succeeds; no weekly copies are retained.
+    command: ["python", "-m", "app.workers.backup_scheduler", "--interval", "86400", "--retention", "1", "--weekly-retention", "0"]
     depends_on:
       api:
         condition: service_healthy

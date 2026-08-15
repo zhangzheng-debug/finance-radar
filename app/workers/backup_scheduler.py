@@ -9,27 +9,35 @@ from app.ops.backup import create_and_verify
 from app.storage import OperationsRepository
 
 
+def run_once(settings: Settings, *, retention: int, weekly_retention: int) -> dict:
+    operations = OperationsRepository(settings.operations_db)
+    backup_dir = settings.ledger_db.parent / "operational_backups"
+    return create_and_verify(
+        settings.ledger_db,
+        backup_dir,
+        operations,
+        retention=retention,
+        weekly_retention=weekly_retention,
+    )
+
+
 def main() -> int:
     settings = Settings.from_env()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--interval", type=float, default=float(os.getenv("FINANCE_RADAR_BACKUP_INTERVAL", "86400")))
-    parser.add_argument("--retention", type=int, default=int(os.getenv("FINANCE_RADAR_BACKUP_RETENTION", "30")))
+    parser.add_argument("--retention", type=int, default=int(os.getenv("FINANCE_RADAR_BACKUP_RETENTION", "1")))
     parser.add_argument(
         "--weekly-retention",
         type=int,
-        default=int(os.getenv("FINANCE_RADAR_WEEKLY_BACKUP_RETENTION", "12")),
+        default=int(os.getenv("FINANCE_RADAR_WEEKLY_BACKUP_RETENTION", "0")),
     )
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
-    operations = OperationsRepository(settings.operations_db)
-    backup_dir = settings.ledger_db.parent / "operational_backups"
     exit_code = 0
     while True:
         try:
-            result = create_and_verify(
-                settings.ledger_db,
-                backup_dir,
-                operations,
+            result = run_once(
+                settings,
                 retention=args.retention,
                 weekly_retention=args.weekly_retention,
             )

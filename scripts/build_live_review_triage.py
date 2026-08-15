@@ -236,7 +236,7 @@ def triage_row(row: Any) -> Triage:
         reasons.append("SEC_primary_text_parsed")
     elif row["page_evidence_status"] == "machine_extracted_unreviewed":
         reasons.append("official_primary_page_text_machine_extracted_unreviewed")
-    elif row["page_evidence_status"] == "confirmed_primary":
+    elif row["page_evidence_status"] in {"confirmed_primary", "accepted_light_primary_evidence"}:
         reasons.append("official_primary_page_text_confirmed")
     if row["matched_event_type"]:
         score += 4
@@ -257,7 +257,7 @@ def evidence_readiness(row: Any) -> str:
     )
     has_official_page_text = bool(str(row["page_evidence_passage"] or "").strip()) and row[
         "page_evidence_status"
-    ] in {"machine_extracted_unreviewed", "confirmed_primary"}
+    ] in {"machine_extracted_unreviewed", "confirmed_primary", "accepted_light_primary_evidence"}
     if has_sec_text or has_official_page_text:
         return "primary_text_ready"
     if str(row["authority_tier"]).startswith("P0"):

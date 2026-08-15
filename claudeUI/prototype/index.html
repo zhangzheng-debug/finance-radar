@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Finance Radar · Evidence Terminal v2</title>
+<title>Finance Radar · 证据情报终端 v3</title>
 <style>
 /* ==========================================================
    Calm Institutional v2 "Obsidian" — 内联 tokens
@@ -316,6 +316,39 @@ button { font-family:inherit; }
 .identity-id { font:650 11px var(--fr-font-mono); color:var(--fr-text-2); background:var(--fr-raised);
   border:1px solid var(--fr-border); border-radius:4px; padding:5px 8px; overflow-wrap:anywhere; }
 .identity-meta { color:var(--fr-muted); font-size:11px; margin-top:6px; }
+.next-action-card {
+  padding:12px; margin-bottom:10px; border:1px solid var(--fr-border-strong);
+  border-left:3px solid var(--fr-amber); border-radius:6px;
+  background:linear-gradient(135deg,var(--fr-amber-dim),transparent 72%),var(--fr-panel);
+}
+.next-action-card.risk {
+  border-left-color:var(--fr-red);
+  background:linear-gradient(135deg,var(--fr-red-dim),transparent 72%),var(--fr-panel);
+}
+.next-action-card.ok {
+  border-left-color:var(--fr-green);
+  background:linear-gradient(135deg,var(--fr-green-dim),transparent 72%),var(--fr-panel);
+}
+.next-action-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.next-action-label { color:var(--fr-muted); font:700 9.5px var(--fr-font-mono); letter-spacing:.08em; }
+.next-action-priority {
+  padding:2px 7px; border:1px solid rgba(245,180,83,.35); border-radius:999px;
+  color:var(--fr-amber); background:var(--fr-amber-dim);
+  font:700 9px var(--fr-font-mono); white-space:nowrap;
+}
+.next-action-card.risk .next-action-priority { color:var(--fr-red); border-color:rgba(255,107,122,.35); background:var(--fr-red-dim); }
+.next-action-card.ok .next-action-priority { color:var(--fr-green); border-color:rgba(47,208,143,.32); background:var(--fr-green-dim); }
+.next-action-title { margin-top:8px; color:var(--fr-text); font-size:13px; font-weight:720; line-height:1.4; }
+.next-action-copy { margin-top:4px; color:var(--fr-text-2); font-size:10.8px; line-height:1.55; }
+.next-action-steps { margin:8px 0 0 17px; color:var(--fr-text-2); font-size:10.8px; line-height:1.55; }
+.next-action-steps li+li { margin-top:3px; }
+.next-action-steps li::marker { color:var(--fr-cyan); font-family:var(--fr-font-mono); font-weight:700; }
+.next-action-foot {
+  display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 8px;
+  margin-top:9px; padding-top:7px; border-top:1px solid var(--fr-border);
+  color:var(--fr-muted); font:650 9px/1.45 var(--fr-font-mono);
+}
+.next-action-foot .reviewed { color:var(--fr-green); }
 .action-row { display:flex; gap:6px; flex-wrap:wrap; }
 .btn {
   display:inline-flex; align-items:center; justify-content:center; gap:6px;
@@ -371,6 +404,10 @@ button { font-family:inherit; }
 .model-fail-banner {
   background:var(--fr-red-dim); border:1px solid rgba(255,107,122,.3); border-left:3px solid var(--fr-red);
   border-radius:6px; padding:9px 12px; margin-bottom:10px; font-size:11.5px; line-height:1.55; color:#f2c6cc;
+}
+.model-fail-banner.pass {
+  background:var(--fr-green-dim); border-color:rgba(49,211,160,.3);
+  border-left-color:var(--fr-green); color:#bcebdc;
 }
 
 /* Adjudication */
@@ -496,23 +533,23 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
 
 <div class="boot-overlay" id="boot-overlay" role="status" aria-live="polite">
   <div class="boot-card">
-    <div class="boot-title">FINANCE RADAR · CONNECTING LIVE READ-ONLY CORE</div>
-    <div class="boot-copy">正在读取事件账本、来源健康与证据状态。连接结果确认前不展示合成数字。</div>
+    <div class="boot-title">ARCHIVED PROTOTYPE · NOT A PRODUCTION UI</div>
+    <div class="boot-copy">这是冻结的历史设计材料，不读取或验证当前生产数据。</div>
     <div class="boot-line" aria-hidden="true"></div>
   </div>
 </div>
 
 <header class="topbar">
-  <div class="brand" title="Finance Radar Evidence Terminal">
+  <div class="brand" title="Archived Finance Radar design prototype">
     <span class="brand-mark" aria-hidden="true"></span>
     <span class="brand-name">FINANCE RADAR</span>
   </div>
   <nav class="nav-tabs" role="navigation" aria-label="终端页面导航">
-    <button class="nav-tab" data-route="situation">态势室 <span class="en">SITUATION</span></button>
-    <button class="nav-tab" data-route="workbench">事件工作台 <span class="en">WORKBENCH</span></button>
-    <button class="nav-tab" data-route="replay">回放实验室 <span class="en">REPLAY</span></button>
-    <button class="nav-tab" data-route="ops">运行与模型 <span class="en">OPS</span></button>
-    <button class="nav-tab" data-route="adjudication">盲标裁决 <span class="en">ADJUD</span></button>
+    <button class="nav-tab" data-route="situation">态势总览</button>
+    <button class="nav-tab" data-route="workbench">事件工作台</button>
+    <button class="nav-tab" data-route="replay">证据回放</button>
+    <button class="nav-tab" data-route="ops">运行与模型</button>
+    <button class="nav-tab" data-route="adjudication">双人盲审</button>
   </nav>
   <div class="top-search">
     <span class="icon" aria-hidden="true">⌕</span>
@@ -523,7 +560,7 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
   <div class="top-right">
     <button class="mode-badge presentation-toggle" id="presentation-toggle"
             type="button" aria-pressed="false" title="切换答辩投影高可读模式">PRESENT</button>
-    <button class="mode-badge demo" id="mode-badge" title="正在连接同源 API（/finance-radar-api）">CONNECTING…</button>
+    <button class="mode-badge demo" id="mode-badge" title="历史原型状态；不可作为生产验收">ARCHIVED</button>
     <span class="utc-clock" id="utc-clock">--:--:-- UTC</span>
   </div>
 </header>
@@ -531,7 +568,7 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
 <main class="shell">
   <div class="safe-banner" role="note">
     <span aria-hidden="true">◉</span>
-    情报与人工复核系统 · 只读行情 · 不含下单、仓位、余额或交易执行能力 · 模型输出均为 SHADOW
+    历史设计原型已退役 · 非生产 · 不可用于部署、恢复或当前数据验收
   </div>
 
   <!-- ============ 态势室 ============ -->
@@ -617,10 +654,9 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
           <span class="section-title">影子模型</span>
           <span class="section-meta">LIVE MODEL STATUS · SHADOW ONLY · 不参与最终判定</span>
         </div>
-        <div class="model-fail-banner">
-          <b>EXTERNAL BLIND V1 · GATE FAIL</b> — 40 条 label-first 外部盲测：
-          风险召回 100%，但正常新闻误报 95%。模型保持 shadow，
-          只做候选队列高召回路由，不能作为正负新闻总分类器。失败结果公开展示，不隐藏。
+        <div class="model-fail-banner" id="model-status-banner">
+          <b>模型状态正在同步</b> — 正在读取当前模型版本、外部盲测门禁与晋级结论。
+          历史失败不会覆盖当前结果；当前结果也不会删除历史失败记录。
         </div>
         <div class="pulse-grid" id="model-pulse"></div>
         <div class="section-head" style="margin-top:14px">
@@ -637,12 +673,12 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
     <div class="adj-grid">
       <div>
         <div class="section-head">
-          <span class="section-title">双人盲标进度</span>
-          <span class="section-meta">LIVE AGGREGATE · FROZEN EXAMPLES · 来源已脱敏</span>
+          <span class="section-title">人工评测集构建</span>
+          <span class="section-meta">用于检验模型 · 不负责审核实时事件 · 来源已脱敏</span>
         </div>
         <div class="gate-banner warn" id="adj-gate-banner">
-          <b>NOT_READY_FOR_FREEZE</b> — 24 条未标注任务等待两名互不可见的审核者。
-          冲突必须由第三人裁决；公网写控件默认关闭（未授权队列请求返回 HTTP 403）。
+          <b>NOT_READY_FOR_FREEZE</b> — 24 条评测任务等待两名互不可见的审核者。
+          这里构建“人类标准答案”来检验模型，不改变实时事件状态；冲突由第三人裁决。
         </div>
         <div id="adj-samples"></div>
       </div>
@@ -655,7 +691,7 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
           <div class="queue-label">标注进度</div>
           <div class="queue-value"><span id="adj-done">0</span> / <span id="adj-total">24</span></div>
           <div class="progressbar"><i id="adj-bar" style="width:0%"></i></div>
-          <div class="queue-copy">审核者只提交 重大性 / 极性 / 证据状态 三个独立轴 + 理由。目标标签只能在复核完成后派生，绝不由单人或模型直接给出。</div>
+          <div class="queue-copy">两名审核者在看不到模型答案的情况下，独立判断重大性、极性和证据状态；一致结果成为评测基准，分歧交第三人裁决。它检验模型是否可靠，不是实时事件审批按钮。</div>
         </div>
         <div class="pulse-grid">
           <div class="pulse-cell"><div class="pulse-label">审核轴</div><div class="pulse-value">3 + 理由</div></div>
@@ -673,7 +709,7 @@ body.presentation-mode .mh-label { font-size:10.5px !important; }
   <span>只读行情 · 无下单 · 无仓位 · 无余额</span><span class="sep">/</span>
   <span>Ledger Schema 12 · quick_check=ok</span><span class="sep">/</span>
   <span id="footer-snapshot">合成演示快照</span><span class="sep">/</span>
-  <span>Evidence Terminal v2 · AWS 正式只读终端</span>
+  <span>Evidence Terminal v3 · 历史冻结原型 · 非生产</span>
 </footer>
 
 <div class="palette-backdrop" id="palette-backdrop" aria-hidden="true">
@@ -698,11 +734,14 @@ const DEMO = {
   review_queue: 297,
   worker: { cycle_seconds:5.38, cycles:266, observed_hours:20.6, latest:"SUCCESS" },
   ops: { api_status:"DEMO", quick_check:"DEMO", replay_runs:7 },
-  backups: { online:35, daily_keep:30, weekly_keep:12, local_latest:"20260719T045536Z",
-             offhost_latest:"20260719T045536Z", offhost_state:"FROZEN", restore_drill:"PASS" },
+  backups: { history_runs:35, verified_runs:35, failed_runs:0, running_runs:0,
+             retained_daily_files:30, retained_weekly_files:12, daily_keep:30, weekly_keep:12,
+             local_latest:"20260719T045536Z", offhost_latest:"20260719T045536Z",
+             offhost_state:"FROZEN", restore_drill:"PASS" },
   model: { mode:"SHADOW", coverage:.827, covered_accuracy:.957, abstain_rate:.173,
            blind_accuracy:.513, blind_recall:1.0, blind_false_risk:.95,
-           gate_pass:false, p95_ms:7240, runs:7 },
+           gate_pass:false, p95_ms:7240, runs:7, model_version:"demo-shadow-v1",
+           promotion_decision:"HISTORICAL_FAIL", evaluation_name:"EXTERNAL BLIND V1" },
   adjudication: { status:"NOT_READY_FOR_FREEZE", samples:24, valid_annotations:0,
                   blind_v2_frozen:false, live:false },
   sparks: {
@@ -1058,15 +1097,15 @@ const S = {
   route:"situation", selectedEvent:DEMO.events[0].id,
   wb:{ flow:"", family:"", source:"", q:"" },
   replay:{ caseId:DEMO.replays[0].id, step:-1, timer:null },
-  live:false, liveScope:"demo", liveDetailLoading:new Map(),
-  apiBase:(new URLSearchParams(location.search).get("api") || "/finance-radar-api").replace(/\/$/, "")
+  searchTimer:null
 };
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const FAMILY_LABEL = Object.fromEntries(DEMO.families);
 const POL = { adverse:["▼","pol-adverse","利空"], positive:["▲","pol-positive","利好"],
-              neutral:["◆","pol-neutral","中性"], mixed:["◈","pol-mixed","冲突"] };
+              neutral:["◆","pol-neutral","中性"], mixed:["◈","pol-mixed","冲突"],
+              unknown:["?","pol-neutral","未判定"] };
 const ROUTE_CHIP = { RISK_REVIEW:"chip-risk", NON_TARGET:"chip-nontarget", ABSTAIN:"chip-abstain" };
 const STATUS_LABEL = { verified:"VERIFIED", candidate:"REVIEW", weak:"WEAK", rejected:"REJECTED" };
 const TL_GLYPH = { observe:"○", revise:"◉", evidence:"◆", gate:"■", withdraw:"✕" };
@@ -1098,64 +1137,6 @@ function evidenceIdentity(item) {
   if (item.id) return `EVIDENCE-ID:${esc(String(item.id).slice(-12))}`;
   return "IDENTITY PENDING";
 }
-async function apiFetch(path, attempts=2) {
-  let lastError;
-  for (let attempt=1; attempt<=attempts; attempt+=1) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 9000);
-      const response = await fetch(`${S.apiBase}${path}`, {
-        headers:{Accept:"application/json"}, cache:"no-store", signal:controller.signal
-      });
-      clearTimeout(timeout);
-      if (!response.ok) {
-        const error = new Error(`HTTP ${response.status} ${path}`);
-        if (response.status < 500 && response.status !== 429) throw error;
-        lastError = error;
-      } else {
-        const payload = await response.json();
-        return payload.data || payload;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-    if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, 300 * attempt));
-  }
-  throw lastError || new Error(`API request failed ${path}`);
-}
-function liveSourceState(source) {
-  const cursor = String(source.cursor_status || "").toUpperCase();
-  if (source.last_error || /ERROR|FAILED|HTTP_/.test(cursor)) return "error";
-  if (!source.enabled || /UNOBSERVED|DISABLED|REGISTERED_ONLY|STATIC_IMPORTED/.test(cursor)) return "idle";
-  if (!source.last_success_at) return "idle";
-  if (/STALE/.test(cursor)) return "watch";
-  return "ok";
-}
-function liveEventFromRow(row) {
-  const company = row.company_name || "未识别主体";
-  const typeLabel = humanize(row.event_type);
-  return {
-    id:row.event_id, time:shortTime(row.last_updated_at), date:row.event_date || "—",
-    company, ticker:row.ticker_at_event || "—", family:row.event_family || "unclassified",
-    type:row.event_type || "unclassified", source:row.discovery_source || "unknown",
-    tier:authorityTier(row), status:row.status || "candidate", polarity:"neutral",
-    route:"SHADOW_PENDING", confidence:0, version:Number(row.current_version || 1),
-    evidenceCount:Number(row.evidence_count || 0), conflict:false,
-    sortAt:row.last_updated_at || row.first_seen_at || row.event_date || "",
-    headline:row.source_title || `${company} · ${typeLabel}`,
-    summary:row.source_summary || row.evidence_excerpt || "实时事件已入账；精确证据与模型分流将在选中后按需读取。",
-    evidence:row.evidence_excerpt ? [{
-      source:row.discovery_source || "unknown", tier:authorityTier(row), id:null,
-      passage:row.evidence_excerpt, status:"PREVIEW", note:"实时事件列表中的证据摘要；选中后加载精确证据对象"
-    }] : [],
-    timeline:[{t:shortTime(row.first_seen_at),kind:"observe",title:"实时事件入账",desc:`${row.discovery_source || "unknown"} · ${row.status || "candidate"}`}],
-    market:{symbol:row.ticker_at_event || "NO TICKER",provider:"live ledger",price:"NOT AVAILABLE",
-      fresh:"NOT CAPTURED",freshState:"watch",available:false,
-      note:"当前只读 API 未返回该事件的可展示行情快照；不使用合成价格填充。",horizons:[]},
-    liveDetailLoaded:false
-  };
-}
-
 function spark(values, w=56, h=22, color="var(--fr-cyan)") {
   const min = Math.min(...values), max = Math.max(...values), span = (max-min) || 1;
   const pts = values.map((v,i) =>
@@ -1165,7 +1146,7 @@ function spark(values, w=56, h=22, color="var(--fr-cyan)") {
       stroke-linejoin="round" stroke-linecap="round" opacity=".8"/></svg>`;
 }
 function tierChip(tier) { return `<span class="chip chip-${tier.toLowerCase()}">${tier}</span>`; }
-function polGlyph(p) { const [g,cls,label] = POL[p] || POL.neutral;
+function polGlyph(p) { const [g,cls,label] = POL[p] || POL.unknown;
   return `<span class="pol ${cls}" title="${label}" aria-label="极性:${label}">${g}</span>`; }
 
 /* ============================================================
@@ -1196,7 +1177,7 @@ function renderSituation() {
     ["证据边", c.event_evidence.toLocaleString(), "", spark(DEMO.sparks.evidence,56,22,"var(--fr-purple)")],
     ["原文证据对象", fmtCount(c.evidence_objects), "", ""],
     ["WORKER", DEMO.worker.cycle_seconds.toFixed(2), "ok", "", "s"],
-    ["在线备份", DEMO.backups.online.toLocaleString(), "", ""],
+    ["备份运行记录", DEMO.backups.history_runs.toLocaleString(), "", ""],
   ].map(([label, value, state, sp, unit]) => `
     <div class="kpi">
       <div class="kpi-label">${label}</div>
@@ -1282,6 +1263,94 @@ function wbFiltered() {
     (!S.wb.source || ev.source === S.wb.source) &&
     (!q || [ev.company, ev.ticker, ev.type, ev.id, ev.headline].join(" ").toLowerCase().includes(q)));
 }
+function modelDisplay(ev) {
+  const source = String(ev.modelDecisionSource || "").toUpperCase();
+  if (source === "PENDING") {
+    return {value:"同步中", state:"watch", title:"正在读取该事件的规则门与模型执行记录"};
+  }
+  if (source === "DETERMINISTIC_EVIDENCE_GATE") {
+    return {value:"未调用 · 证据门", state:"watch", title:"证据不足时由确定性规则先行弃权，不把规则分数冒充模型置信度"};
+  }
+  if (source === "DETERMINISTIC_SEMANTIC_POLICY_GATE" || source === "LEGACY_SCOPE_GUARDRAIL") {
+    return {value:"未调用 · 策略门", state:"watch", title:"由确定性策略规则作出分流，语义模型没有运行"};
+  }
+  if (ev.semanticModelInvoked) {
+    const pct = ev.confidenceApplicable ? `${Math.round(ev.confidence*100)}%` : "已运行";
+    return {value:`${pct} · 旁路模型`, state:"", title:"语义模型已运行，但只写入旁路审计，不改变事件状态"};
+  }
+  if (Number.isFinite(ev.confidence)) {
+    return {value:`${Math.round(ev.confidence*100)}% · 演示`, state:"", title:"合成演示数据，不是实时模型运行"};
+  }
+  return {value:"未执行", state:"watch", title:"当前没有可核验的语义模型执行记录"};
+}
+function nextActionGuidance(ev) {
+  const evidence = Array.isArray(ev.evidence) ? ev.evidence : [];
+  const evidenceCount = Number.isFinite(Number(ev.evidenceCount)) ? Number(ev.evidenceCount) : evidence.length;
+  const statuses = evidence.map(item => String(item.status || "").toUpperCase());
+  const conflict = Boolean(ev.conflict) || statuses.some(status => /CONFLICT|CONTRADICT/.test(status));
+  const highestTier = evidence.map(item => String(item.tier || "P?")).sort((a,b) => {
+    const rank = value => /^P[0-2]$/.test(value) ? Number(value.slice(1)) : 99;
+    return rank(a) - rank(b);
+  })[0] || ev.tier || "P?";
+  const status = String(ev.status || "candidate").toLowerCase();
+  const reviewed = Number(ev.humanReviewCount || 0) > 0;
+  let action;
+
+  if (conflict) {
+    action = {
+      code:"EVIDENCE_CONFLICT", tone:"risk", priority:"立即复核", title:"先处理证据冲突",
+      reason:`当前 ${evidenceCount} 条证据中存在相互冲突的状态，结论不能自动升级。`,
+      steps:["并排核对冲突来源的精确引文与发布时间", "确认是否属于修订、撤回或同名主体混淆", "由人工写明保留、降级或拒绝理由"]
+    };
+  } else if (evidenceCount === 0) {
+    action = {
+      code:"MISSING_EVIDENCE", tone:"risk", priority:"先补证据", title:"补齐可引用的原始证据",
+      reason:"当前事件没有证据边，系统必须保持待复核或弃权。",
+      steps:["优先找到 P0/P1 原始来源并确认主体与日期", "截取能够直接支持事件事实的精确段落", "证据代理形成可追溯记录后再由人工判断"]
+    };
+  } else if (status === "rejected") {
+    action = {
+      code:"REJECTION_WATCH", tone:"ok", priority:"保留拒绝", title:"保留拒绝结论，等待新证据",
+      reason:"当前工作流已拒绝该事件；只有来源修订或新增高权威证据才应重开。",
+      steps:["确认拒绝理由仍与当前原始来源一致", "关注撤回、修订或新增监管文件", "没有新证据时不重复运行判断流程"]
+    };
+  } else if (status === "verified") {
+    action = {
+      code:"VERIFIED_MONITOR", tone:"ok", priority:"持续观察", title:"核验已完成，转入版本观察",
+      reason:`事件已有 ${evidenceCount} 条证据边，当前工作流状态为已核验。`,
+      steps:["确认最高权威来源与当前事件版本一致", "只在来源修订或新增事实时创建新版本", "保留精确引文与人工记录以便回放审计"]
+    };
+  } else if (status === "weak") {
+    action = {
+      code:"WEAK_EVIDENCE", tone:"watch", priority:"补强证据", title:"先补强证据，再决定是否保留事件",
+      reason:`当前 ${evidenceCount} 条证据尚不足以闭合事实，工作流保持弱证据状态。`,
+      steps:[`复核现有最高权威 ${highestTier} 来源能直接支持哪些事实`, "补充更高权威来源或缩小事件陈述的事实范围", "仍无法闭合时由人工标记证据不足或拒绝"]
+    };
+  } else if (String(ev.route || "").toUpperCase() === "RISK_REVIEW") {
+    action = {
+      code:"HUMAN_RISK_REVIEW", tone:"risk", priority:"人工风险复核", title:"核对不利事件的事实边界",
+      reason:"Shadow 路由将其列入风险复核队列；这只是排序信号，不是交易方向。",
+      steps:[`先核对最高权威 ${highestTier} 来源的精确引文`, "区分已发生事实、条件性表述与前瞻性陈述", "由人工记录保留、降级或证据不足结论"]
+    };
+  } else {
+    action = {
+      code:"EVIDENCE_REVIEW", tone:"watch", priority:"等待判断", title:"核对最高权威证据后再判断",
+      reason:`当前共有 ${evidenceCount} 条证据边，尚未完成事实闭环。`,
+      steps:[highestTier === "P0" ? "逐字核对 P0 来源与事件摘要" : "优先补充 P0/P1 来源，再核对现有引文", "检查主体、发布日期、事件版本和引文上下文", ev.agentDecisionCount ? "核对代理引用后由人工记录结论" : "需要结构化比对时等待只读证据代理记录"]
+    };
+  }
+  return {...action, reviewed};
+}
+function nextActionMarkup(ev) {
+  const action = nextActionGuidance(ev);
+  return `<section class="next-action-card ${action.tone}" data-action-code="${esc(action.code)}" aria-labelledby="next-action-title">
+    <div class="next-action-top"><span class="next-action-label">下一步行动</span><span class="next-action-priority">${esc(action.priority)}</span></div>
+    <h2 class="next-action-title" id="next-action-title">${esc(action.title)}</h2>
+    <p class="next-action-copy">${esc(action.reason)}</p>
+    <ol class="next-action-steps">${action.steps.map(step => `<li>${esc(step)}</li>`).join("")}</ol>
+    <div class="next-action-foot"><span class="${action.reviewed?"reviewed":""}">${action.reviewed?"已存在人工复核记录":"尚未记录人工复核"}</span><span>只读提示 · 不构成交易建议 · 不触发下单</span></div>
+  </section>`;
+}
 function renderWorkbench() {
   const familySel = $("#wb-family");
   if (familySel.options.length === 1) {
@@ -1316,12 +1385,20 @@ function renderWorkbench() {
     const pick = () => {
       S.selectedEvent = item.dataset.id;
       renderWorkbench();
-      if (S.live) void loadLiveEventDetail(item.dataset.id);
     };
     item.addEventListener("click", pick);
     item.addEventListener("keydown", e => { if (e.key==="Enter") pick(); });
   });
 
+  if (!list.length) {
+    S.selectedEvent = "";
+    $("#wb-center").innerHTML = `<div class="panel" style="padding:28px;color:var(--fr-muted)">
+      <div class="section-title" style="margin-bottom:8px">没有检索结果</div>
+      当前条件下没有事件，详情区已清空；系统不会继续显示上一次选中的事件。
+    </div>`;
+    $("#wb-right").innerHTML = "";
+    return;
+  }
   const ev = DEMO.events.find(e=>e.id===S.selectedEvent);
   if (!ev) { $("#wb-center").innerHTML = ""; $("#wb-right").innerHTML = ""; return; }
 
@@ -1342,7 +1419,6 @@ function renderWorkbench() {
     </div>
     <h2 class="event-headline">${esc(ev.headline)}</h2>
     <p class="event-summary">${esc(ev.summary)}</p>
-    ${S.live && !ev.liveDetailLoaded ? `<div class="live-detail-note">SYNCING LIVE EVIDENCE + TIMELINE…</div>` : ""}
     ${conflictBanner}${noEvidenceBanner}
     <div class="section-head"><span class="section-title">证据矩阵</span>
       <span class="section-meta">EXACT PASSAGES · CONTENT-ADDRESSED · IMMUTABLE</span></div>
@@ -1372,6 +1448,7 @@ function renderWorkbench() {
     </div>`;
 
   const m = ev.market;
+  const modelState = modelDisplay(ev);
   const horizons = m.horizons.length ? `
     <div class="market-horizons" aria-label="观察基线后的行情窗口">
       ${m.horizons.map(h => `
@@ -1381,6 +1458,7 @@ function renderWorkbench() {
         </div>`).join("")}
     </div>` : "";
   $("#wb-right").innerHTML = `
+    ${nextActionMarkup(ev)}
     <div class="section-head"><span class="section-title">决策上下文</span>
       <span class="section-meta">DIMENSIONS ARE SEPARATE</span></div>
     <div class="score-rail">
@@ -1389,13 +1467,19 @@ function renderWorkbench() {
          ["最高权威", ev.tier, "evidence"],
          ["新颖性", ev.version>1?"REVISION":"NEW", ""],
          ["证据冲突", ev.conflict?"DETECTED":"CLEAR", ev.conflict?"risk":"ok"],
-         ["模型", Math.round(ev.confidence*100)+"% · SHADOW", ""],
+         ["模型/规则", modelState.value, modelState.state],
          ["工作流", ev.status.toUpperCase(), ev.status==="verified"?"ok":"watch"]]
         .map(([l,v,s]) => `<div class="score-cell"><div class="score-label">${l}</div>
           <div class="score-value ${s}">${v}</div></div>`).join("")}
     </div>
     <div style="color:var(--fr-muted);font-size:10.5px;line-height:1.5;margin-bottom:10px">
       风险路由是"重大下行风险复核分流"，不是交易方向或收益预测。各维度独立展示，永不合并为买卖分。
+    </div>
+    <div class="panel identity-card" style="margin-bottom:10px" title="${esc(modelState.title)}">
+      <div class="queue-label" style="margin-bottom:6px">本次判断由谁完成</div>
+      <div class="identity-id">${esc(ev.modelDecisionSource || "DEMO_FIXTURE")}</div>
+      <div class="identity-meta">${esc(ev.modelReason || modelState.title)}</div>
+      <div class="identity-meta" style="margin-top:5px">已持久化影子运行 ${ev.modelRunCount || 0} 次 · Evidence Agent ${ev.agentDecisionCount || 0} 次</div>
     </div>
     <div class="section-head"><span class="section-title">只读行情上下文</span>
       <span class="section-meta">POST-EVENT AUDIT ONLY</span></div>
@@ -1414,17 +1498,35 @@ function renderWorkbench() {
       <div class="identity-id">${ev.id}</div>
       <div class="identity-meta">Version ${ev.version} · ${esc(ev.type)} · ${esc(ev.source)}</div>
     </div>
-    <div class="action-row">
-      <button class="btn primary" disabled title="公开终端保持只读；人工复核由授权审核人执行">标记人工复核</button>
-      <button class="btn" disabled title="公开终端不开放写操作">运行 Evidence Agent</button>
+    <div class="section-head"><span class="section-title">后续复核状态</span>
+      <span class="section-meta">公开终端只展示状态</span></div>
+    <div class="pulse-grid">
+      <div class="pulse-cell"><div class="pulse-label">Evidence Agent</div>
+        <div class="pulse-value ${ev.agentDecisionCount?"st-ok":"st-watch"}" style="font-size:11px">${esc(ev.agentLatestStatus || "NOT RUN")}</div></div>
+      <div class="pulse-cell"><div class="pulse-label">人工复核记录</div>
+        <div class="pulse-value ${ev.humanReviewCount?"st-ok":"st-watch"}">${ev.humanReviewCount || 0}</div></div>
+    </div>
+    <div style="color:var(--fr-muted);font-size:10.5px;line-height:1.5;margin-top:7px">
+      Evidence Agent 由后台在证据准备好后自动运行；人工复核由授权管理端执行。公开页面没有写入按钮，避免误以为灰色按钮可操作。
     </div>`;
 
-  if (S.live && !ev.liveDetailLoaded) void loadLiveEventDetail(ev.id);
 }
 ["wb-flow","wb-family","wb-source"].forEach(id =>
   $("#"+id).addEventListener("change", e => {
     S.wb[id.replace("wb-","")] = e.target.value; renderWorkbench(); }));
-$("#wb-search").addEventListener("input", e => { S.wb.q = e.target.value; renderWorkbench(); });
+$("#wb-search").addEventListener("input", e => {
+  S.wb.q = e.target.value;
+  renderWorkbench();
+  clearTimeout(S.searchTimer);
+  S.searchTimer = setTimeout(() => void executeSearch(e.target.value), 350);
+});
+$("#wb-search").addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    clearTimeout(S.searchTimer);
+    void executeSearch(e.target.value);
+  }
+});
 
 /* ============================================================
    回放实验室
@@ -1494,6 +1596,11 @@ function resetReplay() {
    ============================================================ */
 function renderOps() {
   const m = DEMO.model, b = DEMO.backups, w = DEMO.worker;
+  const modelBanner = $("#model-status-banner");
+  modelBanner.classList.toggle("pass", Boolean(m.gate_pass));
+  modelBanner.innerHTML = m.gate_pass
+    ? `<b>${esc(m.evaluation_name)} · GATE PASS</b> — 当前版本 ${esc(m.model_version)} 已通过本轮外部盲测，治理结论为 ${esc(m.promotion_decision)}。仍保持 SHADOW：结果只用于排序、审计与人工复核，不自动改变事件状态。历史 V1 失败继续保存在评测档案中。`
+    : `<b>${esc(m.evaluation_name)} · GATE FAIL</b> — 当前版本 ${esc(m.model_version)} 未通过外部盲测，治理结论为 ${esc(m.promotion_decision)}。模型保持 SHADOW，不作为最终分类器；失败结果公开展示。`;
   $("#ops-kpi").innerHTML = [
     ["只读 API", DEMO.ops.api_status, DEMO.ops.api_status==="OK"?"ok":"watch"],
     ["账本检查", DEMO.ops.quick_check, DEMO.ops.quick_check==="ok"?"ok":"watch"],
@@ -1529,7 +1636,10 @@ function renderOps() {
     <div class="pulse-value ${cls}">${v}</div></div>`).join("");
 
   $("#backup-pulse").innerHTML = [
-    ["服务器验证备份", String(b.online), b.online?"st-ok":"st-watch"], ["保留策略", `${b.daily_keep}日+${b.weekly_keep}周`, ""],
+    ["历史备份运行", String(b.history_runs), b.history_runs?"st-ok":"st-watch"],
+    ["已验证 / 失败", `${b.verified_runs} / ${b.failed_runs}`, b.failed_runs?"st-error":"st-ok"],
+    ["当前保留文件", `${b.retained_daily_files} 日备 + ${b.retained_weekly_files} 周备`, ""],
+    ["保留上限", `${b.daily_keep}日+${b.weekly_keep}周`, ""],
     ["服务器最新备份", b.local_latest, ""],
     ["最新异机恢复包", b.offhost_latest, b.offhost_state==="VERIFIED"?"st-ok":"st-watch"],
     ["异机恢复审计", b.restore_drill, b.restore_drill==="PASS"?"st-ok":"st-watch"],
@@ -1548,8 +1658,8 @@ function renderAdjudication() {
   $("#adj-bar").style.width = `${total ? Math.min(100, done/total*100) : 0}%`;
   const banner = $("#adj-gate-banner");
   banner.classList.toggle("warn", !a.blind_v2_frozen);
-  banner.innerHTML = `<b>${esc(a.status)}</b> — ${total.toLocaleString()} 条任务，${done.toLocaleString()} 条有效标注。` +
-    ` 冲突必须由第三人裁决；公网写控件默认关闭（未授权队列请求返回 HTTP 403）。`;
+  banner.innerHTML = `<b>${esc(a.status)}</b> — ${total.toLocaleString()} 条模型评测任务，${done.toLocaleString()} 条有效人工标注。` +
+    ` 两名审核者互相看不到答案，也看不到模型输出；一致结果成为人类标准答案，冲突由第三人裁决。此页面不审核或改变实时事件。`;
   $("#adj-samples").innerHTML = DEMO.adjSamples.map(s => `
     <div class="panel adj-sample">
       <div class="adj-masked">${esc(s.masked)} · <span class="chip chip-abstain">FROZEN UI FIXTURE</span></div>
@@ -1574,7 +1684,7 @@ const PALETTE_ITEMS = [
   { label:"事件工作台 Event Workbench", meta:"PAGE", act:()=>navigate("workbench") },
   { label:"回放实验室 Replay Lab", meta:"PAGE", act:()=>navigate("replay") },
   { label:"运行与模型 Operations", meta:"PAGE", act:()=>navigate("ops") },
-  { label:"盲标裁决 Adjudication", meta:"PAGE", act:()=>navigate("adjudication") },
+  { label:"模型人工验收 Adjudication", meta:"PAGE", act:()=>navigate("adjudication") },
   ...DEMO.families.map(([value,label]) => ({
     label:`事件族 · ${label}`, meta:"FAMILY",
     act:()=>{ S.wb.family = value; S.wb.flow=""; navigate("workbench"); } })),
@@ -1647,12 +1757,15 @@ document.addEventListener("keydown", e => {
   }
 });
 $("#global-search").addEventListener("keydown", e => {
-  if (e.key === "Enter") { S.wb.q = e.target.value; S.wb.flow=""; navigate("workbench"); }
+  if (e.key === "Enter") {
+    e.preventDefault();
+    void executeSearch(e.target.value);
+  }
 });
 
 /* ============================================================
-   Live 核心：overview + event list + selected detail/evidence/timeline。
-   回放、盲标样例仍明确使用冻结夹具，绝不伪装成实时数据。
+   归档演示：所有页面只使用内嵌冻结样例。
+   此原型不请求、代理或切换到任何生产 API。
    ============================================================ */
 function ageLabel(value) {
   if (!value) return "NEVER";
@@ -1669,245 +1782,27 @@ function resetWorkbenchOptions() {
   while (source.options.length > 1) source.remove(1);
   S.wb = {flow:"", family:"", source:"", q:""};
 }
-function setModeBadge(mode, detail="") {
+function refreshWorkbenchOptions() {
+  const family = $("#wb-family"), source = $("#wb-source");
+  while (family.options.length > 1) family.remove(1);
+  while (source.options.length > 1) source.remove(1);
+}
+function executeSearch(rawQuery) {
+  const query = String(rawQuery || "").trim();
+  S.wb.q = query;
+  S.wb.flow = "";
+  S.wb.family = "";
+  S.wb.source = "";
+  $("#global-search").value = query;
+  navigate("workbench");
+}
+function setModeBadge() {
   const badge = $("#mode-badge");
   badge.classList.remove("demo", "error");
-  if (mode === "live") {
-    badge.textContent = "LIVE CORE · READ ONLY";
-    badge.title = "实时范围：态势、来源、事件列表、所选事件详情、证据与时间线；回放及盲标样例为冻结夹具。";
-  } else if (mode === "loading") {
-    badge.classList.add("demo"); badge.textContent = "CONNECTING…";
-    badge.title = "正在连接只读 API";
-  } else if (mode === "error") {
-    badge.classList.add("error"); badge.textContent = "DEMO · API OFFLINE";
-    badge.title = detail || "只读 API 不可达；当前所有事件均为明确标记的合成演示快照。";
-  } else {
-    badge.classList.add("demo"); badge.textContent = "DEMO SNAPSHOT";
-    badge.title = "点击连接同源只读 API；本地开发请使用 dev_server.py 代理。";
-  }
+  badge.classList.add("demo");
+  badge.textContent = "ARCHIVED · FROZEN SNAPSHOT";
+  badge.title = "归档演示原型：仅使用内嵌冻结样例，不连接或切换到生产 API。";
 }
-function applyLiveOverview(data) {
-  const counts = data.counts || {};
-  DEMO.counts = {
-    ...DEMO.counts, ...counts,
-    market_metrics:counts.event_market_metrics ?? counts.market_metrics ?? "—"
-  };
-  DEMO.event_status = {verified:0,candidate:0,weak:0,rejected:0,...(data.event_status || {})};
-  DEMO.review_queue = Number(data.review_queue || 0);
-  const cycle = Number(data.timing?.worker_cycle_duration_seconds);
-  if (Number.isFinite(cycle)) DEMO.worker.cycle_seconds = cycle;
-  DEMO.worker.latest = data.latest_worker_cycle?.status || data.status?.toUpperCase() || "UNKNOWN";
-  if (data.latest_backup?.created_at) DEMO.backups.local_latest = compactTimestamp(data.latest_backup.created_at);
-  if (Array.isArray(data.source_health)) {
-    DEMO.sources = data.source_health.map(source => ({
-      id:source.source_id || source.name || "unknown",
-      tier:authorityTier(source), state:liveSourceState(source),
-      age:ageLabel(source.last_success_at), cursor:source.cursor_status || "UNOBSERVED"
-    }));
-  }
-}
-function applyLiveHealth(data) {
-  const ledger = data?.ledger || {}, operations = data?.operations || {};
-  const counts = operations.counts || {}, worker = operations.latest_worker_cycle || {};
-  const window24h = operations.worker_window_24h || {};
-  DEMO.ops.api_status = String(data?.status || "unknown").toUpperCase();
-  DEMO.ops.quick_check = ledger.quick_check || operations.quick_check || "UNKNOWN";
-  DEMO.counts.evidence_objects = counts.evidence_objects ?? DEMO.counts.evidence_objects;
-  DEMO.worker.cycles = Number(counts.worker_cycles ?? DEMO.worker.cycles);
-  DEMO.worker.observed_hours = Number(window24h.observed_hours || 0).toFixed(1);
-  DEMO.worker.latest = worker.status || DEMO.worker.latest;
-  const started = new Date(worker.started_at || 0), finished = new Date(worker.finished_at || 0);
-  if (!Number.isNaN(started.getTime()) && !Number.isNaN(finished.getTime())) {
-    DEMO.worker.cycle_seconds = Math.max(0, (finished - started) / 1000);
-  }
-  DEMO.ops.replay_runs = Number(counts.replay_runs ?? DEMO.ops.replay_runs);
-  DEMO.model.runs = Number(counts.model_runs ?? DEMO.model.runs);
-  DEMO.backups.online = Number(counts.backup_runs || 0);
-  const backup = operations.latest_backup || {};
-  if (backup.created_at) DEMO.backups.local_latest = compactTimestamp(backup.created_at);
-}
-function applyLiveAdjudication(data) {
-  DEMO.adjudication = {
-    ...DEMO.adjudication,
-    status:data?.status || "UNKNOWN",
-    samples:Number(data?.samples || 0),
-    valid_annotations:Number(data?.valid_annotations || 0),
-    blind_v2_frozen:Boolean(data?.blind_v2_frozen),
-    live:true
-  };
-}
-function applyOffhostStatus(data) {
-  if (!data?.full_restore_verified || data?.status !== "VERIFIED") return;
-  DEMO.backups.offhost_latest = compactTimestamp(data.verified_at || data.created_at);
-  DEMO.backups.offhost_state = "VERIFIED";
-  DEMO.backups.restore_drill = "PASS";
-}
-function applyLiveModel(data) {
-  const metrics = data?.model_card?.metrics || {};
-  const blind = data?.external_blind?.metrics || {};
-  DEMO.model.mode = data?.shadow ? "SHADOW" : "UNKNOWN";
-  if (Number.isFinite(metrics.coverage)) DEMO.model.coverage = metrics.coverage;
-  if (Number.isFinite(metrics.covered_accuracy)) DEMO.model.covered_accuracy = metrics.covered_accuracy;
-  if (Number.isFinite(metrics.abstain_rate)) DEMO.model.abstain_rate = metrics.abstain_rate;
-  if (Number.isFinite(blind.risk_recall)) DEMO.model.blind_recall = blind.risk_recall;
-  if (Number.isFinite(blind.non_target_false_risk_rate)) DEMO.model.blind_false_risk = blind.non_target_false_risk_rate;
-  if (Number.isFinite(blind.covered_accuracy)) DEMO.model.blind_accuracy = blind.covered_accuracy;
-  DEMO.model.gate_pass = Boolean(data?.external_blind?.gate_pass);
-  if (Array.isArray(data?.recent_runs)) DEMO.model.runs = data.recent_runs.length;
-}
-function timelineFromLive(items, fallback) {
-  if (!Array.isArray(items) || !items.length) return fallback;
-  const kindMap = {observation:"observe",event_version:"revise",evidence:"evidence",gate:"gate",withdraw:"withdraw"};
-  return items.map(item => {
-    const payload = item.payload || {};
-    const kind = kindMap[item.kind] || "observe";
-    return {
-      t:shortTime(item.at), kind,
-      title:payload.title || (item.kind === "event_version" ? `事件版本 v${payload.version || "?"}` : humanize(item.kind)),
-      desc:payload.change_reason || payload.source_id || payload.status || payload.relation_type || "实时账本时间线记录"
-    };
-  });
-}
-function marketFromLive(detail, fallback) {
-  const snapshots = Array.isArray(detail?.market_snapshots) ? detail.market_snapshots : [];
-  const jobs = Array.isArray(detail?.market_jobs) ? detail.market_jobs : [];
-  const assets = Array.isArray(detail?.assets) ? detail.assets : [];
-  if (!snapshots.length) {
-    const mapped = assets.find(item => item.market_observation_allowed) || assets[0];
-    if (!mapped) return fallback;
-    return {
-      symbol:mapped.provider_symbol || mapped.symbol || fallback.symbol,
-      provider:"READ-ONLY OBSERVER",
-      price:"NOT CAPTURED",
-      fresh:"NO SNAPSHOT",
-      freshState:"watch",
-      available:false,
-      note:"标的关系已入账，但尚无可展示的真实行情快照；不使用合成价格或事后补值。",
-      horizons:[]
-    };
-  }
-  const latest = [...snapshots].sort((a,b) => String(b.captured_at).localeCompare(String(a.captured_at)))[0];
-  const matchingJobs = jobs.filter(job => job.asset_id === latest.asset_id && job.provider === latest.provider);
-  const horizonLabels = {t_plus_5m:"T+5M",t_plus_30m:"T+30M",t_plus_1d:"T+1D"};
-  const horizons = matchingJobs.filter(job => horizonLabels[job.observation_window]).map(job => {
-    const captured = snapshots.find(item => item.market_job_id === job.market_job_id);
-    if (captured) return {label:horizonLabels[job.observation_window],value:captured.price,state:"evidence"};
-    if (job.status === "MISSED_WINDOW") return {label:horizonLabels[job.observation_window],value:"MISSED",state:"watch"};
-    return {label:horizonLabels[job.observation_window],value:job.status || "PENDING",state:"watch"};
-  });
-  return {
-    symbol:latest.provider_symbol || fallback.symbol,
-    provider:String(latest.provider || "READ ONLY").toUpperCase(),
-    price:`${latest.price} ${latest.currency || ""}`.trim(),
-    fresh:`${ageLabel(latest.captured_at)} AGO`,
-    freshState:"ok",
-    available:true,
-    note:`真实只读快照 · ${latest.data_scope || "post_event_audit"} · ${latest.freshness_status || "freshness unknown"}；不用于模型特征或交易。`,
-    horizons
-  };
-}
-async function loadLiveEventDetail(eventId) {
-  if (!S.live) return;
-  const event = DEMO.events.find(item => item.id === eventId);
-  if (!event || event.liveDetailLoaded) return;
-  if (S.liveDetailLoading.has(eventId)) return S.liveDetailLoading.get(eventId);
-  const encoded = encodeURIComponent(eventId);
-  const job = (async () => {
-    try {
-      // Sequential reads are intentional: the public demo endpoint is stable
-      // under bounded traffic but may reset concurrent TLS streams.
-      const detail = await apiFetch(`/api/v1/events/${encoded}`);
-      const evidenceData = await apiFetch(`/api/v1/events/${encoded}/evidence`);
-      const timelineData = await apiFetch(`/api/v1/events/${encoded}/timeline`);
-      const row = detail.event || {};
-      const facts = detail.current_version?.facts || {};
-      const evidence = Array.isArray(evidenceData.items) ? evidenceData.items : [];
-      const shadow = detail.model_shadow_output || {};
-      event.company = row.company_name || event.company;
-      event.ticker = row.ticker_at_event || event.ticker;
-      event.family = row.event_family || event.family;
-      event.type = row.event_type || event.type;
-      event.source = row.discovery_source || event.source;
-      event.tier = authorityTier(detail.assessment || row || event);
-      event.status = row.status || event.status;
-      event.version = Number(row.current_version || event.version);
-      event.route = shadow.label || "SHADOW_PENDING";
-      event.confidence = Number(shadow.confidence || 0);
-      event.headline = facts.source_title || event.headline;
-      event.summary = facts.source_summary || evidence[0]?.observation_summary || event.summary;
-      event.evidenceCount = Number(detail.evidence_count ?? evidence.length);
-      event.evidence = evidence.map(item => ({
-        id:item.evidence_id, source:item.source_id || item.source_name || event.source,
-        tier:authorityTier(item), passage:item.evidence_passage || item.observation_summary || "未提供可展示段落",
-        status:String(item.evidence_status || "UNREVIEWED").toUpperCase(),
-        note:`${item.source_name || item.form || "实时证据"} · ${item.filing_date || "日期未知"}`
-      }));
-      event.conflict = event.evidence.some(item => /CONFLICT|CONTRADICT/.test(item.status));
-      event.timeline = timelineFromLive(timelineData.items, event.timeline);
-      event.market = marketFromLive(detail, event.market);
-      event.liveDetailLoaded = true;
-    } catch (error) {
-      event.liveDetailLoaded = true;
-      event.summary += `（详情同步失败：${error.message}；保留实时列表摘要。）`;
-    } finally {
-      S.liveDetailLoading.delete(eventId);
-      if (S.route === "workbench" && S.selectedEvent === eventId) renderWorkbench();
-    }
-  })();
-  S.liveDetailLoading.set(eventId, job);
-  return job;
-}
-async function tryLive() {
-  if (S.live) return;
-  setModeBadge("loading");
-  try {
-    const [overview, candidatePage, verifiedPage, weakPage, rejectedPage, health] = await Promise.all([
-      apiFetch("/api/v1/overview"),
-      apiFetch("/api/v1/events?status=candidate&limit=100"),
-      apiFetch("/api/v1/events?status=verified&limit=50"),
-      apiFetch("/api/v1/events?status=weak&limit=25"),
-      apiFetch("/api/v1/events?status=rejected&limit=25"),
-      apiFetch("/api/v1/health")
-    ]);
-    const liveRows = [candidatePage, verifiedPage, weakPage, rejectedPage]
-      .flatMap(page => Array.isArray(page.items) ? page.items : []);
-    if (!liveRows.length) throw new Error("实时事件列表为空");
-    applyLiveOverview(overview);
-    applyLiveHealth(health);
-    DEMO.events = liveRows.map(liveEventFromRow)
-      .sort((a,b) => String(b.sortAt).localeCompare(String(a.sortAt)));
-    DEMO.families = [...new Set(DEMO.events.map(event => event.family))]
-      .sort().map(value => [value, humanize(value)]);
-    DEMO.families.forEach(([value,label]) => { FAMILY_LABEL[value] = label; });
-    resetWorkbenchOptions();
-    S.selectedEvent = DEMO.events[0].id;
-    S.live = true; S.liveScope = "core";
-    setModeBadge("live");
-    $("#footer-snapshot").textContent = "LIVE CORE API · " + new Date().toISOString().slice(0,16) + "Z";
-    renderSituation();
-    if (S.route === "workbench") renderWorkbench();
-    const auxiliary = await Promise.allSettled([
-      apiFetch("/api/v1/model/status"), apiFetch("/api/v1/adjudication/status"),
-      fetch("/radar/offhost-status.json", {cache:"no-store"}).then(response => {
-        if (!response.ok) throw new Error(`HTTP ${response.status} offhost status`);
-        return response.json();
-      })
-    ]);
-    if (auxiliary[0].status === "fulfilled") applyLiveModel(auxiliary[0].value);
-    if (auxiliary[1].status === "fulfilled") applyLiveAdjudication(auxiliary[1].value);
-    if (auxiliary[2].status === "fulfilled") applyOffhostStatus(auxiliary[2].value);
-    renderSituation(); renderOps(); renderAdjudication();
-    await loadLiveEventDetail(S.selectedEvent);
-  } catch (error) {
-    S.live = false; S.liveScope = "demo";
-    setModeBadge("error", `API 连接失败：${error.message}。当前为合成演示快照；同源部署或本地 dev_server.py 可启用实时核心数据。`);
-    $("#footer-snapshot").textContent = "合成演示快照 · API OFFLINE";
-  } finally {
-    $("#boot-overlay").classList.add("hidden");
-  }
-}
-$("#mode-badge").addEventListener("click", tryLive);
-
 function syncFooterReserve() {
   const footer = document.querySelector(".boundary-footer");
   if (footer) document.documentElement.style.setProperty("--fr-footer-reserve", `${Math.ceil(footer.getBoundingClientRect().height)}px`);
@@ -1935,8 +1830,8 @@ $("#footer-snapshot").textContent = "合成演示快照 " + DEMO.snapshot.replac
 renderSituation(); renderOps(); renderAdjudication(); resetReplay();
 const initial = (location.hash.match(/^#\/(\w+)/) || [])[1];
 navigate(["situation","workbench","replay","ops","adjudication"].includes(initial) ? initial : "situation");
-if (location.protocol !== "file:") tryLive();
-else { setModeBadge("demo"); $("#boot-overlay").classList.add("hidden"); }
+setModeBadge();
+$("#boot-overlay").classList.add("hidden");
 </script>
 </body>
 </html>

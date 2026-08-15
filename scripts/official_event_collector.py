@@ -365,7 +365,12 @@ def normalize_rss_date(value: str | None) -> str | None:
     return parsed.astimezone(dt.timezone.utc).isoformat()
 
 
-def entry_is_recent(value: str | None, *, max_age_days: int | None) -> bool:
+def entry_is_recent(
+    value: str | None,
+    *,
+    max_age_days: int | None,
+    now: dt.datetime | None = None,
+) -> bool:
     if max_age_days is None or not value:
         return True
     try:
@@ -374,7 +379,10 @@ def entry_is_recent(value: str | None, *, max_age_days: int | None) -> bool:
         return True
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt.timezone.utc)
-    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=max_age_days)
+    reference = now or dt.datetime.now(dt.timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=dt.timezone.utc)
+    cutoff = reference.astimezone(dt.timezone.utc) - dt.timedelta(days=max_age_days)
     return parsed.astimezone(dt.timezone.utc) >= cutoff
 
 
@@ -509,6 +517,7 @@ def collect_feed(
     fetcher: Fetcher = fetch_http,
     timeout: float = 30.0,
     force: bool = False,
+    now: dt.datetime | None = None,
 ) -> dict[str, Any]:
     upsert_source(
         connection,
@@ -567,7 +576,9 @@ def collect_feed(
     }
     for entry in entries:
         if not entry_is_recent(
-            entry.get("published_at"), max_age_days=spec.max_entry_age_days
+            entry.get("published_at"),
+            max_age_days=spec.max_entry_age_days,
+            now=now,
         ):
             counts["filtered"] += 1
             continue

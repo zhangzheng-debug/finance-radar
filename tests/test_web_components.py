@@ -11,6 +11,7 @@ from app.web.components import (
     event_keyboard_payload,
     event_button_label,
     event_feed_row,
+    evidence_route_markup,
     evidence_summary,
     command_palette_markup,
     facet_counts,
@@ -20,10 +21,13 @@ from app.web.components import (
     market_context_items,
     market_context_markup,
     market_horizon_items,
+    public_event_copy,
+    public_event_state,
     score_dimensions,
     source_health_state,
     terminal_search_state,
     saved_flow_payload,
+    saved_public_flow_payload,
     source_option_label,
 )
 
@@ -43,12 +47,154 @@ def test_event_feed_row_is_compact_linked_and_html_safe() -> None:
         }
     )
     assert "event%2Fa%3Fx%3D1" in row
-    assert "flow=%E5%85%A8%E9%83%A8%E4%BA%8B%E4%BB%B6" in row
+    assert "preview_flow=%E5%85%A8%E9%83%A8%E4%BA%8B%E4%BB%B6" in row
+    assert "preview_event_id=event%2Fa%3Fx%3D1" in row
+    assert "Event_Intelligence" not in row
     assert "A&amp;B &lt;Holdings&gt;" in row
     assert "Exact &lt;passage&gt; &amp; source." in row
     assert "status-verified" in row
+    assert "◆" in row
+    assert "authority-p0" in row
+    assert "当前页预览" in row
+    assert 'target="_self"' in row
+    assert 'target="_blank"' not in row
     assert "监管执法" in row
     assert "<script" not in row
+
+
+def test_public_event_feed_row_hides_internal_codes_and_bounds_excerpt() -> None:
+    row = event_feed_row(
+        {
+            "event_id": "public-event",
+            "status": "candidate",
+            "event_family": "debt_financing",
+            "event_type": "internal_classifier_slug",
+            "company_name": "Example Issuer",
+            "last_updated_at": "2026-08-03T22:34:00+00:00",
+            "credibility_tier": "P?",
+            "discovery_source": "sec_current_filings",
+            "evidence_excerpt": "A" * 500,
+        },
+        public=True,
+    )
+
+    assert "待核验" in row
+    assert "债务融资" in row
+    assert "SEC 官方文件" in row
+    assert "查看证据" in row
+    assert "REVIEW" not in row
+    assert "P?" not in row
+    assert "sec_current_filings" not in row
+    assert "internal classifier slug" not in row
+    assert "A" * 20 not in row
+    assert "仍需核对原始文件" in row
+    assert "为什么关注" in row
+
+
+def test_public_flow_shortcuts_use_reader_facing_labels() -> None:
+    markup = flow_shortcuts_markup(
+        {"verified": 5, "candidate": 4, "weak": 2, "rejected": 1},
+        public=True,
+    )
+
+    assert "待核验" in markup
+    assert "已粗审" in markup
+    assert "已核验" in markup
+    assert "已排除" in markup
+    assert "待复核" not in markup
+    assert "已拒绝" not in markup
+    assert "preview_state=pending_verification" in markup
+    assert 'target="_self"' in markup
+    assert 'target="_blank"' not in markup
+
+
+def test_public_flow_shortcuts_use_partitioned_funnel_counts() -> None:
+    markup = flow_shortcuts_markup(
+        {"verified": 5, "candidate": 4, "weak": 0, "rejected": 1},
+        public=True,
+        public_funnel={
+            "total": 12,
+            "verified": 5,
+            "excluded": 1,
+            "insufficient": 2,
+            "rough_reviewed": 3,
+            "pending_verification": 1,
+        },
+    )
+    assert "在当前页面筛选证据不足信息流，2条" in markup
+    assert "在当前页面筛选已粗审信息流，3条" in markup
+    assert '<span class="flow-count">12</span>' in markup
+
+
+def test_public_event_copy_never_promotes_raw_english_boilerplate() -> None:
+    event = {
+        "status": "candidate",
+        "public_state": "rough_reviewed",
+        "event_family": "capital_structure",
+        "company_name": "Example Ltd.",
+        "discovery_source": "sec_current_filings",
+        "evidence_excerpt": "THIS WARRANT AGREEMENT contains raw legal boilerplate.",
+    }
+    copy = public_event_copy(event)
+    assert public_event_state(event) == "rough_reviewed"
+    assert copy["state_label"] == "已粗审"
+    assert "资本结构" in copy["summary"]
+    assert "THIS WARRANT" not in copy["summary"]
+    assert "正式证据核验" in copy["summary"]
+
+
+def test_public_event_copy_prefers_structured_fact_and_keeps_state_boundary() -> None:
+    copy = public_event_copy(
+        {
+            "status": "candidate",
+            "public_state": "insufficient",
+            "event_family": "listing_status",
+            "company_name": "Example Ltd.",
+            "facts": {
+                "evidence_summary": "交易所公告称该公司收到上市合规通知。",
+            },
+            "evidence_excerpt": "UNRELATED RAW ENGLISH EXCERPT",
+        }
+    )
+
+    assert copy["summary_provenance"] == "结构化事实摘要"
+    assert "交易所公告称该公司收到上市合规通知" in copy["summary"]
+    assert "当前证据不足" in copy["summary"]
+    assert "UNRELATED RAW ENGLISH EXCERPT" not in copy["summary"]
+
+
+def test_public_event_row_labels_its_distinct_time_clocks() -> None:
+    row = event_feed_row(
+        {
+            "event_id": "timed-public-event",
+            "status": "candidate",
+            "event_family": "listing_status",
+            "company_name": "Timed Example",
+            "event_date": "2026-08-02",
+            "first_seen_at": "2026-08-03T01:02:00+00:00",
+            "last_updated_at": "2026-08-03T02:03:00+00:00",
+            "reviewed_at": "2026-08-03T03:04:00+00:00",
+        },
+        public=True,
+    )
+
+    for label in ("最后更新", "事件日", "系统发现", "核验记录"):
+        assert label in row
+    assert "2026-08-02" in row
+
+
+def test_evidence_route_is_truthful_about_shadow_and_human_review() -> None:
+    markup = evidence_route_markup(
+        {"verified": 5, "candidate": 4, "weak": 2, "rejected": 1},
+        review_queue=6,
+    )
+    assert "规范化事件" in markup
+    assert ">12<" in markup
+    assert "候选与弱证据" in markup
+    assert ">6<" in markup
+    assert "只分流" in markup
+    assert "不替代人工结论" in markup
+    assert "自动执行始终禁用" in markup
 
 
 def test_flow_shortcuts_link_to_named_views_and_show_counts() -> None:
@@ -56,9 +202,10 @@ def test_flow_shortcuts_link_to_named_views_and_show_counts() -> None:
         {"verified": 5, "candidate": 4, "weak": 2, "rejected": 1}
     )
     assert "快速信息流" in markup
-    assert "flow=%E5%BE%85%E5%A4%8D%E6%A0%B8" in markup
-    assert "flow=%E5%B7%B2%E6%A0%B8%E9%AA%8C" in markup
-    assert "打开待复核信息流，4条" in markup
+    assert "preview_flow=%E5%BE%85%E5%A4%8D%E6%A0%B8" in markup
+    assert "preview_flow=%E5%B7%B2%E6%A0%B8%E9%AA%8C" in markup
+    assert "在当前页面筛选待复核信息流，4条" in markup
+    assert "Event_Intelligence" not in markup
     assert '<span class="flow-count">12</span>' in markup
 
 
@@ -78,6 +225,7 @@ def test_saved_flow_payload_normalizes_and_bounds_browser_only_state() -> None:
         50,
         source="  sec_current_filings  ",
     ) == {
+        "scope": "reviewer",
         "flow": "已核验",
         "family": "enforcement action",
         "source": "sec_current_filings",
@@ -93,7 +241,7 @@ def test_saved_flow_payload_normalizes_and_bounds_browser_only_state() -> None:
 
 
 def test_saved_flow_component_is_device_local_bounded_and_safe() -> None:
-    assert 'storageKey = "finance-radar.saved-flows.v1"' in SAVED_FLOW_JS
+    assert 'finance-radar.saved-flows.${currentScope}.v2' in SAVED_FLOW_JS
     assert "我的信息流" in SAVED_FLOW_HTML
     assert "const maxFlows = 8" in SAVED_FLOW_JS
     assert 'url.searchParams.delete("event_id")' in SAVED_FLOW_JS
@@ -104,6 +252,27 @@ def test_saved_flow_component_is_device_local_bounded_and_safe() -> None:
     assert "XMLHttpRequest" not in SAVED_FLOW_JS
     assert 'aria-live="polite"' in SAVED_FLOW_HTML
     assert 'aria-label="本机保存的信息流"' in SAVED_FLOW_HTML
+
+
+def test_public_saved_flow_payload_keeps_only_bounded_research_filters() -> None:
+    assert saved_public_flow_payload(
+        "pending_verification",
+        "  earnings  ",
+        "  ACME   filing ",
+        "最近 24 小时",
+        "latest",
+        24,
+        source=" sec ",
+    ) == {
+        "scope": "public",
+        "state": "pending_verification",
+        "family": "earnings",
+        "source": "sec",
+        "q": "ACME filing",
+        "period": "最近 24 小时",
+        "sort": "latest",
+        "page_size": "24",
+    }
 
 
 def test_facets_preserve_deep_links_and_render_data_backed_safe_commands() -> None:
@@ -129,6 +298,7 @@ def test_facets_preserve_deep_links_and_render_data_backed_safe_commands() -> No
     assert "快捷命令" in markup
     assert "family=enforcement" in markup
     assert "source=sec%20current%2Ffilings" in markup
+    assert 'target="_self"' in markup
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in markup
     assert "<script>" not in markup
 

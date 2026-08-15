@@ -1,29 +1,40 @@
 [CmdletBinding()]
 param(
-    [string]$SshHost = "",
-    [string]$IdentityFile = "C:\Users\MR\.ssh1\id_ed25519",
+    [string]$SshHost = $env:FINANCE_RADAR_SSH_HOST,
+    [string]$IdentityFile = $env:FINANCE_RADAR_SSH_IDENTITY_FILE,
     [Parameter(Mandatory = $true)]
     [string]$EncryptedArchive,
     [string]$PassphraseFile = "",
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^[0-9]{8}T[0-9]{6}Z$')]
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$')]
     [string]$ExpectedRelease,
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[0-9a-fA-F]{64}$')]
     [string]$ExpectedSha256,
     [string]$PublicWebUrl = "",
-    [switch]$Activate,
-    [switch]$AllowCurrentServer
+    [switch]$Activate
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $EncryptedArchive = [System.IO.Path]::GetFullPath($EncryptedArchive)
 if (-not $PassphraseFile) {
-    $PassphraseFile = Join-Path $repoRoot "server_migration_backup\.backup-passphrase"
+    $defaultPassphrase = "D:\FinanceRadarBackups\.backup-passphrase"
+    $legacyPassphrase = Join-Path $repoRoot "server_migration_backup\.backup-passphrase"
+    $PassphraseFile = if (Test-Path -LiteralPath $defaultPassphrase -PathType Leaf) {
+        $defaultPassphrase
+    } elseif (Test-Path -LiteralPath $legacyPassphrase -PathType Leaf) {
+        # Preserve recovery of existing historic C: archives without making
+        # that space-constrained location the default for new backups.
+        $legacyPassphrase
+    } else {
+        $defaultPassphrase
+    }
 }
 $PassphraseFile = [System.IO.Path]::GetFullPath($PassphraseFile)
-$IdentityFile = [System.IO.Path]::GetFullPath($IdentityFile)
+if ($IdentityFile) {
+    $IdentityFile = [System.IO.Path]::GetFullPath($IdentityFile)
+}
 
 if (-not (Test-Path -LiteralPath $EncryptedArchive -PathType Leaf)) {
     throw "encrypted migration archive not found: $EncryptedArchive"
@@ -35,8 +46,8 @@ if ($Activate) {
     if (-not $SshHost -or $SshHost -notmatch '^(?:[A-Za-z0-9_.-]+@)?[A-Za-z0-9_.-]+$') {
         throw "a simple user@host SSH target is required for activation"
     }
-    if ($SshHost -match '(^|@)167\.172\.69\.16$' -and -not $AllowCurrentServer) {
-        throw "refusing the current VPS; activation is only for a clean replacement host"
+    if (-not $IdentityFile) {
+        throw "IdentityFile is required for activation; pass it or set FINANCE_RADAR_SSH_IDENTITY_FILE"
     }
     if (-not (Test-Path -LiteralPath $IdentityFile -PathType Leaf)) {
         throw "SSH identity not found: $IdentityFile"
@@ -57,8 +68,11 @@ if ($Activate) {
 }
 
 $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
-$tempRoot = [System.IO.Path]::GetFullPath($env:TEMP)
-$localWork = Join-Path $tempRoot "finance-radar-cutover-$stamp-$([guid]::NewGuid().ToString('N'))"
+# The audit decrypts and the full prepare step expands multi-gigabyte recovery
+# material.  Do not inherit the Windows system TEMP location on C:.
+$localWorkRoot = [System.IO.Path]::GetFullPath("D:\FinanceRadarScratch\migration-restore")
+New-Item -ItemType Directory -Path $localWorkRoot -Force | Out-Null
+$localWork = Join-Path $localWorkRoot "finance-radar-cutover-$stamp-$([guid]::NewGuid().ToString('N'))"
 $plainArchiveName = [System.IO.Path]::GetFileNameWithoutExtension(
     [System.IO.Path]::GetFileName($EncryptedArchive)
 )
@@ -77,6 +91,7 @@ $remotePrepared = "/tmp/finance-radar-restore-$stamp.prepared"
 $remotePrepareScript = "/tmp/prepare_migration_restore-$stamp.py"
 $remoteAuditScript = "/tmp/audit_migration_restore.py"
 $remoteCryptoScript = "/tmp/backup_crypto.py"
+$remoteReleaseIdentityScript = "/tmp/release_identity.py"
 $remoteActivateScript = "/tmp/activate_prepared_restore-$stamp.sh"
 $remotePreflightScript = "/tmp/replacement_vps_preflight-$stamp.py"
 $remotePreflightReport = "/tmp/replacement-vps-preflight-$stamp.json"
@@ -89,6 +104,7 @@ try {
         --passphrase-file $PassphraseFile `
         --expected-release $ExpectedRelease `
         --expected-sha256 $ExpectedSha256.ToLowerInvariant() `
+        --workspace-root $localWork `
         --report $auditReport
     if ($LASTEXITCODE -ne 0) { throw "encrypted migration audit failed" }
 
@@ -160,13 +176,16 @@ try {
         (Join-Path $PSScriptRoot 'backup_crypto.py') "${SshHost}:$remoteCryptoScript"
     if ($LASTEXITCODE -ne 0) { throw "restore crypto dependency transfer failed" }
     & scp -O @sshOptions -i $IdentityFile `
+        (Join-Path $PSScriptRoot 'release_identity.py') "${SshHost}:$remoteReleaseIdentityScript"
+    if ($LASTEXITCODE -ne 0) { throw "restore release identity dependency transfer failed" }
+    & scp -O @sshOptions -i $IdentityFile `
         (Join-Path $repoRoot 'deployment\systemd\activate_prepared_restore.sh') "${SshHost}:$remoteActivateScript"
     if ($LASTEXITCODE -ne 0) { throw "activation script transfer failed" }
 
     $remoteCommand = @"
 set -euo pipefail
 cleanup() {
-  rm -f '$remoteArchive' '$remotePrepareScript' '$remoteAuditScript' '$remoteCryptoScript' '$remoteActivateScript'
+  rm -f '$remoteArchive' '$remotePrepareScript' '$remoteAuditScript' '$remoteCryptoScript' '$remoteReleaseIdentityScript' '$remoteActivateScript'
   if [ -d '$remotePrepared' ]; then rm -rf '$remotePrepared'; fi
 }
 trap cleanup EXIT
@@ -186,7 +205,7 @@ bash '$remoteActivateScript' '$remotePrepared' '$ExpectedRelease' '$PublicWebUrl
     } | ConvertTo-Json
 } finally {
     $resolvedWork = [System.IO.Path]::GetFullPath($localWork)
-    if (-not $resolvedWork.StartsWith($tempRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $resolvedWork.StartsWith($localWorkRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "refusing unsafe temporary cleanup target"
     }
     if (Test-Path -LiteralPath $resolvedWork) {

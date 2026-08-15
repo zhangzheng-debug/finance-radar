@@ -4,6 +4,7 @@ import argparse
 import concurrent.futures
 import json
 import math
+import os
 import statistics
 import time
 from collections import Counter
@@ -15,7 +16,7 @@ import httpx
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BASE = "https://radar.167-172-69-16.sslip.io:8443/finance-radar-api"
+DEFAULT_BASE = os.environ.get("FINANCE_RADAR_AUDIT_API_URL")
 ROUTES = (
     "/api/v1/health",
     "/api/v1/overview",
@@ -53,8 +54,8 @@ def request_once(client: httpx.Client, base: str, route: str) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a bounded read-only smoke load against the public API.")
-    parser.add_argument("--base-url", default=DEFAULT_BASE)
+    parser = argparse.ArgumentParser(description="Run a bounded read-only smoke load against the loopback API.")
+    parser.add_argument("--base-url", default=DEFAULT_BASE, required=DEFAULT_BASE is None)
     parser.add_argument("--requests", type=int, default=60)
     parser.add_argument("--concurrency", type=int, default=6)
     parser.add_argument("--timeout", type=float, default=15.0)
