@@ -23,6 +23,13 @@ Releases use the same version prefixed by `v`.
 - Made dependency-lock digests portable across LF/CRLF checkouts and required
   the extracted systemd candidate to verify both runtime and development locks
   before any backup, package installation or cutover mutation.
+- Made the isolated public Web identity perform a real cwd-based `import app`
+  before and after cutover, while private environment/data paths stay unreadable.
+- Replaced the three-copy predeploy backup peak with a verified atomic custody
+  transfer: the fresh bundle leaves normal retention, superseded daily bundles
+  are removed only after revalidation, and failure moves the fresh bundle back.
+- Kept `/opt/finance-radar/releases` traversable during a failed pre-cutover
+  transaction so rollback cannot strand the public Web unit at `CHDIR`.
 
 - Consolidated the public product around one read-only Streamlit UI and marked
   the retired static prototype and its deployment records as historical only.

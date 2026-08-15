@@ -576,36 +576,34 @@ def test_installer_recognizes_only_audited_static_or_direct_predecessor_vhosts_b
     assert "refusing to retire an unrecognized Finance Radar Nginx vhost" in source
 
 
-def test_installer_physically_copies_a_root_only_predeploy_hold_until_the_postcutover_bundle_is_independently_validated() -> None:
+def test_installer_atomically_transfers_a_root_only_predeploy_hold_until_postcutover_backup() -> None:
     source = INSTALLER.read_text(encoding="utf-8")
+    hold_transfer = (
+        Path(__file__).parents[1]
+        / "deployment"
+        / "systemd"
+        / "transfer_verified_backup_hold.py"
+    ).read_text(encoding="utf-8")
     cutover_marker = '# The only point at which the running release changes.'
     assert "create_predeploy_backup_hold()" in source
-    assert "root-owned independent physical copy" in source
-    assert "same-filesystem hard links" not in source
-    assert "os.link(" not in source
-    assert "os.O_EXCL" in source
-    assert "held.st_nlink != 1" in source
-    assert "os.fsync(destination_file_fd)" in source
+    assert 'FINANCE_RADAR_DEPLOY_HOLD_MODE:-atomic_custody' in source
+    assert 'BACKUP_HOLD_TRANSFER="$RELEASE/deployment/systemd/transfer_verified_backup_hold.py"' in source
+    assert 'mode=atomic_custody' in source
     assert "preserve_failed_predeploy_backup_hold" in source
     assert "rollback_recovery_hold=PRESERVED" in source
     assert "failed-precutover" in source
     assert "two retained failed recovery holds require explicit operator review" in source
     assert "clear_predeploy_backup_hold" in source
-    assert "source = Path(sys.argv[1])" in source
-    assert "source.parent != backup_root" in source
-    assert "os.O_NOFOLLOW" in source
-    assert "def scandir_from_duplicate" in source
-    assert "os.scandir(duplicate_fd)" in source
-    assert "with scandir_from_duplicate(source_directory_fd) as entries:" in source
-    assert "verify_full_bundle(destination, started_at=baseline)" in source
-    assert "predeploy hold manifest hash does not match the verified receipt" in source
-    assert 'TMPDIR="$receipt_tmpdir" python3 - "$PREDEPLOY_BACKUP_PATH"' in source
-    assert "predeploy recovery hold storage headroom insufficient" in source
-    assert "projected_postcutover_bundle" in source
-    assert "projected_sqlite_receipt_scratch" in source
-    assert source.index("predeploy recovery hold storage headroom insufficient") < source.index(
-        "os.mkdir(hold_root, mode=0o700)"
-    )
+    assert "os.rename(source, destination)" in hold_transfer
+    assert "verify_bundle(verifier, source, receipt_sha256)" in hold_transfer
+    assert "verify_bundle(verifier, destination, receipt_sha256)" in hold_transfer
+    assert "validated_superseded_bundles" in hold_transfer
+    assert "shutil.rmtree(candidate)" in hold_transfer
+    assert "projected_postcutover_bundle" in hold_transfer
+    assert "projected_sqlite_receipt_scratch" in hold_transfer
+    assert "atomic predeploy custody storage headroom insufficient" in hold_transfer
+    assert "os.rename(destination, source)" in hold_transfer
+    assert "root-owned atomic custody transfer" in hold_transfer
     assert source.index("create_predeploy_backup_hold ||") < source.index(cutover_marker)
     post_gate = source.index("require_postcutover_verified_backup ||")
     assert source.index("clear_predeploy_backup_hold ||", post_gate) > post_gate
@@ -621,7 +619,7 @@ def test_candidate_code_is_root_owned_and_runtime_read_only_before_root_bridge_e
     source = INSTALLER.read_text(encoding="utf-8")
 
     assert 'install -d -m 0751 -o root -g root "$BASE"' in source
-    assert 'install -d -m 0750 -o root -g finance-radar "$BASE/releases"' in source
+    assert 'install -d -m 0751 -o root -g finance-radar "$BASE/releases"' in source
     assert 'install -d -m 0750 -o root -g finance-radar "$RELEASE"' in source
     assert 'chown -R root:finance-radar "$RELEASE"' in source
     assert 'chown -R finance-radar:finance-radar "$RELEASE"' not in source
