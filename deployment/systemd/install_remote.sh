@@ -166,7 +166,13 @@ grant_public_web_runtime_access() {
     chmod 0755 "$RELEASE"
     find "$RELEASE/app" -type d -exec chmod 0755 {} +
     find "$RELEASE/app" -type f -exec chmod 0644 {} +
-    chmod 0644 "$RELEASE/requirements.txt" "$RELEASE/requirements.lock"
+    # app/__init__.py reads VERSION during import.  Treat that one marker as
+    # public runtime metadata; all other root-level release files stay 0640.
+    chmod 0644 "$RELEASE/VERSION" "$RELEASE/requirements.txt" "$RELEASE/requirements.lock"
+    runuser -u finance-radar-web -- test -r "$RELEASE/VERSION" || {
+        printf 'public release version marker is not readable by its isolated runtime account\n' >&2
+        return 1
+    }
     # Streamlit probes $PWD/.streamlit/secrets.toml even when it is absent.
     # The isolated public UID must traverse the project config directory for
     # that probe and for the public config.toml, but a release must never carry

@@ -219,7 +219,10 @@ grant_public_web_runtime_access() {
     chmod 0755 "$RELEASE"
     find "$RELEASE/app" -type d -exec chmod 0755 {} +
     find "$RELEASE/app" -type f -exec chmod 0644 {} +
-    chmod 0644 "$RELEASE/requirements.txt" "$RELEASE/requirements.lock"
+    # app/__init__.py reads VERSION during import.  Expose only that one
+    # root-level runtime marker in addition to the dependency manifests.
+    chmod 0644 "$RELEASE/VERSION" "$RELEASE/requirements.txt" "$RELEASE/requirements.lock"
+    runuser -u finance-radar-web -- test -r "$RELEASE/VERSION" || return 1
     # Streamlit probes $PWD/.streamlit/secrets.toml even when it is absent.
     # Permit its isolated public account to traverse the public configuration,
     # but fail closed if a prepared archive contains a Streamlit secret file.

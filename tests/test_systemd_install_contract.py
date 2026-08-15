@@ -181,6 +181,8 @@ def test_public_web_uses_a_fixed_minimal_environment_without_admin_token() -> No
     assert 'chmod 0711 "$BASE"' in installer
     assert 'chmod 0751 "$BASE/releases"' in installer
     assert 'chmod 0755 "$RELEASE"' in installer
+    assert 'chmod 0644 "$RELEASE/VERSION" "$RELEASE/requirements.txt" "$RELEASE/requirements.lock"' in installer
+    assert 'test -r "$RELEASE/VERSION"' in installer
     assert 'chmod 0751 "$BASE/releases" "$RELEASE"' not in installer
     assert 'chmod 0711 "$BASE" "$BASE/releases" "$RELEASE"' not in installer
     assert 'unset PYTHONPATH' in installer
@@ -281,6 +283,8 @@ def test_restore_recreates_public_environment_and_never_enables_admin() -> None:
     assert 'chmod 0711 "$BASE"' in source
     assert 'chmod 0751 "$BASE/releases"' in source
     assert 'chmod 0755 "$RELEASE"' in source
+    assert 'chmod 0644 "$RELEASE/VERSION" "$RELEASE/requirements.txt" "$RELEASE/requirements.lock"' in source
+    assert 'test -r "$RELEASE/VERSION"' in source
     assert 'chmod 0751 "$BASE/releases" "$RELEASE"' not in source
     assert 'chmod 0711 "$BASE" "$BASE/releases" "$RELEASE"' not in source
     assert 'unset PYTHONPATH' in source
