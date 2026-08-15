@@ -74,6 +74,16 @@ def test_remote_installer_uses_explicit_current_public_url() -> None:
     assert "18.208.34.152" not in source + candidate
 
 
+def test_remote_installer_verifies_candidate_dependency_binding_before_mutation() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+    dependency_gate = source.index('python3 "$RELEASE/scripts/verify_dependency_locks.py"')
+    recovery_gate = source.index("# Mandatory recovery gates.")
+    package_install = source.index('pip install --require-hashes -r "$RELEASE/requirements.lock"')
+
+    assert dependency_gate < recovery_gate < package_install
+    assert "candidate dependency lock verification failed" in source
+
+
 def test_long_running_units_restart_worker_disable_formal_auto_verify_and_keep_one_bundle() -> None:
     api = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-api.service"
     worker = WORKER_UNIT.read_text(encoding="utf-8")

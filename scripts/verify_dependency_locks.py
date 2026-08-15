@@ -12,17 +12,31 @@ ROOT = Path(__file__).resolve().parents[1]
 METADATA = ROOT / "dependency-lock.json"
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+SCHEMA_VERSION = 2
+DIGEST_ALGORITHM = "sha256-canonical-text-v1"
+TEXT_NORMALIZATION = "crlf-and-cr-to-lf"
+
+
+def canonical_text_bytes(path: Path) -> bytes:
+    """Return platform-independent bytes without changing semantic content."""
+
+    raw = path.read_bytes()
+    return raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
+def sha256_canonical_text(path: Path) -> str:
+    return hashlib.sha256(canonical_text_bytes(path)).hexdigest()
 
 
 def verify(root: Path = ROOT) -> dict[str, object]:
     metadata = json.loads((root / METADATA.name).read_text(encoding="utf-8"))
     failures: list[str] = []
+    if metadata.get("schema_version") != SCHEMA_VERSION:
+        failures.append("unsupported dependency lock metadata schema")
+    if metadata.get("digest_algorithm") != DIGEST_ALGORITHM:
+        failures.append("unsupported dependency lock digest algorithm")
+    if metadata.get("text_normalization") != TEXT_NORMALIZATION:
+        failures.append("unsupported dependency lock text normalization")
     files = metadata.get("files")
     if not isinstance(files, dict) or not files:
         failures.append("dependency-lock.json has no file inventory")
@@ -32,7 +46,7 @@ def verify(root: Path = ROOT) -> dict[str, object]:
         if not path.is_file():
             failures.append(f"missing dependency file: {relative}")
             continue
-        actual = sha256(path)
+        actual = sha256_canonical_text(path)
         if actual != str(expected).lower():
             failures.append(f"hash mismatch: {relative}: expected={expected} actual={actual}")
     for relative in ("requirements.lock", "requirements-dev.lock"):
