@@ -5,6 +5,8 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+- 修复隔离的公开 Web 账户无法读取顶层 `VERSION`、导致候选版本在切换前安全终止的问题；安装与恢复路径现在只额外公开这一项运行时版本标记，私密环境和共享数据权限不变。
+
 - Added reproducible, hash-locked Python 3.12 runtime/development dependencies
   and made CI/deployment verify the lock inputs before installation.
 - Separated Public, Reviewer, Operator and Admin navigation, loopback services,
