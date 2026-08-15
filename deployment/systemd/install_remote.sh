@@ -156,12 +156,14 @@ grant_public_web_runtime_access() {
     # Permit the distinct public UID to traverse only the known code and venv
     # paths.  Do not relax /etc/finance-radar.env, release .env, shared data or
     # reports: those remain owned by the private runtime account.
-    # The public UID needs only search permission, while the private runtime
-    # group must retain read+search so Python can discover top-level packages
-    # from WorkingDirectory.  0711 on the release roots made `import app` fail
-    # for finance-radar even though direct file reads still succeeded.
+    # Python's FileFinder must be able to enumerate the candidate release root
+    # to discover the top-level app package.  Keep the shared releases parent
+    # group-private, but make this immutable candidate root listable.  Files
+    # outside the explicitly public trees remain 0640 root:finance-radar, so
+    # the public UID can see their names but cannot read their contents.
     chmod 0711 "$BASE"
-    chmod 0751 "$BASE/releases" "$RELEASE"
+    chmod 0751 "$BASE/releases"
+    chmod 0755 "$RELEASE"
     find "$RELEASE/app" -type d -exec chmod 0755 {} +
     find "$RELEASE/app" -type f -exec chmod 0644 {} +
     chmod 0644 "$RELEASE/requirements.txt" "$RELEASE/requirements.lock"
@@ -207,6 +209,17 @@ assert_private_runtime_import_boundary() {
     # PYTHONPATH used by the predeploy backup bridge.  This catches a release
     # root whose permissions permit traversal but prevent package discovery.
     runuser -u finance-radar -- bash -c '
+        set -euo pipefail
+        cd -- "$1"
+        unset PYTHONPATH
+        exec "$2" -B -c "import app; assert app.__file__"
+    ' _ "$RELEASE" "$BASE/venv/bin/python"
+}
+
+assert_public_runtime_import_boundary() {
+    # Exercise the same cwd-based import that the isolated Streamlit unit uses.
+    # A process-only health probe does not catch an unreadable release root.
+    runuser -u finance-radar-web -- bash -c '
         set -euo pipefail
         cd -- "$1"
         unset PYTHONPATH
@@ -1708,6 +1721,8 @@ grant_public_web_runtime_access || \
     abort_cutover 'public Web runtime access boundary could not be prepared' 4
 assert_private_runtime_import_boundary || \
     abort_cutover 'private runtime cannot import candidate application from its service working directory' 4
+assert_public_runtime_import_boundary || \
+    abort_cutover 'public Web runtime cannot import candidate application from its service working directory' 4
 
 if [ ! -f /etc/finance-radar.env ]; then
     ADMIN_TOKEN=$(openssl rand -hex 32)
@@ -1923,6 +1938,7 @@ assert_public_web_identity_and_boundary() {
     runuser -u finance-radar-web -- test -r "$RELEASE/app/web/Home.py" || return 1
     runuser -u finance-radar-web -- test -r "$RELEASE/.streamlit/config.toml" || return 1
     runuser -u finance-radar-web -- test -x "$BASE/venv/bin/python" || return 1
+    assert_public_runtime_import_boundary || return 1
     printf 'public_web_identity=PASS user=%s ProtectProc=%s ProcSubset=%s\n' \
         "$user" "$protect_proc" "$proc_subset"
 }

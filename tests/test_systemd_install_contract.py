@@ -177,14 +177,19 @@ def test_public_web_uses_a_fixed_minimal_environment_without_admin_token() -> No
     assert "ensure_public_web_principal" in installer
     assert "grant_public_web_runtime_access" in installer
     assert "assert_private_runtime_import_boundary" in installer
+    assert "assert_public_runtime_import_boundary" in installer
     assert 'chmod 0711 "$BASE"' in installer
-    assert 'chmod 0751 "$BASE/releases" "$RELEASE"' in installer
+    assert 'chmod 0751 "$BASE/releases"' in installer
+    assert 'chmod 0755 "$RELEASE"' in installer
+    assert 'chmod 0751 "$BASE/releases" "$RELEASE"' not in installer
     assert 'chmod 0711 "$BASE" "$BASE/releases" "$RELEASE"' not in installer
     assert 'unset PYTHONPATH' in installer
     assert 'exec "$2" -B -c "import app; assert app.__file__"' in installer
     private_import_gate = installer.index("assert_private_runtime_import_boundary ||")
+    public_import_gate = installer.index("assert_public_runtime_import_boundary ||")
     assert installer.index("grant_public_web_runtime_access ||") < private_import_gate
-    assert private_import_gate < installer.index("# The only point at which the running release changes.")
+    assert private_import_gate < public_import_gate
+    assert public_import_gate < installer.index("# The only point at which the running release changes.")
     assert "assert_public_web_identity_and_boundary" in installer
     assert 'streamlit_dir="$RELEASE/.streamlit"' in installer
     assert '"secrets.toml"' in installer
@@ -272,14 +277,19 @@ def test_restore_recreates_public_environment_and_never_enables_admin() -> None:
     assert "ensure_public_web_principal" in source
     assert "grant_public_web_runtime_access" in source
     assert "assert_private_runtime_import_boundary" in source
+    assert "assert_public_runtime_import_boundary" in source
     assert 'chmod 0711 "$BASE"' in source
-    assert 'chmod 0751 "$BASE/releases" "$RELEASE"' in source
+    assert 'chmod 0751 "$BASE/releases"' in source
+    assert 'chmod 0755 "$RELEASE"' in source
+    assert 'chmod 0751 "$BASE/releases" "$RELEASE"' not in source
     assert 'chmod 0711 "$BASE" "$BASE/releases" "$RELEASE"' not in source
     assert 'unset PYTHONPATH' in source
     assert 'exec "$2" -B -c "import app; assert app.__file__"' in source
     private_import_gate = source.index("assert_private_runtime_import_boundary ||")
+    public_import_gate = source.index("assert_public_runtime_import_boundary ||")
     assert source.index("grant_public_web_runtime_access ||") < private_import_gate
-    assert private_import_gate < source.index("systemctl daemon-reload", private_import_gate)
+    assert private_import_gate < public_import_gate
+    assert public_import_gate < source.index("systemctl daemon-reload", public_import_gate)
     assert "assert_public_web_identity_and_boundary" in source
     assert 'streamlit_dir="$RELEASE/.streamlit"' in source
     assert 'refusing a prepared restore that contains Streamlit secrets' in source
