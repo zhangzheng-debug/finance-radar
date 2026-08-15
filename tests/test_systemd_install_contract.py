@@ -496,8 +496,12 @@ def test_in_place_installer_requires_a_fresh_verified_backup_before_cutover() ->
         '--setenv="FINANCE_RADAR_BACKUP_SOURCE_ROOT=$RELEASE"',
         '--setenv=FINANCE_RADAR_PREDEPLOY_BRIDGE=1',
         'bash "$BACKUP_QUIESCE_WRAPPER_SOURCE"',
+        'runtime_log="$RELEASE_RECORDS/PREDEPLOY_BACKUP_RUNTIME.log"',
+        '>"$runtime_log" 2>&1',
+        'chmod 0640 "$runtime_log"',
     ):
         assert literal in bridge
+    assert 'bash "$BACKUP_QUIESCE_WRAPPER_SOURCE" >&2' not in bridge
     assert 'legacy_sqlite' not in source
     assert 'PREDEPLOY_BACKUP_RECEIPT_SHA256' in source
     assert 'require_postcutover_verified_backup' in source

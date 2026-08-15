@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import sqlite3
 import sys
 import threading
 import time
@@ -166,9 +167,27 @@ class CycleLeaseHeartbeat:
         self._thread.join(timeout=max(2.0, self.interval_seconds * 2))
 
     def _run(self) -> None:
-        connection = open_ledger(self.db_path)
+        connection: sqlite3.Connection | None = None
         try:
-            while not self._stop.wait(self.interval_seconds):
+            while not self._stop.is_set():
+                if connection is None:
+                    try:
+                        # The main cycle has already initialized the schema.
+                        # Opening through open_ledger() would perform schema
+                        # writes and can race the cycle's own transactions.
+                        # Keep this connection lease-only and bound lock waits
+                        # so one busy database cannot strand shutdown.
+                        lock_wait = min(5.0, max(0.1, self.interval_seconds))
+                        connection = sqlite3.connect(self.db_path, timeout=lock_wait)
+                        connection.execute(f"PRAGMA busy_timeout={int(lock_wait * 1000)}")
+                    except Exception as exc:
+                        self.last_error = f"{type(exc).__name__}: {exc}"
+                        connection = None
+                        if self._stop.wait(self.interval_seconds):
+                            return
+                        continue
+                if self._stop.wait(self.interval_seconds):
+                    return
                 try:
                     if not renew_cycle_lease(
                         connection,
@@ -181,7 +200,8 @@ class CycleLeaseHeartbeat:
                 except Exception as exc:
                     self.last_error = f"{type(exc).__name__}: {exc}"
         finally:
-            connection.close()
+            if connection is not None:
+                connection.close()
 
 
 def load_json(path: Path) -> Any:
