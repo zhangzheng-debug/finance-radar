@@ -120,6 +120,36 @@ class LiveCycleLeaseTests(unittest.TestCase):
                 cycle.release_cycle_lease(connection, token)
                 connection.close()
 
+    def test_lease_heartbeat_survives_a_busy_main_cycle_connection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "db.sqlite3"
+            connection = open_ledger(db_path)
+            token = cycle.acquire_cycle_lease(connection, ttl_seconds=2)
+            self.assertIsNotNone(token)
+            heartbeat = cycle.CycleLeaseHeartbeat(
+                db_path,
+                token,
+                ttl_seconds=2,
+                interval_seconds=0.05,
+            )
+            connection.execute("BEGIN IMMEDIATE")
+            heartbeat.start()
+            try:
+                time.sleep(0.25)
+                self.assertTrue(heartbeat._thread.is_alive())
+                self.assertIsNotNone(heartbeat.last_error)
+                connection.rollback()
+                deadline = time.monotonic() + 2.0
+                while heartbeat.last_error is not None and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertIsNone(heartbeat.last_error)
+                self.assertFalse(heartbeat.lost)
+            finally:
+                connection.rollback()
+                heartbeat.stop()
+                cycle.release_cycle_lease(connection, token)
+                connection.close()
+
     def test_light_followup_with_evidence_advances_to_human_review_without_touching_other_jobs(self) -> None:
         class ExistingDecisionOperations:
             def __init__(self, decision):

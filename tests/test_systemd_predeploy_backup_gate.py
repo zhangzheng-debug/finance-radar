@@ -415,6 +415,7 @@ exec "$@"
         'BASE="$ROOT/base"\n'
         'SHARED="$ROOT/shared"\n'
         'RELEASE="$BASE/releases/$RELEASE_ID"\n'
+        'RELEASE_RECORDS="$RELEASE/release-records"\n'
         'BACKUP_ROOT="$SHARED/data/operational_backups"\n'
         'OPS_DB="$SHARED/data/finance_radar_operations.sqlite3"\n'
         'FINANCE_RADAR_BACKUP_RECEIPT_TMPDIR="$ROOT/receipt-tmp"\n'

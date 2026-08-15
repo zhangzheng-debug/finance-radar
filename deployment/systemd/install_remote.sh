@@ -531,16 +531,18 @@ prepare_candidate_predeploy_backup() {
 }
 
 run_predeploy_candidate_backup() {
-    local transient_unit
+    local transient_unit runtime_log
     prepare_candidate_predeploy_backup || return 1
     prepare_backup_restore_tmpdir || return 1
     transient_unit="finance-radar-predeploy-backup-${RELEASE_ID}-$$"
+    runtime_log="$RELEASE_RECORDS/PREDEPLOY_BACKUP_RUNTIME.log"
+    install -d -m 0750 -o root -g finance-radar "$RELEASE_RECORDS" || return 1
     # A transient service gives the candidate the exact same privilege,
     # sandbox and memory envelope as the normal backup job, but does not
     # replace the old service unit, wrapper, timer or current symlink.  It is
     # collected automatically whether it succeeds or fails, so no candidate
     # source-selection state can leak into rollback.
-    systemd-run --quiet --wait --collect --pipe \
+    if ! systemd-run --quiet --wait --collect --pipe \
         --unit="$transient_unit" \
         --slice=finance-radar.slice \
         --property=User=root \
@@ -567,7 +569,14 @@ run_predeploy_candidate_backup() {
         --setenv="FINANCE_RADAR_WORKER_RESUME_INHIBIT=$WORKER_RESUME_INHIBIT" \
         --setenv="FINANCE_RADAR_BACKUP_SOURCE_ROOT=$RELEASE" \
         --setenv=FINANCE_RADAR_PREDEPLOY_BRIDGE=1 \
-        bash "$BACKUP_QUIESCE_WRAPPER_SOURCE" >&2 || return 1
+        bash "$BACKUP_QUIESCE_WRAPPER_SOURCE" >"$runtime_log" 2>&1; then
+        chown root:finance-radar "$runtime_log" 2>/dev/null || true
+        chmod 0640 "$runtime_log" 2>/dev/null || true
+        printf 'candidate predeploy backup bridge failed; runtime_log=%s\n' "$runtime_log" >&2
+        return 1
+    fi
+    chown root:finance-radar "$runtime_log" || return 1
+    chmod 0640 "$runtime_log" || return 1
     printf 'predeploy_candidate_backup_runtime=PASS unit=%s source=%s high=340M max=460M\n' \
         "$transient_unit" "$RELEASE" >&2
 }
