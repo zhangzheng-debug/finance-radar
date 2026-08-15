@@ -12,6 +12,12 @@ import pytest
 
 INSTALLER = Path(__file__).parents[1] / "deployment" / "systemd" / "install_remote.sh"
 VALIDATOR = Path(__file__).parents[1] / "deployment" / "systemd" / "verify_backup_receipt.py"
+HOLD_TRANSFER = (
+    Path(__file__).parents[1]
+    / "deployment"
+    / "systemd"
+    / "transfer_verified_backup_hold.py"
+)
 
 
 def _bash() -> str:
@@ -351,6 +357,7 @@ exec "$@"
     release_verifier = release / "deployment" / "systemd" / "verify_backup_receipt.py"
     release_verifier.parent.mkdir(parents=True)
     shutil.copy2(VALIDATOR, release_verifier)
+    shutil.copy2(HOLD_TRANSFER, release_verifier.with_name(HOLD_TRANSFER.name))
     wrapper = release / "deployment" / "systemd" / "run_backup_quiesced.sh"
     _write_executable(wrapper, "#!/usr/bin/env bash\nexit 0\n")
     (release / "app" / "ops").mkdir(parents=True)
@@ -489,7 +496,7 @@ def test_predeploy_recovery_hold_revalidates_the_held_bundle_before_accepting_it
     not _supports_descriptor_relative_hold(),
     reason="the deployment hold deliberately requires root Linux descriptor-relative APIs",
 )
-def test_predeploy_recovery_hold_remains_valid_after_the_runtime_source_is_modified(
+def test_predeploy_recovery_hold_leaves_normal_retention_and_enters_root_custody(
     tmp_path: Path,
 ) -> None:
     driver = _make_gate_driver(tmp_path, entrypoint="hold")
@@ -500,17 +507,15 @@ def test_predeploy_recovery_hold_remains_valid_after_the_runtime_source_is_modif
         text=True,
         timeout=30,
         check=False,
-        env={**os.environ, "HOLD_AFTER_CREATE_MUTATION": "source-content"},
     )
 
     assert result.returncode == 0, result.stderr
     receipt = json.loads(result.stdout.strip().splitlines()[-1])
     assert receipt["kind"] == "recovery_bundle"
     assert receipt["receipt_sha256"] == receipt["held_receipt_sha256"]
-    assert receipt["protection"].startswith("root-owned independent physical copy")
-    held_ledger = Path(receipt["hold_path"]) / "ledger.sqlite3"
-    source_ledger = Path(receipt["original_path"]) / "ledger.sqlite3"
-    assert held_ledger.read_bytes() != source_ledger.read_bytes()
+    assert receipt["protection"].startswith("root-owned atomic custody transfer")
+    assert Path(receipt["hold_path"]).is_dir()
+    assert not Path(receipt["original_path"]).exists()
 
 
 @pytest.mark.skipif(
@@ -520,7 +525,7 @@ def test_predeploy_recovery_hold_remains_valid_after_the_runtime_source_is_modif
 @pytest.mark.parametrize(
     ("mutation", "expected_error"),
     (
-        ("symlink", "predeploy source must not be a symlink"),
+        ("symlink", "fresh verified recovery bundle is not a real directory"),
         ("replacement", "predeploy hold receipt validation failed"),
         ("outside", "predeploy source is not a direct operational-backups child"),
     ),

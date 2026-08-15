@@ -147,11 +147,15 @@ it uses candidate source without changing the active service unit or `current`, 
 it does not migrate or write to the live operations database or its recovery-copy
 schema. Only a successful full two-database recovery bundle can proceed to
 cutover. The candidate source remains root-owned and runtime-read-only during the
-bridge, and the verified bundle is physically copied to a root-only hold before
-the release switch. Its activation receipt records the fresh snapshot ID and
-manifest SHA-256. The backup policy remains one newest verified daily bundle, so a
-failed backup never deletes the prior recovery point; exceptional failed-cutover
-holds are retained for review and capped by an explicit two-hold operator gate.
+bridge. The verified bundle is then revalidated, atomically transferred into a
+root-only hold and removed from normal retention before superseded daily bundles
+are pruned. A post-prune headroom gate reserves one complete post-cutover bundle,
+the largest SQLite restore scratch file and 512 MiB safety space. Any failure in
+that custody transaction moves the fresh bundle back to the operational backup
+root. Its activation receipt records the fresh snapshot ID and manifest SHA-256.
+The backup policy remains one newest verified daily bundle, so a failed backup
+never deletes the prior recovery point; exceptional failed-cutover holds are
+retained for review and capped by an explicit two-hold operator gate.
 
 ## Rollback handoff
 

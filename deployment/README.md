@@ -148,13 +148,16 @@ and records the resulting snapshot ID and manifest hash. The bridge never change
 retains the backup service's complete two-database restore verification and accepts
 only a full recovery bundle. The candidate code stays root-owned and is readable,
 not writable, by the runtime account while the root bridge is in progress. Before
-the symlink changes, the verified bundle is physically copied into a root-only
-hold outside shared application data; its schema and formal-audit rows remain in
-the pre-cutover form. The normal backup service retains only the newest
-successfully restored daily bundle. A verified hold is removed only after the
-post-cutover bundle and services pass; a failed cutover preserves its root-only
-hold for recovery review, with two retained failed holds requiring explicit
-operator review before another cutover. It then records the previous release, privately
+the symlink changes, the verified bundle is revalidated and atomically moved into
+root-only custody outside normal retention. Only then are superseded daily
+bundles removed, and the installer proves that the post-cutover bundle plus its
+isolated SQLite restore still fit on disk. The normal backup service retains only
+the newest successfully restored daily bundle. A verified hold is removed only
+after the post-cutover bundle and services pass; a failed cutover preserves its
+root-only hold for recovery review, with two retained failed holds requiring
+explicit operator review before another cutover. The optional
+`FINANCE_RADAR_DEPLOY_HOLD_MODE=physical_copy` mode remains available for hosts
+with capacity for three full bundles. It then records the previous release, privately
 snapshots the service units, protected/public environments, Nginx candidate and
 renewal hook, and the shared venv. It switches `current`, enables/restarts only
 API/Web/Worker/backup-timer, verifies both loopback health endpoints, then uses

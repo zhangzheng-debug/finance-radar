@@ -241,7 +241,7 @@ fi
 # instant it is created; the runtime account receives only group read/search
 # access for its unprivileged Python child.
 install -d -m 0751 -o root -g root "$BASE"
-install -d -m 0750 -o root -g finance-radar "$BASE/releases"
+install -d -m 0751 -o root -g finance-radar "$BASE/releases"
 install -d -m 0750 -o finance-radar -g finance-radar "$SHARED"
 install -d -m 0750 -o root -g finance-radar "$RELEASE"
 tar -xzf "$ARCHIVE" -C "$RELEASE"
@@ -305,6 +305,11 @@ WORKER_RESUME_INHIBIT_CREATED=0
 BACKUP_RECEIPT_VERIFIER="$RELEASE/deployment/systemd/verify_backup_receipt.py"
 [ -f "$BACKUP_RECEIPT_VERIFIER" ] || {
     printf 'backup receipt verifier is missing from candidate release\n' >&2
+    exit 3
+}
+BACKUP_HOLD_TRANSFER="$RELEASE/deployment/systemd/transfer_verified_backup_hold.py"
+[ -f "$BACKUP_HOLD_TRANSFER" ] && [ ! -L "$BACKUP_HOLD_TRANSFER" ] || {
+    printf 'atomic backup custody helper is missing from candidate release\n' >&2
     exit 3
 }
 BACKUP_QUIESCE_WRAPPER_SOURCE="$RELEASE/deployment/systemd/run_backup_quiesced.sh"
@@ -1149,7 +1154,7 @@ remove_legacy_managed_property_dropins() {
     done
 }
 
-create_predeploy_backup_hold() {
+create_predeploy_backup_hold_physical_copy() {
     local hold_root failed_holds receipt_tmpdir
     [ "$PREDEPLOY_BACKUP_KIND" = recovery_bundle ] || {
         printf 'cannot hold a predeploy backup that is not a complete recovery bundle\n' >&2
@@ -1522,8 +1527,73 @@ PY
         printf 'predeploy recovery hold did not contain a protected backup\n' >&2
         return 1
     }
-    printf 'predeploy_backup_hold=READY path=%s format=%s\n' \
+    printf 'predeploy_backup_hold=READY path=%s format=%s mode=physical_copy\n' \
         "$PREDEPLOY_HOLD_PATH" "$PREDEPLOY_BACKUP_KIND"
+}
+
+create_predeploy_backup_hold() {
+    local failed_holds hold_root hold_summary receipt_tmpdir
+    case "${FINANCE_RADAR_DEPLOY_HOLD_MODE:-atomic_custody}" in
+        atomic_custody)
+            ;;
+        physical_copy)
+            create_predeploy_backup_hold_physical_copy
+            return
+            ;;
+        *)
+            printf 'unknown predeploy hold mode: %s\n' \
+                "${FINANCE_RADAR_DEPLOY_HOLD_MODE}" >&2
+            return 1
+            ;;
+    esac
+    [ "$PREDEPLOY_BACKUP_KIND" = recovery_bundle ] || {
+        printf 'cannot hold a predeploy backup that is not a complete recovery bundle\n' >&2
+        return 1
+    }
+    [ -n "$PREDEPLOY_BACKUP_PATH" ] || {
+        printf 'cannot hold a missing predeploy backup\n' >&2
+        return 1
+    }
+    install -d -m 0700 -o root -g root "$RECOVERY_HOLD_PARENT" "$RECOVERY_HOLD_ROOT" || return 1
+    failed_holds="$(find "$RECOVERY_HOLD_ROOT" -mindepth 1 -maxdepth 1 -type d \
+        \( -name 'failed-precutover-*' -o -name 'failed-cutover-*' \) -print | wc -l)" || return 1
+    [[ "$failed_holds" =~ ^[0-9]+$ ]] || return 1
+    if [ "$failed_holds" -ge 2 ]; then
+        printf 'two retained failed recovery holds require explicit operator review before another cutover\n' >&2
+        return 1
+    fi
+    receipt_tmpdir="${FINANCE_RADAR_BACKUP_RECEIPT_TMPDIR:-/var/tmp/finance-radar-receipt}"
+    [ -d "$receipt_tmpdir" ] && [ ! -L "$receipt_tmpdir" ] || {
+        printf 'receipt verifier temporary directory is unsafe: %s\n' "$receipt_tmpdir" >&2
+        return 1
+    }
+    hold_root="$RECOVERY_HOLD_ROOT/.inflight-${RELEASE_ID}-$$"
+    [[ "$hold_root" == "$RECOVERY_HOLD_ROOT/.inflight-${RELEASE_ID}-"* ]] || {
+        printf 'refusing unexpected predeploy recovery hold path: %s\n' "$hold_root" >&2
+        return 1
+    }
+    [ ! -e "$hold_root" ] && [ ! -L "$hold_root" ] || {
+        printf 'predeploy recovery hold path already exists: %s\n' "$hold_root" >&2
+        return 1
+    }
+    hold_summary="$(TMPDIR="$receipt_tmpdir" python3 "$BACKUP_HOLD_TRANSFER" \
+        --source "$PREDEPLOY_BACKUP_PATH" \
+        --backup-root "$SHARED/data/operational_backups" \
+        --hold-root "$hold_root" \
+        --receipt-sha256 "$PREDEPLOY_BACKUP_RECEIPT_SHA256" \
+        --verifier "$BACKUP_RECEIPT_VERIFIER" \
+        --receipt-tmpdir "$receipt_tmpdir")" || return 1
+    PREDEPLOY_HOLD_ROOT="$hold_root"
+    PREDEPLOY_HOLD_PATH="$hold_root/$(basename "$PREDEPLOY_BACKUP_PATH")"
+    [ -f "$PREDEPLOY_HOLD_ROOT/HOLD_RECEIPT.json" ] && \
+        [ -f "$PREDEPLOY_HOLD_PATH/manifest.json" ] && \
+        [ ! -e "$PREDEPLOY_BACKUP_PATH" ] || {
+            printf 'atomic predeploy custody transfer is incomplete\n' >&2
+            return 1
+        }
+    printf 'predeploy_backup_hold=READY path=%s format=%s mode=atomic_custody\n' \
+        "$PREDEPLOY_HOLD_PATH" "$PREDEPLOY_BACKUP_KIND"
+    printf 'predeploy_backup_hold_summary=%s\n' "$hold_summary"
 }
 
 clear_predeploy_backup_hold() {
