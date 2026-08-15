@@ -5,6 +5,16 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.15.4
+
+- Published the production release at commit
+  `ceb9f577b5486f6eac6a6fba5699f9e8131509df` with release identity
+  `20260815T051127Z-ceb9f577b548`.
+- Verified the public read-only product, isolated runtime roles, continuous
+  worker, cgroup memory protection and one-copy daily backup policy on AWS.
+- Bound the accepted recovery artifact to its SHA-256, verified full restore
+  receipt and exact production activation record.
+
 - 修复实时循环租约心跳通过完整 schema 初始化连接而与主循环写事务竞争的问题；心跳现在使用有界等待的租约专用 SQLite 连接，并在短暂锁冲突后继续续租。
 - 将切换前完整备份的数千行运行结果写入候选版本的受限发布记录，而不是直接灌入远程终端；安装器只回传简洁门禁状态，降低长部署因输出通道中断而留下半激活状态的风险。
 
