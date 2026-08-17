@@ -235,16 +235,49 @@ market_snapshots.read_only             CHECK (read_only = 1)</code></pre>
 <h3>3.1 风险路由小模型 <span class="kv mono">app/models/risk_router.py</span></h3>
 <ul>
   <li>CPU 上跑的 scikit-learn 文本分类器，输出三档：<code>RISK_REVIEW</code> / <code>NON_TARGET</code> / <code>ABSTAIN</code>。</li>
-  <li>它前面还有<strong>两道确定性闸门</strong>：<code>risk_scope_gate</code>（判断这条消息是不是在处理范围内）和 <code>semantic_policy_gate</code>（语义策略）。闸门能定的事，轮不到模型说话。</li>
   <li>模型文件坏了会<strong>可见降级</strong>成关键词兜底（<code>runtime = "fallback"</code>），不会让 API 崩溃。这条有专门的故障注入演练验证过。</li>
   <li>每次输出都强制带 <code>shadow: true</code> 和 <code>no_trading: true</code>。</li>
   <li>每次决策都记一个 <code>input_sha256</code>，把文本、证据状态、阈值配置全哈希进去——换了阈值就是另一次决策，不会被静默去重。</li>
 </ul>
 
+<h4>它经历过一次彻底的失败和一次彻底的重做</h4>
+<p>这是本项目最值得讲的一段，三代盲测的真实数字（每一代的盲测集都是<strong>先冻结标签、再跑推理</strong>，且与训练集零重叠）：</p>
+
+<table>
+  <tr><th>版本</th><th>盲测集</th><th>准确率</th><th>风险召回</th><th>普通新闻误报率</th><th>门禁</th></tr>
+  <tr><td class="mono">v1</td><td class="mono">blind-v1（40 条）</td><td>50.0%</td><td>100%</td><td><strong>95.0%</strong></td><td><span class="tag no">FAIL</span></td></tr>
+  <tr><td class="mono">v3</td><td class="mono">blind-v2（80 条）</td><td>56.2%</td><td>40.0%</td><td>6.7%</td><td><span class="tag no">FAIL</span></td></tr>
+  <tr><td class="mono"><strong>v4（当前生产）</strong></td><td class="mono">blind-v3（80 条）</td><td><strong>96.3%</strong></td><td><strong>96.7%</strong></td><td><strong>6.7%</strong></td><td><span class="tag ok">PASS</span></td></tr>
+</table>
+
+<p><strong>v1 错在哪：</strong>它对 40 条里的 39 条都喊 <code>RISK_REVIEW</code>，一次 <code>NON_TARGET</code> 都没输出过。误判的全是"官方腔调但零负面内容"的东西——NVIDIA 的游戏上线公告、美联储悼念格林斯潘的讣告、三年期支付研究报告。根因是训练语料做空特化，模型学到的是"官方财经文体 = 风险"，它没有"官方但不是坏事"这个概念。</p>
+
+<div class="box">
+  <span class="t">顺便回答一个很多人会想到的问题：把输出反过来不就对了？</span>
+  <p>不行，实测过。反过来之后严格准确率从 50.0% 掉到 <strong>47.5%</strong>，风险召回从 100% 掉到 <strong>0%</strong>——一个风险雷达漏掉全部真实风险，比误报更糟，只是把"哪道门不过"换了一下。</p>
+  <p>原因：v1 是<strong>退化</strong>（对什么都喊 RISK），不是<strong>反相关</strong>。反转只在 ROC-AUC &lt; 0.5 时才有意义。v1 的实际 AUC 是 <strong>0.857</strong>，说明它排序的方向本来就是对的，坏的是决策阈值。</p>
+</div>
+
+<p><strong>v4 怎么修好的：</strong>不是调参，是换架构。v2 失败后模型卡里留了一句教训——<code>"Evidence state is a structured gate, not a text class."</code>（证据状态是一道结构化闸门，不是一个文本类别）。于是 v4 拆成三层，代码在 <code>RiskRouter.predict()</code> 里能直接看到：</p>
+<ol>
+  <li><strong>结构化证据门</strong>（确定性）—— 证据不是 PRIMARY_SUPPORTED，直接 <code>ABSTAIN</code>、置信度 1.0，模型根本不被调用</li>
+  <li><strong>高精度语义策略门</strong>（确定性）—— 能定的直接定，只有 <code>DEFER_TO_MODEL</code> 才往下走</li>
+  <li><strong>二分类小模型</strong> —— 只处理前两层都拿不准的那部分</li>
+</ol>
+<p>另外还有一道 <code>risk_scope_gate</code>（判断这条消息是否落在处理范围内），每次调用都会计算并记入 <code>call_counts</code>，在旧架构路径下直接负责拒绝噪音和弃权。</p>
+<p>blind-v3 上 ABSTAIN 的精度和召回都是 <strong>1.000</strong>，正是因为 ABSTAIN 现在由确定性闸门决定，轮不到模型。<strong>把模型的活越切越小，整体准确率反而上来了。</strong></p>
+
 <div class="box red">
-  <span class="t">最重要的一件事：这个模型我们没让它上岗</span>
-  <p>外部盲测结果：<strong>普通新闻误报率 95%</strong>。也就是说它会把大量正常新闻误判成风险。所以我们把它按在 <code>SHADOW</code> 状态，强制 <code>REMAIN_SHADOW</code>，并且把这个失败结果写进了 README、模型卡和答辩材料。</p>
-  <p>这是我们最想让老师看见的一点：<strong>发现失败 → 公开失败 → 阻止晋级</strong>，整条治理链有据可查。不是调参把数字弄好看。</p>
+  <span class="t">那为什么现在还是 SHADOW？——这才是当前真正的缺口</span>
+  <p>v4 的盲测 11 道门全过，但晋级决策是 <code>QUALIFIED_SHADOW</code>（合格但仍在影子态），不是正式判断器。原因写在模型卡里：</p>
+  <p class="mono" style="font-size:9pt">"label_provenance": "AI_RUBRIC_ADJUDICATOR_NOT_HUMAN"<br>"human_labels_claimed": false</p>
+  <p>blind-v2 和 blind-v3 的标签是 <strong>AI 按评分规则打的，不是人打的</strong>。所以我们不承认它有资格出 shadow。</p>
+  <p><strong>要真正晋级，缺的是人工双盲标注</strong>——两人独立标 80 条（RISK 30 / NON_TARGET 30 / ABSTAIN 20），互不可见，分歧由第三人仲裁，然后用人工标签冻结全新的 blind-v4。基础设施（Adjudication Studio 页面、v3 标签合同、仲裁流程）已经全部写好，<strong>真实人审 0 条</strong>。这件事必须两个人做，做完就是最硬的团队协作证据。</p>
+</div>
+
+<div class="box red">
+  <span class="t">有条捷径，千万别走</span>
+  <p>把 v1 的判定阈值从 0.62 挪到 0.768，就能刚好三道门全部踩线通过（召回 80% / 误报 20% / 准确率 80%）。<strong>不许这么干</strong>：那是在盲测集上调参，盲测集一旦用来调参就作废了；而且 40 条样本里一条 = 5%，踩线通过意味着换一条样本就掉下来。老师只要问一句"这个阈值你是怎么定的"，整套评测的可信度就没了。</p>
 </div>
 
 <h3>3.2 证据 Agent 的本地小模型 <span class="kv mono">app/services/evidence_agent.py</span></h3>
@@ -478,7 +511,7 @@ python -m compileall -q app scripts tests</code></pre>
 <h2>10. 答辩可能被问到的，先自己想清楚</h2>
 
 <h4>Q：AI 在你们项目里到底干了啥？</h4>
-<p>两处。一个是 shadow 分类器（外部盲测失败了，我们没让它上岗）；一个是只写摘要的本地小模型（输出要过 8 道校验，判定全归确定性规则）。证据门、抽取规则、评级、告警资格全是人和规则。<strong>AI 参与的是排序和摘要，不是结论。</strong></p>
+<p>两处。一个是 shadow 风险路由分类器（盲测过门了，但因为标签是 AI 打的，仍然不承认它有资格出 shadow）；一个是只写摘要的本地小模型（输出要过 8 道校验，判定全归确定性规则）。证据门、抽取规则、评级、告警资格全是人和规则。<strong>AI 参与的是排序和摘要，不是结论。</strong></p>
 
 <h4>Q：你们怎么保证不碰交易？</h4>
 <p>三层。数据库 CHECK 约束（插不进去）、CI 自动扫描交易写路由（提交不进去）、故障注入演练枚举 API 路由断言不存在（跑起来也没有）。</p>
@@ -486,8 +519,15 @@ python -m compileall -q app scripts tests</code></pre>
 <h4>Q：数据是真的吗？</h4>
 <p>是。生产库 13,357 条事件，来自 13 个官方源。每条都能点回原文，并且有 SHA-256 内容寻址的原始 HTML/PDF 快照存档。</p>
 
-<h4>Q：模型误报 95%，你还敢拿出来讲？</h4>
-<p>这正是我们要讲的。发现 → 公开 → 阻止晋级，整条治理链有据可查。<strong>把失败藏起来才是问题，把失败当证据展示是这门课今年要考的能力。</strong></p>
+<h4>Q：听说你们模型误报 95%？</h4>
+<p>那是 <strong>v1 的数字，已经修好了</strong>。当前生产跑的 v4 在 blind-v3 上误报率 6.7%、准确率 96.3%、11 道门全过。完整三代对比见第 3.1 节。</p>
+<p>而且我们把 v1 的失败、v2 的失败和修复过程全部留档了：v1 的 40 条逐条错例、v2 的教训一句话（"证据状态是结构化闸门，不是文本类别"）、v4 的架构改动。<strong>发现失败 → 公开失败 → 定位根因 → 换架构 → 重新盲测</strong>，整条链有据可查。</p>
+
+<h4>Q：那 v4 都过门了，为什么还是 shadow？</h4>
+<p>因为 blind-v2 和 blind-v3 的标签是 AI 按评分规则打的，不是人打的（模型卡里 <code>human_labels_claimed: false</code> 写得很清楚）。我们不拿 AI 标签冒充人工标注，所以它只拿到 <code>QUALIFIED_SHADOW</code>。要真正晋级，得两个人独立双盲标 80 条、第三人仲裁、重新冻结 blind-v4。</p>
+
+<h4>Q：模型对什么都喊风险，把输出反过来不就对了？</h4>
+<p>实测不行。反过来准确率 50.0% → 47.5%，风险召回 100% → 0%，只是换了一道门不过。因为 v1 是<strong>退化</strong>（对什么都喊 RISK）不是<strong>反相关</strong>——它的 ROC-AUC 是 0.857，排序方向本来就是对的，坏的是决策阈值。反转只在 AUC &lt; 0.5 时才有意义。</p>
 
 <h4>Q：断网了怎么演示？</h4>
 <p>4 个冻结回放案例 + 可执行离线终端，完全不依赖网络，也不依赖当天有没有真实重大事件发生。</p>
