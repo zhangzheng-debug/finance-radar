@@ -106,7 +106,7 @@
   <tr><th>项目</th><th>数值</th><th>怎么查</th></tr>
   <tr><td>生产事件数</td><td>13,357 条（其中 7,471 条待核验）</td><td>公网总览页</td></tr>
   <tr><td>Python 代码</td><td>202 个文件，约 66,700 行</td><td><code>app/</code> 13,972 · <code>scripts/</code> 34,153 · <code>tests/</code> 18,575</td></tr>
-  <tr><td>测试</td><td>664 passed / 5 skipped / 20 subtests</td><td><code>python -m pytest -q</code></td></tr>
+  <tr><td>测试</td><td><strong>669 passed + 20 subtests，0 失败</strong>（写这份文档时实跑的）</td><td><code>python -m pytest -q</code>；参考环境为 664 passed + 5 skipped，同一批 669 项</td></tr>
   <tr><td>API 路由</td><td>25 条（1 条根路径 + 24 条 <code>/api/v1/*</code>）</td><td><code>/docs</code></td></tr>
   <tr><td>Web 页面</td><td>1 个总览 + 5 个功能页，4 种身份</td><td><code>app/web/</code></td></tr>
   <tr><td>冻结演示案例</td><td>4 个（断网也能跑）</td><td><code>replay/cases/cases.json</code></td></tr>
@@ -350,6 +350,30 @@ market_snapshots.read_only             CHECK (read_only = 1)</code></pre>
 </table>
 <p>每个响应都带 <code>schema_version</code>（当前 1.1）、<code>trace_id</code> 和 <code>generated_at</code>，API 层还有 180 次/分钟的限流。</p>
 
+<h3>产品 KPI：我们怎么证明"产品有用"，而不是"工程复杂"</h3>
+<p>这是很多人会忽略但其实很值钱的一块。<code>GET /api/v1/product/metrics</code> 背后是 <code>LedgerRepository.product_metrics()</code>，它<strong>刻意独立于工程健康指标</strong>：</p>
+<table>
+  <tr><th>指标</th><th>衡量什么</th></tr>
+  <tr><td class="mono">capture_latency_p50 / p95</td><td>从来源发布到我们本地记录，慢了多久</td></tr>
+  <tr><td class="mono">duplicate_compression_rate</td><td>重复报道被压缩掉多少（少读几遍）</td></tr>
+  <tr><td class="mono">citable_evidence_coverage</td><td>有多少事件真的有"URL + 精确引文"，而不是只有标题</td></tr>
+  <tr><td class="mono">evidence_closure_rate</td><td>有多少事件已经闭合（verified 或 rejected），不再悬着</td></tr>
+  <tr><td class="mono">review_queue_age_p95</td><td>待复核的东西积压了多久</td></tr>
+  <tr><td class="mono">boundary_violations</td><td>安全边界被突破的次数，目标恒为 0</td></tr>
+</table>
+<p>每个指标只有两种状态：<code>MEASURED</code>（必须附样本量和数据来源）或 <code>UNAVAILABLE</code>（必须附不可用原因）。代码注释把设计意图写死了：</p>
+<pre><code>Metrics that need a human sampling programme remain explicitly
+unavailable instead of receiving a proxy score from model output
+or test counts.
+
+（需要人工抽样才能得出的指标，就明确标为不可用，
+  绝不用模型输出或测试通过数凑一个替代分。）</code></pre>
+<p>返回体里还有一个字段直接写着 <code>"engineering_health_is_not_product_quality": true</code>。</p>
+<div class="box blue">
+  <span class="t">答辩时这条一定要讲</span>
+  <p>它正面回答了"创新亮点"这一评分项——<strong>我们能区分"工程做得好"和"产品有用"，而且宁可显示"测不出来"也不编一个数字。</strong>大部分项目做不到这一点，因为承认自己测不出来很难。</p>
+</div>
+
 <h2>5. 四个冻结回放案例</h2>
 
 <p><code>replay/cases/cases.json</code>，由 <code>ReplayService</code> 按"事件时钟"逐秒回放。<strong>完全不联网</strong>，所以答辩当天断网、当天没有真实重大事件，都不影响演示。</p>
@@ -537,6 +561,32 @@ python -m compileall -q app scripts tests</code></pre>
 
 <h4>Q：那个 <code>--send</code> 是干嘛的？</h4>
 <p>Telegram 真实外发的开关。不加就是 dry-run，一条都不发。<strong>演示的时候不要手贱去加。</strong></p>
+
+<h2>11. 一件必须先做的事：把过期数字改掉</h2>
+
+<p>我们仓库里有几份<strong>要交给老师</strong>的文件，数字还停在一个月前，而且和仓库其他文件互相矛盾。这是自己项目的审计早在 2026-08-13 就标为 P1 的问题（"当前事实源互相冲突"），后来只修了 README 和部署文档，学生材料漏了。</p>
+
+<div class="scroll">
+  <table>
+    <thead><tr><th>文件</th><th>里面写的</th><th>真实值</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">.agent/teacher_approval_request.md</td><td>误报 95%，<code>REMAIN_SHADOW</code>；360 tests</td><td>v4 误报 6.7%，<code>QUALIFIED_SHADOW</code>；669 passed</td></tr>
+      <tr><td class="mono">.agent/student_execution_pack.md</td><td>答辩话术仍是"误报 95% 所以保持 shadow"；封版清单要求 360 passed</td><td>应改为 v1→v4 完整弧线；669 passed</td></tr>
+      <tr><td class="mono">docs/STUDENT_COURSE_HANDOFF.md</td><td>360 passed；<code>REMAIN_SHADOW</code></td><td>669 passed；<code>QUALIFIED_SHADOW</code></td></tr>
+      <tr><td class="mono">README.md:42</td><td>只说"旧盲测误报 95% 所以没晋级"</td><td>诚实但没提 v4 已过门，读者只会记住 95%</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<p>可以照抄的正确来源：<code>CHANGELOG.md</code>、<code>BACKUP_INVENTORY.md</code>、<code>release/RELEASE_NOTES_2026.07.22.2.md</code>、<code>artifacts/risk_router_model_card.json</code>、<code>CURRENT_STATE.md</code>。</p>
+
+<div class="box red">
+  <span class="t">为什么急</span>
+  <p><strong>我们在贱卖自己最好的成果。</strong>"误报 95% 所以我们不用它"是个及格的故事；"误报 95% → 定位根因 → 重做架构 → 降到 6.7% 且盲测全过 → 但标签是 AI 打的所以仍不让它出 shadow"是<strong>满分的故事</strong>，而且正好完整覆盖今年新增的"AI 代码审查能力"30% 维度。</p>
+  <p>另外，同一小组两份文件数字打架，是"设计文档"不合格档的典型特征。</p>
+</div>
+
+<p><strong>注意：<code>ACCEPTANCE_STATUS.md</code> 不要改。</strong>它开头已经明确标着"历史验收快照，不代表当前状态"，改它反而破坏证据。该改的是那些<strong>引用它当现状</strong>的学生材料。每处单独提交，message 写清"把 X 从历史值更新为当前值，权威来源为 Y"——这些提交本身就是细粒度 Git 规范的证据。</p>
 
 <div class="box">
   <span class="t">最后一句，答辩收尾就用这个</span>
