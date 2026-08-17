@@ -1,0 +1,509 @@
+<meta charset="utf-8">
+<title>Finance Radar 组内说明书</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "WenQuanYi Zen Hei", sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.75;
+    color: #14181c;
+    margin: 0;
+  }
+  code, pre, .mono { font-family: "WenQuanYi Zen Hei Mono", monospace; }
+
+  h1 {
+    font-size: 22pt; line-height: 1.3; margin: 0 0 6pt;
+    border-bottom: 2.5pt solid #14181c; padding-bottom: 8pt;
+  }
+  .sub { color: #4a5560; font-size: 10pt; margin: 0 0 4pt; }
+  .meta { color: #6b7680; font-size: 8.5pt; margin: 0 0 22pt; font-family: "WenQuanYi Zen Hei Mono", monospace; }
+
+  h2 {
+    font-size: 14pt; margin: 22pt 0 8pt; padding: 5pt 0 5pt 9pt;
+    border-left: 4pt solid #1d5f78; background: #eef4f7;
+    break-after: avoid; page-break-after: avoid;
+  }
+  h3 {
+    font-size: 11.5pt; margin: 15pt 0 5pt; color: #1d5f78;
+    break-after: avoid; page-break-after: avoid;
+  }
+  h4 { font-size: 10.5pt; margin: 11pt 0 4pt; break-after: avoid; page-break-after: avoid; }
+  p { margin: 0 0 8pt; }
+  ul, ol { margin: 0 0 9pt; padding-left: 19pt; }
+  li { margin-bottom: 3.5pt; }
+  ul ul, ol ul { margin: 3.5pt 0 0; }
+
+  table {
+    width: 100%; border-collapse: collapse; margin: 7pt 0 12pt;
+    font-size: 9pt; page-break-inside: auto;
+  }
+  th, td { border: 0.6pt solid #b9c4cc; padding: 4.5pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #e4ebf0; font-weight: bold; }
+  tr { page-break-inside: avoid; }
+
+  code {
+    background: #eef1f3; padding: 0.5pt 3pt; font-size: 9pt;
+    border: 0.4pt solid #d5dce1;
+  }
+  pre {
+    background: #f5f7f8; border: 0.6pt solid #ccd5db; border-left: 3pt solid #1d5f78;
+    padding: 8pt 10pt; font-size: 8.5pt; line-height: 1.6;
+    overflow-wrap: break-word; white-space: pre-wrap; margin: 7pt 0 11pt;
+    page-break-inside: avoid;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; }
+
+  .box {
+    border: 0.8pt solid #b9c4cc; border-left: 4pt solid #b07d1a;
+    background: #fdf6e7; padding: 8pt 11pt; margin: 9pt 0 12pt;
+    page-break-inside: avoid;
+  }
+  .box.red { border-left-color: #9b3a2c; background: #fbeeeb; }
+  .box.blue { border-left-color: #1d5f78; background: #eaf2f6; }
+  .box .t { font-weight: bold; font-size: 9.5pt; display: block; margin-bottom: 4pt; }
+  .box p:last-child, .box ul:last-child { margin-bottom: 0; }
+
+  .step { margin: 0 0 7pt; padding-left: 30pt; text-indent: -30pt; }
+  .step .n {
+    display: inline-block; width: 22pt; text-indent: 0;
+    font-family: "WenQuanYi Zen Hei Mono", monospace; font-weight: bold; color: #1d5f78;
+  }
+  .kv { color: #6b7680; font-size: 9pt; }
+  .pagebreak { page-break-before: always; }
+  .nowrap { white-space: nowrap; }
+  .tag {
+    display: inline-block; font-size: 8pt; padding: 0.5pt 4pt;
+    border: 0.6pt solid currentColor; font-family: "WenQuanYi Zen Hei Mono", monospace;
+  }
+  .tag.ok { color: #2b6248; }
+  .tag.no { color: #9b3a2c; }
+  footer.doc {
+    margin-top: 26pt; padding-top: 8pt; border-top: 1.2pt solid #14181c;
+    font-size: 8.5pt; color: #6b7680;
+  }
+</style>
+
+<h1>Finance Radar 组内说明书</h1>
+<p class="sub">我们到底做了个什么东西 —— 给组员看的大白话版</p>
+<p class="meta">2026-08-16 · 对应代码提交 ceb9f57 · 生产版本 2026.08.15.4 · 本文所有描述均来自实际源码</p>
+
+<h2>0. 一句话说清楚</h2>
+
+<p>我们做的是一个<strong>金融事件的"证据雷达"</strong>。</p>
+
+<p>它每 5 分钟自动跑一轮，去 13 个官方网站（美联储、SEC、CFTC、FDA、FTC、FDIC、欧洲央行、美国能源署、美国劳工统计局）和 1 个聚合新闻源抓消息；把消息变成"事件"；给每个事件配上<strong>能点回原文的精确引文</strong>；记录这个事件后来被官方修订、更正、撤回的全过程；并且在证据不够或者互相矛盾的时候，<strong>明确地说"我不下结论"</strong>。</p>
+
+<p>它<strong>不是</strong>炒股软件。代码里根本没有下单、持仓、余额这些东西，而且这一点是被数据库约束和 CI 强制保证的，不是靠自觉。</p>
+
+<div class="box blue">
+  <span class="t">一句话记住产品定位</span>
+  <p>别人做的是"让 AI 猜涨跌"，我们做的是"把消息怎么变成结论完整保存下来，并且在证据不足时拒绝下结论"。</p>
+</div>
+
+<h3>规模（都能现场核验）</h3>
+<table>
+  <tr><th>项目</th><th>数值</th><th>怎么查</th></tr>
+  <tr><td>生产事件数</td><td>13,357 条（其中 7,471 条待核验）</td><td>公网总览页</td></tr>
+  <tr><td>Python 代码</td><td>202 个文件，约 66,700 行</td><td><code>app/</code> 13,972 · <code>scripts/</code> 34,153 · <code>tests/</code> 18,575</td></tr>
+  <tr><td>测试</td><td>664 passed / 5 skipped / 20 subtests</td><td><code>python -m pytest -q</code></td></tr>
+  <tr><td>API 路由</td><td>25 条（1 条根路径 + 24 条 <code>/api/v1/*</code>）</td><td><code>/docs</code></td></tr>
+  <tr><td>Web 页面</td><td>1 个总览 + 5 个功能页，4 种身份</td><td><code>app/web/</code></td></tr>
+  <tr><td>冻结演示案例</td><td>4 个（断网也能跑）</td><td><code>replay/cases/cases.json</code></td></tr>
+</table>
+
+<h2>1. 一条新闻的一生</h2>
+
+<p>这是整个项目最核心的一章。看懂这一章，你就知道我们在做什么了。</p>
+
+<p><strong>谁在跑：</strong><code>app/workers/continuous.py</code> 是一个常驻进程，每 <code>--interval</code> 秒（默认 300 秒 = 5 分钟）启动一次子进程 <code>scripts/run_live_cycle.py</code>。子进程里的 <code>run_cycle()</code> 函数就是下面这整套流程，从头到尾顺序执行。</p>
+
+<p><strong>为什么用子进程：</strong>一轮采集崩了不会带崩常驻进程。而且父进程在启动子进程<strong>之前会先删掉上一轮的报告文件</strong>，这样子进程如果启动失败，绝不会读到上一轮的成功报告然后误判成"这轮也成功了"。</p>
+
+<h3>1.1 十六个步骤</h3>
+
+<div class="step"><span class="n">0.</span><strong>抢锁。</strong>先去 <code>runtime_leases</code> 表抢一个叫 <code>live_cycle</code> 的租约，TTL 1200 秒，后台线程每 60 秒续一次。抢不到就直接退出，返回码 3，状态记 <code>SKIPPED</code>。<span class="kv">→ 保证同一时刻只有一个采集周期在跑，两个 worker 不会互相打架写坏数据。</span></div>
+
+<div class="step"><span class="n">1.</span><strong>官方源采集。</strong>13 个官方 RSS / Atom / API 挨个拉。每条消息存进 <code>raw_observations</code> 表（原始观测，不可变）。如果同一条消息内容被改过，就往 <code>source_revisions</code> 表<strong>追加</strong>一条修订记录，类型是 new / edit / delete —— 原记录不动。<span class="kv">→ 所有 <code>sec_*</code> 源需要环境变量 <code>SEC_USER_AGENT</code>（SEC 官方要求访问者声明身份），没配就跳过并记一条 error。</span></div>
+
+<div class="step"><span class="n">2.</span><strong>聚合发现源。</strong>OpenNews 三个分类（macro / ai / web3）。权威等级只有 <code>P2_experimental</code>，也就是"参考线索"级别，单独一条 P2 证据永远不足以让事件成立。</div>
+
+<div class="step"><span class="n">3.</span><strong>候选抽取。</strong><code>process_pending(limit=500)</code>。用 20 条正则规则（破产 / 退市 / 黑客攻击 / 并购 / 财报 / 监管处罚 / 货币政策 / 制裁关税 / 地缘冲突 / 新币上线 / 大规模裁员 / CPI / 非农 / 执法行动 / 产品召回 / 高管变更 / 债务违约 / 增发稀释 / 重组 / 分红回购）把观测变成 <code>canonical_events</code> 表里的<strong>候选事件</strong>（status = candidate）。P0/P1 来源优先处理；P2 有积压上限、会过期、会被淘汰。</div>
+
+<div class="step"><span class="n">4.</span><strong>SEC 文件深挖。</strong><code>enrich_sec_filings(limit=8)</code>。去拉 8-K、10-K、10-Q、20-F 等表单的正文，抽出精确段落作为证据。</div>
+
+<div class="step"><span class="n">5.</span><strong>官方原文页面深挖。</strong><code>enrich_official_primary_pages(limit=20, max_chars=1200)</code>。</div>
+
+<div class="step"><span class="n">6.</span><strong>复核排队。</strong>算一个 <code>review_score</code>，决定人应该先看哪一条。</div>
+
+<div class="step"><span class="n">7.</span><strong>证据路由。</strong>按 <code>config/live_evidence_routes.json</code> 给每个事件排"该去哪里找证据"。</div>
+
+<div class="step"><span class="n">8.</span><strong>人工裁决落库。</strong>把 <code>config/live_primary_adjudications.json</code> 里<strong>人</strong>已经做出的判断写回账本。<span class="kv">→ 注意这一步的输入是人写的文件，不是模型输出。</span></div>
+
+<div class="step"><span class="n">9.</span><strong>原文快照。</strong><code>archive_evidence_sources(limit=8)</code>。把官方页面的 HTML/PDF <strong>原始字节</strong>按 SHA-256 存成内容寻址对象。规则很严：只走 HTTPS、只允许已注册的官方域名、跳转之后重新校验域名、单个文件不超过 10 MiB、只接受 HTML 和 PDF。越域的链接只记 <code>policy_skipped</code>，绕不过去。</div>
+
+<div class="step"><span class="n">10.</span><strong>影子模型跑分。</strong><code>run_shadow_batch(scan_limit=200, run_limit=100)</code>。小模型给事件打标签，<strong>只写运维日志，不改任何事件状态</strong>。</div>
+
+<div class="step"><span class="n">11.</span><strong>证据 Agent。</strong><code>run_pending_evidence_agents(limit=4)</code>。详见第 3 章。</div>
+
+<div class="step"><span class="n">12.</span><strong>资产关联。</strong>把事件关联到具体资产，并做 SEC 发行人 → 股票代码的映射。</div>
+
+<div class="step"><span class="n">13.</span><strong>行情观察排期。</strong>给 14 天内的事件排 T+5m / T+30m / T+1d 三个观察窗口。</div>
+
+<div class="step"><span class="n">14.</span><strong>行情采集。</strong>加密资产走 Binance 公开免认证行情接口，非加密资产走 Twelve Data。宽限期分别是 2 分钟 / 5 分钟 / 30 分钟。<strong>错过窗口就写 <code>MISSED_WINDOW</code>，绝不拿当前最新价补写历史。</strong></div>
+
+<div class="step"><span class="n">15.</span><strong>告警出箱。</strong>先把超过 24 小时还没发出去的清掉，再挑符合资格的事件入队。</div>
+
+<div class="step"><span class="n">16.</span><strong>发送。</strong>默认 <code>dry_run</code>，不加 <code>--send</code> 参数一条都不会真的发出去。</div>
+
+<h3>1.2 告警资格是硬门槛</h3>
+
+<p>不是"模型觉得重要"就能发告警。<code>qualified_events()</code> 里的 SQL 要求<strong>同时</strong>满足五个条件：</p>
+
+<pre><code>status = 'verified'  AND  label_status = 'verified'
+AND manual_grade IN ('S','A++','A')      ← 人评的等级，不是模型给的
+AND no_trading = 1
+AND 事件日期在最近 3 天内
+AND 至少有一条带 URL 的证据</code></pre>
+
+<div class="box">
+  <span class="t">这条最值得记住</span>
+  <p><code>manual_grade</code> 是<strong>人工评级</strong>字段。也就是说：只要没有人手动评过 S / A++ / A，无论模型多确信，这条事件永远发不出告警。模型没有开闸的权力。</p>
+</div>
+
+<h3>1.3 一轮跑完可能是四种结果</h3>
+<table>
+  <tr><th>状态</th><th>什么情况</th><th>要不要慌</th></tr>
+  <tr><td class="mono">SUCCESS</td><td>子进程返回 0</td><td>正常</td></tr>
+  <tr><td class="mono">SKIPPED</td><td>返回 3，锁被别人占着</td><td>正常，说明上一轮还没跑完</td></tr>
+  <tr><td class="mono">DEGRADED</td><td>部分来源失败，但其余来源、证据路由和落库都完成了</td><td><strong>不等于挂了。</strong>某个官方站点超时或 403 很常见</td></tr>
+  <tr><td class="mono">FAILED</td><td>整轮没产出</td><td>要查</td></tr>
+</table>
+
+<div class="pagebreak"></div>
+<h2>2. 数据库长什么样</h2>
+
+<p>两个 SQLite 文件，<strong>故意分开</strong>：</p>
+<ul>
+  <li><strong>账本库</strong> <code>finance_radar.sqlite3</code>（Schema 12，WAL 模式）—— 研究数据：来源、观测、事件、证据、行情。</li>
+  <li><strong>运维库</strong> <code>finance_radar_operations.sqlite3</code>（Schema 6）—— worker 周期、备份记录、模型运行、回放记录、Agent 决策、人工覆盖、盲审样本。</li>
+</ul>
+<p>为什么分开：运维噪音（每 5 分钟一条心跳）不应该污染研究账本，而且备份和权限可以分开管。</p>
+
+<h3>2.1 账本库的主链条</h3>
+
+<pre><code>sources              来源登记（含权威等级 P0/P1/P2/P3）
+  └─ raw_observations        原始观测（唯一键 = 来源 + 外部ID，不可变）
+       └─ source_revisions   修订链（new / edit / delete，只追加）
+
+canonical_events     规范事件（四态：candidate / verified / weak / rejected）
+  ├─ event_versions          事件版本，只追加，每次变化留一版 + 变更原因
+  ├─ event_observations      事件 ↔ 观测（多对多）
+  ├─ event_evidence          证据：URL + 精确段落 + 证据状态
+  ├─ event_assessments       人工评级：S/A++/A/B/C + P0~P3 + 六个分项
+  ├─ event_chains            事件链：主事件 / 同事件支撑 / 后续版本 /
+  │   event_chain_members    后果 / 行政控制
+  ├─ event_entities          涉及的实体（主体/行为方/目标/地点/监管方）
+  ├─ event_asset_impacts     关联资产
+  └─ event_market_metrics    事后行情指标（只作审计）
+
+market_jobs → market_snapshots     行情任务与只读快照
+pipeline_jobs / observation_jobs   两级任务队列
+alert_outbox → alert_delivery_attempts   告警出箱 + 每次投递记录
+runtime_leases                     租约锁</code></pre>
+
+<h3>2.2 六条写死在数据库里的安全约束</h3>
+
+<p>这个答辩<strong>一定</strong>会被问到，一定要能背下来至少三条：</p>
+
+<pre><code>canonical_events.no_trading            CHECK (no_trading = 1)
+event_evidence.auto_verification_allowed  CHECK (= 0)
+event_market_metrics.metric_scope      CHECK (= 'post_event_audit_only')
+event_market_metrics.allowed_for_discovery_rank  CHECK (= 0)
+event_market_metrics.allowed_as_model_feature    CHECK (= 0)
+market_snapshots.read_only             CHECK (read_only = 1)</code></pre>
+
+<div class="box blue">
+  <span class="t">这几行是什么意思</span>
+  <p>它们是 SQLite 的 <code>CHECK</code> 约束，不是注释。意思是：<strong>就算有人写错代码，数据库层面也插不进一条"允许交易"或者"行情可以当模型特征"的记录</strong>——insert 会直接报错。安全边界是被数据库强制的，不靠代码自觉。</p>
+</div>
+
+<h2>3. AI 到底用在哪</h2>
+
+<p>整个系统里只有<strong>两个</strong>地方是 AI，而且<strong>两个都不能决定结论</strong>。这一节要能讲得特别清楚。</p>
+
+<h3>3.1 风险路由小模型 <span class="kv mono">app/models/risk_router.py</span></h3>
+<ul>
+  <li>CPU 上跑的 scikit-learn 文本分类器，输出三档：<code>RISK_REVIEW</code> / <code>NON_TARGET</code> / <code>ABSTAIN</code>。</li>
+  <li>它前面还有<strong>两道确定性闸门</strong>：<code>risk_scope_gate</code>（判断这条消息是不是在处理范围内）和 <code>semantic_policy_gate</code>（语义策略）。闸门能定的事，轮不到模型说话。</li>
+  <li>模型文件坏了会<strong>可见降级</strong>成关键词兜底（<code>runtime = "fallback"</code>），不会让 API 崩溃。这条有专门的故障注入演练验证过。</li>
+  <li>每次输出都强制带 <code>shadow: true</code> 和 <code>no_trading: true</code>。</li>
+  <li>每次决策都记一个 <code>input_sha256</code>，把文本、证据状态、阈值配置全哈希进去——换了阈值就是另一次决策，不会被静默去重。</li>
+</ul>
+
+<div class="box red">
+  <span class="t">最重要的一件事：这个模型我们没让它上岗</span>
+  <p>外部盲测结果：<strong>普通新闻误报率 95%</strong>。也就是说它会把大量正常新闻误判成风险。所以我们把它按在 <code>SHADOW</code> 状态，强制 <code>REMAIN_SHADOW</code>，并且把这个失败结果写进了 README、模型卡和答辩材料。</p>
+  <p>这是我们最想让老师看见的一点：<strong>发现失败 → 公开失败 → 阻止晋级</strong>，整条治理链有据可查。不是调参把数字弄好看。</p>
+</div>
+
+<h3>3.2 证据 Agent 的本地小模型 <span class="kv mono">app/services/evidence_agent.py</span></h3>
+
+<p>这块设计得比较细，是我们工程上最有说服力的部分。</p>
+
+<h4>跑在哪</h4>
+<p>回环地址（127.0.0.1）上的 llama.cpp，模型是 Qwen2.5-0.5B。代码里 <code>_is_loopback_url()</code> 强制检查：不是 loopback 地址直接抛异常。<strong>它物理上连不上外网</strong>，也没有 API key。</p>
+
+<h4>流程</h4>
+<ol>
+  <li>从事件摘要里抽出最多 6 条 <strong>claim（声明）</strong>。</li>
+  <li>从证据里取 <strong>exact_excerpt（精确引文）</strong>——是原文里抠出来的原话，不是 AI 复述的。</li>
+  <li>用词元重合度把证据连到 claim 上，形成<strong>证据图</strong>，边有两种：SUPPORTS（支持）和 CONTRADICTS（反驳）。</li>
+</ol>
+
+<h4>判定是谁做的：100% 是确定性规则，不是模型</h4>
+<table>
+  <tr><th>单条 claim 的情况</th><th>判定</th></tr>
+  <tr><td>有 CONTRADICTS 边</td><td><code>HUMAN_REVIEW</code></td></tr>
+  <tr><td>有 P0 权威来源的 SUPPORTS 边</td><td><code>PRIMARY_SUPPORTED</code></td></tr>
+  <tr><td>只有非 P0 的 SUPPORTS 边</td><td><code>DISCOVERY_SUPPORTED</code></td></tr>
+  <tr><td>什么都没有</td><td><code>INSUFFICIENT</code></td></tr>
+</table>
+<p>整个事件的结论：任何一条冲突 → <code>HUMAN_REVIEW</code>；任何一条不足或只有发现级证据 → <code>INSUFFICIENT</code>；<strong>全部</strong>被 P0 支撑才 → <code>EVIDENCE_READY</code>。</p>
+
+<h4>模型只被允许写一句摘要，而且要过 8 道校验</h4>
+<ol>
+  <li>返回的 JSON 必须严格匹配 schema，多一个字段少一个字段都不行</li>
+  <li>摘要不超过 600 字符</li>
+  <li>不能编造 evidence_id，引用必须在已知集合内</li>
+  <li>判定必须跟确定性证据图<strong>完全一致</strong>，不一致直接拒</li>
+  <li>说 SUPPORTED 就必须引用 SUPPORTS 边，说 CONTRADICTED 就必须引用 CONTRADICTS 边</li>
+  <li>说 INSUFFICIENT 就<strong>不许引用任何东西</strong></li>
+  <li>不能出现 <code>EVIDENCE_READY</code> / <code>HUMAN_REVIEW</code> 这类控制词</li>
+  <li>不能出现"买入 / 卖出 / 下单 / 执行交易 / place order / buy now"之类的字样</li>
+</ol>
+<p>任何一条不过 → 抛 <code>LocalModelContractError</code> → 回退到确定性摘要，并把失败码记进审计记录。系统降级是可见的，不是静默的。</p>
+
+<h4>收据指纹：防止拿旧结论糊弄</h4>
+<p><code>evidence_receipt_fingerprint()</code> 把事件版本号 + 全部证据的关键字段（引文、状态、来源、权威等级、更新时间）哈希成一个指纹。下次要复用旧的 Agent 决策时，先比对指纹：<strong>证据变了指纹就变，旧决策自动作废、重跑</strong>。</p>
+<p>而且更早期没有指纹字段的历史决策，一律<strong>默认失效</strong>——这就是 fail closed：拿不准的时候往保守走，不往通过走。</p>
+
+<h3>3.3 这些地方不是 AI（容易被误会）</h3>
+<p>候选抽取的 20 条正则规则、证据门、light verification、告警资格判定、行情窗口调度、S/A++/A/B/C 评级 —— <strong>全是确定性代码或人工判断，一行 AI 都没有</strong>。</p>
+
+<div class="pagebreak"></div>
+<h2>4. 页面和身份</h2>
+
+<p>Web 是 Streamlit 写的。<strong>同一份代码</strong>，靠环境变量 <code>FINANCE_RADAR_UI_ROLE</code> 切成四种身份（public / reviewer / operator / admin）。<code>require_ui_role()</code> 在页面渲染之前就 <code>st.stop()</code> 拦掉越权访问。</p>
+
+<table>
+  <tr><th>页面</th><th>文件</th><th>谁能看</th><th>内容</th></tr>
+  <tr><td>态势总览</td><td class="mono">Home.py</td><td>所有人</td><td>最新事件流、来源健康度、待核验数量</td></tr>
+  <tr><td>事件工作台</td><td class="mono">pages/1_Event_Intelligence.py</td><td>所有人</td><td>单个事件的证据矩阵（权威等级 / 状态 / 精确引文）、修订时间线、只读行情上下文</td></tr>
+  <tr><td>证据演示</td><td class="mono">pages/2_Replay_Lab.py</td><td>所有人</td><td>4 个冻结案例逐步回放</td></tr>
+  <tr><td>运行与模型</td><td class="mono">pages/3_Operations_and_Model.py</td><td>operator / admin</td><td>worker 周期、备份状态、模型卡、盲测结果</td></tr>
+  <tr><td>双人盲审</td><td class="mono">pages/4_Adjudication_Studio.py</td><td>reviewer / admin</td><td>两人独立打标，互相看不到对方答案，也看不到模型结果</td></tr>
+  <tr><td>方法与边界</td><td class="mono">pages/5_Method_and_Boundaries.py</td><td>所有人</td><td>来源、时间、置信度的口径，以及"我们不做什么"</td></tr>
+</table>
+
+<p><strong>公网只暴露 public。</strong>reviewer / operator / admin 三种内部界面都是回环地址、按需启动、各自独立令牌，通过 SSH 隧道访问，公网 Nginx 不暴露 API 和管理路径。</p>
+
+<h3>API 权限分三层</h3>
+<table>
+  <tr><th>依赖</th><th>能干什么</th></tr>
+  <tr><td class="mono">require_reviewer</td><td>看事件 trace、写人工覆盖记录、双人盲审队列与提交</td></tr>
+  <tr><td class="mono">require_operator</td><td>跑证据 Agent、跑回放、切演示模式、看模型状态、看证据存档</td></tr>
+  <tr><td class="mono">require_admin</td><td>上面两个的超集，外加创建盲审样本</td></tr>
+</table>
+<p>每个响应都带 <code>schema_version</code>（当前 1.1）、<code>trace_id</code> 和 <code>generated_at</code>，API 层还有 180 次/分钟的限流。</p>
+
+<h2>5. 四个冻结回放案例</h2>
+
+<p><code>replay/cases/cases.json</code>，由 <code>ReplayService</code> 按"事件时钟"逐秒回放。<strong>完全不联网</strong>，所以答辩当天断网、当天没有真实重大事件，都不影响演示。</p>
+
+<table>
+  <tr><th>#</th><th>案例</th><th>过程</th><th>结果</th></tr>
+  <tr>
+    <td>1</td><td class="mono">sec_bankruptcy_verified</td>
+    <td>0 秒：P2 传闻说公司要重组 → 18 秒：P0 官方 8-K Item 1.03 落地</td>
+    <td><code>RISK_REVIEW</code><br><span class="tag ok">有告警资格</span></td>
+  </tr>
+  <tr>
+    <td>2</td><td class="mono">positive_earnings_non_target</td>
+    <td>P1 发行人宣布业绩创纪录、上调指引</td>
+    <td><code>NON_TARGET</code><br><span class="kv">证明系统不是"只会喊风险"</span></td>
+  </tr>
+  <tr>
+    <td>3</td><td class="mono">rumor_correction_abstain</td>
+    <td>0 秒：P3 传闻说要破产 → 11 秒：P1 发行人否认（contradicts）</td>
+    <td><code>ABSTAIN</code><br><span class="tag no">无告警</span></td>
+  </tr>
+  <tr>
+    <td>4</td><td class="mono">sec_filing_corrected_abstain</td>
+    <td>0 秒：P0 官方 8-K 披露破产 → 42 秒：P0 <strong>更正件撤回</strong>该披露</td>
+    <td>从"有告警资格"<strong>退回</strong> <code>ABSTAIN</code><br><span class="tag no">告警资格被收回</span></td>
+  </tr>
+</table>
+
+<h3>回放里的门禁逻辑（答辩可以直接念）</h3>
+<pre><code>if 有冲突证据:
+    最终 = ABSTAIN,  理由 = evidence_conflict_cap
+elif 模型说 RISK_REVIEW 但没有 P0 证据:
+    最终 = ABSTAIN,  理由 = evidence_gate_hold_pending_primary
+else:
+    最终 = 模型标签,  理由 = shadow_router_after_evidence_gate
+
+告警资格 = (最终 == RISK_REVIEW) 且 有P0证据 且 无冲突</code></pre>
+
+<div class="box blue">
+  <span class="t">第 4 个案例是我们最强的演示点</span>
+  <p>它证明了一件别的项目做不到的事：<strong>证据可以被官方撤回，我们的结论也就跟着退回去。</strong>系统不是只会往前加结论，它也会往回收。</p>
+</div>
+
+<div class="pagebreak"></div>
+<h2>6. 三条红线和它们的保证方式</h2>
+
+<table>
+  <tr><th>红线</th><th>代码层面怎么保证</th></tr>
+  <tr>
+    <td><strong>不碰交易</strong><br>NO TRADING</td>
+    <td>① 数据库 CHECK 约束 <code>no_trading = 1</code>；② CI 自动扫描交易写路由；③ 故障注入演练枚举全部生成的 API 路由，断言 order / position / balance / brokerage / trade-execution 路径不存在</td>
+  </tr>
+  <tr>
+    <td><strong>模型不能自己把事件升级成 VERIFIED</strong><br>NO AUTO VERIFY</td>
+    <td>① <code>auto_verification_allowed CHECK (= 0)</code>；② Agent 的结果只写运维库，碰不到账本库的事件状态；③ 正式状态只能由人工裁决，或由受限额授权的 light verification 写入</td>
+  </tr>
+  <tr>
+    <td><strong>事后行情不能进模型特征</strong><br>NO LEAKAGE</td>
+    <td>三个 CHECK 约束一起把：<code>metric_scope = 'post_event_audit_only'</code>、<code>allowed_as_model_feature = 0</code>、<code>allowed_for_discovery_rank = 0</code></td>
+  </tr>
+</table>
+
+<p>另外还有两条操作层面的：Telegram 默认 dry-run，要真发必须显式加 <code>--send</code>；Evidence Agent 的本地模型是可选的、回环的、只做建议的，部署和恢复流程默认不启用它。</p>
+
+<h3>light verification 为什么不算"模型自动核验"</h3>
+<p>这个模块<strong>可以</strong>把事件从 candidate 提升到 verified，所以它的限制特别死：</p>
+<ul>
+  <li>只对 4 种<strong>离散的、能从原始记录直接读出来</strong>的事件类型生效：<code>delisted</code>、<code>voluntarydelisting</code>、<code>reverse_split</code>、<code>bankruptcy_liquidation</code>。涉及阈值、价格、比率、会计口径的一律不行——那些需要定量解析，词面匹配不够。</li>
+  <li>必须有一条可寻址的 P0/P1 主来源段落，同时通过身份、事实、日期、语气（modality）四道门。任何一道没过，<strong>不是给出否定结论</strong>，而是保持事件原状 + 建一条"缺哪些证据维度"的后续任务。</li>
+  <li>要写入正式状态，必须加载一份<strong>限额授权合同</strong>：绑定批次 ID、过期时间、最大应用条数，并且逐个事件绑定当前版本号和证据指纹。指纹对不上就拒绝执行。</li>
+  <li>常驻 worker 里<strong>只跑只读报告模式</strong>，代码注释写得很明白：这里绝不允许放长期授权或 <code>--apply</code>。</li>
+</ul>
+
+<h2>7. 三个禁飞区要写什么</h2>
+
+<div class="box red">
+  <span class="t">现状：一行都还没写</span>
+  <p><code>app/core/</code> 这个目录<strong>目前不存在</strong>。三个内核文件全部为空白。这是我们离封版最近的一道坎，也是 AI 帮不上忙的部分。</p>
+</div>
+
+<p><strong>共同约束</strong>（三个都一样）：纯函数，不连网、不连数据库、不调 LLM，输入输出固定，每个至少 20 个聚焦测试，负责人要能<strong>脱离 IDE 逐行讲</strong>。预计每个 80–150 有效行。</p>
+
+<h3>FZ1 · <span class="mono">app/core/event_fingerprint.py</span> <span class="kv">负责人：__________</span></h3>
+<p><strong>干什么：</strong>判断"这条新消息是重复、是修订、还是全新事件"。</p>
+<ul>
+  <li>输入：规范化后的事件字段（来源、标题、摘要、日期、主体、URL）</li>
+  <li>输出：一个稳定指纹 + 关系判定（DUPLICATE / REVISION / NEW）</li>
+  <li>要能讲清的难点：标题被改了一个词，算修订还是新事件？同一件事被两个来源分别报道，怎么合并？指纹碰撞了怎么办？</li>
+  <li>可以参考但<strong>不能抄</strong>：<code>scripts/event_ledger.py</code> 的 <code>stable_id()</code>、<code>source_revisions</code> 表的 <code>revision_kind</code> 字段设计</li>
+</ul>
+
+<h3>FZ2 · <span class="mono">app/core/evidence_gate.py</span> <span class="kv">负责人：__________</span></h3>
+<p><strong>干什么：</strong>给定一组证据，输出证据门结果。</p>
+<ul>
+  <li>输入：证据列表（权威等级、证据状态、有没有精确引文、彼此是否矛盾）</li>
+  <li>输出：<code>PRIMARY_SUPPORTED</code> / <code>DISCOVERY_SUPPORTED</code> / <code>INSUFFICIENT</code> / <code>HUMAN_REVIEW</code> + 理由码</li>
+  <li>要能讲清的核心：<strong>为什么必须 fail-closed</strong> —— 任何拿不准的情况都往更保守走，而不是往通过走</li>
+  <li>可以参考但<strong>不能抄</strong>：<code>EvidenceAgent._status()</code>、<code>derive_evidence_context()</code></li>
+</ul>
+
+<h3>FZ3 · <span class="mono">app/core/finality_gate.py</span> <span class="kv">负责人：__________</span></h3>
+<p><strong>干什么：</strong>给定法律阶段和身份冲突，输出最终状态和等级上限。</p>
+<ul>
+  <li>输入：法律阶段（申请 / 受理 / 裁定 / 更正 / 撤回）、身份是否冲突、是否已具最终性</li>
+  <li>输出：状态 + 最高等级上限（S/A++/A/B/C）+ no-trading 不变量</li>
+  <li>要能讲清的核心：哪些状态转换是<strong>非法</strong>的、官方更正和撤回怎么处理</li>
+  <li>可以参考：<code>canonical_events.status</code> 的四态、<code>provisional_grade_cap</code> 字段</li>
+</ul>
+
+<div class="box red">
+  <span class="t">红线</span>
+  <p><code>risk_router.py</code>、<code>replay.py</code> 这些现有代码是 AI 辅助写的产品脚手架，<strong>绝对不能倒签成禁飞区成果</strong>。课程规则写明：走查时被发现禁飞区代码是 AI 生成的，必须删掉手写重做，该模块分数清零。这一点 <code>.agent/forbidden_zones.md</code> 里已经白纸黑字声明过了。</p>
+</div>
+
+<h2>8. 怎么把它跑起来</h2>
+
+<pre><code># 环境（要求 Python 3.12）
+python -m venv .venv
+.venv/bin/pip install --require-hashes -r requirements-dev.lock
+
+# 三个进程分开跑
+python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000
+python -m streamlit run app/web/Home.py --server.port 8501
+python -m app.workers.continuous --interval 300
+
+# 只手动跑一轮采集（不发 Telegram）
+python scripts/run_live_cycle.py --db data/finance_radar.sqlite3
+
+# 只跑一次本地健康检查，不联网
+python -m app.workers.continuous --once --health-only
+
+# 测试
+python -m pytest -q                      # 664 passed, 5 skipped, 20 subtests
+python -m compileall -q app scripts tests</code></pre>
+
+<p>入口：Web <code>http://127.0.0.1:8501</code>　API 文档 <code>http://127.0.0.1:8000/docs</code>　健康检查 <code>/api/v1/health</code></p>
+
+<div class="pagebreak"></div>
+<h2>9. 名词表</h2>
+
+<table>
+  <tr><th>名词</th><th>大白话解释</th></tr>
+  <tr><td class="mono nowrap">P0 / P1 / P2 / P3</td><td>来源权威等级。<strong>P0</strong> = 官方监管机构（SEC、美联储、CFTC、FDA、FTC、FDIC、ECB…）；<strong>P1</strong> = 发行人官方（公司自己发的新闻稿）；<strong>P2</strong> = 聚合发现源（线索级）；<strong>P3</strong> = 传闻</td></tr>
+  <tr><td class="mono nowrap">candidate / verified<br>weak / rejected</td><td>事件的四种状态。只有 <code>verified</code> 才有可能进告警队列</td></tr>
+  <tr><td class="mono nowrap">EVIDENCE_READY<br>INSUFFICIENT<br>HUMAN_REVIEW</td><td>证据 Agent 的三种结论：证据齐了 / 证据不足 / 有冲突需要人来看</td></tr>
+  <tr><td class="nowrap">exact passage<br>（精确引文）</td><td>从原文里<strong>抠出来的原话</strong>，不是 AI 复述的。这是我们整个产品的立身之本</td></tr>
+  <tr><td class="mono nowrap">shadow（影子）</td><td>模型在跑、在记录，但结果<strong>不影响任何正式判断</strong>。我们的风险路由模型一直是这个状态</td></tr>
+  <tr><td class="mono nowrap">MISSED_WINDOW</td><td>该采行情的那个时间点错过了。如实标记，<strong>不拿现在的价格假装是当时的</strong></td></tr>
+  <tr><td class="mono nowrap">dry-run</td><td>只算不发。Telegram 默认就是这个模式</td></tr>
+  <tr><td class="mono nowrap">lease（租约）</td><td>数据库里的一把带过期时间的锁，保证同一时刻只有一个采集周期在跑</td></tr>
+  <tr><td class="mono nowrap">WAL</td><td>SQLite 的一种日志模式，读和写不互相阻塞</td></tr>
+  <tr><td class="mono nowrap">outbox（出箱）</td><td>先把要发的消息落库，再异步发送。发失败可以重试，而且不会重复发（有唯一键 + 租约）</td></tr>
+  <tr><td class="mono nowrap">S / A++ / A / B / C</td><td>人工评的事件严重程度。告警只发 S / A++ / A</td></tr>
+  <tr><td class="mono nowrap">DEGRADED</td><td>部分来源失败但整轮跑完了。<strong>不等于 worker 挂了</strong></td></tr>
+  <tr><td class="nowrap">fail closed</td><td>拿不准的时候往"更保守"走。比如没有收据的旧决策一律作废、缺证据一律 INSUFFICIENT</td></tr>
+  <tr><td class="nowrap">内容寻址</td><td>文件按内容的 SHA-256 命名存放。同样内容只存一份，而且事后能验证没被改过</td></tr>
+</table>
+
+<h2>10. 答辩可能被问到的，先自己想清楚</h2>
+
+<h4>Q：AI 在你们项目里到底干了啥？</h4>
+<p>两处。一个是 shadow 分类器（外部盲测失败了，我们没让它上岗）；一个是只写摘要的本地小模型（输出要过 8 道校验，判定全归确定性规则）。证据门、抽取规则、评级、告警资格全是人和规则。<strong>AI 参与的是排序和摘要，不是结论。</strong></p>
+
+<h4>Q：你们怎么保证不碰交易？</h4>
+<p>三层。数据库 CHECK 约束（插不进去）、CI 自动扫描交易写路由（提交不进去）、故障注入演练枚举 API 路由断言不存在（跑起来也没有）。</p>
+
+<h4>Q：数据是真的吗？</h4>
+<p>是。生产库 13,357 条事件，来自 13 个官方源。每条都能点回原文，并且有 SHA-256 内容寻址的原始 HTML/PDF 快照存档。</p>
+
+<h4>Q：模型误报 95%，你还敢拿出来讲？</h4>
+<p>这正是我们要讲的。发现 → 公开 → 阻止晋级，整条治理链有据可查。<strong>把失败藏起来才是问题，把失败当证据展示是这门课今年要考的能力。</strong></p>
+
+<h4>Q：断网了怎么演示？</h4>
+<p>4 个冻结回放案例 + 可执行离线终端，完全不依赖网络，也不依赖当天有没有真实重大事件发生。</p>
+
+<h4>Q：为什么用 SQLite 不用 PostgreSQL？</h4>
+<p>单机个人研究场景，WAL 模式下读写不阻塞，够用且零运维。专业性靠持久卷、WAL、租约、幂等出箱、在线备份、隔离恢复验证、健康检查和自动重启来证明，不靠换数据库。PostgreSQL 是留好的扩展门，不是当前重写目标。</p>
+
+<h4>Q：那个 <code>--send</code> 是干嘛的？</h4>
+<p>Telegram 真实外发的开关。不加就是 dry-run，一条都不发。<strong>演示的时候不要手贱去加。</strong></p>
+
+<div class="box">
+  <span class="t">最后一句，答辩收尾就用这个</span>
+  <p>"我们没有让模型更自信，而是让系统更会证明、更会拒绝、更能回放。"</p>
+</div>
+
+<footer class="doc">
+Finance Radar 组内说明书 · 2026-08-16 · 内容依据源码提交 ceb9f57 逐一核对<br>
+配套文件：<span class="mono">.agent/architecture.md</span>（架构） · <span class="mono">.agent/forbidden_zones.md</span>（禁飞区声明） · <span class="mono">CURRENT_STATE.md</span>（生产状态唯一实时入口）
+</footer>
