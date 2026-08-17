@@ -5,6 +5,20 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+- Added a canonical owner-intent and system doctrine that reconstructs the
+  product's evolution from the original personal multi-asset evidence radar,
+  defines short-research specialization as adverse-risk human-review routing
+  rather than a SHORT or trading signal, and separates stable rules from live
+  infrastructure facts and superseded decisions.
+- Added a machine-readable owner-intent policy and tests that preserve the
+  all-polarity evidence layer, advisory-only model boundary, review authority,
+  role isolation, one-copy verified daily backup, D-drive artifact policy and
+  action-specific authorization gates.
+- Corrected the obsolete private-Release assumption after live verification
+  showed that the repository is public: future production recovery archives
+  belong in a separately controlled private store, while the legacy encrypted
+  asset is left untouched pending a separate retention or removal decision.
+
 ## 2026.08.15.4
 
 - Published the production release at commit

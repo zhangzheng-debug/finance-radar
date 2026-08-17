@@ -1,5 +1,10 @@
 # Backup inventory
 
+> Historical recovery inventory for `2026.07.22.2`. Its former “private
+> GitHub Release” assumption is superseded: this repository is public, so no
+> new production migration archive may be uploaded to its Releases. See
+> `SECURITY.md` and `docs/GITHUB_BACKUP_AND_RELEASE_WORKFLOW.md`.
+
 - Backup version: `2026.07.22.2`
 - Application release: `20260722T084500Z`
 - Accepted migration snapshot: `20260722T084527Z`
@@ -15,10 +20,12 @@
 - operational runbooks, taskbooks, current acceptance state, and audit reports
 - reproducible model metadata and evaluation reports (not generated model binaries)
 
-## Stored in the private GitHub Release
+## Historically stored in the GitHub Release
 
-The release `v2026.07.22.2` carries the current encrypted AWS recovery asset
-and the exact qualified SHADOW model binary.
+The release `v2026.07.22.2` historically received an encrypted AWS recovery
+asset and the exact qualified SHADOW model binary. Because the repository is
+public, this is a legacy exception rather than an approved storage pattern; do
+not upload a replacement production snapshot there.
 Its encrypted and authenticated-plaintext SHA-256 hashes are recorded in
 `release/backup-20260722.json`. The preceding `v2026.07.22.1` remains the
 prior AWS snapshot; `v2026.07.19.1` continues to carry the offline demo and
