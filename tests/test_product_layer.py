@@ -245,6 +245,10 @@ class ProductLayerTests(unittest.TestCase):
 
     def test_api_contract_and_admin_boundary(self) -> None:
         with TestClient(create_app(self.settings)) as client:
+            live = client.get("/api/v1/live")
+            self.assertEqual(live.status_code, 200)
+            self.assertEqual(live.json()["data"]["status"], "ok")
+            self.assertEqual(live.json()["data"]["database_checks"], "not_run")
             health = client.get("/api/v1/health")
             self.assertEqual(health.status_code, 200)
             payload = health.json()
