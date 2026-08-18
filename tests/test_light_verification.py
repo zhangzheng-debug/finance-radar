@@ -204,6 +204,35 @@ def test_supported_rejects_not_delisted_and_old_year_primary_passage() -> None:
     assert identity_mismatch["checks"][0]["identity_match"] is False
 
 
+@pytest.mark.parametrize(
+    "passage",
+    [
+        (
+            "ACME HOLDINGS INC reported routine quarterly results. "
+            "Its customer BETA CORP was determined to delist under the applicable listing rule."
+        ),
+        (
+            "ACME HOLDINGS INC reported routine quarterly results, while its customer "
+            "BETA CORP was determined to delist under the applicable listing rule."
+        ),
+        (
+            "ACME HOLDINGS INC announced that subsidiary BETA CORP was determined "
+            "to delist under the applicable listing rule."
+        ),
+    ],
+)
+def test_event_predicate_must_be_bound_to_target_issuer_clause(passage: str) -> None:
+    result = evaluate_event(_event(), _evidence(passage))
+
+    assert result["decision"] == "INSUFFICIENT"
+    check = result["checks"][0]
+    assert check["identity_match"] is True
+    assert check["event_signal"] is True
+    assert check["subject_event_bound"] is False
+    assert check["modality_reason"] == "issuer_not_bound_to_event_predicate"
+    assert any("target issuer" in reason for reason in result["gap_reasons"])
+
+
 def test_threshold_market_and_fundamental_taxonomies_stay_nonterminal_without_fact_gates() -> None:
     # These passages deliberately look persuasive to a lexical matcher.  Their
     # numbers/semantics either contradict the candidate or are too coarse to

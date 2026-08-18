@@ -224,7 +224,9 @@ class LiveCycleLeaseTests(unittest.TestCase):
             operations = ExistingDecisionOperations(
                 {
                     "decision_id": "existing",
+                    "prompt_version": cycle.EVIDENCE_AGENT_CONTRACT_VERSION,
                     "output": {
+                        "prompt_version": cycle.EVIDENCE_AGENT_CONTRACT_VERSION,
                         "event_version": event_version,
                         "evidence_receipt_fingerprint": evidence_receipt_fingerprint(
                             event_version,
@@ -277,7 +279,7 @@ class LiveCycleLeaseTests(unittest.TestCase):
                 self.calls.append(event_id)
                 return {"status": "INSUFFICIENT"}
 
-        for stale_kind in ("legacy", "evidence", "version"):
+        for stale_kind in ("legacy", "contract", "evidence", "version"):
             with self.subTest(stale_kind=stale_kind), tempfile.TemporaryDirectory() as directory:
                 db_path = Path(directory) / "db.sqlite3"
                 connection = _open_pending_candidate_job(db_path)
@@ -297,6 +299,7 @@ class LiveCycleLeaseTests(unittest.TestCase):
                     {}
                     if stale_kind == "legacy"
                     else {
+                        "prompt_version": cycle.EVIDENCE_AGENT_CONTRACT_VERSION,
                         "event_version": recorded_version,
                         "evidence_receipt_fingerprint": evidence_receipt_fingerprint(
                             recorded_version,
@@ -307,6 +310,11 @@ class LiveCycleLeaseTests(unittest.TestCase):
                 operations = ExistingDecisionOperations(
                     {
                         "decision_id": f"stale-{stale_kind}",
+                        "prompt_version": (
+                            "evidence-agent-contract-v3-summary-shadow"
+                            if stale_kind == "contract"
+                            else cycle.EVIDENCE_AGENT_CONTRACT_VERSION
+                        ),
                         "output": output,
                     }
                 )
@@ -329,6 +337,19 @@ class LiveCycleLeaseTests(unittest.TestCase):
                 ).fetchone()[0]
                 self.assertEqual(status, "PENDING_HUMAN_REVIEW")
                 connection.close()
+
+    def test_continuous_cycle_has_no_legacy_config_write_authority(self) -> None:
+        result = cycle.deferred_legacy_adjudications(
+            [{"event_id": "legacy-a"}, {"event_id": "legacy-b"}]
+        )
+        self.assertEqual(result["requested"], 2)
+        self.assertEqual(result["applied"], 0)
+        self.assertFalse(result["continuous_worker_write_authority"])
+        self.assertFalse(result["formal_mutation_attempted"])
+        self.assertEqual(
+            result["status"],
+            "LEGACY_REVIEW_CONFIG_UNPROVEN_PROVENANCE",
+        )
 
 
 if __name__ == "__main__":

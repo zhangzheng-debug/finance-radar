@@ -16,12 +16,24 @@ from app.models.evidence_policy import is_conflicting_evidence_status
 from app.storage import EvidenceObjectStore, LedgerRepository, OperationsRepository
 
 
-PROMPT_VERSION = "evidence-agent-contract-v3-summary-shadow"
+PROMPT_VERSION = "evidence-agent-contract-v4-relevance-gated-summary-shadow"
 MODEL_PROVIDER = "deterministic_guarded_fallback"
 MODEL_SNAPSHOT = "no-llm-configured-v1"
 LOCAL_MODEL_PROVIDER = "local_llama_cpp"
 ALLOWED_AUTHORITY_TIERS = {"P0", "P1", "P2", "P3"}
 ALLOWED_MODEL_VERDICTS = {"SUPPORTED", "CONTRADICTED", "INSUFFICIENT"}
+_ENTITY_STOPWORDS = {"inc", "corp", "corporation", "co", "company", "ltd", "llc", "plc", "the"}
+_GENERIC_RELATION_TOKENS = {
+    "announced",
+    "company",
+    "evidence",
+    "issuer",
+    "reported",
+    "reporting",
+    "source",
+    "stated",
+}
+_GENERIC_SELF_REFERENCES = {"company", "issuer", "registrant"}
 FORBIDDEN_SUMMARY_CONTROL = re.compile(
     r"\b(?:EVIDENCE_READY|HUMAN_REVIEW)\b|"
     r"\b(?:place|submit|send|execute)\s+(?:an?\s+)?(?:buy\s+|sell\s+|market\s+|limit\s+)?order\b|"
@@ -45,6 +57,75 @@ def _sentences(text: str) -> list[str]:
 
 def _tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]{3,}|[\u4e00-\u9fff]{2,}", text.lower()))
+
+
+def _issuer_tokens(event: dict[str, Any]) -> set[str]:
+    company = str(event.get("company_name") or "")
+    return {
+        token
+        for token in _tokens(company)
+        if token not in _ENTITY_STOPWORDS
+    }
+
+
+def _claim_evidence_relevance(
+    event: dict[str, Any],
+    claim: dict[str, Any],
+    excerpt: str,
+) -> tuple[bool, dict[str, Any]]:
+    """Fail closed unless one exact passage is about this issuer and claim.
+
+    A lexical winner is not evidence: the former implementation attached every
+    passage to whichever claim had the largest overlap, even when that overlap
+    was zero.  This gate requires both an issuer/self-reference anchor and
+    decision-relevant claim overlap.  It deliberately prefers an unattached
+    passage over a false SUPPORTS edge.
+    """
+
+    claim_tokens = _tokens(str(claim.get("text") or ""))
+    excerpt_tokens = _tokens(excerpt)
+    overlap = claim_tokens & excerpt_tokens
+    issuer_tokens = _issuer_tokens(event)
+    meaningful_overlap = overlap - issuer_tokens - _GENERIC_RELATION_TOKENS
+    union = claim_tokens | excerpt_tokens
+    jaccard = len(overlap) / len(union) if union else 0.0
+
+    normalized_excerpt = excerpt.casefold()
+    ticker = str(event.get("ticker_at_event") or "").strip().casefold()
+    ticker_anchor = bool(
+        ticker
+        and len(ticker) >= 2
+        and re.search(rf"(?<![a-z0-9]){re.escape(ticker)}(?![a-z0-9])", normalized_excerpt)
+    )
+    company_anchor_count = len(issuer_tokens & excerpt_tokens)
+    required_company_tokens = min(2, len(issuer_tokens)) if issuer_tokens else 0
+    company_anchor = bool(
+        required_company_tokens and company_anchor_count >= required_company_tokens
+    )
+    generic_self_reference = bool(
+        (_GENERIC_SELF_REFERENCES & claim_tokens)
+        and (_GENERIC_SELF_REFERENCES & excerpt_tokens)
+        and (jaccard >= 0.35 or len(meaningful_overlap) >= 3)
+    )
+    identity_anchor = ticker_anchor or company_anchor or generic_self_reference
+    semantic_anchor = len(meaningful_overlap) >= 2 or (
+        len(meaningful_overlap) >= 1 and jaccard >= 0.35
+    )
+    eligible = bool(identity_anchor and semantic_anchor)
+    return eligible, {
+        "eligible": eligible,
+        "overlap_count": len(overlap),
+        "meaningful_overlap_count": len(meaningful_overlap),
+        "jaccard": round(jaccard, 6),
+        "ticker_anchor": ticker_anchor,
+        "company_anchor": company_anchor,
+        "generic_self_reference": generic_self_reference,
+        "reason": (
+            "issuer_and_claim_relation_matched"
+            if eligible
+            else "issuer_or_claim_relation_not_matched"
+        ),
+    }
 
 
 EVIDENCE_RECEIPT_FINGERPRINT_VERSION = "evidence-agent-receipt-v1"
@@ -380,11 +461,12 @@ class EvidenceAgent:
     def _propose_edges(
         self,
         event_id: str,
+        event: dict[str, Any],
         claims: list[dict[str, Any]],
         evidence_rows: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         edges: list[dict[str, Any]] = []
-        claim_tokens = {claim["claim_id"]: _tokens(claim["text"]) for claim in claims}
+        rejections: list[dict[str, Any]] = []
         for evidence in evidence_rows:
             excerpt = str(
                 evidence.get("evidence_passage") or evidence.get("observation_summary") or ""
@@ -396,18 +478,44 @@ class EvidenceAgent:
             parsed = urlparse(source_url)
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 continue
-            excerpt_tokens = _tokens(excerpt)
-            claim = max(
-                claims,
-                key=lambda item: len(claim_tokens[item["claim_id"]] & excerpt_tokens),
-            )
+            ranked_claims: list[tuple[tuple[int, int, float], dict[str, Any], dict[str, Any]]] = []
+            for claim in claims:
+                eligible, relevance = _claim_evidence_relevance(event, claim, excerpt)
+                if not eligible:
+                    continue
+                score = (
+                    int(relevance["meaningful_overlap_count"]),
+                    int(relevance["overlap_count"]),
+                    float(relevance["jaccard"]),
+                )
+                ranked_claims.append((score, claim, relevance))
+            ranked_claims.sort(key=lambda item: item[0], reverse=True)
+            evidence_id = str(evidence["evidence_id"])
+            if not ranked_claims:
+                rejections.append(
+                    {
+                        "evidence_id": evidence_id,
+                        "reason": "NO_RELEVANT_CLAIM",
+                        "relation_created": False,
+                    }
+                )
+                continue
+            if len(ranked_claims) > 1 and ranked_claims[0][0] == ranked_claims[1][0]:
+                rejections.append(
+                    {
+                        "evidence_id": evidence_id,
+                        "reason": "AMBIGUOUS_CLAIM_MATCH",
+                        "relation_created": False,
+                    }
+                )
+                continue
+            _, claim, relevance = ranked_claims[0]
             relation = (
                 "CONTRADICTS"
                 if is_conflicting_evidence_status(evidence.get("evidence_status"))
                 else "SUPPORTS"
             )
             object_metadata = self.object_store.put_text(excerpt)
-            evidence_id = str(evidence["evidence_id"])
             self.operations.record_evidence_object(
                 event_id,
                 evidence_id,
@@ -426,9 +534,10 @@ class EvidenceAgent:
                     "source_url": source_url,
                     "object_sha256": object_metadata["sha256"],
                     "object_path": object_metadata["relative_path"],
+                    "relevance": relevance,
                 }
             )
-        return edges
+        return edges, rejections
 
     @staticmethod
     def _status(
@@ -497,7 +606,13 @@ class EvidenceAgent:
         )
         claims = self._extract_claims(event_id, detail)
         plan = self._build_plan(claims, allowed_domains)
-        edges = self._propose_edges(event_id, claims, evidence_rows)
+        event = detail.get("event") or {}
+        edges, unmatched_evidence = self._propose_edges(
+            event_id,
+            event,
+            claims,
+            evidence_rows,
+        )
         status, claim_states = self._status(
             claims,
             edges,
@@ -582,6 +697,7 @@ class EvidenceAgent:
             "claims": claims,
             "evidence_plan": plan,
             "evidence_edges": edges,
+            "unmatched_evidence": unmatched_evidence,
             "cited_summary": self._render_summary(claims, edges, claim_states),
             "prompt_version": PROMPT_VERSION,
             "model_provider": model_provider,
@@ -595,6 +711,9 @@ class EvidenceAgent:
                 "structured_output": True,
                 "source_allowlist": True,
                 "exact_excerpt_required": True,
+                "claim_evidence_relevance_gate": True,
+                "zero_overlap_rejected": True,
+                "issuer_or_self_reference_anchor_required": True,
                 "unresolved_conflict_forces_human_review": True,
                 "missing_evidence_forces_insufficient": True,
                 "model_can_assign_final_s": False,
