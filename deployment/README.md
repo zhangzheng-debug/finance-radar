@@ -1,6 +1,12 @@
 # Finance Radar deployment
 
-Two supported deployment shapes exist. The current production host is the AWS US East EC2 instance using systemd + Nginx; Docker Compose + Caddy remains the portable alternative. The former Singapore host is stopped. Telegram delivery is always opt-in so a default deployment cannot send messages accidentally.
+Two supported deployment shapes exist. The production-qualified shape is a
+resource-bounded systemd + Nginx host; Docker Compose + Caddy remains the
+portable, non-production alternative until it has equivalent resource and role
+mutual-exclusion gates. Host, region and retired-topology facts are deliberately
+kept out of this evergreen runbook: verify them through `CURRENT_STATE.md` and a
+fresh authenticated inventory. Telegram delivery is always opt-in so a default
+deployment cannot send messages accidentally.
 
 Before packaging or cutover, generate and verify a source/archive-bound release
 manifest and rollback checklist. The cross-platform workflow and optional
