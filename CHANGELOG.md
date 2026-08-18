@@ -5,6 +5,12 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+- Recorded the verified `2026.08.18.3` production activation and the new private
+  D-drive recovery point after a complete authenticated-decryption, manifest,
+  dual-SQLite and model hash-chain restore audit. The temporary `/32` SSH rule
+  was removed after transfer; the legacy public recovery ciphertext remains
+  untouched pending a separate destructive-action decision.
+
 ## 2026.08.18.3
 
 - Moved the public shell ahead of aggregate API work, added bounded role-scoped
