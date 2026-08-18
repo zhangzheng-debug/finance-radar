@@ -16,6 +16,7 @@ tmp/
 server_migration_backup/
 qa_render*/
 artifacts/*.joblib
+!artifacts/risk_router.joblib
 artifacts/defense_pack/*.zip
 artifacts/offline_demo/*.zip
 artifacts/offline_demo/current/

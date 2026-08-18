@@ -35,6 +35,8 @@ def test_backup_retry_and_verification_default_to_the_same_d_drive_backup_root()
     assert "PassphraseFile must stay outside BackupRoot" in retry
     assert "offhost-status.json" not in retry
     assert "--workspace-root $auditWorkspaceRoot" in retry
+    assert '[string]$BindAddress = ""' in retry
+    assert '$sshOptions += @("-o", "BindAddress=$BindAddress")' in retry
     assert '[string]$BackupRoot = "D:\\FinanceRadarBackups"' in verify
 
 

@@ -381,6 +381,16 @@ def test_release_contract_binds_dependency_lock_verification() -> None:
     assert required.issubset(DEFAULT_CRITICAL_FILES)
 
 
+def test_release_contract_binds_the_exact_qualified_shadow_router() -> None:
+    required = {
+        "artifacts/risk_router.joblib",
+        "artifacts/risk_router.sha256",
+        "artifacts/risk_router_model_card.json",
+        "artifacts/risk_router_external_blind_v3_report.json",
+    }
+    assert required.issubset(DEFAULT_CRITICAL_FILES)
+
+
 def test_default_release_contract_covers_runtime_mutation_and_edge_boundaries() -> None:
     required = {
         "app/config.py",
