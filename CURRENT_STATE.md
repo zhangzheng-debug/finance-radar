@@ -2,15 +2,15 @@
 
 状态日期：2026-08-18（Asia/Singapore）
 
-最近完整部署验收窗口：2026-08-18 05:07–05:34 UTC
+最近完整部署验收窗口：2026-08-18 08:08–08:36 UTC
 
-最近只读运行复核窗口：2026-08-18 05:30–05:34 UTC
+最近只读运行复核窗口：2026-08-18 09:38–09:43 UTC
 
-运行版本：`2026.08.18.2`
+运行版本：`2026.08.18.3`
 
-## 2026-08-18 部署后候选改进（尚未发布到生产）
+## 2026-08-18 产品改进（已发布生产）
 
-当前 `codex/postdeploy-product-loop` 工作分支已经完成但尚未合并、标记或部署：
+原 `codex/postdeploy-product-loop` 候选已经以 PR #15 合并、发布并完成事务式部署：
 
 - Public 首屏先渲染产品外壳，概览/筛选使用有界、按角色隔离的短缓存；刷新失败时
   只允许显示带年龄的旧快照。30 天产品指标移到事件列表之后，不再阻塞主要内容。
@@ -21,35 +21,36 @@
   contract-ineligible，新盲集保持 `NOT_READY`，没有训练、模型晋级或生产行为变化。
 - 事件卡支持最高权威原始来源直达、保留筛选并返回精确卡片位置，以及仅限本次浏览
   会话的“自上次查看”状态/版本/证据变化说明。
-- 本地完整回归为 `686 passed, 5 skipped`；真实浏览器桌面、键盘、事件预览/返回，
-  以及 `390×844` 窄屏均通过，窄屏无横向溢出。上述结果不代表生产已运行这些改进。
+- 精确合并提交本地完整回归为 `693 passed, 5 skipped`，两套 GitHub Actions 均
+  通过；真实浏览器桌面、键盘、事件预览/返回，以及 `390×844` 窄屏均通过。
+- 真实恢复演练发现旧发布归档漏掉被忽略的 `risk_router.joblib`。新版本把正式
+  SHADOW 模型、SHA 声明、模型卡和 blind-v3 报告纳入 Git 与发布关键文件清单；
+  生产模型文件 SHA-256 与三份声明精确一致，不再静默退化为关键词 fallback。
 
 ## 2026-08-18 生产发布、恢复与事实完整性复核
 
 本节取代下方 2026-08-15 发布快照和 2026-08-18 03:25–03:31 UTC 的
 部署前运行快照，作为当前生产事实源：
 
-- `v2026.08.18.2` 已在美国 `us-east-1` 主机完成事务式激活，生产链接精确指向
-  `/opt/finance-radar/releases/20260818T043555Z-64a7caaeff6a`；仓库提交与标签
-  均指向 `64a7caaeff6a1c7132d661d81a3a4e8453232f09`，发布归档 SHA-256 为
-  `5894f2f40bd4e972e103e4fb6e4bc6e117eaea6d9abd18752fee76dfe4cbf017`。
-- 部署前完整恢复点 `finance_radar_20260818T050751Z_b8ae6598` 已通过恢复门，
+- `v2026.08.18.3` 已在美国 `us-east-1` 主机完成事务式激活，生产链接精确指向
+  `/opt/finance-radar/releases/20260818T080656Z-a39224683399`；仓库提交与标签
+  均指向 `a39224683399d5e330d5fd823f1cea2f0313b678`，发布归档 SHA-256 为
+  `3cc7b0e7259432d93e61d62c3b858f2aa5b5a00d5e0f3bad186f3bce439adf9c`。
+- 部署前完整恢复点 `finance_radar_20260818T080925Z_a47ced96` 已通过恢复门，
   收据 SHA-256 为
-  `20f1126915d8a4d87f5b3774e822e070cd0cfa6032411f1f24aca1032dabbfaa`；
-  切换后唯一正式在线恢复点为 `finance_radar_20260818T052124Z_0ebde600`，
+  `fac715ff444b2678dd57cf215b9df884594b9087a45c406ae958c8a5b7b25adc`；
+  切换后唯一正式在线恢复点为 `finance_radar_20260818T082654Z_fe73ed7f`，
   清单 SHA-256 为
-  `299958f33e2d27b0cde3bf0bcec417ae077ccdede8c782e4cbcb584bfdc6b325`。
+  `c7486530be1bfe3da59d51bc83469cdbb61035216f803dd72049debe257fe6cf`。
   正式日备份库存恰好一份，`weekly` 目录为空，符合“新备份完整验证成功后再替换
   旧备份、每日一份、周备份零份”的口径。
 - API、Public Web、Worker 与每日备份计时器均为 active/enabled；备份 one-shot、
   Evidence LLM、Admin、Reviewer 与 Operator 均为 inactive，其中 Evidence LLM
-  为 disabled，三个内部 UI 为 static/按需。Worker 为
-  `NRestarts=0 / ExecMainStatus=0`，当前约 274 MiB、峰值约 281 MiB。
-- 根盘为 `38 GiB`，约 `26 GiB` 已用、`12 GiB` 可用（69%）；908 MiB RAM
-  约 515 MiB available，2 GiB swap 使用约 326 MiB。过去 24 小时内核日志
-  没有 OOM、Out of memory 或 Killed process 记录。
+  为 disabled，三个内部 UI 为 static/按需。
+- 根盘为 `38 GiB`，异机传输临时文件清理后约 `27 GiB` 已用、`12 GiB` 可用
+  （70%）；部署前/后备份峰值曾到 92%，但均在验证及单份轮换后回落。
 - 公网 `/radar/`、`/radar/_stcore/health` 和 `/radar/release.json` 返回 200，
-  release marker 精确为 `20260818T043555Z-64a7caaeff6a`；
+  release marker 精确为 `20260818T080656Z-a39224683399`；
   `/radar/offhost-status.json`、FastAPI、Admin、Reviewer 与 Operator 公网路径
   均返回 404。过期异机备份 JSON 已不再公开。
 - 新版已切断常驻周期对旧 `manual_review_config` 的正式写入，并上线证据零相关门、
@@ -58,14 +59,22 @@
   重跑，2,729 条轻量核验需人工复核，105 条旧“人工核验配置”被标记为
   provenance 不可证。报告 SHA-256 为
   `ac75b5715b99c46dddcc4ee8a66848c8da70166e768141e1e30d02941ff0078f`。
-- Windows 上三条 Finance Radar 计划任务仍为 Disabled，`D:\FinanceRadarBackups`
-  尚不存在，因此不能宣称已有新鲜异机恢复点。新脚本已经具备隐藏/S4U、D 盘密钥与
-  密文分离、单份保留和完整恢复验证，但当前本地 SSH 虽能建立 TCP 22 连接，仍在
-  SSH banner 阶段超时；在取得一条经授权的可用 SSH 路径前不得启用计划任务，也
-  不得删除公共 Release 中的旧恢复密文。
+- Windows 上三条 Finance Radar 计划任务继续保持 Disabled；本次使用一次性受控
+  SSH 路径生成了唯一接受的异机恢复点
+  `D:\FinanceRadarBackups\20260818T083746Z`。AES-256-GCM 密文为
+  1,547,871,368 字节，SHA-256 为
+  `e3c7523691d99432f7e56b3d6759d704aafedb03f87ede9b28752634d2bd9706`；
+  口令独立位于 `D:\FinanceRadarRecovery`。54,468 个归档成员、51,270 条清单、
+  两个 SQLite、正式模型哈希链和边界审计全部通过，恢复工作区已清理。
+- 临时 SSH 规则精确为 `sgr-0f1e0716b5e993b73`（`211.145.54.96/32:22`），
+  完成传输后已从安全组删除；入站规则计数由 8 回到 7，随后从同一物理地址直连
+  TCP 22 超时。旧公共 Release 恢复密文仍未删除，等待单独的破坏性动作确认。
 
 本次失败路径也已诚实保留：
 
+- 第一份 2026-08-18 异机归档在加密和解密回环后被完整恢复审计拒绝，因为当时
+  生产发布缺少 `artifacts/risk_router.joblib`。系统没有降低门禁或把失败包标成
+  成功；发布合同修复并部署 `.3` 后，重新从新的在线恢复点生成归档才取得 PASS。
 - `20260818T040331Z-eb1c585ce812` 候选因安装器使用数据库密集的完整
   `/api/v1/health` 作为启动探针而超时，虽然后台日志证明 API 已启动，仍按门禁
   自动回滚到旧版本；其 7.3 GiB 已验证恢复包随后被独立复验并恢复为正式在线备份。
@@ -133,11 +142,11 @@ Admin 和可选 Evidence LLM 保持回环、按需或禁用状态。系统仍然
 
 | 项目 | 已核验值 |
 |---|---|
-| Git 提交 | `64a7caaeff6a1c7132d661d81a3a4e8453232f09` |
-| Git 标签 | `v2026.08.18.2`（解引用后精确指向上述提交） |
-| Release ID | `20260818T043555Z-64a7caaeff6a` |
-| 生产路径 | `/opt/finance-radar/releases/20260818T043555Z-64a7caaeff6a` |
-| 发布归档 SHA-256 | `5894f2f40bd4e972e103e4fb6e4bc6e117eaea6d9abd18752fee76dfe4cbf017` |
+| Git 提交 | `a39224683399d5e330d5fd823f1cea2f0313b678` |
+| Git 标签 | `v2026.08.18.3`（解引用后精确指向上述提交） |
+| Release ID | `20260818T080656Z-a39224683399` |
+| 生产路径 | `/opt/finance-radar/releases/20260818T080656Z-a39224683399` |
+| 发布归档 SHA-256 | `3cc7b0e7259432d93e61d62c3b858f2aa5b5a00d5e0f3bad186f3bce439adf9c` |
 | 公网入口 | `https://radar.18-208-34-152.sslip.io:8443/radar/` |
 
 ## 现场运行证据
@@ -148,9 +157,9 @@ Admin 和可选 Evidence LLM 保持回环、按需或禁用状态。系统仍然
   监听回环端口 `18000`，Worker 现场为 `NRestarts=0 / ExecMainStatus=0`、当前
   约 274 MiB、峰值约 281 MiB。三种内部 UI 为 inactive/static，Evidence LLM
   为 inactive/disabled。
-- 切换后唯一正式备份为 `finance_radar_20260818T052124Z_0ebde600`，已完成
+- 切换后唯一正式备份为 `finance_radar_20260818T082654Z_fe73ed7f`，已完成
   双数据库恢复验证；清单 SHA-256 为
-  `299958f33e2d27b0cde3bf0bcec417ae077ccdede8c782e4cbcb584bfdc6b325`。
+  `c7486530be1bfe3da59d51bc83469cdbb61035216f803dd72049debe257fe6cf`。
 - 正式备份库存恰好一份，临时 hold 库存为空，符合“每天一次；新备份验证通过后
   替换旧备份”的策略。
 - 38 GiB 根卷在切换后使用约 26 GiB、剩余约 12 GiB（69%）；908 MiB RAM
@@ -179,7 +188,7 @@ Admin 和可选 Evidence LLM 保持回环、按需或禁用状态。系统仍然
 
 ## 验证与恢复边界
 
-- 当前 `v2026.08.18.2` 源码完整回归：`680 passed, 5 skipped`；发布归档、清单、
+- 当前 `v2026.08.18.3` 源码完整回归：`693 passed, 5 skipped`；发布归档、清单、
   依赖锁、Bash/PowerShell 语法与隔离解包验证均已通过。
 - 2026-08-15 的 D 盘 Python 3.12 历史回归为：
   `664 passed, 5 skipped, 20 subtests passed`。
