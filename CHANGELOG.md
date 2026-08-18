@@ -5,6 +5,23 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.18.2
+
+- Added a database-free `/api/v1/live` probe and changed the transactional
+  installer to use it for process activation. The full health endpoint remains
+  available for database-backed operational assessment without turning a
+  five-second deployment probe into a self-amplifying query backlog.
+- Hardened the Windows off-host recovery task: it is hidden, non-interactive,
+  uses S4U instead of an interactive desktop session, keeps ciphertext on D:,
+  keeps the recovery passphrase outside the ciphertext tree, and retains one
+  fully restored daily copy only after its successor passes verification.
+- Removed public publication of detailed off-host receipts and made
+  `/radar/offhost-status.json` an explicit `404`; hashes, backup age, release
+  identifiers and ledger counts now remain operator-only recovery metadata.
+- Preserved the failed 2026-08-18 candidate's full pre-cutover recovery hold
+  after its database-heavy activation probe timed out, while automatically
+  restoring the previous release and all required services.
+
 ## 2026.08.18.1
 
 - Added a canonical owner-intent and system doctrine that reconstructs the

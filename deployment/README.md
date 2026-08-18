@@ -209,11 +209,12 @@ outcome, order, position, balance or trading endpoint is involved.
 Primary public endpoint is deployment-specific and must be passed explicitly as
 `https://YOUR_DOMAIN[:PORT]/radar/`; it is not a repository constant.
 
-The public edge returns `404` for `/finance-radar-api/`, the internal page
-slugs, `/radar-review/`, `/radar-ops/` and `/radar-admin/`. FastAPI remains available only at
-`http://127.0.0.1:18000` on the server. The one deliberately public operational
-artifact is `/radar/offhost-status.json`, a no-cache file written by the
-off-host backup job.
+The public edge returns `404` for `/finance-radar-api/`,
+`/radar/offhost-status.json`, the internal page slugs, `/radar-review/`,
+`/radar-ops/` and `/radar-admin/`. FastAPI remains available only at
+`http://127.0.0.1:18000` on the server. Off-host verification receipts stay on
+the operator workstation under `D:\FinanceRadarBackups`; the public edge never
+serves their timestamps, hashes, release identifiers or ledger counts.
 
 The three internal UIs are manual, non-enabled, mutually conflicting systemd
 services. They load only their scoped token (Admin is the explicit full-access

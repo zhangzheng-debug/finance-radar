@@ -520,6 +520,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    @application.get("/api/v1/live")
+    def live(request: Request):
+        """Return process liveness without touching either production database."""
+        return envelope(
+            request,
+            {
+                "status": "ok",
+                "service": "finance-radar-api",
+                "service_version": __version__,
+                "database_checks": "not_run",
+                "boundary": "process-liveness-only",
+            },
+        )
+
     @application.get("/api/v1/health")
     def health(request: Request):
         try:
