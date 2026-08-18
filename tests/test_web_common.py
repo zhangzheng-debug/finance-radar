@@ -137,6 +137,96 @@ def test_admin_api_request_can_attach_configured_token(monkeypatch) -> None:
     assert captured[0].get_header("X-admin-token") == "internal-only"
 
 
+def test_personal_reviewer_credential_overrides_static_and_admin_tokens(monkeypatch) -> None:
+    captured: list[object] = []
+
+    def fake_urlopen(request: object, *, timeout: int) -> _JsonResponse:
+        captured.append(request)
+        return _JsonResponse()
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "admin")
+    monkeypatch.setattr(web_common, "REVIEWER_TOKEN", "shared-static-token")
+    monkeypatch.setattr(web_common, "ADMIN_TOKEN", "admin-token")
+    monkeypatch.setattr(web_common.urllib.request, "urlopen", fake_urlopen)
+    assert api_request(
+        "/api/v1/adjudication/status",
+        reviewer_credential="personal-reviewer-credential",
+    ) == {"ok": True}
+    assert captured[0].get_header("X-reviewer-token") == "personal-reviewer-credential"
+    assert captured[0].get_header("X-admin-token") is None
+
+
+def test_public_ui_rejects_personal_reviewer_credential_before_network(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(
+        web_common.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("reviewer credential reached the network"),
+    )
+    with pytest.raises(ApiError, match="角色不允许"):
+        api_request(
+            "/api/v1/adjudication/status",
+            reviewer_credential="personal-reviewer-credential",
+        )
+
+
+def test_cached_api_get_is_bounded_by_ttl_and_returns_defensive_copies(monkeypatch) -> None:
+    calls = 0
+
+    def fake_api(path: str, **_kwargs: object) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {"path": path, "items": ["original"]}
+
+    monkeypatch.setattr(web_common, "api_request", fake_api)
+    web_common.clear_api_get_cache()
+    first, first_meta = web_common.cached_api_get("/api/v1/overview", ttl_seconds=30)
+    first["items"].append("caller mutation")
+    second, second_meta = web_common.cached_api_get("/api/v1/overview", ttl_seconds=30)
+
+    assert calls == 1
+    assert first_meta.cache_hit is False
+    assert second_meta.cache_hit is True
+    assert second_meta.stale is False
+    assert second["items"] == ["original"]
+
+
+def test_cached_api_get_uses_only_explicitly_aged_stale_snapshot_on_error(monkeypatch) -> None:
+    should_fail = False
+
+    def fake_api(_path: str, **_kwargs: object) -> dict[str, object]:
+        if should_fail:
+            raise web_common.ApiError("refresh unavailable")
+        return {"value": "known snapshot"}
+
+    clock = iter([100.0, 100.0, 102.0, 102.0])
+    monkeypatch.setattr(web_common, "api_request", fake_api)
+    monkeypatch.setattr(web_common.time, "monotonic", lambda: next(clock))
+    web_common.clear_api_get_cache()
+    web_common.cached_api_get("/api/v1/overview", ttl_seconds=1, stale_if_error_seconds=5)
+    should_fail = True
+    data, metadata = web_common.cached_api_get(
+        "/api/v1/overview", ttl_seconds=1, stale_if_error_seconds=5
+    )
+
+    assert data == {"value": "known snapshot"}
+    assert metadata.cache_hit is True
+    assert metadata.stale is True
+    assert metadata.age_seconds == 2.0
+
+
+def test_home_renders_shell_before_overview_and_loads_kpis_after_feed() -> None:
+    home_source = (Path(__file__).parents[1] / "app" / "web" / "Home.py").read_text(
+        encoding="utf-8"
+    )
+    assert home_source.index('header(\n    "态势总览"') < home_source.index(
+        'cached_api_get(\n        "/api/v1/overview"'
+    )
+    assert home_source.index("render_event_feed(", home_source.index("if live_feed:")) < home_source.index(
+        'cached_api_get(\n            "/api/v1/product/metrics"'
+    )
+
+
 @pytest.mark.parametrize(
     ("role", "token_name", "header_name", "path", "method"),
     [

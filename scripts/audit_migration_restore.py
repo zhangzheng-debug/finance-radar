@@ -37,8 +37,16 @@ ROOT = Path(__file__).resolve().parents[1]
 STAMP_RE = re.compile(r"finance-radar-migration-(\d{8}T\d{6}Z)\.tgz\.aesgcm$")
 CHUNK_BYTES = 1024 * 1024
 MAX_MEMBERS = 100_000
-MAX_UNPACKED_BYTES = 4 * 1024 * 1024 * 1024
-CAPTURE_LIMIT = 4 * 1024 * 1024
+# The content-addressed evidence corpus makes a current full recovery archive
+# about 8 GiB unpacked.  Keep a finite ceiling with roughly 50% operational
+# headroom rather than silently rejecting the recovery point we actually
+# produce.  Member-count, safe-path, manifest and per-file hashes remain
+# independent gates.
+MAX_UNPACKED_BYTES = 12 * 1024 * 1024 * 1024
+# Only a fixed allowlist of structured control files is captured in memory.
+# Current recovery/whole-archive manifests are about 11 MiB and 7.5 MiB,
+# respectively; 16 MiB accepts them without making capture unbounded.
+CAPTURE_LIMIT = 16 * 1024 * 1024
 LOCAL_EVIDENCE_MODEL_PATH = "evidence-llm/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"
 LOCAL_EVIDENCE_MODEL_SHA256 = (
     "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"

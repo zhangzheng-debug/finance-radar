@@ -590,6 +590,31 @@ html, body, [class*="css"] {
     color: var(--fr-cyan);
 }
 
+.feed-chip.is-changed {
+    color: var(--fr-amber);
+    border-color: color-mix(in srgb, var(--fr-amber) 45%, transparent);
+    background: color-mix(in srgb, var(--fr-amber) 10%, transparent);
+}
+
+.return-filter-link {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    border: 1px solid var(--fr-border-strong);
+    border-radius: var(--fr-radius-sm);
+    color: var(--fr-text-1) !important;
+    text-decoration: none !important;
+    background: var(--fr-surface-2);
+}
+
+.return-filter-link:hover,
+.return-filter-link:focus-visible {
+    border-color: var(--fr-cyan);
+    color: var(--fr-cyan) !important;
+}
+
 .queue-card {
     padding: 15px;
     border-color: rgba(245, 180, 83, .28);

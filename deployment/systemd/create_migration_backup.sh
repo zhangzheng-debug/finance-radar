@@ -3,13 +3,22 @@ set -euo pipefail
 umask 077
 
 STAMP=${1:-$(date -u +%Y%m%dT%H%M%SZ)}
+EXISTING_BACKUP_ID=${2:-}
 STAGE_ROOT=${FINANCE_RADAR_BACKUP_STAGE_ROOT:-/var/tmp}
+BACKUP_TMPDIR=${FINANCE_RADAR_BACKUP_TMPDIR:-/var/tmp}
 STAGE="$STAGE_ROOT/finance-radar-migration-$STAMP"
 ARCHIVE="$STAGE_ROOT/finance-radar-migration-$STAMP.tgz"
 BASE=/opt/finance-radar
 
 [ "$(id -u)" -eq 0 ] || { printf 'run as root\n' >&2; exit 2; }
 [ -d "$STAGE_ROOT" ] || { printf 'stage root missing: %s\n' "$STAGE_ROOT" >&2; exit 2; }
+[ -d "$BACKUP_TMPDIR" ] && [ ! -L "$BACKUP_TMPDIR" ] || {
+    printf 'backup verification temp directory is unsafe: %s\n' "$BACKUP_TMPDIR" >&2
+    exit 2
+}
+# Ubuntu mounts /tmp as a small tmpfs on this host.  SQLite restore checks are
+# larger than that tmpfs even when the root volume has ample free space.
+export TMPDIR="$BACKUP_TMPDIR"
 
 [ ! -e "$STAGE" ] || { printf 'stage already exists: %s\n' "$STAGE" >&2; exit 2; }
 [ ! -e "$ARCHIVE" ] || { printf 'archive already exists: %s\n' "$ARCHIVE" >&2; exit 2; }
@@ -34,18 +43,59 @@ install -d -m 0750 -o finance-radar -g finance-radar "$BACKUP_ROOT"
     printf 'backup receipt verifier is unavailable: %s\n' "$BACKUP_RECEIPT_VERIFIER" >&2
     exit 3
 }
-"$BASE/venv/bin/python" "$BACKUP_RECEIPT_VERIFIER" inventory \
-    --backup-root "$BACKUP_ROOT" \
-    --output "$BACKUP_INVENTORY"
-BACKUP_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-systemctl start finance-radar-backup.service
-BACKUP_RECEIPT="$("$BASE/venv/bin/python" "$BACKUP_RECEIPT_VERIFIER" receipt \
-    --backup-root "$BACKUP_ROOT" \
-    --inventory "$BACKUP_INVENTORY" \
-    --required-kind recovery_bundle \
-    --started-at "$BACKUP_STARTED_AT" \
-    --operations-db "$BASE/shared/data/finance_radar_operations.sqlite3" \
-    --ledger-source "$BASE/shared/data/finance_radar.sqlite3")"
+if [ -n "$EXISTING_BACKUP_ID" ]; then
+    [[ "$EXISTING_BACKUP_ID" =~ ^finance_radar_[A-Za-z0-9_]+$ ]] || {
+        printf 'existing recovery bundle identity is invalid\n' >&2
+        exit 3
+    }
+    # A just-created bundle may be reused after a low-space receipt failure.
+    # Re-run the entire independent verifier, require it to be no older than
+    # six hours, and never trust a caller-provided path or manifest hash.
+    BACKUP_RECEIPT="$("$BASE/venv/bin/python" - \
+        "$BACKUP_RECEIPT_VERIFIER" "$BACKUP_ROOT/$EXISTING_BACKUP_ID" <<'PY'
+from datetime import datetime, timedelta, timezone
+import importlib.util
+from pathlib import Path
+import sys
+
+verifier_path = Path(sys.argv[1])
+candidate = Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("finance_radar_backup_receipt", verifier_path)
+if spec is None or spec.loader is None:
+    raise SystemExit("backup receipt verifier could not be loaded")
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+receipt = module.verify_full_bundle(
+    candidate,
+    started_at=datetime.now(timezone.utc) - timedelta(hours=6),
+)
+print(
+    "\t".join(
+        (
+            str(receipt["snapshot_id"]),
+            str(receipt["kind"]),
+            str(receipt["receipt_sha256"]),
+            str(receipt["relative_path"]),
+        )
+    )
+)
+PY
+)"
+else
+    "$BASE/venv/bin/python" "$BACKUP_RECEIPT_VERIFIER" inventory \
+        --backup-root "$BACKUP_ROOT" \
+        --output "$BACKUP_INVENTORY"
+    BACKUP_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    systemctl start finance-radar-backup.service
+    BACKUP_RECEIPT="$("$BASE/venv/bin/python" "$BACKUP_RECEIPT_VERIFIER" receipt \
+        --backup-root "$BACKUP_ROOT" \
+        --inventory "$BACKUP_INVENTORY" \
+        --required-kind recovery_bundle \
+        --started-at "$BACKUP_STARTED_AT" \
+        --operations-db "$BASE/shared/data/finance_radar_operations.sqlite3" \
+        --ledger-source "$BASE/shared/data/finance_radar.sqlite3")"
+fi
 IFS=$'\t' read -r \
     MIGRATION_BUNDLE_ID MIGRATION_BUNDLE_KIND MIGRATION_BUNDLE_MANIFEST_SHA256 MIGRATION_BUNDLE_RELATIVE \
     <<< "$BACKUP_RECEIPT"
@@ -128,6 +178,7 @@ PY
 from __future__ import annotations
 
 import hashlib
+import errno
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -213,7 +264,12 @@ for entry in files:
     if target_relative in seen_targets:
         raise SystemExit(f"migration source maps multiple files to {target_relative}")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination, follow_symlinks=False)
+    try:
+        os.link(source, destination, follow_symlinks=False)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        shutil.copy2(source, destination, follow_symlinks=False)
     if destination.is_symlink() or not destination.is_file() or destination.stat().st_size != expected_size:
         raise SystemExit(f"migration payload copy failed: {relative}")
     if digest(destination) != expected_sha:

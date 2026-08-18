@@ -2,6 +2,8 @@
 param(
     [string]$SshHost = $env:FINANCE_RADAR_SSH_HOST,
     [string]$IdentityFile = $env:FINANCE_RADAR_SSH_IDENTITY_FILE,
+    [string]$BindAddress = "",
+    [string]$ExistingBackupId = "",
     [string]$DestinationRoot = "",
     [string]$PassphraseFile = "",
     [ValidateRange(1, 1)][int]$LocalRetention = 1,
@@ -46,6 +48,17 @@ $sshOptions = @(
     "-o", "ServerAliveInterval=10",
     "-o", "ServerAliveCountMax=12"
 )
+if ($BindAddress) {
+    $parsedBindAddress = $null
+    if (-not [System.Net.IPAddress]::TryParse($BindAddress, [ref]$parsedBindAddress) -or
+        $parsedBindAddress.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "BindAddress must be a valid IPv4 address"
+    }
+    $sshOptions += @("-o", "BindAddress=$BindAddress")
+}
+if ($ExistingBackupId -and $ExistingBackupId -notmatch '^finance_radar_[A-Za-z0-9_]+$') {
+    throw "ExistingBackupId is invalid"
+}
 $remoteUser = ($SshHost -split "@", 2)[0]
 $remotePrivilege = if ($remoteUser -eq "root") { "" } else { "sudo " }
 
@@ -78,7 +91,8 @@ for ($attempt = 1; $attempt -le 3; $attempt++) {
 if (-not $stageSucceeded) {
     throw "could not stage the migration backup script on the server"
 }
-$remoteOutput = & ssh @sshOptions -i $IdentityFile $SshHost "chmod 700 '$remoteScript' && ${remotePrivilege}bash '$remoteScript' '$stamp'"
+$existingBackupArgument = if ($ExistingBackupId) { " '$ExistingBackupId'" } else { "" }
+$remoteOutput = & ssh @sshOptions -i $IdentityFile $SshHost "chmod 700 '$remoteScript' && ${remotePrivilege}bash '$remoteScript' '$stamp'$existingBackupArgument"
 $remoteExitCode = $LASTEXITCODE
 if ($remoteExitCode -ne 0) {
     & ssh @sshOptions -i $IdentityFile $SshHost "${remotePrivilege}rm -rf -- '$expectedRemoteStage' && ${remotePrivilege}rm -f -- '$expectedRemoteArchive' '$remoteScript'"
@@ -221,6 +235,7 @@ $verification = [ordered]@{
     encrypted_at_rest = [bool]$encryptedArchive
     key_file = if ($encryptedArchive -and -not $env:FINANCE_RADAR_BACKUP_PASSPHRASE) { $PassphraseFile } else { "environment" }
     transport = "SSH/SCP"
+    source_recovery_bundle = if ($ExistingBackupId) { $ExistingBackupId } else { $null }
     trading_project_included = $false
 }
 $verification | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination "offhost-verification.json") -Encoding UTF8

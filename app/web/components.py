@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from html import escape
@@ -666,6 +667,13 @@ def event_button_label(item: dict[str, Any]) -> str:
     return f"{status:<8}  {compact_timestamp(item.get('last_updated_at'))}  {ticker} · {company}"
 
 
+def event_anchor_id(event_id: object) -> str:
+    """Return a stable, HTML-safe anchor without exposing raw identifiers."""
+
+    digest = hashlib.sha256(str(event_id or "").encode("utf-8")).hexdigest()[:16]
+    return f"event-row-{digest}"
+
+
 def public_event_state(item: dict[str, Any]) -> str:
     """Return the stable reader-facing lifecycle state for one event."""
     declared = str(item.get("public_state") or "").strip().lower()
@@ -868,8 +876,13 @@ def event_feed_row(
         if copy
         else ""
     )
+    changed_markup = (
+        '<span class="feed-chip is-changed">自上次查看有更新</span>'
+        if item.get("_changed_since_view")
+        else ""
+    )
     return (
-        f'<a class="{row_class}" href="{preview_url}" target="_self" '
+        f'<a id="{event_anchor_id(item.get("event_id"))}" class="{row_class}" href="{preview_url}" target="_self" '
         f'aria-label="{escape(str(aria_label), quote=True)}">'
         '<div class="feed-time"><span class="feed-time-label">最后更新</span>'
         f'<time>{escape(timestamp)}</time></div>'
@@ -877,6 +890,7 @@ def event_feed_row(
         '<div class="feed-body">'
         '<div class="feed-meta">'
         f'<span class="feed-chip status-{escape(status_key)}">{escape(status)}</span>'
+        f'{changed_markup}'
         f'{authority_chip}'
         f'<span class="feed-chip">{escape(family)}</span>'
         f'<span class="feed-chip">{escape(source)}</span>'

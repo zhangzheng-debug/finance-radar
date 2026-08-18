@@ -5,6 +5,43 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.18.3
+
+- Moved the public shell ahead of aggregate API work, added bounded role-scoped
+  GET snapshots with explicit stale ages, and moved non-critical 30-day product
+  metrics after the event feed. Desktop, keyboard and 390 px browser checks now
+  cover the first-use path without allowing cached data to masquerade as fresh.
+- Bound every authentic-human review identity and role to a separate server-side
+  credential. Client-supplied reviewer aliases and roles are rejected, a shared
+  admin/reviewer token cannot impersonate a human, and reviews persist only a
+  stable principal hash. The Reviewer UI now requires that personal credential
+  in the current Streamlit session and never substitutes its static UI token.
+- Added the `human-blind-v3.1` event-time sample contract, primary-evidence
+  ordering, issuer/event-chain grouping gates, exact/near-duplicate exclusion,
+  balanced deterministic selection and one-way hash-bound freeze tooling.
+  Freezing fails closed unless every historical training, development and blind
+  manifest is present, and excludes their event, issuer and event-chain groups
+  as well as exact and near-duplicate text. The existing 24 legacy OPEN samples
+  remain visible as ineligible history; no authentic-human blind set is claimed.
+- Added same-page source-first reading continuity: event cards now have stable
+  return anchors, filters survive preview/return, the highest-authority source
+  is the explicit external jump, and a browser-session snapshot explains status,
+  version or evidence changes since the last view.
+- Let the Windows local launcher place logs on an explicit D-drive path so UI
+  and recovery QA do not consume the constrained C drive.
+- Made off-host migration creation reuse and independently reverify a fresh
+  full recovery bundle, use the root-backed `/var/tmp` for large SQLite checks,
+  and hard-link immutable payloads when possible so the one-copy server does
+  not needlessly duplicate several GiB during migration.
+- Added explicit local-interface binding to the Windows SSH/SCP recovery path,
+  kept all large audit workspaces on D:, and calibrated bounded restore limits
+  to the current evidence corpus while preserving path, member-count, manifest,
+  database-integrity and per-file hash gates.
+- Added the exact qualified SHADOW `risk_router.joblib` to traceable source and
+  made the binary, SHA declaration, model card and blind-v3 report mandatory
+  release-contract files. A source-only archive can no longer silently deploy
+  the keyword fallback while advertising the qualified model.
+
 ## 2026.08.18.2
 
 - Added a database-free `/api/v1/live` probe and changed the transactional

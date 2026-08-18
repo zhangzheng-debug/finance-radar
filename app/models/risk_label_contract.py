@@ -180,6 +180,7 @@ def build_dual_review_annotation(
         "event_id": sample.get("event_id"),
         "text_sha256": sample["text_sha256"],
         "content_present": bool(sample.get("content")),
+        "content": sample.get("content"),
         "source_id": sample["source_id"],
         "authority_tier": sample["authority_tier"],
         "source_lane": deterministic_source_lane(

@@ -74,6 +74,14 @@ DEFAULT_CRITICAL_FILES: tuple[str, ...] = (
     "app/web/pages/3_Operations_and_Model.py",
     "app/web/pages/4_Adjudication_Studio.py",
     "app/web/pages/5_Method_and_Boundaries.py",
+    # The production router is intentionally SHADOW-only, but the exact
+    # qualified artifact must still be part of a reproducible release.  Its
+    # declaration, card and blind report are all bound beside the binary so a
+    # source-only archive cannot silently degrade to the keyword fallback.
+    "artifacts/risk_router.joblib",
+    "artifacts/risk_router.sha256",
+    "artifacts/risk_router_model_card.json",
+    "artifacts/risk_router_external_blind_v3_report.json",
     "deployment/Caddyfile",
     "deployment/compose.yml",
     "deployment/Dockerfile",

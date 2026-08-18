@@ -171,10 +171,56 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "sec_current_filings" not in rendered
     assert ">P0<" not in rendered
     assert any(
-        link.label == "打开原始来源（外部网站）" for link in page.get("link_button")
+        link.label == "直达本条原始来源（外部网站）" for link in page.get("link_button")
     )
     assert not any("工作台" in button.label or "人工复核" in button.label for button in page.button)
-    assert any(button.label == "收起当前页预览" for button in page.button)
+    assert not any(button.label == "收起当前页预览" for button in page.button)
+    assert "返回原筛选位置" in rendered
+    assert "本次浏览会话首次查看" in "\n".join(str(item.value) for item in page.caption)
+
+
+def test_public_preview_reports_changes_since_last_view(monkeypatch) -> None:
+    revision = {"version": 1}
+
+    def changing_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        data = _fake_api(path, **kwargs)
+        parsed = urllib.parse.urlsplit(path)
+        if parsed.path == "/api/v1/events/event-a":
+            data["event"] = {
+                **data["event"],
+                "current_version": revision["version"],
+                "last_updated_at": f"2026-07-1{7 + revision['version']}T12:34:00+00:00",
+            }
+            data["current_version"] = {
+                **data["current_version"],
+                "version": revision["version"],
+            }
+        elif parsed.path == "/api/v1/events/event-a/evidence" and revision["version"] == 2:
+            data["items"].append(
+                {
+                    "evidence_id": "ev-primary-2",
+                    "authority_tier": "P0",
+                    "source_name": "Official source",
+                    "evidence_status": "confirmed",
+                    "evidence_passage": "A newly published exact passage.",
+                    "evidence_url": "https://example.test/source-2",
+                }
+            )
+        return data
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", changing_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    revision["version"] = 2
+    page.run()
+    rendered = "\n".join(str(item.value) for item in [*page.markdown, *page.caption])
+
+    assert not page.exception
+    assert "自上次查看后的变化" in rendered
+    assert "事件版本：1 → 2" in rendered
+    assert "关联证据：新增 1 条，移除 0 条" in rendered
 
 
 def test_public_verified_event_without_receipt_is_labeled_as_historical(monkeypatch) -> None:

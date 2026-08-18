@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory = $true)][string]$RequiredRelease,
     [string]$SshHost = $env:FINANCE_RADAR_SSH_HOST,
     [string]$IdentityFile = $env:FINANCE_RADAR_SSH_IDENTITY_FILE,
+    [string]$BindAddress = "",
     [string]$BackupRoot = "D:\FinanceRadarBackups",
     [string]$PassphraseFile = "D:\FinanceRadarRecovery\finance-radar-backup-passphrase.txt"
 )
@@ -15,6 +16,13 @@ if (-not $SshHost) {
 }
 if (-not $IdentityFile) {
     throw "IdentityFile is required; pass -IdentityFile or set FINANCE_RADAR_SSH_IDENTITY_FILE"
+}
+if ($BindAddress) {
+    $parsedBindAddress = $null
+    if (-not [System.Net.IPAddress]::TryParse($BindAddress, [ref]$parsedBindAddress) -or
+        $parsedBindAddress.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "BindAddress must be a valid IPv4 address"
+    }
 }
 $remoteUser = ($SshHost -split "@", 2)[0]
 $remotePrivilege = if ($remoteUser -eq "root") { "" } else { "sudo " }
@@ -124,7 +132,11 @@ Remove-Item -LiteralPath $plain -Force
 
 $remoteStage = "/var/tmp/finance-radar-migration-$Stamp"
 $remoteArchive = "$remoteStage.tgz"
-& ssh -i $IdentityFile $SshHost "${remotePrivilege}rm -rf -- '$remoteStage' && ${remotePrivilege}rm -f -- '$remoteArchive'"
+$sshOptions = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=20")
+if ($BindAddress) {
+    $sshOptions += @("-o", "BindAddress=$BindAddress")
+}
+& ssh @sshOptions -i $IdentityFile $SshHost "${remotePrivilege}rm -rf -- '$remoteStage' && ${remotePrivilege}rm -f -- '$remoteArchive'"
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "local encrypted copy is verified, but remote temporary cleanup failed"
 }

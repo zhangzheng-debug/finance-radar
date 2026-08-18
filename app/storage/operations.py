@@ -1275,6 +1275,38 @@ class OperationsRepository:
             "created_at": now,
         }
 
+    def freeze_adjudication_samples(self, sample_ids: list[str], freeze_id: str) -> int:
+        """Atomically make a pre-hashed set immutable after all gates pass."""
+
+        ordered = sorted(set(str(item).strip() for item in sample_ids if str(item).strip()))
+        if not ordered or not str(freeze_id).strip():
+            raise ValueError("freeze requires sample IDs and a freeze ID")
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            placeholders = ",".join("?" for _ in ordered)
+            rows = connection.execute(
+                f"SELECT sample_id,status,freeze_id FROM adjudication_samples WHERE sample_id IN ({placeholders})",
+                ordered,
+            ).fetchall()
+            if len(rows) != len(ordered):
+                raise ValueError("freeze sample set changed before commit")
+            invalid = [
+                str(row["sample_id"])
+                for row in rows
+                if row["status"] != "READY" or row["freeze_id"] not in (None, "")
+            ]
+            if invalid:
+                raise ValueError("freeze requires unfrozen READY samples: " + ", ".join(invalid))
+            now = utc_now()
+            connection.execute(
+                f"""UPDATE adjudication_samples
+                    SET status='FROZEN',freeze_id=?,updated_at=?
+                    WHERE sample_id IN ({placeholders})""",
+                (freeze_id, now, *ordered),
+            )
+            connection.commit()
+        return len(ordered)
+
     def start_worker_cycle(self) -> str:
         cycle_id = f"cycle-{uuid.uuid4().hex}"
         with closing(self.connect()) as connection:
