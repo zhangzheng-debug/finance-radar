@@ -5,6 +5,8 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.18.1
+
 - Added a canonical owner-intent and system doctrine that reconstructs the
   product's evolution from the original personal multi-asset evidence radar,
   defines short-research specialization as adverse-risk human-review routing
@@ -18,6 +20,16 @@ Releases use the same version prefixed by `v`.
   showed that the repository is public: future production recovery archives
   belong in a separately controlled private store, while the legacy encrypted
   asset is left untouched pending a separate retention or removal decision.
+- Bound Evidence Agent support edges to both the target issuer and a meaningful
+  claim relationship; unrelated primary-source text now remains unmatched
+  instead of creating an `EVIDENCE_READY` false positive.
+- Bound formal light-verification event predicates to the target issuer in the
+  same local clause and added customer, vendor and subsidiary counterexamples.
+- Retired the continuous worker's legacy config-to-canonical write path. The
+  105 historical rows are now reported as unproven review hints rather than
+  authentic-human labels or formal write authority.
+- Added a read-only history audit that identifies stale agent decisions and
+  light-verification records requiring review without rewriting history.
 
 ## 2026.08.15.4
 
