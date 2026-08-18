@@ -12,9 +12,13 @@ deployment. Before any release or incident action, identify the authenticated
 AWS account and region and verify the target instance, active release, systemd
 units, Nginx candidate, worker cycle, database integrity, and restore receipt.
 
-The accepted tagged recovery baseline remains `v2026.07.22.2`. The current
-development branch is unreleased until its exact SHA passes local and GitHub
-gates and is separately deployed and accepted on the target host.
+Do not encode a permanent "current" tag in this runbook. The latest accepted
+release and recovery baseline are the timestamped facts in `CURRENT_STATE.md`,
+and they must still be rechecked on the authenticated host before an action.
+At the 2026-08-18 audit the deployed tag remained `v2026.08.15.4`; that dated
+observation is not authority to skip a later live check. A development branch
+remains unreleased until its exact SHA passes local and GitHub gates and is
+separately deployed and accepted on the target host.
 
 ## Release order
 

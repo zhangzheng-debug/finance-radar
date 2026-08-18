@@ -1,10 +1,48 @@
 # Finance Radar current state
 
-状态日期：2026-08-15（Asia/Singapore）
+状态日期：2026-08-18（Asia/Singapore）
 
-生产核验窗口：2026-08-15 05:35–05:50 UTC
+最近完整部署验收窗口：2026-08-15 05:35–05:50 UTC
+
+最近只读运行复核窗口：2026-08-18 03:25–03:31 UTC
 
 运行版本：`2026.08.15.4`
+
+## 2026-08-18 AWS 与恢复现场复核
+
+核验窗口：2026-08-18 03:25–03:31 UTC。以下是本次重新取得的现场证据，
+不是对 2026-08-15 快照的推断：
+
+- 美国 `us-east-1` 的 `i-0fa9bfafa5eab00bf`（`us-vpn-news-1`）正在运行，
+  实例类型 `t3.micro`，状态检查 `3/3` 通过，可用区 `us-east-1c`；唯一 EIP
+  `18.208.34.152` 仍绑定该实例。
+- 唯一根卷为 `vol-0ee52134d18962a6c`，`gp3 40 GiB / 3000 IOPS /
+  125 MiB/s`，状态正常、正在使用；AWS 控制台显示该卷未加密。主机内约
+  `26/38 GiB` 已用（69%），约 12 GiB 可用。
+- Nginx、API、Public Web、Worker 与每日备份计时器均为 active/enabled；
+  Worker 为 `NRestarts=0 / ExecMainStatus=0`，当前约 369 MiB、峰值约
+  382 MiB。主机约 444 MiB 内存可用，2 GiB swap 使用约 412 MiB，过去
+  24 小时内核日志未发现 OOM。
+- 最新服务器备份 `backup-4dffdf3c1c304113936a7ffb9e2aa049` 在
+  `2026-08-17T05:43:09Z` 完成完整恢复验证，`quick_check=ok`，恢复包约
+  7.67 GB；恢复计数为 13,368 个事件、13,841 条证据、22,554 个事件版本。
+  备份单元明确使用 `--retention 1 --weekly-retention 0`，上次结果 success，
+  下一次定时运行计划在 2026-08-18 05:46 UTC 左右。
+- 新加坡 `ap-southeast-1` 现场清单为：EC2 0、EBS 卷 0、EIP 0、账户自有
+  EBS 快照 0。未重新创建已退出的新加坡拓扑。
+- 公网 `/radar/` 与 Streamlit health 返回 200；FastAPI、Admin、Reviewer、
+  Operator 公网路径均返回 404。生产仍是 release
+  `20260815T051127Z-ceb9f577b548` / `2026.08.15.4`。
+
+本次同时确认两个未闭合边界：
+
+- Worker 仍持续采集，但最新周期因一个失效原始页面 404（以及个别 SEC 请求
+  超时）返回 `DEGRADED`；这不等于 Worker 停止，也不能被写成完全健康。
+- 三个 Windows Finance Radar 计划任务仍为 Disabled，避免终端弹窗；
+  `D:\FinanceRadarBackups` 当前不存在。公网 `/radar/offhost-status.json` 仍
+  暴露 2026-07-22 的过期 `VERIFIED` JSON，因此它不是当前异机恢复证明。
+  在隐藏任务、密钥分离、单份保留和新鲜 D 盘恢复验证完成前不得重新启用旧任务，
+  也不得先删除公共 Release 中可能仍是唯一异机副本的旧密文。
 
 ## 2026-08-17 仓库可见性补充核验
 
