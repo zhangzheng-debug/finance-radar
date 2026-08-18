@@ -133,7 +133,7 @@
       "review_output_may_mutate_canonical": false,
       "requires_scoped_expiring_authorization_for_formalization": true,
       "continuous_worker_may_apply": false,
-      "implementation_contract_version": "light-evidence-gate-v2",
+      "implementation_contract_version": "light-evidence-gate-v3-subject-bound",
       "formalization_event_type_allowlist": [
         "bankruptcy_liquidation",
         "delisted",

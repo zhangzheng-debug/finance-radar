@@ -28,8 +28,8 @@ from app.services import (
     run_shadow_batch,
 )
 from app.storage import EvidenceObjectStore, LedgerRepository, OperationsRepository
+from app.services.evidence_agent import PROMPT_VERSION as EVIDENCE_AGENT_CONTRACT_VERSION
 from apply_live_asset_relations import apply_relations
-from apply_live_primary_adjudications import apply_rows
 from build_live_evidence_review import build_rows, write_outputs
 from build_live_review_triage import build as build_review_triage
 from build_live_review_triage import write_outputs as write_triage_outputs
@@ -224,6 +224,8 @@ def decision_matches_current_evidence_receipt(
     output = decision.get("output")
     if not isinstance(output, dict):
         return False
+    if str(decision.get("prompt_version") or output.get("prompt_version") or "") != EVIDENCE_AGENT_CONTRACT_VERSION:
+        return False
     try:
         recorded_version = int(output.get("event_version"))
     except (TypeError, ValueError):
@@ -243,6 +245,20 @@ def decision_matches_current_evidence_receipt(
         current_version,
         current_evidence,
     )
+
+
+def deferred_legacy_adjudications(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Report legacy config rows without granting a continuous worker write authority."""
+
+    return {
+        "requested": len(rows),
+        "applied": 0,
+        "already_applied": 0,
+        "status": "LEGACY_REVIEW_CONFIG_UNPROVEN_PROVENANCE",
+        "continuous_worker_write_authority": False,
+        "formal_mutation_attempted": False,
+        "next_action": "explicit_operator_provenance_audit",
+    }
 
 
 def run_pending_evidence_agents(
@@ -457,7 +473,7 @@ def run_cycle(
     adjudication_rows = load_json(
         ROOT / "config" / "live_primary_adjudications.json"
     )["adjudications"]
-    result["adjudications"] = apply_rows(connection, adjudication_rows)
+    result["adjudications"] = deferred_legacy_adjudications(adjudication_rows)
 
     if sec_user_agent and operations is not None and evidence_object_store is not None:
         snapshots = archive_evidence_sources(

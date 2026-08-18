@@ -1,24 +1,16 @@
 #!/usr/bin/env python3
-"""Apply reviewed P0/P1 evidence to live candidates without automatic verification."""
+"""Audit retired legacy review config without mutating canonical event truth."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
-from event_ledger import (
-    link_event_chain_member,
-    open_ledger,
-    record_source_observation,
-    stable_id,
-    stable_json,
-    upsert_event_chain,
-    upsert_source,
-    utc_now,
-)
+from event_ledger import stable_json
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,228 +52,130 @@ def validate_scores(row: dict[str, Any]) -> tuple[dict[str, int], int]:
     return normalized, total
 
 
-def apply_rows(connection: Any, rows: list[dict[str, Any]]) -> dict[str, int]:
-    result = {"requested": len(rows), "applied": 0, "already_applied": 0}
+REQUIRED_PROVENANCE_FIELDS = {
+    "authorization_id",
+    "evidence_fingerprint",
+    "event_version",
+    "reviewed_at",
+    "reviewer_id",
+    "source_sha256",
+}
+LEGACY_STATUS = "LEGACY_REVIEW_CONFIG_UNPROVEN_PROVENANCE"
+
+
+def open_audit_ledger(path: Path) -> sqlite3.Connection:
+    """Open the retired-config audit input without schema or WAL side effects."""
+
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    connection = sqlite3.connect(
+        f"file:{path.resolve().as_posix()}?mode=ro",
+        uri=True,
+        timeout=30,
+    )
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def _row_provenance_issues(row: dict[str, Any], event: Any) -> list[str]:
+    issues = [
+        f"missing_{field}"
+        for field in sorted(REQUIRED_PROVENANCE_FIELDS)
+        if not row.get(field)
+    ]
+    if event is None:
+        return [*issues, "unknown_event_id"]
+    if row.get("event_version") is not None:
+        try:
+            if int(row["event_version"]) != int(event["current_version"]):
+                issues.append("event_version_mismatch")
+        except (TypeError, ValueError):
+            issues.append("event_version_invalid")
+    claimed_sha256 = str(row.get("source_sha256") or "").lower()
+    if claimed_sha256:
+        payload = dict(row)
+        payload.pop("source_sha256", None)
+        computed = hashlib.sha256(stable_json(payload).encode("utf-8")).hexdigest()
+        if claimed_sha256 != computed:
+            issues.append("source_sha256_mismatch")
+    return issues
+
+
+def audit_rows(connection: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Classify legacy rows; never update ledger, evidence, jobs or assessments."""
+
+    result: dict[str, Any] = {
+        "requested": len(rows),
+        "audited": 0,
+        "unproven": 0,
+        "status": LEGACY_STATUS,
+        "canonical_mutation_allowed": False,
+        "formal_mutation_attempted": False,
+        "rows": [],
+    }
     for row in rows:
         scores, score_total = validate_scores(row)
         event = connection.execute(
             "SELECT * FROM canonical_events WHERE event_id=?", (row["event_id"],)
         ).fetchone()
-        if event is None:
-            raise ValueError(f"Unknown event_id: {row['event_id']}")
-        if row["status"] != "verified":
-            raise ValueError("This importer only accepts manually reviewed verified rows")
-        chain = row.get("event_chain")
-        if chain is not None:
-            required = {
-                "chain_id",
-                "chain_type",
-                "canonical_key",
-                "chain_role",
-                "counts_as_primary_event",
-                "rationale",
+        issues = _row_provenance_issues(row, event)
+        if str(row.get("status") or "") != "verified":
+            issues.append("legacy_status_not_verified")
+        result["audited"] += 1
+        if issues:
+            result["unproven"] += 1
+        result["rows"].append(
+            {
+                "event_id": row.get("event_id"),
+                "config_sha256": hashlib.sha256(
+                    stable_json(row).encode("utf-8")
+                ).hexdigest(),
+                "configured_score_total": score_total,
+                "configured_scores": scores,
+                "canonical_status": event["status"] if event is not None else None,
+                "canonical_version": int(event["current_version"]) if event is not None else None,
+                "provenance_status": "PROVEN" if not issues else LEGACY_STATUS,
+                "issues": issues,
             }
-            if not isinstance(chain, dict) or not required.issubset(chain):
-                raise ValueError(f"{row['event_id']} has an invalid event_chain object")
-            upsert_event_chain(
-                connection,
-                chain_id=str(chain["chain_id"]),
-                chain_type=str(chain["chain_type"]),
-                canonical_key=str(chain["canonical_key"]),
-            )
-            link_event_chain_member(
-                connection,
-                chain_id=str(chain["chain_id"]),
-                event_id=row["event_id"],
-                chain_role=str(chain["chain_role"]),
-                counts_as_primary_event=bool(chain["counts_as_primary_event"]),
-                rationale=str(chain["rationale"]),
-            )
-        upsert_source(
-            connection,
-            source_id=row["source_id"],
-            name=row["source_name"],
-            source_type=row["source_type"],
-            authority_tier=row["authority_tier"],
         )
-        payload = stable_json(row)
-        observation_id, _ = record_source_observation(
-            connection,
-            source_id=row["source_id"],
-            external_id=row["external_id"],
-            source_published_at=row["event_date"],
-            local_received_at=utc_now(),
-            title=row["evidence_title"],
-            summary=row["evidence_passage"],
-            canonical_url=row["evidence_url"],
-            content_sha256=hashlib.sha256(payload.encode("utf-8")).hexdigest(),
-            raw_json=payload,
-            revision_kind="edit",
-        )
-        evidence_id = stable_id("EVID", row["event_id"], observation_id)
-        confirmed_evidence = connection.execute(
-            """SELECT 1 FROM event_evidence
-               WHERE evidence_id=? AND evidence_status='confirmed_primary'""",
-            (evidence_id,),
-        ).fetchone()
-        already = bool(
-            confirmed_evidence
-            and event["status"] == "verified"
-            and event["label_status"] == "verified"
-            and event["event_family"] == row["event_family"]
-            and event["event_type"] == row["event_type"]
-            and event["manual_grade"] == row["manual_grade"]
-        )
-        now = utc_now()
-        connection.execute(
-            """INSERT OR IGNORE INTO event_observations(
-               event_id,observation_id,relation_type,linked_at
-               ) VALUES (?,?,'confirming_primary_evidence',?)""",
-            (row["event_id"], observation_id, now),
-        )
-        connection.execute(
-            """INSERT INTO event_evidence(
-               evidence_id,event_id,observation_id,evidence_url,filing_date,form,items,
-               evidence_passage,matched_keywords,passage_score,evidence_status,
-               auto_verification_allowed,created_at,updated_at
-               ) VALUES (?,?,?,?,?,NULL,NULL,?,NULL,NULL,'confirmed_primary',0,?,?)
-               ON CONFLICT(evidence_id) DO UPDATE SET
-                 evidence_passage=excluded.evidence_passage,
-                 evidence_status='confirmed_primary',auto_verification_allowed=0,
-                 updated_at=excluded.updated_at""",
-            (
-                evidence_id,
-                row["event_id"],
-                observation_id,
-                row["evidence_url"],
-                row["event_date"],
-                row["evidence_passage"],
-                now,
-                now,
-            ),
-        )
-        assessment_version = int(event["current_version"]) if already else int(event["current_version"]) + 1
-        assessment_id = stable_id("ASSESS", row["event_id"], str(assessment_version))
-        connection.execute(
-            """INSERT INTO event_assessments(
-               assessment_id,event_id,event_version,severity_grade,credibility_tier,
-               r_score,l_score,e_score,c_score,p_score,x_score,score_total,
-               assessed_by,rationale,created_at
-               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-               ON CONFLICT(event_id,event_version) DO UPDATE SET
-                 severity_grade=excluded.severity_grade,
-                 credibility_tier=excluded.credibility_tier,
-                 r_score=excluded.r_score,l_score=excluded.l_score,e_score=excluded.e_score,
-                 c_score=excluded.c_score,p_score=excluded.p_score,x_score=excluded.x_score,
-                 score_total=excluded.score_total,rationale=excluded.rationale""",
-            (
-                assessment_id,
-                row["event_id"],
-                assessment_version,
-                row["manual_grade"],
-                row["credibility_tier"],
-                scores["R"],
-                scores["L"],
-                scores["E"],
-                scores["C"],
-                scores["P"],
-                scores["X"],
-                score_total,
-                "manual_review_config",
-                row["score_rationale"],
-                now,
-            ),
-        )
-        if already:
-            result["already_applied"] += 1
-            continue
-        version = int(event["current_version"]) + 1
-        facts = {
-            "confirmed_facts": row["confirmed_facts"],
-            "unconfirmed_facts": row["unconfirmed_facts"],
-            "primary_evidence_url": row["evidence_url"],
-            "manual_reviewed": True,
-            "auto_verification_allowed": False,
-            "no_trading": True,
-        }
-        connection.execute(
-            """UPDATE canonical_events SET
-               current_version=?,status='verified',label_status='verified',event_family=?,
-               event_type=?,event_date=?,last_updated_at=?,ticker_at_event=?,company_name=?,
-               manual_grade=?,provisional_grade_cap=?,no_trading=1
-               WHERE event_id=?""",
-            (
-                version,
-                row["event_family"],
-                row["event_type"],
-                row["event_date"],
-                now,
-                row.get("ticker_at_event"),
-                row.get("company_name"),
-                row["manual_grade"],
-                row["manual_grade"],
-                row["event_id"],
-            ),
-        )
-        connection.execute(
-            """INSERT INTO event_versions(
-               event_id,version,changed_at,status,label_status,event_family,event_type,
-               manual_grade,facts_json,change_reason
-               ) VALUES (?,? ,?,'verified','verified',?,?,?,?,'manual_primary_evidence_review')""",
-            (
-                row["event_id"],
-                version,
-                now,
-                row["event_family"],
-                row["event_type"],
-                row["manual_grade"],
-                stable_json(facts),
-            ),
-        )
-        connection.execute(
-            """UPDATE pipeline_jobs SET status='COMPLETED_MANUAL_ADJUDICATION',
-               attempts=attempts+1,last_error=NULL,updated_at=?
-               WHERE event_id=? AND job_type='live_primary_evidence_review'""",
-            (now, row["event_id"]),
-        )
-        result["applied"] += 1
-    connection.commit()
     return result
 
 
-def write_report(path: Path, rows: list[dict[str, Any]], result: dict[str, int]) -> None:
+def apply_rows(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+    raise PermissionError(
+        "legacy config-to-canonical mutation is retired; use scoped light formalization "
+        "or authenticated independent human adjudication"
+    )
+
+
+def write_report(path: Path, rows: list[dict[str, Any]], result: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# Live Primary Adjudications",
+        "# Legacy Live Primary Adjudication Audit",
         "",
         f"- Requested: `{result['requested']}`",
-        f"- Newly applied: `{result['applied']}`",
-        f"- Already applied: `{result['already_applied']}`",
-        "- All status changes require reviewed config rows; no model/API may auto-verify.",
+        f"- Audited: `{result['audited']}`",
+        f"- Unproven provenance: `{result['unproven']}`",
+        "- Canonical mutation allowed: `false`",
+        "- Formal mutation attempted: `false`",
+        "- Status: `LEGACY_REVIEW_CONFIG_UNPROVEN_PROVENANCE`",
         "",
-        "## Decisions",
+        "These rows are historical review hints only. They are not authentic-human labels,",
+        "training truth, or authority to change canonical event state.",
         "",
     ]
+    by_event = {str(item["event_id"]): item for item in result["rows"]}
     for row in rows:
-        chain_line = []
-        if row.get("event_chain"):
-            chain = row["event_chain"]
-            chain_line = [
-                f"- Event chain: `{chain['chain_id']}` / `{chain['chain_role']}` / "
-                f"primary_count=`{int(bool(chain['counts_as_primary_event']))}`"
-            ]
+        audit = by_event[str(row["event_id"])]
         lines.extend(
             [
                 f"### {row['company_name']} — {row['event_type']}",
                 "",
                 f"- Event: `{row['event_id']}`",
-                f"- Status/grade: `verified / {row['manual_grade']}`",
-                f"- Credibility: `{row['credibility_tier']}`",
-                f"- R/L/E/C/P/X: `{row['scores']['R']}/{row['scores']['L']}/{row['scores']['E']}/{row['scores']['C']}/{row['scores']['P']}/{row['scores']['X']}`",
-                f"- Primary evidence: {row['evidence_url']}",
-                f"- Confirmed: {'; '.join(row['confirmed_facts'])}",
-                f"- Still unconfirmed: {'; '.join(row['unconfirmed_facts']) or 'none'}",
-                *chain_line,
+                f"- Canonical status/version: `{audit['canonical_status']} / {audit['canonical_version']}`",
+                f"- Config SHA-256: `{audit['config_sha256']}`",
+                f"- Provenance status: `{audit['provenance_status']}`",
+                f"- Issues: `{', '.join(audit['issues']) or 'none'}`",
                 "",
             ]
         )
@@ -298,9 +192,9 @@ def main() -> int:
     rows = payload.get("adjudications")
     if not isinstance(rows, list):
         raise ValueError("Config requires an adjudications list")
-    connection = open_ledger(args.db)
+    connection = open_audit_ledger(args.db)
     try:
-        result = apply_rows(connection, rows)
+        result = audit_rows(connection, rows)
     finally:
         connection.close()
     write_report(args.report, rows, result)

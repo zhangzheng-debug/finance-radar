@@ -164,6 +164,37 @@ def test_evidence_receipt_fingerprint_binds_version_and_canonical_evidence_field
     assert fingerprint != evidence_receipt_fingerprint(7, changed)
 
 
+@pytest.mark.parametrize(
+    "unrelated_excerpt",
+    [
+        "The Federal Reserve published routine meeting minutes about monetary policy.",
+        "BETA CORPORATION filed a voluntary Chapter 11 petition in federal court.",
+        "Example Issuer published routine quarterly governance materials for shareholders.",
+    ],
+)
+def test_unrelated_or_wrong_issuer_primary_text_never_creates_support_edge(
+    unrelated_excerpt: str,
+) -> None:
+    operations = FakeOperations()
+    result = EvidenceAgent(
+        FakeLedger(excerpt=unrelated_excerpt),
+        operations,
+        FakeObjectStore(),
+    ).run("evt-model")
+
+    assert result["status"] == "INSUFFICIENT"
+    assert result["claims"][0]["verification_state"] == "INSUFFICIENT"
+    assert result["evidence_edges"] == []
+    assert result["unmatched_evidence"] == [
+        {
+            "evidence_id": "evidence-primary-1",
+            "reason": "NO_RELEVANT_CLAIM",
+            "relation_created": False,
+        }
+    ]
+    assert result["guardrails"]["zero_overlap_rejected"] is True
+
+
 def test_hallucinated_citation_rejects_entire_model_output_and_falls_back() -> None:
     def malicious_request(url: str, *, json: dict[str, Any], timeout: float) -> FakeResponse:
         graph = __import__("json").loads(json["messages"][1]["content"].split("\n", 1)[1])
