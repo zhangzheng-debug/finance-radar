@@ -10,6 +10,7 @@ from app.web.components import (
     age_label,
     event_keyboard_payload,
     event_button_label,
+    event_anchor_id,
     event_feed_row,
     evidence_route_markup,
     evidence_summary,
@@ -60,6 +61,7 @@ def test_event_feed_row_is_compact_linked_and_html_safe() -> None:
     assert 'target="_blank"' not in row
     assert "监管执法" in row
     assert "<script" not in row
+    assert f'id="{event_anchor_id("event/a?x=1")}"' in row
 
 
 def test_public_event_feed_row_hides_internal_codes_and_bounds_excerpt() -> None:
@@ -89,6 +91,21 @@ def test_public_event_feed_row_hides_internal_codes_and_bounds_excerpt() -> None
     assert "A" * 20 not in row
     assert "仍需核对原始文件" in row
     assert "为什么关注" in row
+
+
+def test_public_event_feed_row_marks_session_changes_without_internal_details() -> None:
+    row = event_feed_row(
+        {
+            "event_id": "changed-public-event",
+            "status": "candidate",
+            "event_family": "listing_status",
+            "company_name": "Changed Example",
+            "_changed_since_view": True,
+        },
+        public=True,
+    )
+    assert "自上次查看有更新" in row
+    assert "is-changed" in row
 
 
 def test_public_flow_shortcuts_use_reader_facing_labels() -> None:

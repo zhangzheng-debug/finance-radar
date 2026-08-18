@@ -44,12 +44,13 @@ def test_internal_pages_and_backend_are_denied_at_public_edge() -> None:
         assert "proxy_pass http://127.0.0.1:18000" not in source
 
 
-def test_offhost_status_is_the_only_explicit_public_operational_artifact() -> None:
+def test_offhost_status_is_denied_at_the_public_edge() -> None:
     for relative in (
         "deployment/systemd/nginx-radar-direct.conf",
         "deployment/systemd/nginx-radar-locations.conf",
     ):
         source = (ROOT / relative).read_text(encoding="utf-8")
         assert "location = /radar/offhost-status.json" in source
-        assert "alias /var/www/finance-radar-terminal/offhost-status.json" in source
-        assert 'add_header Cache-Control "no-store" always' in source
+        block = source.split("location = /radar/offhost-status.json", 1)[1].split("}", 1)[0]
+        assert "return 404;" in block
+        assert "alias " not in block

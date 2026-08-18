@@ -5,7 +5,9 @@ param(
     [Parameter(Mandatory = $true)][string]$RequiredRelease,
     [string]$SshHost = $env:FINANCE_RADAR_SSH_HOST,
     [string]$IdentityFile = $env:FINANCE_RADAR_SSH_IDENTITY_FILE,
-    [string]$BackupRoot = "D:\FinanceRadarBackups"
+    [string]$BindAddress = "",
+    [string]$BackupRoot = "D:\FinanceRadarBackups",
+    [string]$PassphraseFile = "D:\FinanceRadarRecovery\finance-radar-backup-passphrase.txt"
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,6 +16,13 @@ if (-not $SshHost) {
 }
 if (-not $IdentityFile) {
     throw "IdentityFile is required; pass -IdentityFile or set FINANCE_RADAR_SSH_IDENTITY_FILE"
+}
+if ($BindAddress) {
+    $parsedBindAddress = $null
+    if (-not [System.Net.IPAddress]::TryParse($BindAddress, [ref]$parsedBindAddress) -or
+        $parsedBindAddress.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "BindAddress must be a valid IPv4 address"
+    }
 }
 $remoteUser = ($SshHost -split "@", 2)[0]
 $remotePrivilege = if ($remoteUser -eq "root") { "" } else { "sudo " }
@@ -27,6 +36,11 @@ if ($ExpectedSha256 -notmatch '^[0-9a-fA-F]{64}$') {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backupRoot = [System.IO.Path]::GetFullPath($BackupRoot)
+$PassphraseFile = [System.IO.Path]::GetFullPath($PassphraseFile)
+$backupRootPrefix = $backupRoot.TrimEnd('\') + '\'
+if ($PassphraseFile.StartsWith($backupRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "PassphraseFile must stay outside BackupRoot"
+}
 $auditWorkspaceRoot = [System.IO.Path]::GetFullPath("D:\FinanceRadarScratch\migration-audit")
 $destination = [System.IO.Path]::GetFullPath((Join-Path $backupRoot $Stamp))
 $rootPrefix = $backupRoot.TrimEnd('\') + '\'
@@ -37,7 +51,7 @@ if (-not $destination.StartsWith($rootPrefix, [System.StringComparison]::Ordinal
 $plain = Join-Path $destination "finance-radar-migration-$Stamp.tgz"
 $encrypted = "$plain.aesgcm"
 $roundTrip = Join-Path $destination "roundtrip-verify.tgz"
-$passphrase = Join-Path $backupRoot ".backup-passphrase"
+$passphrase = $PassphraseFile
 foreach ($required in @($plain, $passphrase, $IdentityFile)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "required file missing: $required"
@@ -112,44 +126,30 @@ $verification = [ordered]@{
 }
 $verification | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination "offhost-verification.json") -Encoding UTF8
 
-$publicStatus = [ordered]@{
-    schema_version = 2
-    status = "VERIFIED"
-    verified_at = $verification.created_at
-    backup_stamp = $Stamp
-    archive_sha256 = $actualSha256
-    full_restore_verified = $true
-    encrypted_at_rest = $true
-    archive_entries = @($listing).Count
-    required_release = $RequiredRelease
-    model_version = $verification.model_version
-    external_blind_gate_pass = $verification.external_blind_gate_pass
-    external_blind_promotion = $verification.external_blind_promotion
-    ledger_events = $verification.ledger_events
-    ledger_evidence = $verification.ledger_evidence
-}
-$publicStatusPath = Join-Path $destination "offhost-status.json"
-$publicStatus | ConvertTo-Json | Set-Content -LiteralPath $publicStatusPath -Encoding UTF8
-$remoteStatus = "/tmp/finance-radar-offhost-status-$Stamp.json"
-& scp -i $IdentityFile $publicStatusPath "${SshHost}:$remoteStatus"
-if ($LASTEXITCODE -ne 0) {
-    throw "could not stage the public off-host verification status"
-}
-& ssh -i $IdentityFile $SshHost `
-    "${remotePrivilege}install -d -m 0755 /var/www/finance-radar-terminal && ${remotePrivilege}install -m 0644 '$remoteStatus' /var/www/finance-radar-terminal/offhost-status.json && rm -f -- '$remoteStatus'"
-if ($LASTEXITCODE -ne 0) {
-    throw "could not publish the public off-host verification status"
-}
-
 # Paths are fixed, absolute children of the verified destination.
 Remove-Item -LiteralPath $roundTrip -Force
 Remove-Item -LiteralPath $plain -Force
 
 $remoteStage = "/var/tmp/finance-radar-migration-$Stamp"
 $remoteArchive = "$remoteStage.tgz"
-& ssh -i $IdentityFile $SshHost "${remotePrivilege}rm -rf -- '$remoteStage' && ${remotePrivilege}rm -f -- '$remoteArchive'"
+$sshOptions = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=20")
+if ($BindAddress) {
+    $sshOptions += @("-o", "BindAddress=$BindAddress")
+}
+& ssh @sshOptions -i $IdentityFile $SshHost "${remotePrivilege}rm -rf -- '$remoteStage' && ${remotePrivilege}rm -f -- '$remoteArchive'"
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "local encrypted copy is verified, but remote temporary cleanup failed"
+}
+
+$oldDirectories = Get-ChildItem -LiteralPath $backupRoot -Directory |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -Skip 1
+foreach ($directory in $oldDirectories) {
+    $resolved = [System.IO.Path]::GetFullPath($directory.FullName)
+    if (-not $resolved.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "refusing to prune outside backup root: $resolved"
+    }
+    Remove-Item -LiteralPath $resolved -Recurse -Force
 }
 
 $verification | ConvertTo-Json

@@ -1,16 +1,18 @@
 # GitHub backup and release workflow
 
 This repository separates maintainable source history from large immutable
-backup artifacts. That makes ordinary clones small while preserving a complete
-recovery point in GitHub Releases.
+backup artifacts. That makes ordinary clones small while public Releases carry
+only artifacts that are safe for public distribution. Production recovery data
+uses a separately controlled private store.
 
 ## Repository model
 
 - `main`: reviewed, reproducible baseline
 - `codex/<topic>` or another short feature branch: one focused update
 - tag `vYYYY.MM.DD.N`: accepted backup/release point
-- GitHub Release with the same tag: deploy/demo/evidence archives and, when
-  needed, the encrypted migration snapshot
+- public GitHub Release with the same tag: public deploy/demo/evidence archives
+- separate private repository/object store: encrypted production migration
+  snapshots, with passphrases held somewhere else
 
 Never develop by editing a generated deployment archive. Change the source
 tree, run tests, build a new archive, then publish a new tag and Release.
@@ -43,9 +45,12 @@ change.
 5. Generate a new `release/*.json` manifest containing filenames, byte sizes,
    and SHA-256 values; never include a passphrase.
 6. Commit and merge the metadata.
-7. Create the matching annotated tag and private GitHub Release.
-8. Upload large archives as Release assets, then download or query them once to
-   confirm asset names and sizes.
+7. Create the matching annotated tag and public GitHub Release.
+8. Upload only artifacts reviewed as safe for public distribution, then
+   download or query them once to confirm asset names, sizes and digests.
+9. Move the encrypted production migration snapshot to the separately
+   controlled private recovery store and verify its identity there. Never
+   upload it to this repository's Release.
 
 Example after the version commit is on `main`:
 
@@ -59,8 +64,9 @@ gh release upload "v$version" <archive-paths> --clobber
 
 ## Recovery rule
 
-The Git repository restores development history. The encrypted migration asset
-restores production history and server runtime. The passphrase must come from
-the operator-controlled recovery location described in
+The Git repository and public Release restore development and public deployment
+artifacts. The encrypted migration asset in the separate private store restores
+production history and server runtime. The passphrase must come from a different
+operator-controlled recovery location described in
 `docs/SERVER_MIGRATION_HANDOFF.md`; GitHub alone must never be sufficient to
 decrypt production data.

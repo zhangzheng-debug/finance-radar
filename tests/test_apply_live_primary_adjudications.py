@@ -79,36 +79,34 @@ class LivePrimaryAdjudicationTests(unittest.TestCase):
             },
         }
 
-    def test_reviewed_evidence_scores_and_version_are_idempotent(self) -> None:
-        first = adjudicator.apply_rows(self.connection, [self.row()])
-        second = adjudicator.apply_rows(self.connection, [self.row()])
-        self.assertEqual(first["applied"], 1)
-        self.assertEqual(second["already_applied"], 1)
+    def test_legacy_config_is_audited_without_mutating_canonical_truth(self) -> None:
+        first = adjudicator.audit_rows(self.connection, [self.row()])
+        second = adjudicator.audit_rows(self.connection, [self.row()])
+        self.assertEqual(first["audited"], 1)
+        self.assertEqual(first["unproven"], 1)
+        self.assertEqual(second, first)
+        self.assertFalse(first["canonical_mutation_allowed"])
+        self.assertFalse(first["formal_mutation_attempted"])
+        self.assertIn("missing_reviewer_id", first["rows"][0]["issues"])
         event = self.connection.execute("SELECT * FROM canonical_events").fetchone()
-        self.assertEqual(event["status"], "verified")
-        self.assertEqual(event["current_version"], 2)
-        assessment = self.connection.execute("SELECT * FROM event_assessments").fetchone()
-        self.assertEqual(assessment["score_total"], 5)
-        self.assertEqual(assessment["severity_grade"], "A")
+        self.assertEqual(event["status"], "candidate")
+        self.assertEqual(event["current_version"], 1)
+        self.assertIsNone(self.connection.execute("SELECT * FROM event_assessments").fetchone())
         self.assertEqual(
-            self.connection.execute("SELECT COUNT(*) FROM event_versions").fetchone()[0], 2
+            self.connection.execute("SELECT COUNT(*) FROM event_versions").fetchone()[0], 1
         )
-        chain = self.connection.execute("SELECT * FROM event_chains").fetchone()
-        member = self.connection.execute("SELECT * FROM event_chain_members").fetchone()
-        self.assertEqual(chain["primary_event_id"], "evt")
-        self.assertEqual(member["chain_role"], "primary_event")
-        self.assertEqual(member["counts_as_primary_event"], 1)
+        with self.assertRaises(PermissionError):
+            adjudicator.apply_rows(self.connection, [self.row()])
 
-    def test_manual_grade_may_conflict_with_rule_priority(self) -> None:
+    def test_audit_preserves_grade_conflict_as_non_authoritative_metadata(self) -> None:
         row = self.row()
         row["manual_grade"] = "S"
-        result = adjudicator.apply_rows(self.connection, [row])
-        self.assertEqual(result["applied"], 1)
-        assessment = self.connection.execute("SELECT * FROM event_assessments").fetchone()
-        self.assertEqual(assessment["score_total"], 5)
-        self.assertEqual(assessment["severity_grade"], "S")
+        result = adjudicator.audit_rows(self.connection, [row])
+        self.assertEqual(result["rows"][0]["configured_score_total"], 5)
+        self.assertEqual(result["rows"][0]["provenance_status"], adjudicator.LEGACY_STATUS)
+        self.assertIsNone(self.connection.execute("SELECT * FROM event_assessments").fetchone())
 
-    def test_preexisting_evidence_row_does_not_block_manual_adjudication(self) -> None:
+    def test_audit_does_not_rewrite_preexisting_evidence(self) -> None:
         upsert_source(
             self.connection,
             source_id="official",
@@ -155,15 +153,15 @@ class LivePrimaryAdjudicationTests(unittest.TestCase):
             ),
         )
         self.connection.commit()
-        result = adjudicator.apply_rows(self.connection, [self.row()])
-        self.assertEqual(result["applied"], 1)
+        result = adjudicator.audit_rows(self.connection, [self.row()])
+        self.assertEqual(result["audited"], 1)
         event = self.connection.execute("SELECT * FROM canonical_events").fetchone()
         evidence = self.connection.execute(
             "SELECT * FROM event_evidence WHERE evidence_id=?", (evidence_id,)
         ).fetchone()
-        self.assertEqual(event["status"], "verified")
+        self.assertEqual(event["status"], "candidate")
         self.assertEqual(evidence["evidence_status"], "confirmed_primary")
-        self.assertEqual(evidence["evidence_passage"], self.row()["evidence_passage"])
+        self.assertEqual(evidence["evidence_passage"], "Machine extracted passage")
 
 
 if __name__ == "__main__":

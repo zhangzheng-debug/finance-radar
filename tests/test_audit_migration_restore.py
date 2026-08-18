@@ -9,7 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from scripts.audit_migration_restore import _validate_link, audit_archive, render_markdown
+from scripts.audit_migration_restore import (
+    CAPTURE_LIMIT,
+    MAX_UNPACKED_BYTES,
+    _stream_regular_file,
+    _validate_link,
+    audit_archive,
+    render_markdown,
+)
 from scripts.backup_crypto import encrypt_file
 
 
@@ -442,3 +449,10 @@ def test_restore_audit_allows_only_expected_absolute_shared_links() -> None:
     member.linkname = "/etc/passwd"
     with pytest.raises(ValueError, match="unsafe archive link target"):
         _validate_link(member, f"finance-radar-migration-{STAMP}")
+
+
+def test_restore_audit_limits_match_the_bounded_full_recovery_contract() -> None:
+    assert MAX_UNPACKED_BYTES == 12 * 1024 * 1024 * 1024
+    assert CAPTURE_LIMIT == 16 * 1024 * 1024
+    with pytest.raises(ValueError, match="captured archive member exceeds safety limit"):
+        _stream_regular_file(io.BytesIO(b"x" * (CAPTURE_LIMIT + 1)), capture=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import hashlib
 import secrets
 import time
 import uuid
@@ -15,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app import __version__
 from app.config import Settings
@@ -99,8 +100,8 @@ class EvidenceAgentRunRequest(BaseModel):
 
 
 class AdjudicationReviewRequest(BaseModel):
-    reviewer_id: str = Field(min_length=2, max_length=80)
-    role: Literal["REVIEWER", "ARBITER"] = "REVIEWER"
+    model_config = ConfigDict(extra="forbid")
+
     materiality: Literal["MATERIAL_ADVERSE", "NOT_MATERIAL_ADVERSE", "UNCLEAR"]
     polarity: Literal["ADVERSE", "POSITIVE", "NEUTRAL", "MIXED", "UNCLEAR"]
     evidence_state: Literal[
@@ -325,6 +326,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> None:
         if settings.admin_token and secrets.compare_digest(x_admin_token or "", settings.admin_token):
             return
+        if any(
+            secrets.compare_digest(x_reviewer_token or "", token)
+            for _principal_id, _role, token in settings.reviewer_principals
+        ):
+            return
         if not settings.reviewer_token:
             if settings.admin_token:
                 raise HTTPException(
@@ -343,6 +349,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 403,
                 {"code": "REVIEWER_TOKEN_REQUIRED", "message": "valid X-Reviewer-Token required"},
             )
+
+    def require_bound_reviewer_principal(
+        x_reviewer_token: str | None = Header(default=None),
+    ) -> dict[str, str]:
+        """Resolve one immutable human principal and role from its credential.
+
+        Admin and legacy shared reviewer tokens intentionally cannot submit
+        human labels. They may inspect readiness, but human independence must
+        be established by separate credentials configured for each person.
+        """
+
+        if not settings.reviewer_principals:
+            raise HTTPException(
+                503,
+                {
+                    "code": "BOUND_REVIEWER_PRINCIPALS_DISABLED",
+                    "message": "credential-bound human reviewer principals are not configured",
+                },
+            )
+        supplied = x_reviewer_token or ""
+        for principal_id, role, token in settings.reviewer_principals:
+            if secrets.compare_digest(supplied, token):
+                principal_hash = hashlib.sha256(
+                    f"finance-radar-reviewer-principal-v1:{principal_id.casefold()}".encode("utf-8")
+                ).hexdigest()
+                return {
+                    "principal_hash": principal_hash,
+                    "principal_alias": f"human-{principal_hash[:10]}",
+                    "role": role,
+                }
+        raise HTTPException(
+            403,
+            {
+                "code": "BOUND_REVIEWER_PRINCIPAL_REQUIRED",
+                "message": "a valid credential-bound reviewer token is required",
+            },
+        )
 
     def require_operator(
         x_operator_token: str | None = Header(default=None),
@@ -517,6 +560,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "docs": "/docs",
                 "health": "/api/v1/health",
                 "boundary": "read-mostly intelligence; no trading endpoints",
+            },
+        )
+
+    @application.get("/api/v1/live")
+    def live(request: Request):
+        """Return process liveness without touching either production database."""
+        return envelope(
+            request,
+            {
+                "status": "ok",
+                "service": "finance-radar-api",
+                "service_version": __version__,
+                "database_checks": "not_run",
+                "boundary": "process-liveness-only",
             },
         )
 
@@ -894,18 +951,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get(
         "/api/v1/adjudication/queue",
-        dependencies=[Depends(require_reviewer)],
     )
     def adjudication_queue(
         request: Request,
-        reviewer_id: str = Query(min_length=2, max_length=80),
-        role: Literal["REVIEWER", "ARBITER"] = "REVIEWER",
         limit: int = Query(50, ge=1, le=200),
+        principal: dict[str, str] = Depends(require_bound_reviewer_principal),
     ):
         try:
             return envelope(
                 request,
-                adjudication.queue(reviewer_id, role=role, limit=limit),
+                adjudication.queue(
+                    principal["principal_hash"],
+                    role=principal["role"],
+                    limit=limit,
+                    principal_alias=principal["principal_alias"],
+                ),
             )
         except ValueError as exc:
             raise HTTPException(
@@ -915,23 +975,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.post(
         "/api/v1/adjudication/samples/{sample_id}/reviews",
-        dependencies=[Depends(require_reviewer)],
     )
     def submit_adjudication_review(
         request: Request,
         sample_id: str,
         payload: AdjudicationReviewRequest,
+        principal: dict[str, str] = Depends(require_bound_reviewer_principal),
     ):
         try:
             result = adjudication.submit_review(
                 sample_id,
-                reviewer_id=payload.reviewer_id,
-                role=payload.role,
+                reviewer_id=principal["principal_hash"],
+                role=principal["role"],
                 materiality=payload.materiality,
                 polarity=payload.polarity,
                 evidence_state=payload.evidence_state,
                 rationale=payload.rationale,
             )
+            result["reviewer_principal"] = principal["principal_alias"]
+            result["credential_bound"] = True
             return envelope(request, result)
         except KeyError as exc:
             raise HTTPException(

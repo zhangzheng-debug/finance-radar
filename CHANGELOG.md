@@ -5,6 +5,92 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+- Recorded the verified `2026.08.18.3` production activation and the new private
+  D-drive recovery point after a complete authenticated-decryption, manifest,
+  dual-SQLite and model hash-chain restore audit. The temporary `/32` SSH rule
+  was removed after transfer; the legacy public recovery ciphertext remains
+  untouched pending a separate destructive-action decision.
+
+## 2026.08.18.3
+
+- Moved the public shell ahead of aggregate API work, added bounded role-scoped
+  GET snapshots with explicit stale ages, and moved non-critical 30-day product
+  metrics after the event feed. Desktop, keyboard and 390 px browser checks now
+  cover the first-use path without allowing cached data to masquerade as fresh.
+- Bound every authentic-human review identity and role to a separate server-side
+  credential. Client-supplied reviewer aliases and roles are rejected, a shared
+  admin/reviewer token cannot impersonate a human, and reviews persist only a
+  stable principal hash. The Reviewer UI now requires that personal credential
+  in the current Streamlit session and never substitutes its static UI token.
+- Added the `human-blind-v3.1` event-time sample contract, primary-evidence
+  ordering, issuer/event-chain grouping gates, exact/near-duplicate exclusion,
+  balanced deterministic selection and one-way hash-bound freeze tooling.
+  Freezing fails closed unless every historical training, development and blind
+  manifest is present, and excludes their event, issuer and event-chain groups
+  as well as exact and near-duplicate text. The existing 24 legacy OPEN samples
+  remain visible as ineligible history; no authentic-human blind set is claimed.
+- Added same-page source-first reading continuity: event cards now have stable
+  return anchors, filters survive preview/return, the highest-authority source
+  is the explicit external jump, and a browser-session snapshot explains status,
+  version or evidence changes since the last view.
+- Let the Windows local launcher place logs on an explicit D-drive path so UI
+  and recovery QA do not consume the constrained C drive.
+- Made off-host migration creation reuse and independently reverify a fresh
+  full recovery bundle, use the root-backed `/var/tmp` for large SQLite checks,
+  and hard-link immutable payloads when possible so the one-copy server does
+  not needlessly duplicate several GiB during migration.
+- Added explicit local-interface binding to the Windows SSH/SCP recovery path,
+  kept all large audit workspaces on D:, and calibrated bounded restore limits
+  to the current evidence corpus while preserving path, member-count, manifest,
+  database-integrity and per-file hash gates.
+- Added the exact qualified SHADOW `risk_router.joblib` to traceable source and
+  made the binary, SHA declaration, model card and blind-v3 report mandatory
+  release-contract files. A source-only archive can no longer silently deploy
+  the keyword fallback while advertising the qualified model.
+
+## 2026.08.18.2
+
+- Added a database-free `/api/v1/live` probe and changed the transactional
+  installer to use it for process activation. The full health endpoint remains
+  available for database-backed operational assessment without turning a
+  five-second deployment probe into a self-amplifying query backlog.
+- Hardened the Windows off-host recovery task: it is hidden, non-interactive,
+  uses S4U instead of an interactive desktop session, keeps ciphertext on D:,
+  keeps the recovery passphrase outside the ciphertext tree, and retains one
+  fully restored daily copy only after its successor passes verification.
+- Removed public publication of detailed off-host receipts and made
+  `/radar/offhost-status.json` an explicit `404`; hashes, backup age, release
+  identifiers and ledger counts now remain operator-only recovery metadata.
+- Preserved the failed 2026-08-18 candidate's full pre-cutover recovery hold
+  after its database-heavy activation probe timed out, while automatically
+  restoring the previous release and all required services.
+
+## 2026.08.18.1
+
+- Added a canonical owner-intent and system doctrine that reconstructs the
+  product's evolution from the original personal multi-asset evidence radar,
+  defines short-research specialization as adverse-risk human-review routing
+  rather than a SHORT or trading signal, and separates stable rules from live
+  infrastructure facts and superseded decisions.
+- Added a machine-readable owner-intent policy and tests that preserve the
+  all-polarity evidence layer, advisory-only model boundary, review authority,
+  role isolation, one-copy verified daily backup, D-drive artifact policy and
+  action-specific authorization gates.
+- Corrected the obsolete private-Release assumption after live verification
+  showed that the repository is public: future production recovery archives
+  belong in a separately controlled private store, while the legacy encrypted
+  asset is left untouched pending a separate retention or removal decision.
+- Bound Evidence Agent support edges to both the target issuer and a meaningful
+  claim relationship; unrelated primary-source text now remains unmatched
+  instead of creating an `EVIDENCE_READY` false positive.
+- Bound formal light-verification event predicates to the target issuer in the
+  same local clause and added customer, vendor and subsidiary counterexamples.
+- Retired the continuous worker's legacy config-to-canonical write path. The
+  105 historical rows are now reported as unproven review hints rather than
+  authentic-human labels or formal write authority.
+- Added a read-only history audit that identifies stale agent decisions and
+  light-verification records requiring review without rewriting history.
+
 ## 2026.08.15.4
 
 - Published the production release at commit

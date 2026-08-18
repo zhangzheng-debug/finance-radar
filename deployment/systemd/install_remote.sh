@@ -1037,8 +1037,8 @@ retire_known_predecessor_vhost() {
         printf 'previous_vhost=RETIRED kind=%s archive=%s\n' \
             "$RETIRABLE_VHOST_KIND" "$retired_config"
     fi
-    # The current direct endpoint legitimately exposes only offhost-status and
-    # release.json below this directory.  Any remaining static-root reference
+    # The current direct endpoint legitimately exposes only release.json below
+    # this directory.  Any remaining static-root reference
     # means an unknown vhost would still be able to serve the retired shell.
     if nginx -T 2>&1 | grep -Eq \
         "(^|[[:space:]])root[[:space:]]+$PUBLIC_STATUS_DIR;|$PUBLIC_STATUS_DIR/index[.]html"; then
@@ -2040,7 +2040,7 @@ assert_edge_status() {
     [ "$status" = "$expected" ]
 }
 
-wait_for_url http://127.0.0.1:18000/api/v1/health || \
+wait_for_url http://127.0.0.1:18000/api/v1/live || \
     abort_cutover 'API health check failed after activation' 6
 wait_for_url http://127.0.0.1:18501/radar/_stcore/health || \
     abort_cutover 'public Web loopback health check failed after activation' 6
@@ -2079,6 +2079,7 @@ assert_public_release_marker || \
     abort_cutover 'public edge does not serve the candidate release fingerprint' 6
 for denied_path in \
     /finance-radar-api/ \
+    /radar/offhost-status.json \
     /radar-admin/ \
     /radar-review/ \
     /radar-ops/ \

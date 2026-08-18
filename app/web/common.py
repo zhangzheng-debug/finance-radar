@@ -4,7 +4,12 @@ import json
 import os
 import hashlib
 import re
+import time
+from collections import OrderedDict
+from copy import deepcopy
+from dataclasses import dataclass
 from html import escape
+from threading import RLock
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -25,6 +30,20 @@ UI_ROLE = _configured_ui_role if _configured_ui_role in UI_ROLES else "public"
 DEEP_LINK_STATE_KEY = "_finance_radar_deep_link"
 DESIGN_TOKENS_V3 = Path(__file__).with_name("design_tokens_v3.css").read_text(encoding="utf-8")
 STYLE_V3 = Path(__file__).with_name("style_v3.css").read_text(encoding="utf-8")
+
+
+@dataclass(frozen=True)
+class ApiCacheMetadata:
+    age_seconds: float
+    cache_hit: bool
+    stale: bool
+
+
+_API_GET_CACHE_MAX_ENTRIES = 64
+_api_get_cache: OrderedDict[
+    tuple[str, str, int], tuple[float, dict[str, Any]]
+] = OrderedDict()
+_api_get_cache_lock = RLock()
 
 
 PUBLIC_NAVIGATION: tuple[dict[str, str], ...] = (
@@ -320,7 +339,11 @@ def api_request(
     *,
     method: str = "GET",
     json_body: dict[str, Any] | None = None,
+    timeout_seconds: int = 20,
+    reviewer_credential: str | None = None,
 ) -> dict[str, Any]:
+    if not 1 <= int(timeout_seconds) <= 20:
+        raise ValueError("timeout_seconds must be between 1 and 20")
     normalized_method = method.upper()
     if normalized_method not in {"GET", "HEAD"}:
         reviewer_write = bool(
@@ -344,7 +367,14 @@ def api_request(
                 else "当前界面角色不允许此写入请求"
             )
     headers = {"Accept": "application/json"}
-    if UI_ROLE == "reviewer" and REVIEWER_TOKEN:
+    if reviewer_credential is not None:
+        if UI_ROLE not in {"reviewer", "admin"}:
+            raise ApiError("当前界面角色不允许使用人工审核凭据")
+        normalized_credential = reviewer_credential.strip()
+        if len(normalized_credential) < 24:
+            raise ApiError("人工审核凭据无效")
+        headers["X-Reviewer-Token"] = normalized_credential
+    elif UI_ROLE == "reviewer" and REVIEWER_TOKEN:
         headers["X-Reviewer-Token"] = REVIEWER_TOKEN
     elif UI_ROLE == "operator" and OPERATOR_TOKEN:
         headers["X-Operator-Token"] = OPERATOR_TOKEN
@@ -358,7 +388,7 @@ def api_request(
         f"{API_URL}{path}", method=normalized_method, headers=headers, data=body
     )
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with urllib.request.urlopen(request, timeout=int(timeout_seconds)) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise ApiError(f"API {exc.code}") from exc
@@ -381,6 +411,62 @@ def api_request(
     if not isinstance(data, dict):
         raise ApiError("API returned invalid data")
     return data
+
+
+def cached_api_get(
+    path: str,
+    *,
+    ttl_seconds: float = 15.0,
+    stale_if_error_seconds: float = 120.0,
+    timeout_seconds: int = 5,
+) -> tuple[dict[str, Any], ApiCacheMetadata]:
+    """Return a bounded, role-scoped GET snapshot with explicit freshness metadata.
+
+    Stale data is used only when a refresh fails and its age is within the
+    caller's stated bound. Callers must surface ``metadata.stale`` to users.
+    The loader identity is part of the key so Streamlit tests and role-specific
+    processes cannot reuse another caller's snapshot.
+    """
+
+    if not path.startswith("/"):
+        raise ValueError("cached API path must be absolute")
+    if ttl_seconds < 0 or stale_if_error_seconds < ttl_seconds:
+        raise ValueError("cache freshness bounds are invalid")
+    key = (UI_ROLE, path, id(api_request))
+    now = time.monotonic()
+    with _api_get_cache_lock:
+        cached = _api_get_cache.get(key)
+        if cached is not None:
+            cached_at, cached_data = cached
+            age = max(0.0, now - cached_at)
+            if age <= ttl_seconds:
+                _api_get_cache.move_to_end(key)
+                return deepcopy(cached_data), ApiCacheMetadata(age, True, False)
+
+    try:
+        fresh = api_request(path, timeout_seconds=timeout_seconds)
+    except Exception:
+        if cached is not None:
+            cached_at, cached_data = cached
+            age = max(0.0, time.monotonic() - cached_at)
+            if age <= stale_if_error_seconds:
+                return deepcopy(cached_data), ApiCacheMetadata(age, True, True)
+        raise
+
+    stored_at = time.monotonic()
+    with _api_get_cache_lock:
+        _api_get_cache[key] = (stored_at, deepcopy(fresh))
+        _api_get_cache.move_to_end(key)
+        while len(_api_get_cache) > _API_GET_CACHE_MAX_ENTRIES:
+            _api_get_cache.popitem(last=False)
+    return deepcopy(fresh), ApiCacheMetadata(0.0, False, False)
+
+
+def clear_api_get_cache() -> None:
+    """Clear process-local UI snapshots (primarily for deterministic tests)."""
+
+    with _api_get_cache_lock:
+        _api_get_cache.clear()
 
 
 def query_path(path: str, **params: Any) -> str:

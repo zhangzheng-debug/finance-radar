@@ -1,0 +1,358 @@
+{
+  "schema_version": 1,
+  "doctrine_version": "2026.08.17.1",
+  "status": "ACTIVE_CANONICAL",
+  "contract_scope": "repository_governance_audit_not_runtime_decision_source",
+  "canonical_document": "docs/OWNER_INTENT_AND_SYSTEM_DOCTRINE.md",
+  "fact_classes": {
+    "P": "stable_owner_principle",
+    "C": "time_stamped_current_fact_requiring_live_verification",
+    "H": "historical_context_only",
+    "SUPERSEDED": "historical_decision_that_must_not_be_reactivated_implicitly"
+  },
+  "product": {
+    "primary_user": "personal_researcher",
+    "secondary_user": "public_demo_visitor",
+    "tertiary_user": "course_developer_operator",
+    "posture": "read_only_financial_event_evidence_radar",
+    "primary_surface": "web",
+    "notification_surface": "telegram_optional_off_by_default",
+    "coverage_direction": [
+      "us_equities",
+      "etfs",
+      "macro",
+      "commodities",
+      "fx",
+      "major_crypto"
+    ]
+  },
+  "short_research_specialization": {
+    "scope": "adverse_material_risk_human_review_routing",
+    "collection_polarity": "all_polarity",
+    "fact_verification_polarity": "all_polarity",
+    "allowed_decisions": [
+      "RISK_REVIEW",
+      "NON_TARGET",
+      "ABSTAIN"
+    ],
+    "forbidden_outputs": [
+      "LONG",
+      "SHORT",
+      "price_direction",
+      "target_price",
+      "expected_return",
+      "expected_drawdown",
+      "timing",
+      "holding_period",
+      "position_size",
+      "leverage",
+      "stop_loss",
+      "alert_permission",
+      "order_permission"
+    ],
+    "execution_capability": "prohibited",
+    "legacy_asset_direction_contract": "ABSTAIN_ONLY",
+    "maximum_authority_without_new_owner_decision": "advisory_shadow_review_routing_only",
+    "formal_fact_authority": "prohibited",
+    "auto_verification_authority": "prohibited"
+  },
+  "labels": {
+    "severity": [
+      "S",
+      "A++",
+      "A",
+      "B",
+      "C"
+    ],
+    "severity_meaning": "event_finality_reversibility_and_research_priority_not_price_direction",
+    "canonical_event_statuses": [
+      "candidate",
+      "verified",
+      "weak",
+      "rejected"
+    ],
+    "adjudication": {
+      "labels": [
+        "RISK_REVIEW",
+        "NON_TARGET",
+        "ABSTAIN"
+      ],
+      "materiality": [
+        "MATERIAL_ADVERSE",
+        "NOT_MATERIAL_ADVERSE",
+        "UNCLEAR"
+      ],
+      "polarity": [
+        "ADVERSE",
+        "POSITIVE",
+        "NEUTRAL",
+        "MIXED",
+        "UNCLEAR"
+      ],
+      "evidence_state": [
+        "PRIMARY_SUPPORTED",
+        "MULTI_SOURCE_SUPPORTED",
+        "DISCOVERY_ONLY",
+        "CONFLICTED",
+        "INSUFFICIENT"
+      ]
+    },
+    "evidence_agent_statuses": [
+      "EVIDENCE_READY",
+      "INSUFFICIENT",
+      "HUMAN_REVIEW"
+    ],
+    "risk_router_evidence_gate_states": [
+      "CONFLICTED",
+      "PRIMARY_SUPPORTED_REVIEWED",
+      "PRIMARY_SUPPORTED_LIGHT_VERIFIED",
+      "PRIMARY_SUPPORTED_MACHINE_OFFICIAL",
+      "DISCOVERY_ONLY",
+      "INSUFFICIENT",
+      "NOT_PROVIDED"
+    ],
+    "namespaces_are_not_interchangeable": true
+  },
+  "model_evidence_gate": {
+    "non_primary_supported": {
+      "decision": "ABSTAIN",
+      "decision_source": "DETERMINISTIC_EVIDENCE_GATE",
+      "semantic_model_invoked": false,
+      "confidence_applicable": false,
+      "ui_shows_confidence": false
+    }
+  },
+  "review_levels": {
+    "rough_review": {
+      "may_change_canonical_label": false,
+      "may_be_training_truth": false,
+      "must_disclose_formal_verification_false": true
+    },
+    "light_detailed_review": {
+      "purpose": "produce_evidence_specific_output_capable_of_changing_formal_conclusion_or_model_view",
+      "review_output_may_mutate_canonical": false,
+      "requires_scoped_expiring_authorization_for_formalization": true,
+      "continuous_worker_may_apply": false,
+      "implementation_contract_version": "light-evidence-gate-v3-subject-bound",
+      "formalization_event_type_allowlist": [
+        "bankruptcy_liquidation",
+        "delisted",
+        "reverse_split",
+        "voluntarydelisting"
+      ],
+      "authorization_required_fields": [
+        "authorization_id",
+        "actor",
+        "purpose",
+        "expires_at",
+        "batch_id"
+      ],
+      "scope_entry_required_fields": [
+        "event_id",
+        "current_version",
+        "evidence_fingerprint"
+      ],
+      "formalization_preconditions": [
+        "candidate_status",
+        "SUPPORTED",
+        "no_blocking_conflict",
+        "evidence_ids_unchanged",
+        "transactional_current_recheck",
+        "compare_and_swap"
+      ],
+      "fail_closed": true
+    },
+    "formal_training_label": {
+      "human_only": true,
+      "credential_bound_principal": true,
+      "client_may_choose_reviewer_id_or_role": false,
+      "shared_admin_or_reviewer_token_may_submit_human_label": false,
+      "independent_reviewers": 2,
+      "reviewer_identities_must_differ": true,
+      "third_arbiter_on_disagreement": true,
+      "arbiter_identity_must_differ": true,
+      "arbiter_only_on_disagreement": true,
+      "human_submits_target_label": false,
+      "target_label_derived_by_pure_function": true,
+      "split_before_validation": "UNASSIGNED",
+      "event_time_content_only": true,
+      "freeze_requires_resolved_issuer_and_event_chain_groups": true,
+      "freeze_requires_exact_and_near_duplicate_zero": true,
+      "freeze_is_one_way_and_dataset_hash_bound": true,
+      "required_submission_fields": [
+        "exact_passage",
+        "rationale",
+        "materiality",
+        "polarity",
+        "evidence_state"
+      ],
+      "hidden_inputs": [
+        "model_output",
+        "peer_answer",
+        "old_label",
+        "post_event_market_outcome"
+      ]
+    }
+  },
+  "roles": {
+    "public": "read_only_event_evidence_freshness_methodology",
+    "reviewer": "evidence_and_human_adjudication",
+    "operator": "sources_worker_backup_model_runtime",
+    "admin": "audited_break_glass_superset",
+    "public_api_exposure": false,
+    "api_network_boundary": {
+      "systemd": "host_loopback",
+      "compose": "private_container_network",
+      "internet_exposed": false
+    },
+    "internal_ui_production_contract": "host_loopback_manual_mutually_exclusive",
+    "compose_production_eligible": false
+  },
+  "operations": {
+    "cloud_topology": "one_resource_constrained_aws_host_unless_reauthorized",
+    "singapore_topology_authorized": false,
+    "singapore_resource_absence_requires_live_verification": true,
+    "cost_order": "optimize_and_stop_unused_before_scale_up",
+    "cloud_credits_justify_expansion": false,
+    "backup_frequency": "daily",
+    "on_host_verified_daily_copies": 1,
+    "on_host_weekly_copies": 0,
+    "delete_previous_on_host_only_after_new_full_restore_verification": true,
+    "offhost_retention_policy": "separate_explicit_operator_policy",
+    "public_repo_may_store_production_recovery_assets": false,
+    "business_evidence_ttl": null,
+    "large_windows_artifact_drive": "D",
+    "visible_interactive_scheduled_terminal": false
+  },
+  "authority": {
+    "old_approval_is_evergreen": false,
+    "requires_separate_action_authorization": [
+      "external_send",
+      "cloud_resource_create_or_delete",
+      "dns_change",
+      "credential_destruction",
+      "production_cutover",
+      "formal_light_verification_batch",
+      "canonical_event_status_mutation",
+      "trading_or_broker_action"
+    ]
+  },
+  "hard_gates": [
+    {
+      "id": "FR-PROD-001",
+      "rule": "The product remains a personal read-only financial-event evidence radar."
+    },
+    {
+      "id": "FR-SHORT-001",
+      "rule": "The ledger and fact layer remain all-polarity; adverse specialization exists only in review routing."
+    },
+    {
+      "id": "FR-SHORT-003",
+      "rule": "The risk router may decide only RISK_REVIEW, NON_TARGET or ABSTAIN."
+    },
+    {
+      "id": "FR-SHORT-004",
+      "rule": "The model never emits direction, return, sizing, alert or execution permission."
+    },
+    {
+      "id": "FR-EVT-005",
+      "rule": "Future outcomes, aliases, labels and market results never backfill an earlier event view."
+    },
+    {
+      "id": "FR-GRADE-005",
+      "rule": "Price moves are discovery prompts, never evidence or labels."
+    },
+    {
+      "id": "FR-SRC-002",
+      "rule": "Source authority never supplies severity, legal meaning, equity outcome or target label."
+    },
+    {
+      "id": "FR-EVD-001",
+      "rule": "Formal conclusions remain bound to exact, addressable, versioned and hashed evidence."
+    },
+    {
+      "id": "FR-EVD-004",
+      "rule": "Evidence or event-version change invalidates stale agent decisions and overrides."
+    },
+    {
+      "id": "FR-EVD-008",
+      "rule": "Canonical, adjudication, Evidence Agent and risk-router gate states remain separate namespaces."
+    },
+    {
+      "id": "FR-REV-002",
+      "rule": "Bulk rough review is never reported as bulk formal verification."
+    },
+    {
+      "id": "FR-REV-006",
+      "rule": "The continuous worker never carries evergreen light-verification authority."
+    },
+    {
+      "id": "FR-REV-007",
+      "rule": "Formal training truth requires two independent blind humans and arbitration on disagreement."
+    },
+    {
+      "id": "FR-MDL-001",
+      "rule": "Non-primary-supported input abstains at the deterministic gate without invoking the semantic model."
+    },
+    {
+      "id": "FR-MDL-002",
+      "rule": "Model invocation, decision source, applicability and hashes remain auditable."
+    },
+    {
+      "id": "FR-MDL-003",
+      "rule": "Training excludes internal labels, source shortcuts, old outputs and post-event outcomes."
+    },
+    {
+      "id": "FR-MDL-007",
+      "rule": "Qualified shadow never means fact verification, alert permission or trading promotion."
+    },
+    {
+      "id": "FR-MKT-004",
+      "rule": "Missed market windows remain MISSED_WINDOW or UNAVAILABLE and are never backfilled."
+    },
+    {
+      "id": "FR-ROLE-001",
+      "rule": "Public, Reviewer, Operator and Admin remain separate capability surfaces."
+    },
+    {
+      "id": "FR-ROLE-002",
+      "rule": "Only Public is internet-facing; systemd uses host loopback and Compose uses a private container network."
+    },
+    {
+      "id": "FR-NOTIFY-002",
+      "rule": "Real external notification requires separate explicit authorization."
+    },
+    {
+      "id": "FR-COST-002",
+      "rule": "Cloud credits never justify expansion; optimize and stop unused resources first."
+    },
+    {
+      "id": "FR-BAK-002",
+      "rule": "The previous backup survives until the new backup passes full isolated restore verification."
+    },
+    {
+      "id": "FR-BAK-006",
+      "rule": "Production recovery assets stay in private storage and never in this public repository or its Releases."
+    },
+    {
+      "id": "FR-LOCAL-002",
+      "rule": "C-to-D movement records copy, validation, cutover and cleanup separately."
+    },
+    {
+      "id": "FR-SEC-001",
+      "rule": "No broker, order, cancellation, position, balance or execution capability is permitted."
+    },
+    {
+      "id": "FR-SEC-003",
+      "rule": "Secrets and plaintext production data never enter Git, reports, logs or Public UI."
+    },
+    {
+      "id": "FR-REL-006",
+      "rule": "Tests and CI are not deployment; a production claim requires cutover and live receipts."
+    },
+    {
+      "id": "FR-STATE-001",
+      "rule": "Current server claims require fresh live verification or an explicit historical-snapshot qualifier."
+    }
+  ]
+}

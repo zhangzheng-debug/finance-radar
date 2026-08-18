@@ -27,6 +27,18 @@ def test_migration_archive_materializes_data_from_a_verified_recovery_bundle() -
     assert "Replace copied live databases with transactionally consistent SQLite snapshots" not in source
 
 
+def test_migration_archive_can_reverify_a_fresh_existing_bundle_without_disk_duplication() -> None:
+    source = CREATE_BACKUP.read_text(encoding="utf-8")
+
+    assert "EXISTING_BACKUP_ID=${2:-}" in source
+    assert "timedelta(hours=6)" in source
+    assert "module.verify_full_bundle(" in source
+    assert "BACKUP_TMPDIR=${FINANCE_RADAR_BACKUP_TMPDIR:-/var/tmp}" in source
+    assert 'export TMPDIR="$BACKUP_TMPDIR"' in source
+    assert "os.link(source, destination, follow_symlinks=False)" in source
+    assert "if exc.errno != errno.EXDEV" in source
+
+
 def test_restore_never_reinstalls_the_retired_static_terminal() -> None:
     source = ACTIVATE_RESTORE.read_text(encoding="utf-8")
 

@@ -2,9 +2,11 @@
 param(
     [string]$SshHost = $env:FINANCE_RADAR_SSH_HOST,
     [string]$IdentityFile = $env:FINANCE_RADAR_SSH_IDENTITY_FILE,
+    [string]$BindAddress = "",
+    [string]$ExistingBackupId = "",
     [string]$DestinationRoot = "",
     [string]$PassphraseFile = "",
-    [int]$LocalRetention = 7,
+    [ValidateRange(1, 1)][int]$LocalRetention = 1,
     [switch]$KeepRemoteTemporary,
     [switch]$KeepPlaintext
 )
@@ -27,9 +29,13 @@ if (-not $DestinationRoot) {
 $DestinationRoot = [System.IO.Path]::GetFullPath($DestinationRoot)
 $auditWorkspaceRoot = [System.IO.Path]::GetFullPath("D:\FinanceRadarScratch\migration-audit")
 if (-not $PassphraseFile) {
-    $PassphraseFile = Join-Path $DestinationRoot ".backup-passphrase"
+    $PassphraseFile = "D:\FinanceRadarRecovery\finance-radar-backup-passphrase.txt"
 }
 $PassphraseFile = [System.IO.Path]::GetFullPath($PassphraseFile)
+$destinationPrefix = $DestinationRoot.TrimEnd('\') + '\'
+if ($PassphraseFile.StartsWith($destinationPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "PassphraseFile must stay outside DestinationRoot"
+}
 $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
 $localRemoteScript = Join-Path $repoRoot "deployment\systemd\create_migration_backup.sh"
 $remoteScript = "/tmp/finance-radar-create-migration-$stamp.sh"
@@ -42,6 +48,17 @@ $sshOptions = @(
     "-o", "ServerAliveInterval=10",
     "-o", "ServerAliveCountMax=12"
 )
+if ($BindAddress) {
+    $parsedBindAddress = $null
+    if (-not [System.Net.IPAddress]::TryParse($BindAddress, [ref]$parsedBindAddress) -or
+        $parsedBindAddress.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "BindAddress must be a valid IPv4 address"
+    }
+    $sshOptions += @("-o", "BindAddress=$BindAddress")
+}
+if ($ExistingBackupId -and $ExistingBackupId -notmatch '^finance_radar_[A-Za-z0-9_]+$') {
+    throw "ExistingBackupId is invalid"
+}
 $remoteUser = ($SshHost -split "@", 2)[0]
 $remotePrivilege = if ($remoteUser -eq "root") { "" } else { "sudo " }
 
@@ -53,6 +70,7 @@ if (-not (Test-Path -LiteralPath $localRemoteScript -PathType Leaf)) {
 }
 New-Item -ItemType Directory -Path $DestinationRoot -Force | Out-Null
 if (-not $KeepPlaintext -and -not $env:FINANCE_RADAR_BACKUP_PASSPHRASE -and -not (Test-Path -LiteralPath $PassphraseFile -PathType Leaf)) {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $PassphraseFile) -Force | Out-Null
     & python (Join-Path $PSScriptRoot "backup_crypto.py") keygen $PassphraseFile
     if ($LASTEXITCODE -ne 0) {
         throw "could not initialize local backup key"
@@ -73,7 +91,8 @@ for ($attempt = 1; $attempt -le 3; $attempt++) {
 if (-not $stageSucceeded) {
     throw "could not stage the migration backup script on the server"
 }
-$remoteOutput = & ssh @sshOptions -i $IdentityFile $SshHost "chmod 700 '$remoteScript' && ${remotePrivilege}bash '$remoteScript' '$stamp'"
+$existingBackupArgument = if ($ExistingBackupId) { " '$ExistingBackupId'" } else { "" }
+$remoteOutput = & ssh @sshOptions -i $IdentityFile $SshHost "chmod 700 '$remoteScript' && ${remotePrivilege}bash '$remoteScript' '$stamp'$existingBackupArgument"
 $remoteExitCode = $LASTEXITCODE
 if ($remoteExitCode -ne 0) {
     & ssh @sshOptions -i $IdentityFile $SshHost "${remotePrivilege}rm -rf -- '$expectedRemoteStage' && ${remotePrivilege}rm -f -- '$expectedRemoteArchive' '$remoteScript'"
@@ -216,38 +235,10 @@ $verification = [ordered]@{
     encrypted_at_rest = [bool]$encryptedArchive
     key_file = if ($encryptedArchive -and -not $env:FINANCE_RADAR_BACKUP_PASSPHRASE) { $PassphraseFile } else { "environment" }
     transport = "SSH/SCP"
+    source_recovery_bundle = if ($ExistingBackupId) { $ExistingBackupId } else { $null }
     trading_project_included = $false
 }
 $verification | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination "offhost-verification.json") -Encoding UTF8
-
-$publicStatus = [ordered]@{
-    schema_version = 2
-    status = "VERIFIED"
-    verified_at = $verification.created_at
-    backup_stamp = $stamp
-    archive_sha256 = $localSha256
-    full_restore_verified = [bool]$fullRestoreVerified
-    encrypted_at_rest = [bool]$encryptedArchive
-    archive_entries = @($archiveListing).Count
-    required_release = $requiredRelease
-    model_version = $verification.model_version
-    external_blind_gate_pass = $verification.external_blind_gate_pass
-    external_blind_promotion = $verification.external_blind_promotion
-    ledger_events = $verification.ledger_events
-    ledger_evidence = $verification.ledger_evidence
-}
-$publicStatusPath = Join-Path $destination "offhost-status.json"
-$publicStatus | ConvertTo-Json | Set-Content -LiteralPath $publicStatusPath -Encoding UTF8
-$remoteStatus = "/tmp/finance-radar-offhost-status-$stamp.json"
-& scp @sshOptions -i $IdentityFile $publicStatusPath "${SshHost}:$remoteStatus"
-if ($LASTEXITCODE -ne 0) {
-    throw "could not stage the public off-host verification status"
-}
-& ssh @sshOptions -i $IdentityFile $SshHost `
-    "${remotePrivilege}install -d -m 0755 /var/www/finance-radar-terminal && ${remotePrivilege}install -m 0644 '$remoteStatus' /var/www/finance-radar-terminal/offhost-status.json && rm -f -- '$remoteStatus'"
-if ($LASTEXITCODE -ne 0) {
-    throw "could not publish the public off-host verification status"
-}
 
 if (-not $KeepRemoteTemporary) {
     & ssh @sshOptions -i $IdentityFile $SshHost "${remotePrivilege}rm -rf -- '$remoteStage' && ${remotePrivilege}rm -f -- '$remoteArchive' '$remoteScript'"

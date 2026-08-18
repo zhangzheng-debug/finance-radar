@@ -24,7 +24,7 @@ from app.models import RiskRouter, derive_evidence_context
 from scripts.event_ledger import stable_json, utc_now
 
 
-LIGHT_VERIFICATION_VERSION = "light-evidence-gate-v2"
+LIGHT_VERIFICATION_VERSION = "light-evidence-gate-v3-subject-bound"
 LEGACY_LIGHT_VERIFICATION_VERSION = "light-evidence-gate-v1"
 LIGHT_VERIFIED_EVIDENCE_STATUS = "accepted_light_primary_evidence"
 LIGHT_FOLLOWUP_JOB_TYPE = "light_verification_followup"
@@ -95,6 +95,20 @@ _SPECULATIVE_MODALITY = re.compile(
 _ASSERTED_MODALITY = re.compile(
     r"\b(?:was|were|is|are|has|have|had|filed|announced|reported|determined|"
     r"approved|completed|will be|will suspend|trading will be)\b",
+    re.IGNORECASE,
+)
+_CLAUSE_BOUNDARY = re.compile(
+    r"[.!?;。！？；]|,\s*(?:while|whereas|but|although|however)\b|"
+    r"\b(?:while|whereas|but|although|however)\b",
+    re.IGNORECASE,
+)
+_THIRD_PARTY_RELATION = re.compile(
+    r"\b(?:customer|client|vendor|supplier|subsidiary|affiliate|partner|"
+    r"portfolio company|borrower|tenant|distributor)\b",
+    re.IGNORECASE,
+)
+_STRUCTURAL_SELF_REFERENCE = re.compile(
+    r"\b(?:the company|the issuer|the registrant|our common stock|its common stock)\b",
     re.IGNORECASE,
 )
 
@@ -215,6 +229,75 @@ def _event_signal(event: dict[str, Any], evidence: dict[str, Any], claim_text: s
     matched = [keyword for keyword in keywords if keyword and keyword in normalized]
     matched.extend(match.group(0) for match in matches)
     return True, list(dict.fromkeys(matched))[:8], [(match.start(), match.end()) for match in matches]
+
+
+def _clause_for_span(text: str, span: tuple[int, int]) -> tuple[int, int, str]:
+    start, end = span
+    clause_start = 0
+    clause_end = len(text)
+    for boundary in _CLAUSE_BOUNDARY.finditer(text):
+        if boundary.end() <= start:
+            clause_start = boundary.end()
+            continue
+        if boundary.start() >= end:
+            clause_end = boundary.start()
+            break
+    return clause_start, clause_end, text[clause_start:clause_end].strip()
+
+
+def _subject_event_binding_check(
+    event: dict[str, Any],
+    evidence: dict[str, Any],
+    claim_text: str,
+    signal_spans: list[tuple[int, int]],
+) -> tuple[bool, list[tuple[int, int]], dict[str, Any]]:
+    """Require the target issuer and event predicate in one local clause."""
+
+    bound_spans: list[tuple[int, int]] = []
+    clause_checks: list[dict[str, Any]] = []
+    event_cik = _normalized_cik(event)
+    evidence_cik = _normalized_cik(evidence)
+    for span in signal_spans:
+        clause_start, clause_end, clause = _clause_for_span(claim_text, span)
+        _, local_identity = _identity_check(event, evidence, clause)
+        explicit_identity = bool(
+            local_identity.get("ticker_match") or local_identity.get("company_full_match")
+        )
+        third_party_relation = bool(_THIRD_PARTY_RELATION.search(clause))
+        structured_self_reference = bool(
+            event_cik
+            and evidence_cik == event_cik
+            and _STRUCTURAL_SELF_REFERENCE.search(clause)
+            and not third_party_relation
+        )
+        bound = bool(
+            not third_party_relation
+            and (explicit_identity or structured_self_reference)
+        )
+        if bound:
+            bound_spans.append(span)
+        clause_checks.append(
+            {
+                "clause_start": clause_start,
+                "clause_end": clause_end,
+                "clause": clause,
+                "explicit_identity": explicit_identity,
+                "structured_self_reference": structured_self_reference,
+                "third_party_relation": third_party_relation,
+                "bound": bound,
+            }
+        )
+    return bool(bound_spans), bound_spans, {
+        "bound": bool(bound_spans),
+        "bound_signal_count": len(bound_spans),
+        "signal_count": len(signal_spans),
+        "clauses": clause_checks,
+        "reason": (
+            "issuer_and_event_predicate_bound_in_local_clause"
+            if bound_spans
+            else "issuer_not_bound_to_event_predicate"
+        ),
+    }
 
 
 def _automatic_formal_eligibility(event: dict[str, Any]) -> tuple[bool, str]:
@@ -426,6 +509,8 @@ def _gap_reasons(best: dict[str, Any], *, automatic_formal_eligible: bool = True
         reasons.append("stable issuer identity is missing or inconsistent")
     if not best.get("event_signal"):
         reasons.append("event taxonomy signal is absent from the primary passage")
+    if best.get("event_signal") and not best.get("subject_event_bound"):
+        reasons.append("event predicate is not bound to the target issuer in the same clause")
     if not best.get("modality_safe"):
         reasons.append(f"event claim is not decision-grade: {best.get('modality_reason') or 'unknown modality'}")
     if not best.get("date_coherent"):
@@ -507,7 +592,19 @@ def evaluate_event(event: dict[str, Any], evidence: list[dict[str, Any]]) -> dic
         ).casefold()
         identity, identity_detail = _identity_check(event, item, identity_haystack)
         signal, matched_keywords, signal_spans = _event_signal(event, item, excerpt)
-        modality_safe, modality_reason = _modality_check(excerpt, signal_spans) if signal else (False, "event_signal_absent")
+        subject_event_bound, bound_signal_spans, subject_binding = (
+            _subject_event_binding_check(event, item, excerpt, signal_spans)
+            if signal
+            else (False, [], {"bound": False, "reason": "event_signal_absent", "clauses": []})
+        )
+        modality_safe, modality_reason = (
+            _modality_check(excerpt, bound_signal_spans)
+            if subject_event_bound
+            else (
+                False,
+                "issuer_not_bound_to_event_predicate" if signal else "event_signal_absent",
+            )
+        )
         source_date = _source_date(item)
         event_date = _event_date(event)
         date_gap_days = abs((source_date - event_date).days) if source_date and event_date else None
@@ -516,7 +613,7 @@ def evaluate_event(event: dict[str, Any], evidence: list[dict[str, Any]]) -> dic
         score += 30 if str(item.get("authority_tier") or "") == "P0" else 25
         score += 20 if len(excerpt) >= MIN_EXCERPT_CHARS else 0
         score += 20 if identity else 0
-        score += 20 if signal and modality_safe else 0
+        score += 20 if signal and subject_event_bound and modality_safe else 0
         score += 10 if date_coherent else 0
         checks.append(
             {
@@ -529,6 +626,8 @@ def evaluate_event(event: dict[str, Any], evidence: list[dict[str, Any]]) -> dic
                 "identity_detail": identity_detail,
                 "event_signal": signal,
                 "matched_keywords": matched_keywords,
+                "subject_event_bound": subject_event_bound,
+                "subject_binding": subject_binding,
                 "modality_safe": modality_safe,
                 "modality_reason": modality_reason,
                 "date_coherent": date_coherent,
@@ -544,16 +643,16 @@ def evaluate_event(event: dict[str, Any], evidence: list[dict[str, Any]]) -> dic
     best = max(checks, key=lambda item: int(item["score"]))
     supported = bool(
         automatic_formal_eligible
-        and
-        best["identity_match"]
+        and best["identity_match"]
         and best["event_signal"]
+        and best["subject_event_bound"]
         and best["modality_safe"]
         and best["date_coherent"]
         and best["excerpt_chars"] >= MIN_EXCERPT_CHARS
     )
     decision = "SUPPORTED" if supported else "INSUFFICIENT"
     rationale = (
-        "primary passage passes stable-identity, event-fact, date and modality gates"
+        "primary passage passes stable-identity, subject-event, event-fact, date and modality gates"
         if supported
         else (
             "primary passage is retained for review, but this event type is not eligible for automatic formal verification"

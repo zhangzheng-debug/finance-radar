@@ -1,11 +1,14 @@
 param(
     [int]$ApiPort = 8000,
-    [int]$WebPort = 8501
+    [int]$WebPort = 8501,
+    [string]$LogDir = ""
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-$LogDir = Join-Path $Root "tmp\product_logs"
+if ([string]::IsNullOrWhiteSpace($LogDir)) {
+    $LogDir = Join-Path $Root "tmp\product_logs"
+}
 New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
 if (-not (Test-Path (Join-Path $Root "artifacts\risk_router.joblib"))) {

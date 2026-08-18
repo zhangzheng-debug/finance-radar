@@ -11,6 +11,7 @@ from app.web.common import (
     DEEP_LINK_STATE_KEY,
     UI_ROLE,
     api_request,
+    cached_api_get,
     format_elapsed,
     header,
     install_style,
@@ -31,6 +32,7 @@ from app.web.components import (
     PUBLIC_STATE_LABELS,
     facet_counts,
     facet_values,
+    event_anchor_id,
     focus_event_preview,
     next_action_guidance,
     public_event_copy,
@@ -59,6 +61,7 @@ PUBLIC_SORTS = {
     "事件日期": "event_date",
     "主体名称": "subject",
 }
+PUBLIC_EVENT_SEEN_STATE_KEY = "public_event_seen_v1"
 
 
 def bounded_int(value: object, default: int, *, minimum: int, maximum: int) -> int:
@@ -145,6 +148,60 @@ def public_source_url(evidence: list[dict[str, object]]) -> str | None:
     except ValueError:
         return None
     return value if parsed.scheme in {"http", "https"} and parsed.netloc else None
+
+
+def public_evidence_sort_key(item: dict[str, object]) -> tuple[int, float, str]:
+    authority = str(item.get("authority_tier") or "P9").upper()
+    try:
+        rank = int(authority[1:]) if authority.startswith("P") else 9
+    except ValueError:
+        rank = 9
+    try:
+        passage_score = float(item.get("passage_score") or 0)
+    except (TypeError, ValueError):
+        passage_score = 0.0
+    return rank, -passage_score, str(item.get("evidence_id") or "")
+
+
+def public_event_snapshot(
+    event: dict[str, object],
+    detail: dict[str, object],
+    evidence: list[dict[str, object]],
+) -> dict[str, object]:
+    version = detail.get("current_version") or {}
+    version_number = version.get("version") if isinstance(version, dict) else None
+    return {
+        "last_updated_at": str(event.get("last_updated_at") or ""),
+        "status": public_event_state(event),
+        "version": version_number or event.get("current_version"),
+        "evidence_ids": sorted(
+            str(item.get("evidence_id") or "")
+            for item in evidence
+            if str(item.get("evidence_id") or "")
+        ),
+    }
+
+
+def public_event_changes(
+    previous: dict[str, object] | None,
+    current: dict[str, object],
+) -> list[str]:
+    if not previous:
+        return []
+    changes: list[str] = []
+    if previous.get("status") != current.get("status"):
+        changes.append(f"状态：{previous.get('status') or '未记录'} → {current.get('status') or '未记录'}")
+    if previous.get("version") != current.get("version"):
+        changes.append(f"事件版本：{previous.get('version') or '未记录'} → {current.get('version') or '未记录'}")
+    previous_ids = set(previous.get("evidence_ids") or [])
+    current_ids = set(current.get("evidence_ids") or [])
+    added = len(current_ids - previous_ids)
+    removed = len(previous_ids - current_ids)
+    if added or removed:
+        changes.append(f"关联证据：新增 {added} 条，移除 {removed} 条")
+    if previous.get("last_updated_at") != current.get("last_updated_at") and not changes:
+        changes.append("事件记录的最后更新时间发生变化；事实状态与证据集合未变。")
+    return changes
 
 
 def public_time_value(value: object, *, date_only: bool = False) -> str:
@@ -302,20 +359,31 @@ if requested_page in page_targets:
     st.query_params.clear()
     st.switch_page(page_targets[requested_page])
 
+header(
+    "态势总览",
+    "事件记录、原始证据与核验进度" if UI_ROLE != "admin" else "事件流、复核队列与运行态总览",
+)
+no_trading_banner()
+overview_loading = st.empty()
+overview_loading.caption("正在读取采集状态与核验概览…")
 try:
-    overview = api_request("/api/v1/overview")
+    overview, overview_cache = cached_api_get(
+        "/api/v1/overview",
+        ttl_seconds=15,
+        stale_if_error_seconds=120,
+        timeout_seconds=5,
+    )
 except Exception as exc:
-    header("态势总览", "多源证据链金融事件情报终端")
+    overview_loading.empty()
     render_api_error(exc)
     st.stop()
-
-product_quality: dict[str, object] | None = None
-try:
-    product_quality = api_request("/api/v1/product/metrics")
-except Exception:
-    # Product metrics are deliberately non-critical to event browsing. Their
-    # absence stays visible below instead of taking down the evidence feed.
-    product_quality = None
+else:
+    overview_loading.empty()
+if overview_cache.stale:
+    st.warning(
+        "概览接口本次刷新失败；当前显示的是 "
+        f"{format_elapsed(overview_cache.age_seconds)} 前的进程内快照。事件列表仍会单独读取。"
+    )
 
 public_timing = overview.get("timing") or {}
 public_worker_age = public_timing.get("latest_worker_success_age_seconds")
@@ -329,12 +397,6 @@ public_worker_fresh = (
 public_worker_stale = UI_ROLE != "admin" and public_worker_age_seconds is not None and not public_worker_fresh
 public_worker_unknown = UI_ROLE != "admin" and public_worker_age_seconds is None
 
-header(
-    "态势总览",
-    "事件记录、原始证据与核验进度" if UI_ROLE != "admin" else "事件流、复核队列与运行态总览",
-    overview["demo_mode"] if UI_ROLE == "admin" else None,
-)
-no_trading_banner()
 if public_worker_stale:
     st.error(
         "数据更新已中断：最近一次成功采集为 "
@@ -372,6 +434,21 @@ public_page_size = bounded_int(
 if public_page_size not in {12, 24, 48}:
     public_page_size = 24
 public_page = bounded_int(st.query_params.get("preview_page"), 1, minimum=1, maximum=10000)
+
+
+def public_filter_return_url(event_id: str) -> str:
+    params = {
+        "preview_state": public_state,
+        "preview_query": preview_query,
+        "preview_family": public_family,
+        "preview_source": public_source,
+        "preview_period": public_period if public_period != "全部时间" else "",
+        "preview_sort": public_sort,
+        "preview_page_size": public_page_size,
+        "preview_page": public_page if public_page > 1 else "",
+    }
+    query = urlencode({key: value for key, value in params.items() if value not in (None, "")})
+    return f"./{'?' + query if query else ''}#{event_anchor_id(event_id)}"
 
 counts = overview["counts"]
 event_status = overview["event_status"]
@@ -455,41 +532,6 @@ if UI_ROLE != "admin":
                 st.query_params[key] = value
             st.rerun()
     st.caption("三个入口分别回答：今天发生了什么、哪些事实仍待核验、哪些粗审线索需要继续补证。")
-    with st.expander("产品质量指标 · 30 天窗口", expanded=False):
-        if product_quality is None:
-            st.caption("当前无法测量产品质量指标；事件与证据浏览仍可继续。")
-        else:
-            metric_map = {
-                str(item.get("id")): item
-                for item in (product_quality.get("metrics") or [])
-                if isinstance(item, dict)
-            }
-
-            def metric_text(metric_id: str, *, seconds: bool = False) -> str:
-                metric = metric_map.get(metric_id) or {}
-                if metric.get("status") != "MEASURED":
-                    return "未测量"
-                value = metric.get("value")
-                if seconds:
-                    return format_elapsed(value)
-                if metric.get("unit") == "percent":
-                    return f"{float(value or 0):.1f}%"
-                return str(value)
-
-            quality_cols = st.columns(4, gap="small")
-            quality_cols[0].metric("发现延迟 P95", metric_text("capture_latency_p95", seconds=True))
-            quality_cols[1].metric("可引用证据覆盖", metric_text("citable_evidence_coverage"))
-            quality_cols[2].metric("事实闭合率", metric_text("evidence_closure_rate"))
-            quality_cols[3].metric("待复核年龄 P95", metric_text("review_queue_age_p95", seconds=True))
-            unavailable_count = sum(
-                item.get("status") != "MEASURED"
-                for item in metric_map.values()
-            )
-            st.caption(
-                f"样本量与数据源随每项指标返回；{unavailable_count} 项当前明确标记为未测量。"
-                "测试通过数和服务健康不替代用户价值。"
-            )
-
 if UI_ROLE == "admin":
     with st.form("terminal-global-search", border=False):
         search_col, submit_col = st.columns([5.4, .8], gap="small", vertical_alignment="bottom")
@@ -590,9 +632,20 @@ if UI_ROLE != "admin":
         unsafe_allow_html=True,
     )
 try:
-    facets = api_request("/api/v1/events/facets")
+    facets, facets_cache = cached_api_get(
+        "/api/v1/events/facets",
+        ttl_seconds=30,
+        stale_if_error_seconds=300,
+        timeout_seconds=5,
+    )
 except Exception:
     pass
+else:
+    if facets_cache.stale:
+        st.caption(
+            "筛选项刷新失败；暂用 "
+            f"{format_elapsed(facets_cache.age_seconds)} 前的筛选快照。"
+        )
 
 if UI_ROLE != "admin":
     family_options = facet_values(facets, "families", public_family)
@@ -696,6 +749,23 @@ try:
         )
     live_feed = list(feed_result.get("items") or [])
     live_total = int(feed_result.get("total") or 0)
+    if UI_ROLE != "admin":
+        seen_events = st.session_state.get(PUBLIC_EVENT_SEEN_STATE_KEY, {})
+        if not isinstance(seen_events, dict):
+            seen_events = {}
+        for item in live_feed:
+            previous = seen_events.get(str(item.get("event_id") or ""))
+            if not isinstance(previous, dict):
+                continue
+            current_feed_state = {
+                "last_updated_at": str(item.get("last_updated_at") or ""),
+                "status": public_event_state(item),
+                "version": item.get("current_version"),
+            }
+            item["_changed_since_view"] = any(
+                previous.get(key) != current_feed_state.get(key)
+                for key in current_feed_state
+            )
 except Exception as exc:
     # A failed filtered request must not silently display the overview's
     # unrelated recent-event sample under the active filters.
@@ -719,7 +789,10 @@ if preview_event_id:
     )
     try:
         preview_detail = api_request(f"/api/v1/events/{preview_event_id}")
-        preview_evidence = api_request(f"/api/v1/events/{preview_event_id}/evidence")["items"]
+        preview_evidence = sorted(
+            api_request(f"/api/v1/events/{preview_event_id}/evidence")["items"],
+            key=public_evidence_sort_key,
+        )
     except Exception as exc:
         render_api_error(exc)
     else:
@@ -753,6 +826,21 @@ if preview_event_id:
             public_copy = public_event_copy(copy_input)
             preview_company = public_copy["subject"]
             preview_type = public_copy["family"]
+            seen_events = st.session_state.get(PUBLIC_EVENT_SEEN_STATE_KEY, {})
+            if not isinstance(seen_events, dict):
+                seen_events = {}
+            previous_snapshot = seen_events.get(preview_event_id)
+            current_snapshot = public_event_snapshot(
+                preview_event,
+                preview_detail,
+                preview_evidence,
+            )
+            changes_since_view = public_event_changes(
+                previous_snapshot if isinstance(previous_snapshot, dict) else None,
+                current_snapshot,
+            )
+            seen_events[preview_event_id] = current_snapshot
+            st.session_state[PUBLIC_EVENT_SEEN_STATE_KEY] = seen_events
         with st.container(border=True):
             section_header(
                 "当前页事件预览",
@@ -823,6 +911,14 @@ if preview_event_id:
                     public_time_markup(preview_event, preview_detail, public_verification),
                     unsafe_allow_html=True,
                 )
+                if previous_snapshot is None:
+                    st.caption("本次浏览会话首次查看；系统已记住当前版本，后续变化会在这里说明。")
+                elif changes_since_view:
+                    st.markdown("**自上次查看后的变化**")
+                    for change in changes_since_view:
+                        st.markdown(f"- {escape(change)}")
+                else:
+                    st.caption("与本次浏览会话中的上次查看相比，状态、版本和证据集合没有变化。")
             if UI_ROLE != "admin" and public_verification:
                 st.markdown(
                     public_verification_markup(
@@ -890,7 +986,7 @@ if preview_event_id:
                 source_url = public_source_url(preview_evidence)
                 if source_url:
                     method_col.link_button(
-                        "打开原始来源（外部网站）",
+                        "直达本条原始来源（外部网站）",
                         source_url,
                         width="stretch",
                     )
@@ -900,13 +996,21 @@ if preview_event_id:
                         label="如何理解证据与置信度",
                         width="stretch",
                     )
-            if close_col.button(
-                "收起当前页预览",
-                width="stretch",
-                key="close-home-event-preview",
-            ):
-                st.query_params.pop("preview_event_id", None)
-                st.rerun()
+            if UI_ROLE == "admin":
+                if close_col.button(
+                    "收起当前页预览",
+                    width="stretch",
+                    key="close-home-event-preview",
+                ):
+                    st.query_params.pop("preview_event_id", None)
+                    st.rerun()
+            else:
+                close_col.markdown(
+                    '<a class="return-filter-link" target="_self" href="{}">返回原筛选位置</a>'.format(
+                        escape(public_filter_return_url(preview_event_id), quote=True)
+                    ),
+                    unsafe_allow_html=True,
+                )
     finally:
         preview_loading.empty()
 
@@ -1072,6 +1176,59 @@ else:
 
         with st.expander("其他工作面", expanded=False):
             render_command_palette(facets)
+
+if UI_ROLE != "admin":
+    # Product KPIs are useful context, but they must never delay the primary
+    # event feed. Load them only after the current event page has rendered.
+    product_quality: dict[str, object] | None = None
+    product_quality_cache = None
+    try:
+        product_quality, product_quality_cache = cached_api_get(
+            "/api/v1/product/metrics",
+            ttl_seconds=60,
+            stale_if_error_seconds=300,
+            timeout_seconds=3,
+        )
+    except Exception:
+        product_quality = None
+    with st.expander("产品质量指标 · 30 天窗口", expanded=False):
+        if product_quality is None:
+            st.caption("当前无法测量产品质量指标；事件与证据浏览不受影响。")
+        else:
+            if product_quality_cache is not None and product_quality_cache.stale:
+                st.caption(
+                    "指标刷新失败；以下为 "
+                    f"{format_elapsed(product_quality_cache.age_seconds)} 前的快照。"
+                )
+            metric_map = {
+                str(item.get("id")): item
+                for item in (product_quality.get("metrics") or [])
+                if isinstance(item, dict)
+            }
+
+            def metric_text(metric_id: str, *, seconds: bool = False) -> str:
+                metric = metric_map.get(metric_id) or {}
+                if metric.get("status") != "MEASURED":
+                    return "未测量"
+                value = metric.get("value")
+                if seconds:
+                    return format_elapsed(value)
+                if metric.get("unit") == "percent":
+                    return f"{float(value or 0):.1f}%"
+                return str(value)
+
+            quality_cols = st.columns(4, gap="small")
+            quality_cols[0].metric("发现延迟 P95", metric_text("capture_latency_p95", seconds=True))
+            quality_cols[1].metric("可引用证据覆盖", metric_text("citable_evidence_coverage"))
+            quality_cols[2].metric("事实闭合率", metric_text("evidence_closure_rate"))
+            quality_cols[3].metric("待复核年龄 P95", metric_text("review_queue_age_p95", seconds=True))
+            unavailable_count = sum(
+                item.get("status") != "MEASURED" for item in metric_map.values()
+            )
+            st.caption(
+                f"样本量与数据源随每项指标返回；{unavailable_count} 项当前明确标记为未测量。"
+                "测试通过数和服务健康不替代用户价值。"
+            )
 
 st.caption(
     "J/K 在人工复核中切换事件 · / 聚焦检索 · 所有行情只读 · 所有模型输出均为 shadow"

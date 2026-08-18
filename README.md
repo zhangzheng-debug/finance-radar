@@ -2,9 +2,9 @@
 
 > 面向个人研究者的只读金融事件证据雷达：持续发现多源事件，压缩重复报道，把人快速带回原始证据、修订时间线与事后行情；证据不足时明确保留不确定性。
 
-[当前状态](CURRENT_STATE.md) · [产品章程](docs/PRODUCT_CHARTER.md) · [下一阶段计划](docs/NEXT_PHASE_PLAN_2026-08-15.md) · [2026-08-13 目标一致性审计](reports/PROJECT_ALIGNMENT_AUDIT_2026-08-13.md) · [部署说明](deployment/README.md)
+[所有者意图与系统细则](docs/OWNER_INTENT_AND_SYSTEM_DOCTRINE.md) · [当前状态](CURRENT_STATE.md) · [产品章程](docs/PRODUCT_CHARTER.md) · [下一阶段计划](docs/NEXT_PHASE_PLAN_2026-08-15.md) · [2026-08-13 目标一致性审计](reports/PROJECT_ALIGNMENT_AUDIT_2026-08-13.md) · [部署说明](deployment/README.md)
 
-Finance Radar 不是交易终端，也不是自动事实裁判。系统收集全极性金融事件，小模型只参与候选排序或解释建议；正式结论必须受确定性证据门和人工判断约束。代码中没有订单、持仓、余额或交易执行接口。
+Finance Radar 不是交易终端，也不是自动事实裁判。系统收集并核验全极性金融事件；面向做空研究的特化只存在于“重大下行风险人工复核路由”层。模型只回答是否值得优先交给人核验，禁止输出 LONG/SHORT、价格方向、收益、仓位或交易许可。正式结论必须受确定性证据门和人工判断约束；代码中没有订单、持仓、余额或交易执行接口。
 
 ## 用户能得到什么
 
@@ -39,7 +39,7 @@ Finance Radar 不是交易终端，也不是自动事实裁判。系统收集全
 
 ## 当前能力边界
 
-- 风险路由模型保持 `SHADOW`。旧外部盲测虽然风险召回高，但普通新闻误报率为 95%，因此没有晋级为正式判断器。
+- 风险路由模型保持 `SHADOW`。legacy external-blind-v1/v2 的失败永久保留；后续 v4 AI-rubric blind-v3 即使达到 `QUALIFIED_SHADOW`，也只表示可继续做咨询式复核路由。V3 authentic-human blind-v2 尚未冻结，因此它不是事实裁判、提醒许可或交易模型。
 - Evidence Agent 只能生成结构化建议与摘要；claim、证据充分性和最终状态仍由确定性规则和人工复核决定。
 - Telegram 的 outbox、幂等和深链已实现，但默认未启用持续外发。当前产品应理解为 **Web-first，Telegram optional/off by default**。
 - GitHub 最新已标记的恢复版本、当前源码分支和生产运行状态是三种不同事实。请以带时间戳的 [CURRENT_STATE.md](CURRENT_STATE.md) 为入口，不要从历史报告推断实时状态。

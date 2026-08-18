@@ -15,8 +15,16 @@ of scope and must not be copied, modified, started, stopped, or restored here.
 - SSH keys, TLS private keys, cookies, recovery keys, or backup passphrases
 - plaintext production databases or unencrypted server snapshots
 
-The encrypted migration archive is distributed only as a private GitHub
-Release asset. Its passphrase is deliberately stored outside this repository.
+This repository is public. Public GitHub Releases inherit repository
+visibility and therefore must contain only artifacts explicitly safe for
+public distribution. New production migration/recovery archives belong in an
+operator-controlled private repository or private object store; their
+passphrases must remain in a different recovery location.
+
+A legacy encrypted migration archive was published before this visibility
+contract was corrected. Do not upload another one and do not describe it as a
+private Release. Retention, private migration, or deletion of that historical
+asset is a separate destructive decision.
 
 ## Before every push
 

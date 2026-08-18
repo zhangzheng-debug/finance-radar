@@ -7,6 +7,7 @@ from html import escape
 import streamlit as st
 
 from app.web.common import (
+    UI_ROLE,
     api_request,
     header,
     install_style,
@@ -33,8 +34,42 @@ header(
 )
 no_trading_banner()
 
+review_ui_enabled = os.getenv("FINANCE_RADAR_REVIEW_UI_ENABLED") == "1"
+review_access_code = os.getenv("FINANCE_RADAR_REVIEW_ACCESS_CODE", "")
+if not review_ui_enabled:
+    st.info(
+        "公网部署当前为只读观察模式。审核写入默认关闭；内部标注时需由运维显式启用独立访问门。"
+    )
+    st.stop()
+if not review_access_code:
+    st.error("审核写入已请求启用，但服务器未配置独立访问码；系统拒绝开放。")
+    st.stop()
+supplied_access_code = st.text_input("内部审核访问码", type="password")
+if not hmac.compare_digest(supplied_access_code, review_access_code):
+    st.info("输入内部审核访问码后才会加载原文任务和写入控件。")
+    st.stop()
+
+supplied_reviewer_credential = st.text_input(
+    "个人审核凭据",
+    type="password",
+    key="adjudication_personal_credential",
+    help="由运维分别发给每名 Reviewer/Arbiter；只驻留当前 Streamlit 会话。",
+)
+if len(supplied_reviewer_credential.strip()) < 24:
+    st.info("输入个人审核凭据后才会读取你的独立队列；不要共享凭据。")
+    st.stop()
+
+
+def adjudication_api(path: str, **kwargs):
+    return api_request(
+        path,
+        reviewer_credential=supplied_reviewer_credential,
+        **kwargs,
+    )
+
+
 try:
-    progress = api_request("/api/v1/adjudication/status")
+    progress = adjudication_api("/api/v1/adjudication/status")
 except Exception as exc:
     render_api_error(exc)
     st.stop()
@@ -89,59 +124,32 @@ with gate_col:
         )
         st.code("production_changed=false · blind_v2_frozen=false", language=None)
 
-review_ui_enabled = os.getenv("FINANCE_RADAR_REVIEW_UI_ENABLED") == "1"
-review_access_code = os.getenv("FINANCE_RADAR_REVIEW_ACCESS_CODE", "")
-if not review_ui_enabled:
-    st.info(
-        "公网部署当前为只读观察模式。审核写入默认关闭；内部标注时需由运维显式启用独立访问门。"
-    )
-    st.stop()
-if not review_access_code:
-    st.error("审核写入已请求启用，但服务器未配置独立访问码；系统拒绝开放。")
-    st.stop()
-supplied_access_code = st.text_input("内部审核访问码", type="password")
-if not hmac.compare_digest(supplied_access_code, review_access_code):
-    st.info("输入内部审核访问码后才会加载原文任务和写入控件。")
-    st.stop()
-
-identity_col, role_col, refresh_col = st.columns([1.5, 1, .7], gap="small")
-reviewer_id = identity_col.text_input(
-    "审核者 ID",
-    value=st.session_state.get("adjudication_reviewer_id", ""),
-    placeholder="例如 reviewer-a",
-)
-role = role_col.selectbox("角色", ["REVIEWER", "ARBITER"])
+identity_col, refresh_col = st.columns([2.5, .7], gap="small")
+identity_col.caption("审核身份和角色由当前独立凭据在服务端绑定；页面不能自报或切换身份。")
 refresh_col.write("")
 if refresh_col.button("刷新", width="stretch"):
     st.rerun()
-if reviewer_id:
-    st.session_state["adjudication_reviewer_id"] = reviewer_id.strip()
 
-with st.expander("将账本事件加入未标注队列"):
-    event_id = st.text_input("事件 ID", placeholder="FR-LIVE-…")
-    if st.button("创建来源遮蔽样本", disabled=not event_id.strip()):
-        try:
-            result = api_request(
-                f"/api/v1/adjudication/samples/from-event/{event_id.strip()}", method="POST"
-            )
-            st.success(
-                f"sample={result['sample_id']} · {'已创建' if result['created'] else '已存在'} · "
-                "目标路由标签保持未设置"
-            )
-            st.rerun()
-        except Exception as exc:
-            render_api_error(exc)
-
-if len(reviewer_id.strip()) < 2:
-    st.info("输入个人审核者 ID 后读取独立任务。不要共用身份。")
-    st.stop()
+if UI_ROLE == "admin":
+    with st.expander("将账本事件加入未标注队列"):
+        event_id = st.text_input("事件 ID", placeholder="FR-LIVE-…")
+        if st.button("创建来源遮蔽样本", disabled=not event_id.strip()):
+            try:
+                result = api_request(
+                    f"/api/v1/adjudication/samples/from-event/{event_id.strip()}", method="POST"
+                )
+                st.success(
+                    f"sample={result['sample_id']} · {'已创建' if result['created'] else '已存在'} · "
+                    "目标路由标签保持未设置"
+                )
+                st.rerun()
+            except Exception as exc:
+                render_api_error(exc)
 
 try:
-    queue = api_request(
+    queue = adjudication_api(
         query_path(
             "/api/v1/adjudication/queue",
-            reviewer_id=reviewer_id.strip(),
-            role=role,
             limit=100,
         )
     )
@@ -149,6 +157,9 @@ except Exception as exc:
     render_api_error(exc)
     st.stop()
 
+role = str(queue.get("role") or "REVIEWER")
+reviewer_principal = str(queue.get("reviewer_principal") or "credential-bound")
+st.caption(f"当前凭据身份：{reviewer_principal} · 角色：{role}")
 items = queue.get("items") or []
 if not items:
     if role == "ARBITER":
@@ -241,12 +252,10 @@ with right:
         )
     if submitted:
         try:
-            result = api_request(
+            result = adjudication_api(
                 f"/api/v1/adjudication/samples/{sample['sample_id']}/reviews",
                 method="POST",
                 json_body={
-                    "reviewer_id": reviewer_id.strip(),
-                    "role": role,
                     "materiality": materiality,
                     "polarity": polarity,
                     "evidence_state": evidence_state,
