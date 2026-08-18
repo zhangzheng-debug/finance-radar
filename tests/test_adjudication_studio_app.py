@@ -35,9 +35,10 @@ def _fake_api(path: str, *, method: str = "GET", json_body: dict[str, Any] | Non
         }
     if parsed.path == "/api/v1/adjudication/queue":
         query = urllib.parse.parse_qs(parsed.query)
-        assert query["reviewer_id"] == ["reviewer-a"]
+        assert "reviewer_id" not in query
+        assert "role" not in query
         return {
-            "reviewer_id": "reviewer-a",
+            "reviewer_principal": "human-1234567890",
             "role": "REVIEWER",
             "peer_answers_hidden": True,
             "items": [
@@ -81,12 +82,10 @@ def test_adjudication_page_hides_peer_model_and_market_outputs(monkeypatch) -> N
     access = next(item for item in page.text_input if item.label == "内部审核访问码")
     access.set_value("review-secret")
     page.run()
-    reviewer = next(item for item in page.text_input if item.label == "审核者 ID")
-    reviewer.set_value("reviewer-a")
-    page.run()
     assert not page.exception
     rendered = "\n".join(str(item.value) for item in [*page.markdown, *page.caption, *page.code])
     assert "Material issuer disclosure" in rendered
+    assert "human-1234567890" in rendered
     assert "同伴答案: HIDDEN" in rendered
     assert "模型 / 行情: HIDDEN" in rendered
     assert "RISK_REVIEW" not in rendered

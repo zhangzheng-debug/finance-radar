@@ -164,6 +164,9 @@
     },
     "formal_training_label": {
       "human_only": true,
+      "credential_bound_principal": true,
+      "client_may_choose_reviewer_id_or_role": false,
+      "shared_admin_or_reviewer_token_may_submit_human_label": false,
       "independent_reviewers": 2,
       "reviewer_identities_must_differ": true,
       "third_arbiter_on_disagreement": true,
@@ -172,6 +175,10 @@
       "human_submits_target_label": false,
       "target_label_derived_by_pure_function": true,
       "split_before_validation": "UNASSIGNED",
+      "event_time_content_only": true,
+      "freeze_requires_resolved_issuer_and_event_chain_groups": true,
+      "freeze_requires_exact_and_near_duplicate_zero": true,
+      "freeze_is_one_way_and_dataset_hash_bound": true,
       "required_submission_fields": [
         "exact_passage",
         "rationale",

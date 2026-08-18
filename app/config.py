@@ -1,11 +1,46 @@
 from __future__ import annotations
 
 import os
+import json
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _reviewer_principals_from_env() -> tuple[tuple[str, str, str], ...]:
+    """Parse credential-bound human reviewers without accepting shared aliases."""
+
+    raw = os.getenv("FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON", "").strip()
+    if not raw:
+        return ()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON must be valid JSON") from exc
+    if not isinstance(payload, list):
+        raise ValueError("FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON must be a list")
+    principals: list[tuple[str, str, str]] = []
+    seen_ids: set[str] = set()
+    seen_tokens: set[str] = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            raise ValueError("each reviewer principal must be an object")
+        principal_id = str(item.get("principal_id") or "").strip()
+        role = str(item.get("role") or "").strip().upper()
+        token = str(item.get("token") or "").strip()
+        if len(principal_id) < 3 or role not in {"REVIEWER", "ARBITER"} or len(token) < 24:
+            raise ValueError("reviewer principal requires principal_id, role and a 24+ character token")
+        normalized_id = principal_id.casefold()
+        token_fingerprint = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        if normalized_id in seen_ids or token_fingerprint in seen_tokens:
+            raise ValueError("reviewer principal IDs and tokens must be unique")
+        seen_ids.add(normalized_id)
+        seen_tokens.add(token_fingerprint)
+        principals.append((principal_id, role, token))
+    return tuple(principals)
 
 
 @dataclass(frozen=True)
@@ -18,6 +53,7 @@ class Settings:
     demo_mode: str = "RECENT_CAPTURE"
     admin_token: str | None = None
     reviewer_token: str | None = None
+    reviewer_principals: tuple[tuple[str, str, str], ...] = ()
     operator_token: str | None = None
     api_base_url: str = "http://127.0.0.1:8000"
     web_base_url: str = "http://127.0.0.1:8501"
@@ -42,6 +78,7 @@ class Settings:
             demo_mode=os.getenv("FINANCE_RADAR_DEMO_MODE", "RECENT_CAPTURE").upper(),
             admin_token=os.getenv("FINANCE_RADAR_ADMIN_TOKEN") or None,
             reviewer_token=os.getenv("FINANCE_RADAR_REVIEWER_TOKEN") or None,
+            reviewer_principals=_reviewer_principals_from_env(),
             operator_token=os.getenv("FINANCE_RADAR_OPERATOR_TOKEN") or None,
             api_base_url=os.getenv("FINANCE_RADAR_API_URL", "http://127.0.0.1:8000").rstrip("/"),
             web_base_url=os.getenv("FINANCE_RADAR_WEB_URL", "http://127.0.0.1:8501").rstrip("/"),

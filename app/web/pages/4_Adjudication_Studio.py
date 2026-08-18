@@ -104,18 +104,11 @@ if not hmac.compare_digest(supplied_access_code, review_access_code):
     st.info("输入内部审核访问码后才会加载原文任务和写入控件。")
     st.stop()
 
-identity_col, role_col, refresh_col = st.columns([1.5, 1, .7], gap="small")
-reviewer_id = identity_col.text_input(
-    "审核者 ID",
-    value=st.session_state.get("adjudication_reviewer_id", ""),
-    placeholder="例如 reviewer-a",
-)
-role = role_col.selectbox("角色", ["REVIEWER", "ARBITER"])
+identity_col, refresh_col = st.columns([2.5, .7], gap="small")
+identity_col.caption("审核身份和角色由当前独立凭据在服务端绑定；页面不能自报或切换身份。")
 refresh_col.write("")
 if refresh_col.button("刷新", width="stretch"):
     st.rerun()
-if reviewer_id:
-    st.session_state["adjudication_reviewer_id"] = reviewer_id.strip()
 
 with st.expander("将账本事件加入未标注队列"):
     event_id = st.text_input("事件 ID", placeholder="FR-LIVE-…")
@@ -132,16 +125,10 @@ with st.expander("将账本事件加入未标注队列"):
         except Exception as exc:
             render_api_error(exc)
 
-if len(reviewer_id.strip()) < 2:
-    st.info("输入个人审核者 ID 后读取独立任务。不要共用身份。")
-    st.stop()
-
 try:
     queue = api_request(
         query_path(
             "/api/v1/adjudication/queue",
-            reviewer_id=reviewer_id.strip(),
-            role=role,
             limit=100,
         )
     )
@@ -149,6 +136,9 @@ except Exception as exc:
     render_api_error(exc)
     st.stop()
 
+role = str(queue.get("role") or "REVIEWER")
+reviewer_principal = str(queue.get("reviewer_principal") or "credential-bound")
+st.caption(f"当前凭据身份：{reviewer_principal} · 角色：{role}")
 items = queue.get("items") or []
 if not items:
     if role == "ARBITER":
@@ -245,8 +235,6 @@ with right:
                 f"/api/v1/adjudication/samples/{sample['sample_id']}/reviews",
                 method="POST",
                 json_body={
-                    "reviewer_id": reviewer_id.strip(),
-                    "role": role,
                     "materiality": materiality,
                     "polarity": polarity,
                     "evidence_state": evidence_state,

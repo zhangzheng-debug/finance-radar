@@ -5,6 +5,26 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+- Moved the public shell ahead of aggregate API work, added bounded role-scoped
+  GET snapshots with explicit stale ages, and moved non-critical 30-day product
+  metrics after the event feed. Desktop, keyboard and 390 px browser checks now
+  cover the first-use path without allowing cached data to masquerade as fresh.
+- Bound every authentic-human review identity and role to a separate server-side
+  credential. Client-supplied reviewer aliases and roles are rejected, a shared
+  admin/reviewer token cannot impersonate a human, and reviews persist only a
+  stable principal hash.
+- Added the `human-blind-v3.1` event-time sample contract, primary-evidence
+  ordering, issuer/event-chain grouping gates, exact/near-duplicate exclusion,
+  balanced deterministic selection and one-way hash-bound freeze tooling. The
+  existing 24 legacy OPEN samples remain visible as ineligible history; no
+  authentic-human blind set is claimed.
+- Added same-page source-first reading continuity: event cards now have stable
+  return anchors, filters survive preview/return, the highest-authority source
+  is the explicit external jump, and a browser-session snapshot explains status,
+  version or evidence changes since the last view.
+- Let the Windows local launcher place logs on an explicit D-drive path so UI
+  and recovery QA do not consume the constrained C drive.
+
 ## 2026.08.18.2
 
 - Added a database-free `/api/v1/live` probe and changed the transactional
