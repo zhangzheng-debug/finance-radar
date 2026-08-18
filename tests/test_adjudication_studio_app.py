@@ -19,7 +19,14 @@ def _run_in_admin_ui(monkeypatch) -> None:
     monkeypatch.setattr(web_common, "UI_ROLE", "admin")
 
 
-def _fake_api(path: str, *, method: str = "GET", json_body: dict[str, Any] | None = None) -> dict[str, Any]:
+def _fake_api(
+    path: str,
+    *,
+    method: str = "GET",
+    json_body: dict[str, Any] | None = None,
+    reviewer_credential: str | None = None,
+) -> dict[str, Any]:
+    assert reviewer_credential == "personal-reviewer-credential"
     parsed = urllib.parse.urlsplit(path)
     if parsed.path == "/api/v1/adjudication/status":
         return {
@@ -83,6 +90,10 @@ def test_adjudication_page_hides_peer_model_and_market_outputs(monkeypatch) -> N
     access.set_value("review-secret")
     page.run()
     assert not page.exception
+    credential = next(item for item in page.text_input if item.label == "个人审核凭据")
+    credential.set_value("personal-reviewer-credential")
+    page.run()
+    assert not page.exception
     rendered = "\n".join(str(item.value) for item in [*page.markdown, *page.caption, *page.code])
     assert "Material issuer disclosure" in rendered
     assert "human-1234567890" in rendered
@@ -110,7 +121,17 @@ def test_adjudication_page_failure_state_hides_internal_details(monkeypatch) -> 
 
     monkeypatch.setattr(web_common, "api_request", fail)
     monkeypatch.setattr(web_common, "SHOW_DEBUG", False)
+    monkeypatch.setenv("FINANCE_RADAR_REVIEW_UI_ENABLED", "1")
+    monkeypatch.setenv("FINANCE_RADAR_REVIEW_ACCESS_CODE", "review-secret")
     page = AppTest.from_file(str(PAGE), default_timeout=10).run()
+    next(item for item in page.text_input if item.label == "内部审核访问码").set_value(
+        "review-secret"
+    )
+    page.run()
+    next(item for item in page.text_input if item.label == "个人审核凭据").set_value(
+        "personal-reviewer-credential"
+    )
+    page.run()
     rendered = "\n".join(str(item.value) for item in [*page.markdown, *page.info, *page.error])
     assert not page.exception
     assert "数据服务暂时不可用" in rendered

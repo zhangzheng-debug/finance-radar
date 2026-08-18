@@ -340,6 +340,7 @@ def api_request(
     method: str = "GET",
     json_body: dict[str, Any] | None = None,
     timeout_seconds: int = 20,
+    reviewer_credential: str | None = None,
 ) -> dict[str, Any]:
     if not 1 <= int(timeout_seconds) <= 20:
         raise ValueError("timeout_seconds must be between 1 and 20")
@@ -366,7 +367,14 @@ def api_request(
                 else "当前界面角色不允许此写入请求"
             )
     headers = {"Accept": "application/json"}
-    if UI_ROLE == "reviewer" and REVIEWER_TOKEN:
+    if reviewer_credential is not None:
+        if UI_ROLE not in {"reviewer", "admin"}:
+            raise ApiError("当前界面角色不允许使用人工审核凭据")
+        normalized_credential = reviewer_credential.strip()
+        if len(normalized_credential) < 24:
+            raise ApiError("人工审核凭据无效")
+        headers["X-Reviewer-Token"] = normalized_credential
+    elif UI_ROLE == "reviewer" and REVIEWER_TOKEN:
         headers["X-Reviewer-Token"] = REVIEWER_TOKEN
     elif UI_ROLE == "operator" and OPERATOR_TOKEN:
         headers["X-Operator-Token"] = OPERATOR_TOKEN

@@ -233,7 +233,17 @@ def test_freeze_candidate_is_zero_overlap_and_commit_is_one_way(workflow) -> Non
     assert candidate["event_chain_overlap_count"] == 0
     assert candidate["near_duplicate_overlap_count"] == 0
     assert candidate["model_predictions_included"] is False
+    assert candidate["production_model_changed"] is False
+    assert candidate["canonical_event_state_changed"] is False
+    assert candidate["adjudication_state_changed"] is False
     assert candidate["rows"][0]["content"]["contract_version"] == "human-blind-v3.1"
+
+    with pytest.raises(ValueError, match="insufficient zero-overlap"):
+        service.build_freeze_candidate(
+            minimums={"RISK_REVIEW": 1},
+            minimum_source_groups=1,
+            excluded_event_ids={"evt-a"},
+        )
 
     assert operations.freeze_adjudication_samples(
         [sample_id], candidate["freeze_id"]

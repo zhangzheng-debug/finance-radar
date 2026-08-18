@@ -429,6 +429,11 @@ class AdjudicationService:
         minimum_source_groups: int = 4,
         excluded_text_sha256: set[str] | None = None,
         excluded_near_duplicate_keys: set[str] | None = None,
+        excluded_event_ids: set[str] | None = None,
+        excluded_entity_groups: set[str] | None = None,
+        excluded_event_chain_groups: set[str] | None = None,
+        excluded_entity_group_sha256: set[str] | None = None,
+        excluded_event_chain_group_sha256: set[str] | None = None,
     ) -> dict[str, Any]:
         """Build a deterministic blind set without mutating samples or invoking a model."""
 
@@ -441,11 +446,39 @@ class AdjudicationService:
             raise ValueError("human annotations are not ready for overlap audit")
         excluded_exact = {str(item).lower() for item in (excluded_text_sha256 or set())}
         excluded_near = set(excluded_near_duplicate_keys or set())
+        excluded_events = {str(item) for item in (excluded_event_ids or set())}
+        excluded_entities = {
+            str(item).removeprefix("issuer:") for item in (excluded_entity_groups or set())
+        }
+        excluded_chains = {
+            str(item).removeprefix("chain:") for item in (excluded_event_chain_groups or set())
+        }
+        excluded_entity_hashes = {
+            str(item).lower() for item in (excluded_entity_group_sha256 or set())
+        }
+        excluded_chain_hashes = {
+            str(item).lower() for item in (excluded_event_chain_group_sha256 or set())
+        }
+
+        def previously_exposed(row: dict[str, Any]) -> bool:
+            entity = str(row.get("entity_group") or "").removeprefix("issuer:")
+            chain = str(row.get("event_chain_group") or "").removeprefix("chain:")
+            entity_hash = hashlib.sha256(entity.encode("utf-8")).hexdigest()
+            chain_hash = hashlib.sha256(chain.encode("utf-8")).hexdigest() if chain else ""
+            return (
+                str(row.get("event_id") or "") in excluded_events
+                or entity in excluded_entities
+                or chain in excluded_chains
+                or entity_hash in excluded_entity_hashes
+                or (chain_hash and chain_hash in excluded_chain_hashes)
+            )
+
         candidates = [
             row
             for row in report["annotations"]
             if str(row.get("text_sha256") or "").lower() not in excluded_exact
             and self._near_duplicate_key(row) not in excluded_near
+            and not previously_exposed(row)
         ]
         selected: list[dict[str, Any]] = []
         used_entities: set[str] = set()
@@ -519,6 +552,8 @@ class AdjudicationService:
             "near_duplicate_overlap_count": len(frozen_rows) - len(used_near),
             "model_predictions_included": False,
             "post_event_market_data_included": False,
-            "production_changed": False,
+            "production_model_changed": False,
+            "canonical_event_state_changed": False,
+            "adjudication_state_changed": False,
             "no_trading": True,
         }

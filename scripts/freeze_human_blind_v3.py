@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +12,15 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+DEFAULT_EXCLUSION_PATHS = (
+    ROOT / "artifacts" / "risk_router_training_manifest.jsonl",
+    ROOT / "artifacts" / "risk_router_external_blind_v1.jsonl",
+    ROOT / "artifacts" / "risk_router_external_blind_v2.jsonl",
+    ROOT / "artifacts" / "risk_router_external_blind_v3.jsonl",
+    ROOT / "artifacts" / "risk_router_v3_ai_adjudications_dev.jsonl",
+    ROOT / "artifacts" / "risk_router_v4_semantic_dev.jsonl",
+)
 
 from app.config import Settings
 from app.services import AdjudicationService
@@ -26,9 +36,16 @@ def _iso_future(value: str) -> str:
     return parsed.astimezone(timezone.utc).isoformat()
 
 
-def _load_exclusions(paths: list[Path], service: AdjudicationService) -> tuple[set[str], set[str]]:
+def _load_exclusions(
+    paths: list[Path], service: AdjudicationService
+) -> tuple[set[str], set[str], set[str], set[str], set[str], set[str], set[str]]:
     exact: set[str] = set()
     near: set[str] = set()
+    event_ids: set[str] = set()
+    entities: set[str] = set()
+    chains: set[str] = set()
+    entity_hashes: set[str] = set()
+    chain_hashes: set[str] = set()
     for path in paths:
         for line in path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
@@ -39,9 +56,30 @@ def _load_exclusions(paths: list[Path], service: AdjudicationService) -> tuple[s
             text_hash = str(row.get("text_sha256") or "").lower()
             if len(text_hash) == 64:
                 exact.add(text_hash)
+            event_id = str(row.get("event_id") or "").strip()
+            entity = str(row.get("entity_group") or "").strip()
+            chain = str(row.get("event_chain_group") or "").strip()
+            entity_hash = str(row.get("entity_group_sha256") or "").strip().lower()
+            chain_hash = str(row.get("event_chain_group_sha256") or "").strip().lower()
+            if event_id:
+                event_ids.add(event_id)
+            if entity:
+                entities.add(entity)
+            if chain:
+                chains.add(chain)
+            if len(entity_hash) == 64:
+                entity_hashes.add(entity_hash)
+            if len(chain_hash) == 64:
+                chain_hashes.add(chain_hash)
             if isinstance(row.get("content"), dict):
                 near.add(service._near_duplicate_key(row))
-    return exact, near
+            elif str(row.get("text") or "").strip():
+                near.add(
+                    service._near_duplicate_key(
+                        {"content": {"summary": str(row["text"])}}
+                    )
+                )
+    return exact, near, event_ids, entities, chains, entity_hashes, chain_hashes
 
 
 def _write_atomic(path: Path, data: bytes) -> None:
@@ -49,6 +87,7 @@ def _write_atomic(path: Path, data: bytes) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_bytes(data)
     temporary.replace(path)
+    os.chmod(path, 0o600)
 
 
 def main() -> None:
@@ -69,10 +108,27 @@ def main() -> None:
     operations_path = (args.operations or settings.operations_db).resolve()
     operations = OperationsRepository(operations_path)
     service = AdjudicationService(LedgerRepository(ledger_path), operations)
-    excluded_exact, excluded_near = _load_exclusions(args.exclude_jsonl, service)
+    exclusion_paths = [*DEFAULT_EXCLUSION_PATHS, *args.exclude_jsonl]
+    missing = [path for path in exclusion_paths if not path.is_file()]
+    if missing:
+        raise ValueError("required overlap reference is missing: " + ", ".join(map(str, missing)))
+    (
+        excluded_exact,
+        excluded_near,
+        excluded_events,
+        excluded_entities,
+        excluded_chains,
+        excluded_entity_hashes,
+        excluded_chain_hashes,
+    ) = _load_exclusions(exclusion_paths, service)
     candidate = service.build_freeze_candidate(
         excluded_text_sha256=excluded_exact,
         excluded_near_duplicate_keys=excluded_near,
+        excluded_event_ids=excluded_events,
+        excluded_entity_groups=excluded_entities,
+        excluded_event_chain_groups=excluded_chains,
+        excluded_entity_group_sha256=excluded_entity_hashes,
+        excluded_event_chain_group_sha256=excluded_chain_hashes,
     )
 
     freeze_id = candidate["freeze_id"]
@@ -90,7 +146,7 @@ def main() -> None:
             "dataset_path": str(dataset_path),
             "ledger_path": str(ledger_path),
             "operations_path": str(operations_path),
-            "excluded_manifests": [str(path.resolve()) for path in args.exclude_jsonl],
+            "excluded_manifests": [str(path.resolve()) for path in exclusion_paths],
             "applied": False,
         }
     )
@@ -121,7 +177,9 @@ def main() -> None:
                     "purpose": args.purpose.strip(),
                     "expires_at": expires_at,
                 },
-                "production_changed": False,
+                "adjudication_state_changed": True,
+                "production_model_changed": False,
+                "canonical_event_state_changed": False,
             }
         )
     _write_atomic(

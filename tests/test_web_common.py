@@ -137,6 +137,39 @@ def test_admin_api_request_can_attach_configured_token(monkeypatch) -> None:
     assert captured[0].get_header("X-admin-token") == "internal-only"
 
 
+def test_personal_reviewer_credential_overrides_static_and_admin_tokens(monkeypatch) -> None:
+    captured: list[object] = []
+
+    def fake_urlopen(request: object, *, timeout: int) -> _JsonResponse:
+        captured.append(request)
+        return _JsonResponse()
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "admin")
+    monkeypatch.setattr(web_common, "REVIEWER_TOKEN", "shared-static-token")
+    monkeypatch.setattr(web_common, "ADMIN_TOKEN", "admin-token")
+    monkeypatch.setattr(web_common.urllib.request, "urlopen", fake_urlopen)
+    assert api_request(
+        "/api/v1/adjudication/status",
+        reviewer_credential="personal-reviewer-credential",
+    ) == {"ok": True}
+    assert captured[0].get_header("X-reviewer-token") == "personal-reviewer-credential"
+    assert captured[0].get_header("X-admin-token") is None
+
+
+def test_public_ui_rejects_personal_reviewer_credential_before_network(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(
+        web_common.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("reviewer credential reached the network"),
+    )
+    with pytest.raises(ApiError, match="角色不允许"):
+        api_request(
+            "/api/v1/adjudication/status",
+            reviewer_credential="personal-reviewer-credential",
+        )
+
+
 def test_cached_api_get_is_bounded_by_ttl_and_returns_defensive_copies(monkeypatch) -> None:
     calls = 0
 
