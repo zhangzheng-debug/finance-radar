@@ -8,6 +8,8 @@ from pathlib import Path
 from app.storage.operations import OperationsRepository
 from scripts.audit_fact_integrity_history import (
     AGENT_REJECTED,
+    LIGHT_REASON_CONTRACT_MISMATCH,
+    LIGHT_REASON_GATE_NOT_SUPPORTED,
     LIGHT_REVIEW,
     build_report,
     open_read_only,
@@ -107,12 +109,20 @@ def _seed_operations(path: Path) -> None:
             "evidence_edges": [
                 {
                     "claim_id": "claim",
-                    "evidence_id": "evidence",
+                    "evidence_id": "irrelevant-fed",
                     "exact_excerpt": (
                         "Federal Reserve officials published routine meeting minutes "
                         "about monetary policy and inflation expectations."
                     ),
-                }
+                },
+                {
+                    "claim_id": "claim",
+                    "evidence_id": "irrelevant-weather",
+                    "exact_excerpt": (
+                        "The National Weather Service issued a routine seasonal outlook "
+                        "for coastal rainfall and temperatures."
+                    ),
+                },
             ],
             "guardrails": {},
             "tool_calls": [],
@@ -169,14 +179,39 @@ def test_history_audit_is_read_only_and_exposes_both_old_false_positive_paths(
     assert before == after == ("verified", 2)
     assert report["canonical_mutation_attempted"] is False
     assert report["agent_decisions"]["counts"] == {AGENT_REJECTED: 1}
+    assert report["agent_decisions"]["classification_unit"] == "agent_decision"
+    # Classifications count decisions; rejected_edge_total counts the rejected
+    # edges inside them. One affected decision can therefore contain two edges.
+    assert report["agent_decisions"]["rejected_edge_total"] == 2
     assert report["light_verifications"]["counts"] == {LIGHT_REVIEW: 1}
+    assert report["light_verifications"]["review_reason_counts"] == {
+        LIGHT_REASON_CONTRACT_MISMATCH: 1,
+        LIGHT_REASON_GATE_NOT_SUPPORTED: 1,
+    }
     assert report["light_verifications"]["records"][0]["current_dry_run_decision"] == "INSUFFICIENT"
     assert report["legacy_review_config"]["unproven"] == 1
+    assert report["legacy_review_config"]["unproven_canonical_verified"] == 1
+    assert report["affected_manifests"]["agent_decisions"] == [
+        {
+            "decision_id": report["agent_decisions"]["decisions"][0]["decision_id"],
+            "event_id": "evt",
+            "classification": AGENT_REJECTED,
+            "rejected_edge_count": 2,
+        }
+    ]
+    assert report["affected_manifests"]["light_formalizations"][0][
+        "review_reasons"
+    ] == [LIGHT_REASON_GATE_NOT_SUPPORTED, LIGHT_REASON_CONTRACT_MISMATCH]
+    assert report["affected_manifests"]["legacy_unproven_canonical_verified"][0][
+        "event_id"
+    ] == "evt"
 
     markdown = tmp_path / "audit.md"
     write_markdown(markdown, report)
     text = markdown.read_text(encoding="utf-8")
     assert "Canonical mutation attempted: `false`" in text
+    assert "Classification unit: `agent_decision`" in text
+    assert "Rejected stored edges across those decisions: `2`" in text
     assert "Federal Reserve officials" not in text
     assert "BETA CORP" not in text
 

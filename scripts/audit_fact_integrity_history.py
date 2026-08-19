@@ -52,6 +52,9 @@ AGENT_REJECTED = "EDGE_REJECTED_BY_CURRENT_RELEVANCE_GATE"
 LIGHT_CURRENT = "PASSES_CURRENT_GATE_DRY_RUN"
 LIGHT_REVIEW = "CURRENT_GATE_REQUIRES_REVIEW"
 LIGHT_EVOLVED = "EVENT_EVOLVED_AFTER_FORMALIZATION"
+LIGHT_REASON_GATE_NOT_SUPPORTED = "CURRENT_GATE_NOT_SUPPORTED"
+LIGHT_REASON_CONTRACT_MISMATCH = "CONTRACT_VERSION_MISMATCH"
+LIGHT_REASON_EVENT_NOT_FOUND = "EVENT_NOT_FOUND"
 
 
 def open_read_only(path: Path) -> sqlite3.Connection:
@@ -103,8 +106,10 @@ def audit_agent_decisions(
         return {
             "status": "NOT_AVAILABLE",
             "current_contract": PROMPT_VERSION,
+            "classification_unit": "agent_decision",
             "total": 0,
             "counts": {},
+            "rejected_edge_total": 0,
             "decisions": [],
         }
 
@@ -180,8 +185,12 @@ def audit_agent_decisions(
     return {
         "status": "OK",
         "current_contract": PROMPT_VERSION,
+        "classification_unit": "agent_decision",
         "total": len(decisions),
         "counts": dict(sorted(counts.items())),
+        "rejected_edge_total": sum(
+            int(item["rejected_edge_count"]) for item in decisions
+        ),
         "decisions": decisions,
     }
 
@@ -216,6 +225,7 @@ def audit_light_verifications(ledger: sqlite3.Connection) -> dict[str, Any]:
             "current_contract": LIGHT_VERIFICATION_VERSION,
             "total": 0,
             "counts": {},
+            "review_reason_counts": {},
             "records": [],
         }
     rows = ledger.execute(
@@ -227,6 +237,7 @@ def audit_light_verifications(ledger: sqlite3.Connection) -> dict[str, Any]:
     ).fetchall()
     records: list[dict[str, Any]] = []
     counts: Counter[str] = Counter()
+    review_reason_counts: Counter[str] = Counter()
     for row in rows:
         event_id = str(row["event_id"])
         event = _event_row(ledger, event_id)
@@ -239,6 +250,7 @@ def audit_light_verifications(ledger: sqlite3.Connection) -> dict[str, Any]:
             decision = "NOT_EVALUATED"
             checks: list[dict[str, Any]] = []
             current_version = None
+            review_reasons = [LIGHT_REASON_EVENT_NOT_FOUND]
         else:
             historical_input = {
                 **event,
@@ -254,13 +266,21 @@ def audit_light_verifications(ledger: sqlite3.Connection) -> dict[str, Any]:
             decision = str(evaluation.get("decision") or "UNKNOWN")
             checks = _sanitized_checks(evaluation)
             current_version = int(event["current_version"])
+            review_reasons = []
+            if current_version != int(row["version"]):
+                review_reasons.append(LIGHT_EVOLVED)
+            if decision != "SUPPORTED":
+                review_reasons.append(LIGHT_REASON_GATE_NOT_SUPPORTED)
+            if stored_contract != LIGHT_VERIFICATION_VERSION:
+                review_reasons.append(LIGHT_REASON_CONTRACT_MISMATCH)
             if current_version != int(row["version"]):
                 classification = LIGHT_EVOLVED
-            elif decision == "SUPPORTED" and stored_contract == LIGHT_VERIFICATION_VERSION:
+            elif not review_reasons:
                 classification = LIGHT_CURRENT
             else:
                 classification = LIGHT_REVIEW
         counts[classification] += 1
+        review_reason_counts.update(review_reasons)
         records.append(
             {
                 "event_id": event_id,
@@ -271,6 +291,7 @@ def audit_light_verifications(ledger: sqlite3.Connection) -> dict[str, Any]:
                 "current_contract": LIGHT_VERIFICATION_VERSION,
                 "current_dry_run_decision": decision,
                 "classification": classification,
+                "review_reasons": review_reasons,
                 "checks": checks,
                 "canonical_mutation_attempted": False,
             }
@@ -280,6 +301,7 @@ def audit_light_verifications(ledger: sqlite3.Connection) -> dict[str, Any]:
         "current_contract": LIGHT_VERIFICATION_VERSION,
         "total": len(records),
         "counts": dict(sorted(counts.items())),
+        "review_reason_counts": dict(sorted(review_reason_counts.items())),
         "records": records,
     }
 
@@ -293,10 +315,21 @@ def audit_legacy_config(
     if not isinstance(rows, list):
         raise ValueError("legacy config requires an adjudications list")
     result = audit_legacy_config_rows(ledger, rows)
+    canonical_status_counts = Counter(
+        str(item.get("canonical_status") or "NOT_FOUND") for item in result["rows"]
+    )
+    unproven_canonical_verified = sum(
+        1
+        for item in result["rows"]
+        if item.get("provenance_status") == LEGACY_STATUS
+        and item.get("canonical_status") == "verified"
+    )
     return {
         "status": LEGACY_STATUS,
         "total": int(result["audited"]),
         "unproven": int(result["unproven"]),
+        "unproven_canonical_verified": unproven_canonical_verified,
+        "canonical_status_counts": dict(sorted(canonical_status_counts.items())),
         "canonical_mutation_allowed": False,
         "formal_mutation_attempted": False,
         "rows": result["rows"],
@@ -308,14 +341,51 @@ def build_report(
     operations: sqlite3.Connection,
     legacy_config: Path,
 ) -> dict[str, Any]:
+    agent = audit_agent_decisions(ledger, operations)
+    light = audit_light_verifications(ledger)
+    legacy = audit_legacy_config(ledger, legacy_config)
     report = {
-        "contract": "fact-integrity-history-audit-v1",
+        "contract": "fact-integrity-history-audit-v2",
         "generated_at": utc_now(),
         "read_only": True,
         "canonical_mutation_attempted": False,
-        "agent_decisions": audit_agent_decisions(ledger, operations),
-        "light_verifications": audit_light_verifications(ledger),
-        "legacy_review_config": audit_legacy_config(ledger, legacy_config),
+        "agent_decisions": agent,
+        "light_verifications": light,
+        "legacy_review_config": legacy,
+        "affected_manifests": {
+            "agent_decisions": [
+                {
+                    "decision_id": item["decision_id"],
+                    "event_id": item["event_id"],
+                    "classification": item["classification"],
+                    "rejected_edge_count": item["rejected_edge_count"],
+                }
+                for item in agent.get("decisions", [])
+                if item.get("classification") != AGENT_CURRENT
+            ],
+            "light_formalizations": [
+                {
+                    "event_id": item["event_id"],
+                    "formalized_version": item["formalized_version"],
+                    "canonical_version_now": item["canonical_version_now"],
+                    "classification": item["classification"],
+                    "review_reasons": item["review_reasons"],
+                }
+                for item in light.get("records", [])
+                if item.get("classification") != LIGHT_CURRENT
+            ],
+            "legacy_unproven_canonical_verified": [
+                {
+                    "event_id": item["event_id"],
+                    "canonical_version": item["canonical_version"],
+                    "provenance_status": item["provenance_status"],
+                    "issues": item["issues"],
+                }
+                for item in legacy.get("rows", [])
+                if item.get("provenance_status") == LEGACY_STATUS
+                and item.get("canonical_status") == "verified"
+            ],
+        },
     }
     report["report_sha256"] = hashlib.sha256(
         stable_json(report).encode("utf-8")
@@ -355,7 +425,9 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"- Total stored decisions: `{agent['total']}`",
         f"- Current contract: `{_count(agent, AGENT_CURRENT)}`",
         f"- Old contract requires rerun: `{_count(agent, AGENT_STALE)}`",
-        f"- Stored edge rejected by current relevance gate: `{_count(agent, AGENT_REJECTED)}`",
+        f"- Decisions with at least one stored edge rejected by the current relevance gate: `{_count(agent, AGENT_REJECTED)}`",
+        f"- Rejected stored edges across those decisions: `{agent.get('rejected_edge_total', 0)}`",
+        "- Classification unit: `agent_decision` (decision counts and edge counts must not be conflated)",
         "",
         "All non-current decisions are advisory history only. The live cycle must rerun them",
         "under the current receipt and prompt contract before displaying a current conclusion.",
@@ -366,6 +438,7 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"- Pass current gate in dry run: `{_count(light, LIGHT_CURRENT)}`",
         f"- Current gate requires review: `{_count(light, LIGHT_REVIEW)}`",
         f"- Event evolved after formalization: `{_count(light, LIGHT_EVOLVED)}`",
+        f"- Review reasons: `{stable_json(light.get('review_reason_counts', {}))}`",
         "",
         "This section does not roll back a historical version. A scoped human/operator",
         "decision is required before any canonical correction.",
@@ -374,6 +447,7 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         "",
         f"- Rows audited: `{legacy['total']}`",
         f"- Rows with unproven provenance: `{legacy['unproven']}`",
+        f"- Unproven rows whose canonical status is currently verified: `{legacy.get('unproven_canonical_verified', 0)}`",
         "- Allowed to mutate canonical truth: `false`",
         "- Eligible as authentic-human labels or training truth: `false`",
         "",
@@ -381,6 +455,7 @@ def write_markdown(path: Path, report: dict[str, Any]) -> None:
         "",
         f"- Agent decisions requiring rerun/review: `{len(affected_agent_ids)}`",
         f"- Light formalizations requiring review/evolution check: `{len(affected_light_ids)}`",
+        f"- Unproven legacy rows currently canonical verified: `{len(report['affected_manifests']['legacy_unproven_canonical_verified'])}`",
         "",
         "The adjacent JSON report contains every decision/event identifier and sanitized gate",
         "result. It intentionally excludes evidence passage text and credentials.",
@@ -410,8 +485,17 @@ def main() -> int:
             {
                 "report_sha256": report["report_sha256"],
                 "agent_counts": report["agent_decisions"]["counts"],
+                "agent_rejected_edge_total": report["agent_decisions"][
+                    "rejected_edge_total"
+                ],
                 "light_counts": report["light_verifications"]["counts"],
+                "light_review_reason_counts": report["light_verifications"][
+                    "review_reason_counts"
+                ],
                 "legacy_unproven": report["legacy_review_config"]["unproven"],
+                "legacy_unproven_canonical_verified": report[
+                    "legacy_review_config"
+                ]["unproven_canonical_verified"],
                 "canonical_mutation_attempted": False,
                 "json_report": str(args.json_report),
                 "markdown_report": str(args.markdown_report),
