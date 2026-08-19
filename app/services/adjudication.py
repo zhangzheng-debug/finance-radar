@@ -25,6 +25,31 @@ PRINCIPAL_HASH_PATTERN = re.compile(r"[0-9a-f]{64}")
 HUMAN_BLIND_CONTRACT_VERSION = "human-blind-v3.1"
 
 
+def normalize_source_family(value: object) -> str:
+    """Collapse provider-specific feeds into one independent source family."""
+
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").casefold()).strip("_")
+    aliases = (
+        ("federal_reserve", "federal_reserve"),
+        ("fed", "federal_reserve"),
+        ("sec", "sec"),
+        ("cftc", "cftc"),
+        ("fda", "fda"),
+        ("ecb", "ecb"),
+        ("eia", "eia"),
+        ("bls", "bls"),
+        ("bea", "bea"),
+        ("sharadar", "sharadar"),
+        ("opennews", "opennews"),
+        ("binance", "binance"),
+        ("alpaca", "alpaca"),
+    )
+    for prefix, canonical in aliases:
+        if normalized == prefix or normalized.startswith(prefix + "_"):
+            return canonical
+    return normalized
+
+
 def _clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
@@ -364,7 +389,12 @@ class AdjudicationService:
             else:
                 annotations.append(row)
         labels = Counter(row["label"] for row in annotations)
-        source_groups = {row["source_id"] for row in annotations}
+        source_groups = {str(row["source_id"]) for row in annotations}
+        source_families = {
+            family
+            for source in source_groups
+            if (family := normalize_source_family(source))
+        }
         deficits = {
             label: max(0, int(required) - labels.get(label, 0))
             for label, required in minimums.items()
@@ -373,7 +403,7 @@ class AdjudicationService:
             bool(annotations)
             and not invalid
             and all(value == 0 for value in deficits.values())
-            and len(source_groups) >= minimum_source_groups
+            and len(source_families) >= minimum_source_groups
             and not unresolved_groups
         )
         return {
@@ -387,7 +417,10 @@ class AdjudicationService:
             "label_minimums": minimums,
             "label_deficits": deficits,
             "source_groups": len(source_groups),
+            "source_families": len(source_families),
+            "source_family_names": sorted(source_families),
             "minimum_source_groups": minimum_source_groups,
+            "minimum_source_families": minimum_source_groups,
             "contract_version": HUMAN_BLIND_CONTRACT_VERSION,
             "contract_ineligible_samples": contract_ineligible,
             "unresolved_group_samples": unresolved_groups,
@@ -593,7 +626,14 @@ class AdjudicationService:
                         f"insufficient zero-overlap {label} annotations after grouping: {have}/{target}"
                     )
         source_groups = sorted({str(row.get("source_id") or "") for row in selected})
-        if len(source_groups) < minimum_source_groups:
+        source_families = sorted(
+            {
+                family
+                for source in source_groups
+                if (family := normalize_source_family(source))
+            }
+        )
+        if len(source_families) < minimum_source_groups:
             raise ValueError("selected blind set does not meet the source-family minimum")
         frozen_rows = [{**row, "split": "HUMAN_BLIND_V3"} for row in selected]
         dataset_bytes = "".join(
@@ -609,6 +649,7 @@ class AdjudicationService:
             "row_count": len(frozen_rows),
             "label_counts": dict(sorted(Counter(row["label"] for row in frozen_rows).items())),
             "source_groups": source_groups,
+            "source_families": source_families,
             "entity_overlap_count": len(frozen_rows) - len(used_entities),
             "event_chain_overlap_count": len(frozen_rows) - len(used_chains),
             "exact_text_overlap_count": len(frozen_rows) - len(used_text),

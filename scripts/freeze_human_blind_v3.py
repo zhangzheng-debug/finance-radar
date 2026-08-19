@@ -6,7 +6,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -27,6 +26,7 @@ DEFAULT_EXCLUSION_PATHS = (
 
 from app.config import Settings
 from app.services import AdjudicationService
+from app.services.adjudication import normalize_source_family
 from app.storage import LedgerRepository, OperationsRepository
 
 
@@ -37,29 +37,6 @@ def _iso_future(value: str) -> str:
     if parsed.astimezone(timezone.utc) <= datetime.now(timezone.utc):
         raise ValueError("authorization expiry must be in the future")
     return parsed.astimezone(timezone.utc).isoformat()
-
-
-def _source_family(value: object) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").casefold()).strip("_")
-    aliases = (
-        ("federal_reserve", "federal_reserve"),
-        ("fed", "federal_reserve"),
-        ("sec", "sec"),
-        ("cftc", "cftc"),
-        ("fda", "fda"),
-        ("ecb", "ecb"),
-        ("eia", "eia"),
-        ("bls", "bls"),
-        ("bea", "bea"),
-        ("sharadar", "sharadar"),
-        ("opennews", "opennews"),
-        ("binance", "binance"),
-        ("alpaca", "alpaca"),
-    )
-    for prefix, canonical in aliases:
-        if normalized == prefix or normalized.startswith(prefix + "_"):
-            return canonical
-    return normalized
 
 
 def _load_exclusions(
@@ -99,7 +76,9 @@ def _load_exclusions(
             chain = str(row.get("event_chain_group") or "").strip()
             entity_hash = str(row.get("entity_group_sha256") or "").strip().lower()
             chain_hash = str(row.get("event_chain_group_sha256") or "").strip().lower()
-            source_family = _source_family(row.get("source_group") or row.get("source_id"))
+            source_family = normalize_source_family(
+                row.get("source_group") or row.get("source_id")
+            )
             if event_id:
                 event_ids.add(event_id)
             if entity:
@@ -253,7 +232,11 @@ def main() -> None:
 
     candidate["sample_ids_sha256"] = _sample_ids_sha256(candidate["rows"])
     candidate_source_families = sorted(
-        {_source_family(source) for source in candidate["source_groups"] if _source_family(source)}
+        {
+            normalize_source_family(source)
+            for source in candidate["source_groups"]
+            if normalize_source_family(source)
+        }
     )
     held_out_source_families = sorted(
         set(candidate_source_families) - excluded_source_families

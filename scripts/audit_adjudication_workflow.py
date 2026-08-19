@@ -33,7 +33,8 @@ def render_markdown(report: dict) -> str:
             f"- Workflow states: `{json.dumps(counts, ensure_ascii=False, sort_keys=True)}`",
             f"- Derived labels: `{json.dumps(labels, ensure_ascii=False, sort_keys=True)}`",
             f"- Remaining label minimums: `{json.dumps(deficits, ensure_ascii=False, sort_keys=True)}`",
-            f"- Independent source groups: **{report['source_groups']} / {report['minimum_source_groups']}**",
+            f"- Independent source families: **{report.get('source_families', 0)} / {report.get('minimum_source_families', report['minimum_source_groups'])}**",
+            f"- Raw source IDs represented: **{report['source_groups']}**",
             "",
             "Reviewer submissions contain only materiality, polarity and evidence-state axes. "
             "The target label is derived after two hidden independent reviews; conflicts require a third arbiter.",

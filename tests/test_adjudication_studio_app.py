@@ -37,6 +37,7 @@ def _fake_api(
             "label_counts": {},
             "label_deficits": {"RISK_REVIEW": 30, "NON_TARGET": 30, "ABSTAIN": 20},
             "source_groups": 0,
+            "source_families": 0,
             "split": "UNASSIGNED",
             "production_changed": False,
         }

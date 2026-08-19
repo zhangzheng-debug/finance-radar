@@ -293,6 +293,7 @@ def test_dry_run_writes_artifacts_and_freezes_nothing(monkeypatch, corpus) -> No
     assert dataset.is_file()
     assert hashlib.sha256(dataset.read_bytes()).hexdigest() == manifest["dataset_sha256"]
     assert manifest["freeze_id"].startswith("human-blind-v3-")
+    assert manifest["source_families"] == sorted(SOURCES)
     assert manifest["source_holdout_status"] == "ELIGIBLE_WITH_FULLY_HELD_OUT_FAMILY"
     assert manifest["held_out_source_families"] == sorted(SOURCES)
 
@@ -307,6 +308,35 @@ def test_dry_run_reports_zero_overlap_across_every_grouping(monkeypatch, corpus)
     assert manifest["event_chain_overlap_count"] == 0
     assert manifest["exact_text_overlap_count"] == 0
     assert manifest["near_duplicate_overlap_count"] == 0
+
+
+def test_four_provider_feeds_do_not_masquerade_as_four_source_families(
+    monkeypatch, corpus
+) -> None:
+    root, ledger_path, _operations_path, operations, sample_ids = corpus
+    sec_feeds = (
+        "sec_edgar",
+        "sec_current_filings",
+        "sec_litigation_releases",
+        "sec_trading_suspensions",
+    )
+    with operations.connect() as connection:
+        for index, sample_id in enumerate(sample_ids):
+            connection.execute(
+                "UPDATE adjudication_samples SET source_id=? WHERE sample_id=?",
+                (sec_feeds[index % len(sec_feeds)], sample_id),
+            )
+
+    report = AdjudicationService(
+        LedgerRepository(ledger_path), operations
+    ).pre_freeze_report()
+    assert report["source_groups"] == 4
+    assert report["source_families"] == 1
+    assert report["source_family_names"] == ["sec"]
+    assert report["status"] == "NOT_READY_FOR_FREEZE"
+
+    with pytest.raises(ValueError, match="not ready for overlap audit"):
+        run_script(monkeypatch, corpus, root / "collapsed-family")
 
 
 def test_artifacts_are_owner_only_and_leave_no_temporary_file(monkeypatch, corpus) -> None:
