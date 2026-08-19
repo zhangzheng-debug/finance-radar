@@ -6,12 +6,12 @@
 
 | 项目 | 当前证据 |
 |---|---|
-| 公网版本 | release `20260719T044852Z`，API/Web/Worker/Backup/本地模型五服务 active；Worker 每5分钟采集，失败20秒后重启 |
-| 功能与数据 | `360 passed + 17 subtests`；公网产品 `19/19`；行情能力 `17/17`；离线终端 `11/11`；83个证据对象中81个为官方原始快照，分页不会被头部失败记录永久卡住 |
-| 换机恢复 | 加密快照 `20260719T045536Z`；9,860项清单；Schema 12/3；9,861文件/1,559,757,804字节服务准备通过；真实新机激活前必须通过资源/端口/工具/HTTPS失败前置门 |
+| 公网版本 | 生产 `2026.08.18.3`，AWS `us-east-1`；API/Public Web/Worker/备份计时器 active，三个内部 UI 回环按需、Evidence LLM 未启用。精确 release ID 与提交见 `CURRENT_STATE.md` |
+| 功能与数据 | 完整回归 `693 passed, 5 skipped`（参考环境）；公网产品、行情能力与离线终端验收见 `CURRENT_STATE.md`；证据对象为内容寻址官方原始快照，分页不会被头部失败记录永久卡住。测试数属易变事实，复跑 `python -m pytest -q` |
+| 换机恢复 | 账本 Schema 12 + 运维 Schema 6，两库 `quick_check/integrity_check` 均 ok；最近异机加密恢复点、清单条目数与字节数见 `CURRENT_STATE.md`；真实新机激活前必须通过资源/端口/工具/HTTPS 失败前置门 |
 | 安全边界 | 无交易路由；无账户数据；Telegram默认dry-run；备份不含交易项目和TLS私钥 |
 | 文档 | 人读任务书10页实渲染，编号缺陷已修，a11y high/medium/low均为0 |
-| 模型治理 | 外部盲测如实失败，生产保持`REMAIN_SHADOW`；V3双人盲审基础设施就绪但0条真实审核 |
+| 模型治理 | v1 误报 95% FAIL → v2 再 FAIL → v4 三层架构在 blind-v3 上误报 6.7%、11 道门全过，但因标签非人工双盲而自限 `QUALIFIED_SHADOW`；真人盲集未冻结，真人结论 **0 条** |
 
 ## 仍必须由人完成
 
