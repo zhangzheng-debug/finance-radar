@@ -2,8 +2,8 @@
 
 ``scripts/freeze_human_blind_v3.py`` performs the only irreversible step on the
 path out of ``QUALIFIED_SHADOW``: it hashes a selected human-adjudicated set and
-commits those samples to ``FROZEN``. A freeze cannot be repeated or undone, so
-the gates that stand in front of it are the contract worth pinning here.
+commits those samples to ``FROZEN``. A freeze cannot be changed or undone;
+only an exact idempotent retry may reconcile a post-commit artifact failure.
 
 Every test below asserts one of four invariants:
 
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import sys
 from datetime import datetime, timedelta, timezone
@@ -34,7 +35,7 @@ from app.storage import LedgerRepository, OperationsRepository  # noqa: E402
 from event_ledger import open_ledger, utc_now  # noqa: E402
 
 
-SOURCES = ("sec", "cftc", "fed", "fda")
+SOURCES = ("fixture_source_alpha", "fixture_source_beta", "fixture_source_gamma", "fixture_source_delta")
 TIERS = ("P0_official", "P0_official", "P0_official", "P0_official")
 
 # The fixture holds exactly the production minimums so that excluding a single
@@ -79,9 +80,13 @@ def build_ledger(path: Path, plan: list[tuple[str, int]]) -> list[tuple[str, str
         event_id = f"evt-{slug}"
         observation_id = f"obs-{slug}"
         headline = f"Issuer {slug} files a {label.lower()} disclosure"
+        unique_terms = " ".join(
+            f"u{hashlib.sha256(f'{slug}-{term}'.encode()).hexdigest()[:10]}"
+            for term in range(16)
+        )
         summary = (
             f"Filing {slug} from {source_id} describes a distinct {label.lower()} "
-            f"matter for issuer number {index} with no shared wording."
+            f"matter for issuer number {index} with corpus-specific terms {unique_terms}."
         )
         passage = (
             f"The registrant {slug} disclosed an independently reviewable "
@@ -230,15 +235,31 @@ def future_iso(hours: int = 6) -> str:
     return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
 
 
-AUTHORIZED = (
-    "--apply",
-    "--authorization-id",
-    "AUTH-2026-08-18-blind-v3",
-    "--actor",
-    "owner",
-    "--purpose",
-    "Freeze the authentic-human blind-v3 evaluation set for governance review.",
-)
+def authorization_file(
+    monkeypatch,
+    corpus,
+    root: Path,
+    **updates,
+) -> Path:
+    candidate_dir = root / "candidate"
+    run_script(monkeypatch, corpus, candidate_dir)
+    manifest = read_manifest(candidate_dir)
+    template = json.loads(
+        Path(manifest["authorization_template_path"]).read_text(encoding="utf-8")
+    )
+    template.update(
+        {
+            "approved": True,
+            "authorization_id": "AUTH-2026-08-18-blind-v3",
+            "actor": "owner-external-approval",
+            "purpose": "Freeze the authentic-human blind-v3 evaluation set for governance review.",
+            "expires_at": future_iso(),
+        }
+    )
+    template.update(updates)
+    path = root / "authorization.json"
+    path.write_text(json.dumps(template, indent=2) + "\n", encoding="utf-8")
+    return path
 
 
 # --------------------------------------------------------------------------
@@ -272,6 +293,8 @@ def test_dry_run_writes_artifacts_and_freezes_nothing(monkeypatch, corpus) -> No
     assert dataset.is_file()
     assert hashlib.sha256(dataset.read_bytes()).hexdigest() == manifest["dataset_sha256"]
     assert manifest["freeze_id"].startswith("human-blind-v3-")
+    assert manifest["source_holdout_status"] == "ELIGIBLE_WITH_FULLY_HELD_OUT_FAMILY"
+    assert manifest["held_out_source_families"] == sorted(SOURCES)
 
     assert statuses(operations, sample_ids) == {"READY"}
 
@@ -295,7 +318,12 @@ def test_artifacts_are_owner_only_and_leave_no_temporary_file(monkeypatch, corpu
     written = sorted(output_dir.iterdir())
     assert [path.suffix for path in written].count(".tmp") == 0
     for path in written:
-        assert stat.S_IMODE(path.stat().st_mode) == 0o600, path
+        if os.name != "nt":
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600, path
+    if os.name == "nt":
+        assert read_manifest(output_dir)["artifact_permission_contract"] == (
+            "WINDOWS_CALLER_ACL_NOT_PROVEN_BY_CHMOD"
+        )
 
 
 def test_same_corpus_produces_the_same_freeze_identity(monkeypatch, corpus) -> None:
@@ -318,23 +346,30 @@ def test_same_corpus_produces_the_same_freeze_identity(monkeypatch, corpus) -> N
 
 
 @pytest.mark.parametrize(
-    "missing,replacement",
+    "field,replacement",
     [
-        ("--authorization-id", ""),
-        ("--actor", ""),
-        # A purpose shorter than 20 characters is treated as absent.
-        ("--purpose", "too short"),
+        ("authorization_id", ""),
+        ("actor", ""),
+        ("purpose", "too short"),
     ],
 )
 def test_apply_refuses_incomplete_authorization(
-    monkeypatch, corpus, missing: str, replacement: str
+    monkeypatch, corpus, field: str, replacement: str
 ) -> None:
     root, _ledger, _operations_path, operations, sample_ids = corpus
-    argv = list(AUTHORIZED)
-    argv[argv.index(missing) + 1] = replacement
+    authorization = authorization_file(
+        monkeypatch, corpus, root, **{field: replacement}
+    )
 
-    with pytest.raises(ValueError, match="action-scoped authorization"):
-        run_script(monkeypatch, corpus, root / "out", *argv, "--expires-at", future_iso())
+    with pytest.raises(ValueError, match="authorization contract"):
+        run_script(
+            monkeypatch,
+            corpus,
+            root / "out",
+            "--apply",
+            "--authorization-file",
+            str(authorization),
+        )
 
     assert statuses(operations, sample_ids) == {"READY"}
     # The refusal happens before any manifest is written, so no artifact can
@@ -344,9 +379,17 @@ def test_apply_refuses_incomplete_authorization(
 
 def test_apply_refuses_a_missing_expiry(monkeypatch, corpus) -> None:
     root, _ledger, _operations_path, operations, sample_ids = corpus
+    authorization = authorization_file(monkeypatch, corpus, root, expires_at="")
 
-    with pytest.raises(ValueError, match="action-scoped authorization"):
-        run_script(monkeypatch, corpus, root / "out", *AUTHORIZED, "--expires-at", "")
+    with pytest.raises((ValueError, TypeError), match="isoformat|expiry"):
+        run_script(
+            monkeypatch,
+            corpus,
+            root / "out",
+            "--apply",
+            "--authorization-file",
+            str(authorization),
+        )
 
     assert statuses(operations, sample_ids) == {"READY"}
 
@@ -357,9 +400,17 @@ def test_apply_refuses_an_expired_authorization(
 ) -> None:
     root, _ledger, _operations_path, operations, sample_ids = corpus
     expired = (datetime.now(timezone.utc) + timedelta(hours=delta_hours)).isoformat()
+    authorization = authorization_file(monkeypatch, corpus, root, expires_at=expired)
 
     with pytest.raises(ValueError, match="expiry must be in the future"):
-        run_script(monkeypatch, corpus, root / "out", *AUTHORIZED, "--expires-at", expired)
+        run_script(
+            monkeypatch,
+            corpus,
+            root / "out",
+            "--apply",
+            "--authorization-file",
+            str(authorization),
+        )
 
     assert statuses(operations, sample_ids) == {"READY"}
     assert not list((root / "out").glob("*.manifest.json"))
@@ -390,9 +441,16 @@ def test_authorized_apply_freezes_exactly_the_selected_samples(
     monkeypatch, corpus
 ) -> None:
     root, _ledger, _operations_path, operations, sample_ids = corpus
-    expires_at = future_iso()
+    authorization = authorization_file(monkeypatch, corpus, root)
 
-    run_script(monkeypatch, corpus, root / "out", *AUTHORIZED, "--expires-at", expires_at)
+    run_script(
+        monkeypatch,
+        corpus,
+        root / "out",
+        "--apply",
+        "--authorization-file",
+        str(authorization),
+    )
 
     manifest = read_manifest(root / "out")
     assert manifest["applied"] is True
@@ -404,7 +462,7 @@ def test_authorized_apply_freezes_exactly_the_selected_samples(
 
     authorization = manifest["authorization"]
     assert authorization["authorization_id"] == "AUTH-2026-08-18-blind-v3"
-    assert authorization["actor"] == "owner"
+    assert authorization["actor"] == "owner-external-approval"
     assert len(authorization["purpose"]) >= 20
     assert datetime.fromisoformat(authorization["expires_at"]) > datetime.now(timezone.utc)
 
@@ -415,19 +473,73 @@ def test_authorized_apply_freezes_exactly_the_selected_samples(
 
 def test_freeze_is_one_way_and_cannot_be_repeated(monkeypatch, corpus) -> None:
     root, _ledger, _operations_path, operations, sample_ids = corpus
+    authorization = authorization_file(monkeypatch, corpus, root)
 
-    run_script(monkeypatch, corpus, root / "out", *AUTHORIZED, "--expires-at", future_iso())
+    run_script(monkeypatch, corpus, root / "out", "--apply", "--authorization-file", str(authorization))
     first = read_manifest(root / "out")
 
     # A second authorized run must not silently re-freeze or re-identify the set.
     with pytest.raises(ValueError):
         run_script(
-            monkeypatch, corpus, root / "again", *AUTHORIZED, "--expires-at", future_iso()
+            monkeypatch,
+            corpus,
+            root / "again",
+            "--apply",
+            "--authorization-file",
+            str(authorization),
         )
 
     assert statuses(operations, sample_ids) == {"FROZEN"}
     for sample_id in sample_ids:
         assert operations.adjudication_sample(sample_id)["freeze_id"] == first["freeze_id"]
+
+
+def test_exact_retry_reconciles_after_database_commit(monkeypatch, corpus) -> None:
+    root, _ledger, _operations_path, operations, sample_ids = corpus
+    authorization = authorization_file(monkeypatch, corpus, root)
+    output_dir = root / "out"
+
+    run_script(monkeypatch, corpus, output_dir, "--apply", "--authorization-file", str(authorization))
+    run_script(monkeypatch, corpus, output_dir, "--apply", "--authorization-file", str(authorization))
+
+    manifest = read_manifest(output_dir)
+    assert manifest["commit_state"] == "COMMITTED"
+    assert manifest["idempotent_reconciliation"] is True
+    assert manifest["adjudication_state_changed"] is False
+    receipt = operations.adjudication_freeze(manifest["freeze_id"])
+    assert receipt is not None
+    assert receipt["dataset_sha256"] == manifest["dataset_sha256"]
+    assert receipt["sample_count"] == len(sample_ids)
+
+
+def test_manifest_write_failure_leaves_durable_receipt_for_reconciliation(
+    monkeypatch, corpus
+) -> None:
+    root, _ledger, _operations_path, operations, sample_ids = corpus
+    authorization = authorization_file(monkeypatch, corpus, root)
+    output_dir = root / "out"
+    original = freeze_script._write_atomic
+    calls = 0
+
+    def fail_final_manifest(path: Path, data: bytes) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise OSError("simulated final manifest write failure")
+        original(path, data)
+
+    monkeypatch.setattr(freeze_script, "_write_atomic", fail_final_manifest)
+    with pytest.raises(OSError, match="simulated final manifest"):
+        run_script(monkeypatch, corpus, output_dir, "--apply", "--authorization-file", str(authorization))
+
+    assert statuses(operations, sample_ids) == {"FROZEN"}
+    prepared = read_manifest(output_dir)
+    assert prepared["commit_state"] == "PREPARED"
+    assert operations.adjudication_freeze(prepared["freeze_id"]) is not None
+
+    monkeypatch.setattr(freeze_script, "_write_atomic", original)
+    run_script(monkeypatch, corpus, output_dir, "--apply", "--authorization-file", str(authorization))
+    assert read_manifest(output_dir)["idempotent_reconciliation"] is True
 
 
 # --------------------------------------------------------------------------
@@ -456,6 +568,43 @@ def test_supplied_exclusions_remove_rows_from_the_candidate(
         )
 
     assert statuses(operations, sample_ids) == {"READY"}
+
+
+def test_fuzzy_near_duplicate_exclusion_is_not_just_an_exact_hash(
+    monkeypatch, corpus, tmp_path: Path
+) -> None:
+    root, _ledger, _operations_path, operations, sample_ids = corpus
+    prior = operations.adjudication_sample(sample_ids[0])
+    content = dict(prior["content"])
+    content["summary"] = str(content["summary"]) + " minor editorial correction"
+    exclusions = tmp_path / "near-duplicate.jsonl"
+    exclusions.write_text(json.dumps({"content": content}) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="insufficient zero-overlap"):
+        run_script(monkeypatch, corpus, root / "out", "--exclude-jsonl", str(exclusions))
+
+
+def test_near_duplicate_similarity_catches_small_edits_but_not_unrelated_text() -> None:
+    def annotation(words: list[str]) -> dict:
+        return {"content": {"summary": " ".join(words)}}
+
+    original = [f"term{index}" for index in range(40)]
+    edited = [*original]
+    edited[20] = "correctedterm"
+    unrelated = [f"other{index}" for index in range(40)]
+    first = AdjudicationService._near_duplicate_signature(annotation(original))
+    second = AdjudicationService._near_duplicate_signature(annotation(edited))
+    third = AdjudicationService._near_duplicate_signature(annotation(unrelated))
+
+    assert AdjudicationService._is_near_duplicate(first, second) is True
+    assert AdjudicationService._is_near_duplicate(first, third) is False
+
+    chinese = annotation(list("公司公告显示该发行人已完成债务重组并取消原有普通股权益"))
+    chinese_edit = annotation(list("公司公告显示该发行人已完成债务重组并注销原有普通股权益"))
+    assert AdjudicationService._is_near_duplicate(
+        AdjudicationService._near_duplicate_signature(chinese),
+        AdjudicationService._near_duplicate_signature(chinese_edit),
+    ) is True
 
 
 def test_exclusion_loader_rejects_a_non_object_row(tmp_path: Path) -> None:
@@ -491,6 +640,7 @@ def test_exclusion_loader_collects_every_overlap_dimension(tmp_path: Path) -> No
                         "event_chain_group": "chain:prior",
                         "entity_group_sha256": entity_hash.upper(),
                         "event_chain_group_sha256": chain_hash.upper(),
+                        "source_group": "sec_edgar",
                         "content": {"summary": "A previously exposed summary."},
                     }
                 ),
@@ -501,7 +651,17 @@ def test_exclusion_loader_collects_every_overlap_dimension(tmp_path: Path) -> No
         encoding="utf-8",
     )
 
-    exact, near, events, entities, chains, entity_hashes, chain_hashes = (
+    (
+        exact,
+        near,
+        near_signatures,
+        events,
+        entities,
+        chains,
+        entity_hashes,
+        chain_hashes,
+        source_families,
+    ) = (
         freeze_script._load_exclusions([rows], service)
     )
 
@@ -513,8 +673,10 @@ def test_exclusion_loader_collects_every_overlap_dimension(tmp_path: Path) -> No
     assert events == {"evt-prior"}
     assert entities == {"issuer:prior"}
     assert chains == {"chain:prior"}
+    assert source_families == {"sec"}
     # Both the structured row and the plain-text row contribute a near key.
     assert len(near) == 2
+    assert len(near_signatures) == 2
 
 
 # --------------------------------------------------------------------------
@@ -552,5 +714,6 @@ def test_atomic_write_creates_parents_replaces_and_restricts_mode(tmp_path: Path
 
     freeze_script._write_atomic(target, b"second\n")
     assert target.read_bytes() == b"second\n"
-    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600
     assert not list(target.parent.glob("*.tmp"))

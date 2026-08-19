@@ -26,6 +26,7 @@ MANAGED_UNIT_PATHS=(
 MANAGED_CONFIG_PATHS=(
     /etc/finance-radar.env
     /etc/finance-radar-public.env
+    /etc/finance-radar-reviewer-principals.json
 )
 MANAGED_RUNTIME_UNITS=(
     finance-radar-backup.timer
@@ -316,6 +317,12 @@ fi
 if ! grep -q '^FINANCE_RADAR_OPERATOR_TOKEN=' /etc/finance-radar.env; then
     printf 'FINANCE_RADAR_OPERATOR_TOKEN=%s\n' "$(openssl rand -hex 32)" >> /etc/finance-radar.env
 fi
+# Reviewer identities are not carried in migration archives.  Restore leaves
+# human-label submission fail-closed until distinct principals are provisioned
+# again through the documented owner-authorized process.
+install -m 0600 -o root -g root /dev/null \
+    /etc/finance-radar-reviewer-principals.json
+printf '%s\n' '[]' > /etc/finance-radar-reviewer-principals.json
 if grep -q '^FINANCE_RADAR_WEB_URL=' /etc/finance-radar.env; then
     sed -i "s#^FINANCE_RADAR_WEB_URL=.*#FINANCE_RADAR_WEB_URL=$PUBLIC_WEB_URL#" /etc/finance-radar.env
 else

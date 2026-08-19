@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-OPS_SCHEMA_VERSION = 6
+OPS_SCHEMA_VERSION = 7
 DEMO_MODES = {"LIVE", "RECENT_CAPTURE", "REPLAY"}
 FORMAL_MUTATION_KIND_LIGHT_VERIFICATION = "LIGHT_VERIFICATION"
 FORMAL_MUTATION_STATES = {
@@ -195,6 +195,18 @@ class OperationsRepository:
                 );
                 CREATE INDEX IF NOT EXISTS idx_adjudication_review_sample
                     ON adjudication_reviews(sample_id, created_at);
+                CREATE TABLE IF NOT EXISTS adjudication_freezes(
+                    freeze_id TEXT PRIMARY KEY,
+                    dataset_sha256 TEXT NOT NULL UNIQUE,
+                    sample_ids_sha256 TEXT NOT NULL,
+                    sample_count INTEGER NOT NULL CHECK(sample_count > 0),
+                    authorization_id TEXT NOT NULL,
+                    authorization_sha256 TEXT NOT NULL,
+                    receipt_json TEXT NOT NULL,
+                    state TEXT NOT NULL CHECK(state IN ('COMMITTED')),
+                    created_at TEXT NOT NULL,
+                    committed_at TEXT NOT NULL
+                );
                 """
             )
             link_columns = {
@@ -1275,14 +1287,107 @@ class OperationsRepository:
             "created_at": now,
         }
 
-    def freeze_adjudication_samples(self, sample_ids: list[str], freeze_id: str) -> int:
-        """Atomically make a pre-hashed set immutable after all gates pass."""
+    def commit_adjudication_freeze(
+        self,
+        sample_ids: list[str],
+        freeze_id: str,
+        *,
+        dataset_sha256: str,
+        sample_ids_sha256: str,
+        authorization: dict[str, Any],
+        dataset_path: str,
+        manifest_path: str,
+    ) -> dict[str, Any]:
+        """Commit the immutable set and its full receipt in one transaction.
+
+        An exact retry is idempotent so a crash after the database commit but
+        before the filesystem manifest update can be reconciled safely. Any
+        mismatch is a conflicting freeze and fails closed.
+        """
 
         ordered = sorted(set(str(item).strip() for item in sample_ids if str(item).strip()))
-        if not ordered or not str(freeze_id).strip():
+        freeze_id = str(freeze_id).strip()
+        dataset_sha256 = str(dataset_sha256).strip().lower()
+        sample_ids_sha256 = str(sample_ids_sha256).strip().lower()
+        if not ordered or not freeze_id:
             raise ValueError("freeze requires sample IDs and a freeze ID")
+        if len(dataset_sha256) != 64 or len(sample_ids_sha256) != 64:
+            raise ValueError("freeze requires full dataset and sample-set hashes")
+        required_authorization = {
+            "schema_version",
+            "action",
+            "approved",
+            "authorization_id",
+            "actor",
+            "purpose",
+            "expires_at",
+            "freeze_id",
+            "dataset_sha256",
+            "sample_ids_sha256",
+            "sample_count",
+            "held_out_source_families",
+        }
+        if set(authorization) != required_authorization:
+            raise ValueError("freeze authorization fields do not match the v1 contract")
+        authorization_id = str(authorization.get("authorization_id") or "").strip()
+        if not authorization_id:
+            raise ValueError("freeze authorization ID is required")
+        expected_sample_ids_sha256 = hashlib.sha256(
+            _stable_json(ordered).encode("utf-8")
+        ).hexdigest()
+        if expected_sample_ids_sha256 != sample_ids_sha256:
+            raise ValueError("freeze sample-set hash does not match the selected sample IDs")
+        if (
+            authorization.get("schema_version") != 1
+            or authorization.get("action") != "FREEZE_HUMAN_BLIND_V3"
+            or authorization.get("approved") is not True
+            or authorization.get("freeze_id") != freeze_id
+            or authorization.get("dataset_sha256") != dataset_sha256
+            or authorization.get("sample_ids_sha256") != sample_ids_sha256
+            or authorization.get("sample_count") != len(ordered)
+        ):
+            raise ValueError("freeze authorization does not bind the selected dataset")
+        held_out_sources = authorization.get("held_out_source_families")
+        if (
+            not isinstance(held_out_sources, list)
+            or not held_out_sources
+            or any(not isinstance(item, str) or not item.strip() for item in held_out_sources)
+            or len(set(held_out_sources)) != len(held_out_sources)
+        ):
+            raise ValueError("freeze authorization requires distinct held-out source families")
+        try:
+            expires_at = datetime.fromisoformat(
+                str(authorization.get("expires_at") or "").replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise ValueError("freeze authorization expiry is invalid") from exc
+        if expires_at.tzinfo is None or expires_at.astimezone(timezone.utc) <= datetime.now(timezone.utc):
+            raise ValueError("freeze authorization has expired")
+        if len(str(authorization.get("actor") or "").strip()) < 3 or len(
+            str(authorization.get("purpose") or "").strip()
+        ) < 20:
+            raise ValueError("freeze authorization actor or purpose is incomplete")
+        authorization_sha256 = _stable_sha256(authorization)
+        receipt = {
+            "schema_version": 1,
+            "freeze_id": freeze_id,
+            "dataset_sha256": dataset_sha256,
+            "sample_ids_sha256": sample_ids_sha256,
+            "sample_count": len(ordered),
+            "sample_ids": ordered,
+            "authorization": authorization,
+            "authorization_sha256": authorization_sha256,
+            "dataset_path": str(dataset_path),
+            "manifest_path": str(manifest_path),
+            "state": "COMMITTED",
+        }
+        receipt_json = _stable_json(receipt)
         with closing(self.connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM adjudication_freezes WHERE freeze_id=?",
+                (freeze_id,),
+            ).fetchone()
             placeholders = ",".join("?" for _ in ordered)
             rows = connection.execute(
                 f"SELECT sample_id,status,freeze_id FROM adjudication_samples WHERE sample_id IN ({placeholders})",
@@ -1290,6 +1395,25 @@ class OperationsRepository:
             ).fetchall()
             if len(rows) != len(ordered):
                 raise ValueError("freeze sample set changed before commit")
+            if existing is not None:
+                if (
+                    str(existing["dataset_sha256"]) != dataset_sha256
+                    or str(existing["sample_ids_sha256"]) != sample_ids_sha256
+                    or int(existing["sample_count"]) != len(ordered)
+                    or str(existing["authorization_sha256"]) != authorization_sha256
+                    or str(existing["receipt_json"]) != receipt_json
+                    or any(
+                        row["status"] != "FROZEN" or row["freeze_id"] != freeze_id
+                        for row in rows
+                    )
+                ):
+                    raise ValueError("freeze retry conflicts with the committed receipt")
+                connection.rollback()
+                return {
+                    "frozen_samples": len(ordered),
+                    "idempotent": True,
+                    "receipt": receipt,
+                }
             invalid = [
                 str(row["sample_id"])
                 for row in rows
@@ -1299,13 +1423,48 @@ class OperationsRepository:
                 raise ValueError("freeze requires unfrozen READY samples: " + ", ".join(invalid))
             now = utc_now()
             connection.execute(
+                """INSERT INTO adjudication_freezes(
+                       freeze_id,dataset_sha256,sample_ids_sha256,sample_count,
+                       authorization_id,authorization_sha256,receipt_json,state,
+                       created_at,committed_at
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    freeze_id,
+                    dataset_sha256,
+                    sample_ids_sha256,
+                    len(ordered),
+                    authorization_id,
+                    authorization_sha256,
+                    receipt_json,
+                    "COMMITTED",
+                    now,
+                    now,
+                ),
+            )
+            connection.execute(
                 f"""UPDATE adjudication_samples
                     SET status='FROZEN',freeze_id=?,updated_at=?
                     WHERE sample_id IN ({placeholders})""",
                 (freeze_id, now, *ordered),
             )
             connection.commit()
-        return len(ordered)
+        return {
+            "frozen_samples": len(ordered),
+            "idempotent": False,
+            "receipt": receipt,
+        }
+
+    def adjudication_freeze(self, freeze_id: str) -> dict[str, Any] | None:
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                "SELECT * FROM adjudication_freezes WHERE freeze_id=?",
+                (freeze_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["receipt"] = json.loads(result.pop("receipt_json"))
+        return result
 
     def start_worker_cycle(self) -> str:
         cycle_id = f"cycle-{uuid.uuid4().hex}"
@@ -1618,6 +1777,7 @@ class OperationsRepository:
                     "human_overrides",
                     "adjudication_samples",
                     "adjudication_reviews",
+                    "adjudication_freezes",
                 )
             }
         audit_reconciliation = self.audit_reconciliation_status()

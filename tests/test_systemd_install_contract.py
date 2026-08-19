@@ -271,6 +271,10 @@ def test_scoped_internal_uis_are_manual_loopback_only_and_mutually_exclusive() -
     assert "FINANCE_RADAR_OPERATOR_TOKEN" in installer
     assert "finance-radar-reviewer.service" in installer
     assert "finance-radar-operator.service" in installer
+    api = (INSTALLER.parent / "finance-radar-api.service").read_text(encoding="utf-8")
+    assert "LoadCredential=reviewer-principals.json:/etc/finance-radar-reviewer-principals.json" in api
+    assert "/etc/finance-radar-reviewer-principals.json" in installer
+    assert "chmod 0600 /etc/finance-radar-reviewer-principals.json" in installer
 
 
 def test_restore_recreates_public_environment_and_never_enables_admin() -> None:
@@ -310,6 +314,9 @@ def test_restore_recreates_public_environment_and_never_enables_admin() -> None:
     assert "FINANCE_RADAR_ADMIN_TOKEN" not in public_env_block
     assert "FINANCE_RADAR_REVIEWER_TOKEN" not in public_env_block
     assert "FINANCE_RADAR_OPERATOR_TOKEN" not in public_env_block
+    assert "FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON" not in public_env_block
+    assert "reviewer-principals.json" in source
+    assert "human-label submission fail-closed" in source
     enable_line = next(
         line for line in source.splitlines() if line.startswith("systemctl enable --now finance-radar-api")
     )

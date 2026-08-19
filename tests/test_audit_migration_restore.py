@@ -75,6 +75,8 @@ def _operations(path: Path, *, schema_version: int = 4) -> None:
         if schema_version >= 6:
             connection.execute("CREATE TABLE light_verification_runs(id INTEGER)")
             connection.execute("CREATE TABLE formal_mutation_audits(id INTEGER)")
+        if schema_version >= 7:
+            connection.execute("CREATE TABLE adjudication_freezes(id INTEGER)")
         connection.execute("INSERT INTO worker_cycles VALUES (1)")
         connection.commit()
 
@@ -313,6 +315,20 @@ def test_restore_audit_accepts_current_operations_schema_six(tmp_path: Path) -> 
     assert result["operations_restore"]["schema_version"] == 6
     assert result["operations_restore"]["counts"]["light_verification_runs"] == 0
     assert result["operations_restore"]["counts"]["formal_mutation_audits"] == 0
+
+
+def test_restore_audit_accepts_current_operations_schema_seven(tmp_path: Path) -> None:
+    encrypted, passphrase, expected_sha256 = _fixture(tmp_path, operations_schema_version=7)
+
+    result = audit_archive(
+        encrypted,
+        passphrase,
+        expected_release=RELEASE,
+        expected_sha256=expected_sha256,
+    )
+
+    assert result["operations_restore"]["schema_version"] == 7
+    assert result["operations_restore"]["counts"]["adjudication_freezes"] == 0
 
 
 def test_restore_audit_binds_new_archive_to_verified_recovery_bundle(tmp_path: Path) -> None:

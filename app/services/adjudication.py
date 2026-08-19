@@ -405,7 +405,7 @@ class AdjudicationService:
         }
 
     @staticmethod
-    def _near_duplicate_key(annotation: dict[str, Any]) -> str:
+    def _duplicate_tokens(annotation: dict[str, Any]) -> tuple[str, ...]:
         content = annotation.get("content") or {}
         text = " ".join(
             [
@@ -419,8 +419,52 @@ class AdjudicationService:
             ]
         ).casefold()
         normalized = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", text)
-        tokens = normalized.split()
+        # Keep Latin/number words intact, but tokenize CJK text by character so
+        # a long Chinese passage is not misrepresented as one indivisible token.
+        return tuple(re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]", normalized)[:240])
+
+    @classmethod
+    def _near_duplicate_key(cls, annotation: dict[str, Any]) -> str:
+        tokens = cls._duplicate_tokens(annotation)
         return hashlib.sha256(" ".join(tokens[:240]).encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _near_duplicate_signature(
+        cls, annotation: dict[str, Any]
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """Return order-insensitive tokens and order-sensitive 5-grams.
+
+        The old contract only hashed normalized text, which detected exact
+        duplicates but not near duplicates.  The two views catch reordered
+        passages and small edits while requiring enough shared content to avoid
+        treating short finance boilerplate as the same event.
+        """
+
+        tokens = cls._duplicate_tokens(annotation)
+        token_set = frozenset(tokens)
+        shingles = frozenset(
+            " ".join(tokens[index : index + 5])
+            for index in range(max(0, len(tokens) - 4))
+        )
+        return token_set, shingles
+
+    @classmethod
+    def _is_near_duplicate(
+        cls,
+        left: tuple[frozenset[str], frozenset[str]],
+        right: tuple[frozenset[str], frozenset[str]],
+    ) -> bool:
+        left_tokens, left_shingles = left
+        right_tokens, right_shingles = right
+        if min(len(left_tokens), len(right_tokens)) >= 12:
+            smaller = min(len(left_tokens), len(right_tokens))
+            if smaller and len(left_tokens & right_tokens) / smaller >= 0.90:
+                return True
+        if left_shingles and right_shingles:
+            union = left_shingles | right_shingles
+            if union and len(left_shingles & right_shingles) / len(union) >= 0.85:
+                return True
+        return False
 
     def build_freeze_candidate(
         self,
@@ -429,6 +473,10 @@ class AdjudicationService:
         minimum_source_groups: int = 4,
         excluded_text_sha256: set[str] | None = None,
         excluded_near_duplicate_keys: set[str] | None = None,
+        excluded_near_duplicate_signatures: list[
+            tuple[frozenset[str], frozenset[str]]
+        ]
+        | None = None,
         excluded_event_ids: set[str] | None = None,
         excluded_entity_groups: set[str] | None = None,
         excluded_event_chain_groups: set[str] | None = None,
@@ -446,6 +494,7 @@ class AdjudicationService:
             raise ValueError("human annotations are not ready for overlap audit")
         excluded_exact = {str(item).lower() for item in (excluded_text_sha256 or set())}
         excluded_near = set(excluded_near_duplicate_keys or set())
+        excluded_signatures = list(excluded_near_duplicate_signatures or [])
         excluded_events = {str(item) for item in (excluded_event_ids or set())}
         excluded_entities = {
             str(item).removeprefix("issuer:") for item in (excluded_entity_groups or set())
@@ -473,18 +522,26 @@ class AdjudicationService:
                 or (chain_hash and chain_hash in excluded_chain_hashes)
             )
 
-        candidates = [
-            row
-            for row in report["annotations"]
-            if str(row.get("text_sha256") or "").lower() not in excluded_exact
-            and self._near_duplicate_key(row) not in excluded_near
-            and not previously_exposed(row)
-        ]
+        candidates = []
+        for row in report["annotations"]:
+            signature = self._near_duplicate_signature(row)
+            if (
+                str(row.get("text_sha256") or "").lower() in excluded_exact
+                or self._near_duplicate_key(row) in excluded_near
+                or any(
+                    self._is_near_duplicate(signature, excluded)
+                    for excluded in excluded_signatures
+                )
+                or previously_exposed(row)
+            ):
+                continue
+            candidates.append(row)
         selected: list[dict[str, Any]] = []
         used_entities: set[str] = set()
         used_chains: set[str] = set()
         used_text: set[str] = set()
         used_near: set[str] = set()
+        used_signatures: list[tuple[frozenset[str], frozenset[str]]] = []
         for label, target in minimums.items():
             label_rows = sorted(
                 (row for row in candidates if row.get("label") == label),
@@ -508,11 +565,16 @@ class AdjudicationService:
                         chain = str(row.get("event_chain_group") or "")
                         text_hash = str(row.get("text_sha256") or "").lower()
                         near = self._near_duplicate_key(row)
+                        signature = self._near_duplicate_signature(row)
                         if (
                             entity in used_entities
                             or chain in used_chains
                             or text_hash in used_text
                             or near in used_near
+                            or any(
+                                self._is_near_duplicate(signature, used)
+                                for used in used_signatures
+                            )
                         ):
                             continue
                         selected.append(row)
@@ -520,6 +582,7 @@ class AdjudicationService:
                         used_chains.add(chain)
                         used_text.add(text_hash)
                         used_near.add(near)
+                        used_signatures.append(signature)
                         progressed = True
                         break
                     if len([row for row in selected if row.get("label") == label]) >= int(target):
@@ -550,6 +613,12 @@ class AdjudicationService:
             "event_chain_overlap_count": len(frozen_rows) - len(used_chains),
             "exact_text_overlap_count": len(frozen_rows) - len(used_text),
             "near_duplicate_overlap_count": len(frozen_rows) - len(used_near),
+            "near_duplicate_contract": {
+                "token_overlap_coefficient_threshold": 0.90,
+                "five_gram_jaccard_threshold": 0.85,
+                "compared_to_exclusion_corpora": True,
+                "compared_within_selected_set": True,
+            },
             "model_predictions_included": False,
             "post_event_market_data_included": False,
             "production_model_changed": False,

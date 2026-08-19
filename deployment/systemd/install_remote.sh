@@ -868,6 +868,7 @@ ROLLBACK_SERVICE_UNITS=(
 ROLLBACK_PATHS=(
     /etc/finance-radar.env
     /etc/finance-radar-public.env
+    /etc/finance-radar-reviewer-principals.json
     /etc/systemd/system/finance-radar-api.service
     /etc/systemd/system/finance-radar-web.service
     /etc/systemd/system/finance-radar-admin.service
@@ -1846,6 +1847,46 @@ fi
 if ! grep -q '^FINANCE_RADAR_OPERATOR_TOKEN=' /etc/finance-radar.env; then
     printf 'FINANCE_RADAR_OPERATOR_TOKEN=%s\n' "$(openssl rand -hex 32)" >> /etc/finance-radar.env
 fi
+# Human-review principals are deliberately separate from the shared Reviewer
+# UI access token.  An empty array keeps label submission fail-closed until an
+# operator installs an owner-approved, per-person credential file.
+if [ ! -e /etc/finance-radar-reviewer-principals.json ] && \
+   [ ! -L /etc/finance-radar-reviewer-principals.json ]; then
+    install -m 0600 -o root -g root /dev/null \
+        /etc/finance-radar-reviewer-principals.json
+    printf '%s\n' '[]' > /etc/finance-radar-reviewer-principals.json
+fi
+[ -f /etc/finance-radar-reviewer-principals.json ] && \
+    [ ! -L /etc/finance-radar-reviewer-principals.json ] || \
+    abort_cutover 'reviewer principals credential must be a regular file' 4
+chown root:root /etc/finance-radar-reviewer-principals.json
+chmod 0600 /etc/finance-radar-reviewer-principals.json
+python3 - /etc/finance-radar-reviewer-principals.json <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if not isinstance(payload, list):
+    raise SystemExit("reviewer principals credential must contain a JSON array")
+principal_ids = set()
+token_hashes = set()
+for item in payload:
+    if not isinstance(item, dict) or set(item) != {"principal_id", "role", "token"}:
+        raise SystemExit("each reviewer principal must contain exactly principal_id, role and token")
+    principal_id = str(item["principal_id"]).strip()
+    role = str(item["role"]).strip().upper()
+    token = str(item["token"]).strip()
+    principal_key = principal_id.casefold()
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    if len(principal_id) < 3 or role not in {"REVIEWER", "ARBITER"} or len(token) < 24:
+        raise SystemExit("reviewer principal values violate the runtime contract")
+    if principal_key in principal_ids or token_hash in token_hashes:
+        raise SystemExit("reviewer principal IDs and tokens must be unique")
+    principal_ids.add(principal_key)
+    token_hashes.add(token_hash)
+PY
 if grep -q '^FINANCE_RADAR_RELEASE_ID=' /etc/finance-radar.env; then
     sed -i "s#^FINANCE_RADAR_RELEASE_ID=.*#FINANCE_RADAR_RELEASE_ID=$RELEASE_ID#" \
         /etc/finance-radar.env

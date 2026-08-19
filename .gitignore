@@ -29,3 +29,7 @@ finance-radar-deploy-*.tgz
 # regenerated on demand and must not become part of a traceable release.
 reports/light_verification_dryrun_local*.json
 reports/light_verification_dryrun_local*.md
+# Generated course/briefing renderings are Release artifacts, not source. Keep
+# their Markdown/source inputs in Git and place rendered HTML/PDF outside main.
+docs/team_*_*.html
+docs/Finance_Radar_*_*.pdf

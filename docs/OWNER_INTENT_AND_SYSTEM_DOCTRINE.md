@@ -162,7 +162,7 @@ Web Situation Room 取代 Telegram 成为主界面；系统明确为“全极性
 - `FR-REV-009 · P`：AI 不得批量冒充真实人审、复制理由、伪造双审、教师批准或学生工作。
 - `FR-REV-010 · P`：当真实双审未完成时，必须写 `NOT_READY`；不得以 AI rubric、高测试数或 shadow 指标替代人类标签来源。
 - `FR-REV-011 · P`：真实审核身份和角色必须由服务端把独立凭据绑定到不可变主体；客户端不得自报或切换 `reviewer_id/role`，共享 Reviewer/Admin 令牌不得冒充两名审核者或第三仲裁者。
-- `FR-REV-012 · P`：真人盲集只允许使用事件时点已存在的内容；冻结前必须完成真实 issuer/event-chain 分组、精确与近重复清零、来源分层、数据集哈希和一次性不可逆冻结。旧合同样本可以保留审计，但不得进入新队列或阻挡诚实的 `NOT_READY`。
+- `FR-REV-012 · P`：真人盲集只允许使用事件时点已存在的内容；冻结前必须完成真实 issuer/event-chain 分组、精确与近重复清零、至少一个完整来源家族留出、数据集与样本 ID 集哈希和一次性不可逆冻结。冻结授权必须是独立文件并精确绑定动作、到期时间、freeze ID、两类哈希、数量与来源留出；命令行自报身份不构成授权。样本状态和完整冻结收据必须同一数据库事务提交，只允许完全相同的幂等故障恢复。旧合同样本可以保留审计，但不得进入新队列或阻挡诚实的 `NOT_READY`。
 
 ## 8. Evidence Agent 与风险路由模型
 
@@ -172,7 +172,7 @@ Web Situation Room 取代 Telegram 成为主界面；系统明确为“全极性
 - `FR-MDL-001 · P`：结构化证据门先于语义模型；非 `PRIMARY_SUPPORTED_*` 输入必须由 `DETERMINISTIC_EVIDENCE_GATE` 直接返回 `ABSTAIN`，`semantic_model_invoked=false`、`confidence_applicable=false`，UI 不显示置信度。
 - `FR-MDL-002 · P`：每次运行保存实际是否调用语义模型、`decision_source`、`confidence_applicable`、输入/证据/配置/模型哈希；UI 只有在 `confidence_applicable=true` 时显示置信度。
 - `FR-MDL-003 · P`：训练特征禁止事件正式状态、人工等级、内部 taxonomy、来源捷径、旧模型输出、事件后价格/收益、账户、仓位和订单信息。
-- `FR-MDL-004 · P`：数据切分必须同时按时间、issuer 和 event-chain 分组，并执行 source holdout、精确/近重复清零；盲集在推理前冻结并哈希，暴露后永不再用于调参。
+- `FR-MDL-004 · P`：数据切分必须同时按时间、issuer 和 event-chain 分组，并执行 source-family holdout、精确/近重复清零；“近重复”必须使用真实相似度判定，不能以规范化文本等值哈希冒充。盲集在推理前冻结并哈希，暴露后永不再用于调参。
 - `FR-MDL-005 · P`：晋级不能只看 accuracy；必须同时报告 macro-F1、`RISK_REVIEW` recall、`NON_TARGET` false-risk、`ABSTAIN`、泄漏/重叠、来源留出和标签 provenance。
 - `FR-MDL-006 · P`：失败的 legacy external-blind-v1 和 legacy external-blind-v2 工件永久保留；后续 v4 AI-rubric blind-v3 指标改善不能抹除历史失败，也不能冒充尚未冻结的 V3 authentic-human blind-v2。
 - `FR-MDL-007 · P`：`QUALIFIED_SHADOW` 只允许继续咨询式队列路由；不等于事实核验、正式判断器、告警许可或交易晋级。任何非 shadow 激活都必须先有真实双盲标签、全部晋级门、独立审计和所有者新的明确决策；即使获准，也只能是 advisory routing，永久保持 `no_auto_verify + no_trading`。

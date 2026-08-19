@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import re
 
 from app import __version__
@@ -34,3 +35,36 @@ def test_scoped_internal_tokens_are_loaded_independently(monkeypatch) -> None:
     settings = Settings.from_env()
     assert settings.reviewer_token == "review-secret"
     assert settings.operator_token == "operate-secret"
+
+
+def test_reviewer_principals_load_from_systemd_credential(monkeypatch, tmp_path: Path) -> None:
+    credential = tmp_path / "reviewer-principals.json"
+    credential.write_text(
+        json.dumps(
+            [
+                {
+                    "principal_id": "reviewer-a",
+                    "role": "REVIEWER",
+                    "token": "reviewer-a-token-000000000001",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON", raising=False)
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+
+    assert Settings.from_env().reviewer_principals == (
+        ("reviewer-a", "REVIEWER", "reviewer-a-token-000000000001"),
+    )
+
+
+def test_reviewer_principals_reject_ambiguous_secret_sources(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / "reviewer-principals.json").write_text("[]\n", encoding="utf-8")
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    monkeypatch.setenv("FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON", "[]")
+
+    import pytest
+
+    with pytest.raises(ValueError, match="either environment JSON or a systemd credential"):
+        Settings.from_env()

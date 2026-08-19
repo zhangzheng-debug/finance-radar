@@ -184,6 +184,22 @@ def test_formal_label_policy_requires_real_independent_blind_humans() -> None:
     assert formal["human_submits_target_label"] is False
     assert formal["target_label_derived_by_pure_function"] is True
     assert formal["split_before_validation"] == "UNASSIGNED"
+    assert formal["near_duplicate_requires_similarity_check_not_only_equality_hash"] is True
+    assert formal["freeze_requires_at_least_one_fully_held_out_source_family"] is True
+    assert formal["freeze_receipt_and_sample_state_same_transaction"] is True
+    assert formal["freeze_retry"] == "exact_receipt_only_idempotent"
+    assert set(formal["freeze_authorization_contract_fields"]) == {
+        "action",
+        "authorization_id",
+        "actor",
+        "purpose",
+        "expires_at",
+        "freeze_id",
+        "dataset_sha256",
+        "sample_ids_sha256",
+        "sample_count",
+        "held_out_source_families",
+    }
     assert set(formal["required_submission_fields"]) == {
         "exact_passage",
         "rationale",
