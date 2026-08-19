@@ -5,6 +5,23 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+- No unreleased changes.
+
+## 2026.08.19.1
+
+- Closed the authentic-human review boundary: Reviewer and Arbiter identities
+  are credential-bound server-side principals, the blind-set freeze is
+  action-authorized and receipt-bound, and exact/near duplicates plus normalized
+  source-family coverage fail closed. Authentic-human label count remains zero;
+  the risk router remains advisory `QUALIFIED_SHADOW` and no-trading.
+- Added fact-integrity history audit v2 with separate decision and evidence-edge
+  units, current-contract light-review reason codes, exact read-only manifests,
+  and an explicit count of legacy canonical-verified rows. The audit neither
+  rewrites history nor authorizes a canonical status change.
+- Removed stale mutable counts from student-facing material, linked volatile
+  claims to `CURRENT_STATE.md` and reproducible commands, recovered the second
+  repository audit into the main history, and documented bounded choices for
+  each historical-integrity debt class.
 - Recorded the verified `2026.08.18.3` production activation and the new private
   D-drive recovery point after a complete authenticated-decryption, manifest,
   dual-SQLite and model hash-chain restore audit. The temporary `/32` SSH rule
