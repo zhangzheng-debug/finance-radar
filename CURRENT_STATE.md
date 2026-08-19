@@ -1,12 +1,70 @@
 # Finance Radar current state
 
-状态日期：2026-08-18（Asia/Singapore）
+状态日期：2026-08-19（Asia/Singapore）
 
-最近完整部署验收窗口：2026-08-18 08:08–08:36 UTC
+最近完整部署验收窗口：2026-08-19 06:25–06:54 UTC
 
-最近只读运行复核窗口：2026-08-18 09:38–09:43 UTC
+最近只读事实完整性复核：2026-08-19 06:56–06:57 UTC
 
-运行版本：`2026.08.18.3`
+运行版本：`2026.08.19.1`
+
+## 2026-08-19 生产发布与历史事实完整性审计
+
+本节取代下方 2026-08-18 快照，作为当前生产事实源。它只记录本次现场复核能够
+证明的事实，不把仓库 CI、旧截图或历史文档当作当前服务器状态：
+
+- `v2026.08.19.1` 已在美国 `us-east-1` 的 `i-0fa9bfafa5eab00bf`
+  （`us-vpn-news-1`）完成事务式激活。生产链接精确指向
+  `/opt/finance-radar/releases/20260819T062521Z-fb9b61fb0aa0`，版本为
+  `2026.08.19.1`，仓库提交为 `fb9b61fb0aa0`。发布归档 SHA-256 为
+  `1e63aadb31737946baae8fc7faa4bf180dbd6e64de7d54cb08b8dc4cda66f930`，
+  发布清单 SHA-256 为
+  `dff60841e1d8bf5e7a0b02253c0e7ca114cdb2dfdb8d8cb00ef4794da463089b`。
+- 部署前完整恢复点 `finance_radar_20260819T062743Z_bd47be6f` 已通过恢复门，
+  收据 SHA-256 为
+  `aaa8249f1b68ad596ba4221b82df889e70a2c682bf6f646784e75bf7057cfa6e`；
+  切换后唯一正式在线恢复点为 `finance_radar_20260819T064350Z_faa0c011`，
+  清单 SHA-256 为
+  `b931aaae79d261e1f7abc074b16ad6ce936317e583edb16873a09736d654669a`。
+  新恢复点独立验证成功后旧恢复点才被移出保留链；正式在线库存仍恰好一份，
+  recovery hold 只余 `12 KiB` 元数据。
+- Nginx、API、Public Web、Worker 与每日备份计时器均为 `active/enabled`；
+  Worker 为 `NRestarts=0 / ExecMainStatus=0`，当前约 188 MiB、峰值约 378 MiB。
+  根盘为 `38 GiB`，部署双备份峰值曾到 93%，验证和单份轮换后回落到
+  `27 GiB` 已用、`12 GiB` 可用（70%）。主机约 531 MiB 内存可用，2 GiB
+  swap 使用约 490 MiB。下一次每日备份计划为 2026-08-20 06:50:59 UTC。
+- 公网 `/radar/`、`/radar/_stcore/health` 和 `/radar/release.json` 返回 200，
+  release marker 为 `20260819T062521Z-fb9b61fb0aa0`；FastAPI、Admin、
+  Reviewer、Operator、`/radar/offhost-status.json` 与退役的旧工作台路径均
+  返回 404。
+- Worker 部署后周期从 2026-08-19 06:54:28 UTC 运行到 06:55:51 UTC，
+  因一个已失效的原始页面返回 404 而诚实标为 `DEGRADED`；Worker 没有退出。
+  周期中的旧人工配置处置为
+  `LEGACY_REVIEW_CONFIG_UNPROVEN_PROVENANCE`，`applied=0`、
+  `formal_mutation_attempted=false`。这不是“全部数据源健康”，也不是正式结论写入。
+- `fact-integrity-history-audit-v2` 已在生产数据库只读复跑，明确记录
+  `read_only=true` 与 `canonical_mutation_attempted=false`。11,045 个历史
+  Evidence Agent 决策中，271 个符合当前合同、4,275 个需按新合同重跑，
+  6,499 个决策至少含一条被当前关联门拒绝的旧边；被拒旧边总数也是 6,499。
+  2,729 条轻量正式化全部因合同版本不匹配且当前门不支持而需复审；105 条旧
+  “人工配置”全部缺乏可证明来源，且目前均对应 canonical `verified`。
+- 精确逐项清单只保留在受限服务器：
+  `/opt/finance-radar/shared/reports/fact_integrity_history_audit_v2_20260819.json`
+  （9,604,616 字节，文件 SHA-256
+  `a30ee6776eea0f8d2b09f5f80f4e91d6db472055b59d439abf380aa4d9d78e1f`）和同名
+  Markdown（1,857 字节，SHA-256
+  `c590afd0b19db1ec48e6cc6d60b1e2380e9de1781af99ea20dabfdc669555f25`）。
+  JSON 内部规范化载荷哈希为
+  `d6b755a7ece36975bf0108b5c5303c877fe446dc7bf44a15cf8e5d9948f6cd91`。
+  仓库只记录聚合结果和哈希，不公开事件 ID、证据 passage 或生产数据库内容。
+- 本轮没有 canonical 回滚、批量改写、模型晋级、交易、系统升级或重启。历史债
+  的修复必须先审阅本次精确清单，再使用与该清单哈希绑定、限时、限量且动作专属的
+  新授权合同；不得把本次只读审计解释为写入授权。
+- 为本次部署临时放行的 EC2 Instance Connect 入站规则
+  `sgr-0813614bd680afd8c`（TCP 22，AWS 托管前缀列表
+  `pl-0e4bcff02b13bef1e`）已在完成取证并取得操作时确认后删除。AWS 控制台显示
+  修改成功，入站规则由 7 条回到 6 条；现有
+  `sgr-018f725a61dfbd882 / 159.89.226.240/32` 及其他规则均保留未改。
 
 ## 2026-08-18 产品改进（已发布生产）
 
