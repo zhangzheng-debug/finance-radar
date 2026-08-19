@@ -17,7 +17,7 @@ systemd installer gate are documented in
 
 1. Install Docker Engine and the Compose plugin.
 2. Copy the repository and existing `data/finance_radar.sqlite3` to the VPS.
-3. Create `.env` from `.env.example`; set distinct strong `FINANCE_RADAR_REVIEWER_TOKEN`, `FINANCE_RADAR_OPERATOR_TOKEN` and `FINANCE_RADAR_ADMIN_TOKEN` values, plus the public domain and SEC user agent. These tokens are for loopback internal UIs only; the public Web service must never receive them.
+3. Create `.env` from `.env.example`; set distinct strong `FINANCE_RADAR_REVIEWER_TOKEN`, `FINANCE_RADAR_OPERATOR_TOKEN` and `FINANCE_RADAR_ADMIN_TOKEN` values, plus the public domain and SEC user agent. These tokens are for loopback internal UIs only; the public Web service must never receive them. Human blind-review writes additionally require `FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON`: a distinct token per real reviewer/arbiter, never one shared alias.
 4. Give container UID 10001 write access to `data/`, `artifacts/` and `reports/`.
 5. Train or copy the risk-router artifact before starting the stack.
 
@@ -73,7 +73,7 @@ No service exposes order, position, balance, brokerage-account or trade-executio
 
 ## Encrypted migration restore audit
 
-The Windows off-host job does more than download and hash the archive. Before it removes temporary plaintext, it calls `scripts/audit_migration_restore.py` to scan archive paths/links, verify every `MANIFEST.sha256` entry, restore only the ledger and operations SQLite files, run `PRAGMA quick_check` plus `PRAGMA integrity_check`, and verify the immutable current release, external-blind promotion guard and no-trading exclusions. It accepts historical operations schemas 2/3/4 and the current schema 6 (including the light-verification and formal-mutation tables).
+The Windows off-host job does more than download and hash the archive. Before it removes temporary plaintext, it calls `scripts/audit_migration_restore.py` to scan archive paths/links, verify every `MANIFEST.sha256` entry, restore only the ledger and operations SQLite files, run `PRAGMA quick_check` plus `PRAGMA integrity_check`, and verify the immutable current release, external-blind promotion guard and no-trading exclusions. It accepts historical operations schemas 2/3/4/6 and the current schema 7 (including the light-verification, formal-mutation and atomic blind-freeze receipt tables).
 
 The advisory local Evidence Agent is declared independently in
 `config/LOCAL_EVIDENCE_MODEL_CAPABILITY.json`. A current unit file does not by
@@ -138,6 +138,31 @@ remain immutable and rollbackable. The public Web unit reads only
 `/etc/finance-radar-public.env`, which the installer creates from three fixed,
 non-secret values. It never loads `/etc/finance-radar.env` and explicitly
 removes `FINANCE_RADAR_ADMIN_TOKEN` from its process environment.
+
+Human reviewer identities are provisioned separately from the shared Reviewer
+UI token. The installer creates
+`/etc/finance-radar-reviewer-principals.json` as root-owned `0600` containing
+`[]`, so human-label writes fail closed. Generate an owner-approved candidate
+file without printing its secrets, transfer it through the authenticated
+administration channel, validate it, then install and restart only the API:
+
+```bash
+python scripts/generate_reviewer_principals.py \
+  --output reviewer-principals.json \
+  --reviewer-id reviewer-a --reviewer-id reviewer-b --arbiter-id arbiter-c
+python -m json.tool reviewer-principals.json >/dev/null
+sudo install -m 0600 -o root -g root reviewer-principals.json \
+  /etc/finance-radar-reviewer-principals.json
+sudo systemctl restart finance-radar-api
+```
+
+Distribute each token only to its named person. The API consumes this file via
+systemd `LoadCredential`; it is not copied into `/etc/finance-radar.env`, the
+public Web process, migration archives, reports, logs or browser code. A
+disaster restore deliberately resets the file to `[]`; principals must be
+re-authorized and reprovisioned. Compose/local development may instead set the
+JSON environment variable shown in `.env.example`, but production uses the
+credential file.
 
 The versioned Worker unit includes `MemoryHigh=380M`, `MemoryMax=520M` and
 `TasksMax=128`. These are primary-unit limits, not a server-only drop-in, so a

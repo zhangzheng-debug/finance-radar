@@ -10,6 +10,7 @@ Group=finance-radar
 WorkingDirectory=/opt/finance-radar/current
 Slice=finance-radar.slice
 EnvironmentFile=/etc/finance-radar.env
+LoadCredential=reviewer-principals.json:/etc/finance-radar-reviewer-principals.json
 ExecStart=/opt/finance-radar/venv/bin/python -m uvicorn app.api.main:app --host 127.0.0.1 --port 18000 --workers 1
 Restart=on-failure
 RestartSec=5

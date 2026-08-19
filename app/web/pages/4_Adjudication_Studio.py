@@ -119,8 +119,8 @@ with gate_col:
         st.write("✓ 模型输出与事件后行情结果隐藏")
         st.write("✓ 公网写入控件默认关闭")
         st.write(
-            f"○ 独立来源组 {int(progress.get('source_groups') or 0)} / "
-            f"{int(progress.get('minimum_source_groups') or 4)}"
+            f"○ 独立来源家族 {int(progress.get('source_families') or 0)} / "
+            f"{int(progress.get('minimum_source_families') or progress.get('minimum_source_groups') or 4)}"
         )
         st.code("production_changed=false · blind_v2_frozen=false", language=None)
 
@@ -277,6 +277,7 @@ st.json(
         "derived_label_counts": progress.get("label_counts"),
         "remaining_minimums": progress.get("label_deficits"),
         "source_groups": progress.get("source_groups"),
+        "source_families": progress.get("source_families"),
         "split": progress.get("split"),
         "production_changed": progress.get("production_changed"),
     },

@@ -10,6 +10,7 @@ x-radar-environment: &radar-environment
   FINANCE_RADAR_DEMO_MODE: ${FINANCE_RADAR_DEMO_MODE:-RECENT_CAPTURE}
   FINANCE_RADAR_ADMIN_TOKEN: ${FINANCE_RADAR_ADMIN_TOKEN:-change-me-before-public-deploy}
   FINANCE_RADAR_REVIEWER_TOKEN: ${FINANCE_RADAR_REVIEWER_TOKEN:-change-me-reviewer}
+  FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON: '${FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON:-[]}'
   FINANCE_RADAR_OPERATOR_TOKEN: ${FINANCE_RADAR_OPERATOR_TOKEN:-change-me-operator}
 
 x-radar-public-web-environment: &radar-public-web-environment

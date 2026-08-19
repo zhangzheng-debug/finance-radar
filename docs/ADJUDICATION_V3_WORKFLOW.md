@@ -17,12 +17,12 @@
 
 ## 使用流程
 
-1. 打开 Web 终端的 **Adjudication Studio**。
-2. 每个人使用不同的 Reviewer ID；不得共享身份。
-3. 先以 `REVIEWER` 身份完成独立判断。提交后本人不再看到该任务。
-4. 第二名审核者在不知道第一份答案的情况下完成同一样本。
-5. 若进入 `CONFLICT`，第三人切换为 `ARBITER`，阅读两种匿名意见后裁决。
-6. 运行审计，确认数量、来源组、冲突和冻结前缺口。
+1. 运维为两名真实 Reviewer 和一名独立 Arbiter 分别创建凭据；每个角色由 API 服务端绑定，不允许页面自报或切换。
+2. 打开仅回环可达的 Reviewer UI，再进入 **Adjudication Studio**。
+3. 每个人输入自己的个人审核凭据；共享 Reviewer/Admin 令牌不能提交真人标签。
+4. 两名 `REVIEWER` 分别完成独立判断。提交后本人不再看到该任务。
+5. 若进入 `CONFLICT`，只有凭据绑定为 `ARBITER` 的第三人可以阅读匿名分歧并裁决。
+6. 运行审计，确认数量、规范化来源家族、冲突、身份独立性和冻结前缺口。
 
 公网部署默认只显示聚合进度，审核写入被关闭。内部标注窗口必须同时设置：
 
@@ -31,7 +31,9 @@ FINANCE_RADAR_REVIEW_UI_ENABLED=1
 FINANCE_RADAR_REVIEW_ACCESS_CODE=<独立访问码>
 ```
 
-访问码只保存在服务器环境中，不写入仓库、报告或答辩包。关闭标注窗口后移除或禁用开关并重启 Web 服务。API 仍要求 `X-Admin-Token`，两层门禁缺一不可。
+访问码只保存在服务器环境中，不写入仓库、报告或答辩包。关闭标注窗口后移除或禁用开关并重启 Reviewer 服务。它只是 UI 入口门，不代表审核者身份。API 的真人读写要求 `X-Reviewer-Token` 对应 `/etc/finance-radar-reviewer-principals.json` 中的独立主体；`X-Admin-Token` 和共享 Reviewer UI token 都不能冒充真人审核者。
+
+首次系统级部署会生成一个内容为 `[]` 的 root-only credential 文件，因此真人写入默认返回 503。由所有者确认参与人后，按 `deployment/README.md` 使用 `scripts/generate_reviewer_principals.py` 生成并安装凭据，再分别安全交付个人 token。恢复到新主机时该文件故意重置为 `[]`，不得从历史迁移包自动复活旧人审身份。
 
 ```powershell
 python scripts/seed_adjudication_queue.py --limit 24
@@ -45,13 +47,13 @@ python scripts/audit_adjudication_workflow.py
 
 ## API
 
-写操作和含原文的队列读取都沿用 `X-Admin-Token`：
+建样本仍是 Admin 动作；含原文的队列读取与审核写入必须使用服务端绑定的个人 `X-Reviewer-Token`：
 
 - `GET /api/v1/adjudication/status`：只返回聚合状态。
 - `POST /api/v1/adjudication/samples/from-event/{event_id}`：创建不带目标标签的样本。
-- `GET /api/v1/adjudication/queue?reviewer_id=...&role=REVIEWER`：获取对该身份可见的独立任务。
+- `GET /api/v1/adjudication/queue`：服务端根据个人凭据返回其独立任务；不接受客户端 `reviewer_id/role`。
 - `POST /api/v1/adjudication/samples/{sample_id}/reviews`：提交判断轴。
-- `role=ARBITER`：只读取冲突样本并进行第三人裁决。
+- `ARBITER` 凭据：只读取冲突样本并进行第三人裁决。
 
 Streamlit 不会把服务器管理员令牌交给浏览器，但其后端可以代发请求，因此 UI 必须保持上述独立访问门；不能仅依赖 API 管理员令牌。
 
@@ -62,10 +64,21 @@ Streamlit 不会把服务器管理员令牌交给浏览器，但其后端可以�
 - `RISK_REVIEW >= 30`
 - `NON_TARGET >= 30`
 - `ABSTAIN >= 20`
-- 至少 4 个独立来源组
+- 至少 4 个规范化后的独立来源家族；同一机构的多个 feed 只能计为一个家族
 - 每行通过 V3 合同验证
 
-这仍不等于盲测集已冻结。下一步必须先与 V1 训练集和 external-blind-v1 做精确/近重复排查，再按 `entity_group + event_chain_group` 分组切分、哈希并冻结。任何阈值调参都不得读取 blind-v2。
+这仍不等于盲测集已冻结。冻结脚本会对全部历史训练/盲测清单做实体、事件链、精确文本和真正的近重复相似度检查；同时要求至少存在一个完整未在历史语料出现的来源家族。它先生成数据集、哈希、来源留出结论和未批准的授权模板：
+
+```powershell
+python scripts/freeze_human_blind_v3.py `
+  --output-dir "D:\FinanceRadarBlindFreeze\candidate"
+```
+
+所有者必须检查候选清单后，复制授权模板并精确填写 `approved=true`、动作 ID、外部操作者、目的和到期时间。模板已绑定 `freeze_id`、完整数据集哈希、样本 ID 集哈希、数量与 held-out source families；任一字段变化都使授权失效。命令行自报 `actor=owner` 不构成授权，`--apply` 只接受独立的 `--authorization-file`。
+
+正式 apply 建议在生产 Linux 的私有目录执行。脚本先原子写 `PREPARED` 清单，再用一个 SQLite 事务同时写入完整冻结收据和全部 `FROZEN` 状态，最后写 `COMMITTED` 清单。若最后一步崩溃，同一目录、同一授权和同一哈希的重试只做幂等对账；任何差异均失败关闭。Windows 上 `chmod 0600` 不能证明 NTFS ACL，清单会如实标记 `WINDOWS_CALLER_ACL_NOT_PROVEN_BY_CHMOD`，本地候选应放在受控 D 盘目录，不能把它当成已经证明 owner-only。
+
+冻结不会训练、替换或晋级模型，`split` 仍只成为 `HUMAN_BLIND_V3` 的一次性评估集合。任何阈值调参都不得读取该盲集。
 
 ## 真实性边界
 

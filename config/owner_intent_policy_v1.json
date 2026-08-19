@@ -178,7 +178,23 @@
       "event_time_content_only": true,
       "freeze_requires_resolved_issuer_and_event_chain_groups": true,
       "freeze_requires_exact_and_near_duplicate_zero": true,
+      "near_duplicate_requires_similarity_check_not_only_equality_hash": true,
+      "freeze_requires_at_least_one_fully_held_out_source_family": true,
       "freeze_is_one_way_and_dataset_hash_bound": true,
+      "freeze_authorization_contract_fields": [
+        "action",
+        "authorization_id",
+        "actor",
+        "purpose",
+        "expires_at",
+        "freeze_id",
+        "dataset_sha256",
+        "sample_ids_sha256",
+        "sample_count",
+        "held_out_source_families"
+      ],
+      "freeze_receipt_and_sample_state_same_transaction": true,
+      "freeze_retry": "exact_receipt_only_idempotent",
       "required_submission_fields": [
         "exact_passage",
         "rationale",

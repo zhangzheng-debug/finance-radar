@@ -10,10 +10,35 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _reviewer_principals_payload() -> str:
+    """Load reviewer principals from one unambiguous secret source.
+
+    Compose/local development can use the JSON environment variable.  The
+    production systemd unit uses ``LoadCredential=`` so the principal tokens do
+    not enter the service environment or ``systemctl show`` output.
+    """
+
+    raw = os.getenv("FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON", "").strip()
+    credential_directory = os.getenv("CREDENTIALS_DIRECTORY", "").strip()
+    credential_path = (
+        Path(credential_directory) / "reviewer-principals.json"
+        if credential_directory
+        else None
+    )
+    credential_present = bool(credential_path and credential_path.is_file())
+    if raw and credential_present:
+        raise ValueError("reviewer principals must use either environment JSON or a systemd credential, not both")
+    if credential_present:
+        if credential_path.stat().st_size > 64 * 1024:
+            raise ValueError("reviewer principals credential exceeds 64 KiB")
+        raw = credential_path.read_text(encoding="utf-8").strip()
+    return raw
+
+
 def _reviewer_principals_from_env() -> tuple[tuple[str, str, str], ...]:
     """Parse credential-bound human reviewers without accepting shared aliases."""
 
-    raw = os.getenv("FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON", "").strip()
+    raw = _reviewer_principals_payload()
     if not raw:
         return ()
     try:

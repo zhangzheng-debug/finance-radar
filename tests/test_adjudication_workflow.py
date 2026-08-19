@@ -245,9 +245,33 @@ def test_freeze_candidate_is_zero_overlap_and_commit_is_one_way(workflow) -> Non
             excluded_event_ids={"evt-a"},
         )
 
-    assert operations.freeze_adjudication_samples(
-        [sample_id], candidate["freeze_id"]
-    ) == 1
+    sample_ids_sha256 = hashlib.sha256(
+        json.dumps([sample_id], separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    authorization = {
+        "schema_version": 1,
+        "action": "FREEZE_HUMAN_BLIND_V3",
+        "approved": True,
+        "authorization_id": "test-auth",
+        "actor": "test-owner",
+        "purpose": "Exercise the atomic adjudication freeze receipt contract.",
+        "expires_at": "2999-01-01T00:00:00+00:00",
+        "freeze_id": candidate["freeze_id"],
+        "dataset_sha256": candidate["dataset_sha256"],
+        "sample_ids_sha256": sample_ids_sha256,
+        "sample_count": 1,
+        "held_out_source_families": ["test-source-family"],
+    }
+    committed = operations.commit_adjudication_freeze(
+        [sample_id],
+        candidate["freeze_id"],
+        dataset_sha256=candidate["dataset_sha256"],
+        sample_ids_sha256=sample_ids_sha256,
+        authorization=authorization,
+        dataset_path="test.jsonl",
+        manifest_path="test.manifest.json",
+    )
+    assert committed["frozen_samples"] == 1
     assert operations.adjudication_sample(sample_id)["status"] == "FROZEN"
     with pytest.raises(ValueError, match="frozen sample"):
         review(service, sample_id, "reviewer-c")
@@ -318,5 +342,6 @@ def test_api_exposes_guarded_queue_and_review_contract(workflow) -> None:
         )
         assert spoofed.status_code == 422
         health = client.get("/api/v1/health").json()["data"]
-        assert health["operations"]["schema_version"] == 6
+        assert health["operations"]["schema_version"] == 7
+        assert health["operations"]["counts"]["adjudication_freezes"] == 0
         assert health["operations"]["counts"]["adjudication_samples"] == 1
