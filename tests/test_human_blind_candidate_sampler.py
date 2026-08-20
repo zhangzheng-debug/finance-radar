@@ -190,6 +190,40 @@ def test_insufficient_candidates_fail_honestly() -> None:
         build_candidate_set(packets, target_count=2)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("proposed_event_family", "price_crash"),
+        ("proposed_event_type", "one_day_crash_candidate"),
+        ("proposed_event_type", "five-day-crash"),
+        ("proposed_event_family", "price_gainer"),
+        ("proposed_event_family", "market_return_outcome"),
+    ],
+)
+def test_market_outcome_event_families_are_explicitly_ineligible(
+    field: str, value: str
+) -> None:
+    packet = _packet(77)
+    packet[field] = value
+
+    with pytest.raises(ValueError, match="market-outcome event family/type is ineligible"):
+        packet_to_candidate(packet)
+
+
+def test_sampler_reports_market_outcome_rejections_instead_of_silently_selecting_them() -> None:
+    packets = [_packet(1), _packet(2)]
+    packets[1]["proposed_event_family"] = "price_loser"
+
+    result = build_candidate_set(packets, target_count=1)
+
+    assert result["row_count"] == 1
+    assert any(
+        key.startswith("market-outcome event family/type is ineligible")
+        for key in result["rejection_counts"]
+    )
+    assert "price_loser" in result["market_outcome_event_identifiers_denied"]
+
+
 def test_package_loader_requires_owner_proven_full_coverage(tmp_path: Path) -> None:
     root = tmp_path / "census"
     (root / "成员A" / "任务分片").mkdir(parents=True)
@@ -225,4 +259,3 @@ def test_package_loader_requires_owner_proven_full_coverage(tmp_path: Path) -> N
     )
     with pytest.raises(ValueError, match="coverage does not match owner index"):
         load_packets_from_census_package(root)
-

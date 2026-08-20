@@ -31,6 +31,19 @@ SAMPLING_CONTRACT_VERSION = "human-blind-candidate-sampler-v1"
 DEFAULT_TARGET_COUNT = 720
 DEFAULT_SEED = "finance-radar-human-blind-v3.1-candidates-v1"
 MIN_EXACT_PASSAGE_CHARS = 40
+MARKET_OUTCOME_IDENTIFIERS = {
+    "price_crash",
+    "one_day_crash",
+    "five_day_crash",
+    "price_gainer",
+    "price_loser",
+    "post_event_return",
+    "market_return_outcome",
+}
+MARKET_OUTCOME_IDENTIFIER_PATTERN = re.compile(
+    r"(?:^|_)(?:price_(?:crash|gainer|loser)|(?:one|five)_day_crash|"
+    r"post_event_return|market_return_outcome)(?:_|$)"
+)
 
 
 def stable_json(value: Any) -> str:
@@ -43,6 +56,14 @@ def sha256_json(value: Any) -> str:
 
 def _clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _market_outcome_identifier(packet: dict[str, Any]) -> str | None:
+    for field in ("proposed_event_family", "proposed_event_type"):
+        value = re.sub(r"[^a-z0-9]+", "_", _clean_text(packet.get(field)).casefold()).strip("_")
+        if value in MARKET_OUTCOME_IDENTIFIERS or MARKET_OUTCOME_IDENTIFIER_PATTERN.search(value):
+            return f"{field}:{value}"
+    return None
 
 
 def _parse_timestamp(value: Any, *, field: str, date_only_allowed: bool) -> datetime:
@@ -199,6 +220,12 @@ def packet_to_candidate(packet: dict[str, Any]) -> tuple[dict[str, Any], Counter
         raise ValueError("record_type must be event_packet")
     if _clean_text(packet.get("contract_version")) != AI_CENSUS_CONTRACT_VERSION:
         raise ValueError(f"input must use {AI_CENSUS_CONTRACT_VERSION}")
+    market_outcome_identifier = _market_outcome_identifier(packet)
+    if market_outcome_identifier:
+        raise ValueError(
+            "market-outcome event family/type is ineligible for human-blind labels: "
+            + market_outcome_identifier
+        )
     event_id = _clean_text(packet.get("event_id"))
     if not event_id:
         raise ValueError("event_id is required")
@@ -377,6 +404,7 @@ def build_candidate_set(
         "old_status_included": False,
         "ai_or_model_output_included": False,
         "post_event_market_data_included": False,
+        "market_outcome_event_identifiers_denied": sorted(MARKET_OUTCOME_IDENTIFIERS),
         "target_label_preassigned": False,
         "canonical_state_changed": False,
         "no_trading": True,
