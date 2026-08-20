@@ -1,6 +1,6 @@
 # Public reader event quality gate
 
-Status: implemented locally, not evidence of production deployment  
+Status: implemented locally, not evidence of production deployment
 Decision date: 2026-08-20
 
 ## User and task
