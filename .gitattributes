@@ -38,6 +38,8 @@ VERSION text eol=lf
 *.pdf binary
 *.docx binary
 *.pptx binary
+*.xls binary
+*.xlsx binary
 *.zip binary
 *.tgz binary
 *.aesgcm binary
