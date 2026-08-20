@@ -23,6 +23,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from app.models.event_taxonomy import classify_event
+
 
 ROOT = Path(__file__).resolve().parents[2]
 PLAYBOOK_PATH = ROOT / "config" / "event_playbook_v1.json"
@@ -177,26 +179,34 @@ def load_playbook(path: str | None = None) -> tuple[PlaybookCard, ...]:
     return cards
 
 
-def cards_for_family(event_family: str | None) -> tuple[PlaybookCard, ...]:
+def cards_for_family(
+    event_family: str | None, event_type: str | None = None
+) -> tuple[PlaybookCard, ...]:
     """Return the cards that explain how to read one event family."""
 
     normalized = str(event_family or "").strip()
     if not normalized:
         return ()
-    return tuple(card for card in load_playbook() if card.event_family == normalized)
+    direct = tuple(card for card in load_playbook() if card.event_family == normalized)
+    if direct:
+        return direct
+    alias = classify_event(normalized, event_type).playbook_family
+    return tuple(card for card in load_playbook() if card.event_family == alias)
 
 
-def time_anchor_for_family(event_family: str | None) -> str | None:
+def time_anchor_for_family(
+    event_family: str | None, event_type: str | None = None
+) -> str | None:
     """Return the anchor the confirm card declares for this family.
 
     The price-window audit consumes this: a scheduled window whose anchor does
     not match the declared anchor is a defect, not a matter of taste.
     """
 
-    for card in cards_for_family(event_family):
+    for card in cards_for_family(event_family, event_type):
         if card.kind == "confirm":
             return card.time_anchor
-    return None
+    return classify_event(event_family, event_type).time_anchor
 
 
 def covered_families() -> tuple[str, ...]:
