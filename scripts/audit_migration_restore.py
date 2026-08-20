@@ -72,6 +72,11 @@ LEDGER_TABLES = (
     "pipeline_jobs",
     "alert_outbox",
 )
+LEDGER_V13_TABLES = (
+    "discovery_leads",
+    "event_evidence_relations",
+    "event_fact_workflow",
+)
 OPERATIONS_TABLES = (
     "replay_runs",
     "model_runs",
@@ -440,6 +445,8 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
             connection.execute(f"SELECT MAX(version) FROM {schema_table}").fetchone()[0] or 0
         )
         tables = LEDGER_TABLES if ledger else OPERATIONS_TABLES
+        if ledger and schema_version >= 13:
+            tables += LEDGER_V13_TABLES
         if not ledger and schema_version >= 3:
             tables += OPERATIONS_V3_TABLES
         if not ledger and schema_version >= 6:
@@ -479,7 +486,7 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
             }
     if quick_check != "ok" or integrity_check != "ok":
         raise ValueError(f"SQLite integrity failure: quick={quick_check} integrity={integrity_check}")
-    if ledger and (schema_version != 12 or any(audit.values())):
+    if ledger and (schema_version != 13 or any(audit.values())):
         raise ValueError(f"ledger safety/schema failure: schema={schema_version} audit={audit}")
     if not ledger and schema_version not in SUPPORTED_OPERATIONS_SCHEMA_VERSIONS:
         expected_versions = ", ".join(str(version) for version in sorted(SUPPORTED_OPERATIONS_SCHEMA_VERSIONS))

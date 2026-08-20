@@ -96,7 +96,7 @@ class ProductLayerTests(unittest.TestCase):
     def test_repository_exposes_evidence_linked_event(self) -> None:
         repository = LedgerRepository(self.ledger_path)
         health = repository.health()
-        self.assertEqual(health["schema_version"], 12)
+        self.assertEqual(health["schema_version"], 13)
         self.assertEqual(health["audit"]["trading_boundary_violations"], 0)
         detail = repository.event_detail("evt-1")
         self.assertEqual(detail["event"]["no_trading"], 1)

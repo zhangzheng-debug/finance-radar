@@ -302,10 +302,17 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
             "The exchange notice names Zulu Pending, identifies the listing compliance action, "
             "and states the remediation deadline."
         )
+        facts = {
+            "public_fact_summary": fact_summary,
+            "claim_subject": "Zulu Pending",
+            "claim_action": "listing_compliance_notice",
+            "claim_stage": "DISCLOSED",
+            "known_at": evidence_at,
+        }
         connection.execute(
             """INSERT INTO event_versions VALUES (
                'pending-0',1,?,'candidate','candidate','regulatory','filing',NULL,?,'seed')""",
-            (evidence_at, json.dumps({"evidence_summary": fact_summary}, ensure_ascii=False)),
+            (evidence_at, json.dumps(facts, ensure_ascii=False)),
         )
         connection.execute(
             """INSERT INTO raw_observations(
@@ -321,7 +328,7 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
                 "Zulu Pending listing compliance notice",
                 fact_summary,
                 "https://example.test/original-notice",
-                "reader-ready-content-sha256",
+                "a" * 64,
                 "{}",
                 "captured",
             ),
@@ -335,6 +342,12 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
                'reader-ready-evidence','pending-0','reader-ready-observation',?,NULL,NULL,NULL,
                ?,NULL,100,'candidate_passage',0,?,?)""",
             ("https://example.test/original-notice", passage, evidence_at, evidence_at),
+        )
+        connection.execute(
+            """INSERT INTO event_evidence_relations VALUES (
+               'pending-0','reader-ready-evidence',1,'SCOPED_MATCH',1,1,1,
+               'DISCLOSED',?,'event-admission-v1','fixture',?)""",
+            ("b" * 64, evidence_at),
         )
         connection.execute(
             """INSERT INTO pipeline_jobs VALUES (

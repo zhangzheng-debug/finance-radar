@@ -50,12 +50,28 @@ ranked_light_followups AS (
       AND status IN ('PENDING_EVIDENCE_REVIEW','PENDING_HUMAN_REVIEW')
 ),
 event_reader_evidence AS (
-    SELECT event_id,
+    SELECT ev.event_id,
            COUNT(*) AS citable_evidence_count
-    FROM event_evidence
-    WHERE TRIM(COALESCE(evidence_url,''))!=''
-      AND LENGTH(TRIM(COALESCE(evidence_passage,'')))>=40
-    GROUP BY event_id
+    FROM event_evidence ev
+    JOIN canonical_events ce ON ce.event_id=ev.event_id
+    JOIN event_evidence_relations rel
+      ON rel.event_id=ev.event_id
+     AND rel.evidence_id=ev.evidence_id
+     AND rel.event_version=ce.current_version
+    JOIN raw_observations ro ON ro.observation_id=ev.observation_id
+    JOIN sources src ON src.source_id=ro.source_id
+    WHERE TRIM(COALESCE(ev.evidence_url,''))!=''
+      AND LENGTH(TRIM(COALESCE(ev.evidence_passage,'')))>=40
+      AND ev.evidence_status IN (
+          'machine_extracted_unreviewed','candidate_passage',
+          'confirmed_primary','accepted_manual_primary_evidence'
+      )
+      AND rel.relation_status IN ('SCOPED_MATCH','HUMAN_CONFIRMED')
+      AND rel.subject_match=1
+      AND rel.event_claim_supported=1
+      AND rel.date_coherent=1
+      AND UPPER(src.authority_tier) GLOB 'P[01]*'
+    GROUP BY ev.event_id
 ),
 event_public AS (
     SELECT canonical.*,
@@ -94,8 +110,20 @@ event_public AS (
                NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
                NULLIF(TRIM(json_extract(current_version.facts_json,'$.fact_summary')),''),
                NULLIF(TRIM(json_extract(current_version.facts_json,'$.evidence_summary')),'')
-             )
-           END AS public_fact_summary,
+              )
+            END AS public_fact_summary,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_subject')
+            END AS claim_subject,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_action')
+            END AS claim_action,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_stage')
+            END AS claim_stage,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.known_at')
+            END AS known_at,
            CASE WHEN COALESCE(
              NULLIF(TRIM(canonical.company_name),''),
              NULLIF(TRIM(canonical.ticker_at_event),''),
@@ -107,8 +135,21 @@ event_public AS (
              NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
              NULLIF(TRIM(json_extract(current_version.facts_json,'$.fact_summary')),''),
              NULLIF(TRIM(json_extract(current_version.facts_json,'$.evidence_summary')),''),
-             ''
-           ))>=20 THEN 1 ELSE 0 END AS reader_has_fact_summary,
+              ''
+            ))>=20
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_subject'),''
+              )))>=2
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_action'),''
+              )))>=3
+              AND UPPER(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_stage'),''
+              ))) IN ('PROPOSED','FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED')
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.known_at'),''
+              )))>=20
+              THEN 1 ELSE 0 END AS reader_has_fact_summary,
            CASE WHEN
              COALESCE(
                NULLIF(TRIM(canonical.company_name),''),
@@ -117,13 +158,25 @@ event_public AS (
              )!=''
              AND COALESCE(reader_evidence.citable_evidence_count,0)>0
              AND json_valid(current_version.facts_json)
-             AND LENGTH(COALESCE(
+              AND LENGTH(COALESCE(
                NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
                NULLIF(TRIM(json_extract(current_version.facts_json,'$.fact_summary')),''),
                NULLIF(TRIM(json_extract(current_version.facts_json,'$.evidence_summary')),''),
                ''
-             ))>=20
-             THEN 1 ELSE 0
+              ))>=20
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_subject'),''
+              )))>=2
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_action'),''
+              )))>=3
+              AND UPPER(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_stage'),''
+              ))) IN ('PROPOSED','FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED')
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.known_at'),''
+              )))>=20
+              THEN 1 ELSE 0
            END AS reader_ready
     FROM canonical_events canonical
     LEFT JOIN ranked_rough_reviews rough
@@ -677,7 +730,7 @@ class LedgerRepository:
         return {
             "schema_version": 1,
             "definition": (
-                "named subject + structured fact summary + citable URL and exact passage"
+                "named subject + subject-action-stage-known_at fact + current supported P0/P1 passage"
             ),
             "total": total,
             "reader_ready": ready,
@@ -693,7 +746,7 @@ class LedgerRepository:
                 **state_counts,
                 "partition_total": sum(state_counts.values()),
                 "partition_complete": sum(state_counts.values()) == ready,
-                "definition": "reader-ready subset of the exhaustive public funnel",
+                "definition": "current-version evidence-supported reader subset of the canonical ledger",
             },
             "read_only": True,
             "canonical_mutation": False,
@@ -1223,12 +1276,19 @@ class LedgerRepository:
         with closing(self.connect()) as connection:
             rows = connection.execute(
                 """SELECT ev.*, o.title AS observation_title, o.summary AS observation_summary,
-                          o.source_published_at, o.local_received_at, s.source_id, s.name AS source_name,
-                          s.authority_tier, s.source_type
-                   FROM event_evidence ev
-                   JOIN raw_observations o ON o.observation_id=ev.observation_id
-                   JOIN sources s ON s.source_id=o.source_id
-                   WHERE ev.event_id=?
+                           o.source_published_at, o.local_received_at, s.source_id, s.name AS source_name,
+                           s.authority_tier, s.source_type,rel.event_version AS relation_event_version,
+                           rel.relation_status,rel.subject_match,rel.event_claim_supported,
+                           rel.date_coherent,rel.modality,rel.evidence_fingerprint,
+                           rel.contract_version AS relation_contract_version
+                    FROM event_evidence ev
+                    JOIN raw_observations o ON o.observation_id=ev.observation_id
+                    JOIN sources s ON s.source_id=o.source_id
+                    LEFT JOIN canonical_events ce ON ce.event_id=ev.event_id
+                    LEFT JOIN event_evidence_relations rel
+                      ON rel.event_id=ev.event_id AND rel.evidence_id=ev.evidence_id
+                     AND rel.event_version=ce.current_version
+                    WHERE ev.event_id=?
                    ORDER BY ev.passage_score DESC, ev.updated_at DESC""",
                 (event_id,),
             ).fetchall()

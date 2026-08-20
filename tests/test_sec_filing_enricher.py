@@ -35,6 +35,117 @@ class FakeClient:
 
 
 class SecFilingEnricherTests(unittest.TestCase):
+    def _seed_discovery_lead(self, connection, *, suffix: str = "lead") -> None:
+        now = "2026-08-20T01:02:03+00:00"
+        raw_json = json.dumps(
+            {"item": {"form": "8-K", "items": ["5.02"], "company": "Example Corp"}}
+        )
+        connection.execute(
+            """INSERT INTO sources VALUES (
+               'sec_current_filings','SEC','official_primary_feed','P0_official',1,1,?,?)""",
+            (now, now),
+        )
+        connection.execute(
+            """INSERT INTO raw_observations VALUES (
+               ?,'sec_current_filings',?,'2026-08-20T00:30:00+00:00',?,
+               '8-K - Example Corp','Item 5.02','https://www.sec.gov/Archives/a/index.htm',
+               ?,?,'completed_discovery_lead')""",
+            (
+                f"obs-{suffix}",
+                suffix,
+                now,
+                hashlib.sha256(raw_json.encode()).hexdigest(),
+                raw_json,
+            ),
+        )
+        connection.execute(
+            """INSERT INTO discovery_leads VALUES (
+               ?,?,'sec_current_filings','PENDING_ENRICHMENT','governance','management_change',
+               'Example Corp','EXM','2026-08-20',?,NULL,NULL,NULL,
+               'https://www.sec.gov/Archives/a/index.htm',NULL,
+               'link_only_no_relevant_passage',?,'[]','["SEC_REQUIRES_DOCUMENT_SEMANTIC_MATCH"]',
+               'event-admission-v1',NULL,?,?,1)""",
+            (
+                f"lead-{suffix}",
+                f"obs-{suffix}",
+                now,
+                hashlib.sha256(raw_json.encode()).hexdigest(),
+                now,
+                now,
+            ),
+        )
+        connection.commit()
+
+    def test_discovery_lead_is_promoted_only_after_scoped_document_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            connection = open_ledger(Path(directory) / "db.sqlite3")
+            self._seed_discovery_lead(connection)
+            client = FakeClient(
+                {
+                    "https://www.sec.gov/Archives/a/index.htm": INDEX,
+                    "https://www.sec.gov/Archives/a/main.htm": (
+                        b"<html><body>Item 5.02. Example Corp reported that its chief "
+                        b"financial officer resigned effective immediately on August 20, 2026.</body></html>"
+                    ),
+                    "https://www.sec.gov/Archives/a/ex991.htm": (
+                        b"<html><body>Example Corp announces the executive transition and "
+                        b"names the interim chief financial officer.</body></html>"
+                    ),
+                }
+            )
+
+            result = enricher.enrich_pending_discovery_leads(connection, client, limit=5)
+            lead = connection.execute("SELECT * FROM discovery_leads").fetchone()
+            event = connection.execute("SELECT * FROM canonical_events").fetchone()
+            relation = connection.execute("SELECT * FROM event_evidence_relations").fetchone()
+            workflow = connection.execute("SELECT * FROM event_fact_workflow").fetchone()
+            job = connection.execute("SELECT * FROM pipeline_jobs").fetchone()
+            facts = json.loads(
+                connection.execute("SELECT facts_json FROM event_versions").fetchone()[0]
+            )
+            connection.close()
+
+        self.assertEqual(result["promoted"], 1)
+        self.assertEqual(lead["status"], "PROMOTED")
+        self.assertEqual(lead["canonical_event_id"], event["event_id"])
+        self.assertEqual(event["status"], "candidate")
+        self.assertEqual(event["event_type"], "management_change")
+        self.assertEqual(relation["relation_status"], "SCOPED_MATCH")
+        self.assertEqual(relation["subject_match"], 1)
+        self.assertEqual(relation["event_claim_supported"], 1)
+        self.assertEqual(workflow["workflow_state"], "EVIDENCE_READY")
+        self.assertEqual(job["status"], "PENDING_EVIDENCE_REVIEW")
+        self.assertEqual(facts["claim_subject"], "Example Corp")
+        self.assertEqual(facts["claim_stage"], "DISCLOSED")
+        self.assertFalse(facts["formal_verification"])
+
+    def test_unscoped_filing_remains_a_lead_and_never_creates_a_canonical_event(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            connection = open_ledger(Path(directory) / "db.sqlite3")
+            self._seed_discovery_lead(connection, suffix="ordinary")
+            client = FakeClient(
+                {
+                    "https://www.sec.gov/Archives/a/index.htm": INDEX,
+                    "https://www.sec.gov/Archives/a/main.htm": (
+                        b"<html><body>Example Corp filed an ordinary administrative update "
+                        b"and incorporated prior disclosures by reference.</body></html>"
+                    ),
+                    "https://www.sec.gov/Archives/a/ex991.htm": (
+                        b"<html><body>This exhibit contains only routine administrative "
+                        b"information and no described corporate action.</body></html>"
+                    ),
+                }
+            )
+
+            result = enricher.enrich_pending_discovery_leads(connection, client, limit=5)
+            lead = connection.execute("SELECT * FROM discovery_leads").fetchone()
+            event_count = connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0]
+            connection.close()
+
+        self.assertEqual(result["no_scoped_event"], 1)
+        self.assertEqual(lead["status"], "LEAD_NO_SCOPED_EVENT")
+        self.assertEqual(event_count, 0)
+
     def test_index_parser_canonicalizes_ix_and_keeps_exhibit(self) -> None:
         rows = enricher.parse_filing_index(INDEX)
         self.assertEqual(len(rows), 2)

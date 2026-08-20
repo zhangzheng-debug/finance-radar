@@ -11,6 +11,7 @@ import re
 import sys
 import urllib.parse
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from event_ledger import open_ledger, stable_id, stable_json, utc_now
 
 DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
 DEFAULT_REPORT = ROOT / "reports" / "live_candidate_extraction_latest.md"
+DISCOVERY_ADMISSION_CONTRACT = "event-admission-v1"
 
 
 @dataclass(frozen=True)
@@ -360,6 +362,80 @@ def canonicalize_url(value: str | None) -> str | None:
         host = "x.com"
     path = re.sub(r"/+$", "", parsed.path) or "/"
     return urllib.parse.urlunsplit((parsed.scheme.casefold(), host, path, "", ""))
+
+
+def observation_known_at(source_published_at: str | None, local_received_at: str) -> str:
+    values: list[datetime] = []
+    for value in (source_published_at, local_received_at):
+        if not value:
+            continue
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        values.append(parsed.astimezone(timezone.utc))
+    if not values:
+        raise ValueError("observation requires a published or received timestamp")
+    return max(values).isoformat()
+
+
+def record_sec_discovery_lead(connection: Any, row: Any, matched: EventRule, *, now: str) -> str:
+    """Keep an SEC filing as a lead until its documents support a scoped event.
+
+    A filing index proves that a document was filed.  It does not by itself
+    prove earnings deterioration, a management change, distress, a transaction,
+    or any other event predicate.
+    """
+
+    lead_id = stable_id("LEAD", str(row["observation_id"]))
+    event_date = (row["source_published_at"] or row["local_received_at"])[:10]
+    company_name = extract_company(str(row["raw_json"] or ""))
+    ticker = extract_symbol(
+        str(row["raw_json"] or ""),
+        f"{row['title']}\n{row['summary']}",
+    )
+    connection.execute(
+        """
+        INSERT INTO discovery_leads(
+            lead_id,observation_id,source_id,status,proposed_event_family,
+            proposed_event_type,company_name,ticker_at_event,event_date,known_at,
+            claim_action,claim_stage,claim_summary,evidence_url,evidence_passage,
+            evidence_status,source_content_sha256,matched_keywords_json,
+            admission_reasons_json,admission_contract_version,canonical_event_id,
+            created_at,updated_at,no_trading
+        ) VALUES (?,?,?,'PENDING_ENRICHMENT',?,?,?,?,?,?,NULL,NULL,NULL,?,NULL,
+                  'link_only_no_relevant_passage',?,'[]',?,?,NULL,?,?,1)
+        ON CONFLICT(observation_id) DO UPDATE SET
+            proposed_event_family=excluded.proposed_event_family,
+            proposed_event_type=excluded.proposed_event_type,
+            company_name=COALESCE(excluded.company_name,discovery_leads.company_name),
+            ticker_at_event=COALESCE(excluded.ticker_at_event,discovery_leads.ticker_at_event),
+            event_date=excluded.event_date,
+            known_at=excluded.known_at,
+            evidence_url=excluded.evidence_url,
+            source_content_sha256=excluded.source_content_sha256,
+            admission_reasons_json=excluded.admission_reasons_json,
+            admission_contract_version=excluded.admission_contract_version,
+            updated_at=excluded.updated_at
+        """,
+        (
+            lead_id,
+            row["observation_id"],
+            row["source_id"],
+            matched.event_family,
+            matched.event_type,
+            company_name,
+            ticker,
+            event_date,
+            observation_known_at(row["source_published_at"], row["local_received_at"]),
+            canonicalize_url(row["canonical_url"]) or "",
+            str(row["content_sha256"] or ""),
+            stable_json(["SEC_REQUIRES_DOCUMENT_SEMANTIC_MATCH"]),
+            DISCOVERY_ADMISSION_CONTRACT,
+            now,
+            now,
+        ),
+    )
+    return lead_id
 
 
 def normalized_title(value: str) -> str:
@@ -898,7 +974,7 @@ def process_pending(
     rows = connection.execute(
         """
         SELECT j.*,r.source_id,r.source_published_at,r.local_received_at,r.title,r.summary,
-               r.canonical_url,r.raw_json,s.authority_tier
+               r.canonical_url,r.content_sha256,r.raw_json,s.authority_tier
         FROM observation_jobs j
         JOIN latest_source_content r ON r.observation_id=j.observation_id
         JOIN sources s ON s.source_id=r.source_id
@@ -916,6 +992,7 @@ def process_pending(
     result: dict[str, Any] = {
         "processed": 0,
         "candidates": 0,
+        "discovery_leads": 0,
         "no_candidate": 0,
         "scope_filtered": 0,
         "backpressure_filtered": 0,
@@ -941,6 +1018,18 @@ def process_pending(
                 (now, row["job_id"]),
             )
             result["no_candidate"] += 1
+            continue
+
+        if str(row["source_id"]) == "sec_current_filings":
+            record_sec_discovery_lead(connection, row, matched, now=now)
+            connection.execute(
+                """UPDATE observation_jobs
+                   SET status='COMPLETED_DISCOVERY_LEAD',attempts=attempts+1,
+                       last_error='sec_parse_before_canonical',updated_at=?
+                   WHERE job_id=?""",
+                (now, row["job_id"]),
+            )
+            result["discovery_leads"] += 1
             continue
 
         is_p2 = not str(row["authority_tier"]).startswith(("P0", "P1"))

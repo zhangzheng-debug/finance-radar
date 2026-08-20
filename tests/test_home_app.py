@@ -78,7 +78,7 @@ def _overview() -> dict[str, Any]:
             },
         ],
         "audit": {"no_trading": 0, "no_auto_verify": 0, "no_leakage": 0},
-        "schema_version": 12,
+        "schema_version": 13,
         "quick_check": "ok",
     }
 
@@ -97,7 +97,11 @@ def _fake_api(path: str, **_kwargs: Any) -> dict[str, Any]:
                 {
                     "authority_tier": "P0",
                     "source_name": "Official source",
-                    "evidence_status": "confirmed",
+                    "evidence_status": "confirmed_primary",
+                    "relation_status": "HUMAN_CONFIRMED",
+                    "subject_match": 1,
+                    "event_claim_supported": 1,
+                    "date_coherent": 1,
                     "evidence_passage": (
                         "Exact primary-source passage naming the issuer, action, and event stage."
                     ),
@@ -109,7 +113,15 @@ def _fake_api(path: str, **_kwargs: Any) -> dict[str, Any]:
         event = _overview()["recent_events"][0]
         return {
             "event": event,
-            "current_version": {"facts": {"evidence_summary": event["evidence_excerpt"]}},
+            "current_version": {
+                "facts": {
+                    "evidence_summary": event["evidence_excerpt"],
+                    "claim_subject": "Example Holdings",
+                    "claim_action": "sec_litigation_release",
+                    "claim_stage": "DISCLOSED",
+                    "known_at": "2026-08-03T20:00:00+00:00",
+                }
+            },
             "preferred_source": {"source_published_at": "2026-08-02T08:30:00+00:00"},
             "verification_method": {
                 "reviewed_at": "2026-08-03T23:00:00+00:00",

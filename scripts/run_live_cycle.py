@@ -270,7 +270,7 @@ def run_pending_evidence_agents(
 ) -> dict[str, Any]:
     """Run bounded internal evidence analysis after primary evidence enrichment."""
     rows = connection.execute(
-        """SELECT e.event_id,j.job_id,j.job_type,j.priority
+        """SELECT e.event_id,e.current_version,j.job_id,j.job_type,j.priority
            FROM canonical_events e
            JOIN pipeline_jobs j ON j.event_id=e.event_id
            WHERE (
@@ -294,9 +294,53 @@ def run_pending_evidence_agents(
         "by_job_type": {},
         "no_trading": True,
     }
-    now = utc_now()
+    def advance_fact_state(
+        *,
+        event_id: str,
+        event_version: int,
+        job_id: str,
+        job_type: str,
+        decision_status: str,
+        evidence_fingerprint: str | None,
+    ) -> None:
+        if decision_status == "INSUFFICIENT":
+            job_status = "COMPLETED_NEEDS_EVIDENCE"
+            workflow_state = "NEEDS_EVIDENCE"
+            reasons = ["EVIDENCE_AGENT_INSUFFICIENT"]
+        else:
+            job_status = "PENDING_HUMAN_REVIEW"
+            workflow_state = "NEEDS_HUMAN"
+            reasons = [f"EVIDENCE_AGENT_{decision_status}"]
+        connection.execute(
+            """UPDATE pipeline_jobs
+               SET status=?,last_error=NULL,updated_at=?
+               WHERE job_id=? AND job_type=? AND status='PENDING_EVIDENCE_REVIEW'""",
+            (job_status, utc_now(), job_id, job_type),
+        )
+        connection.execute(
+            """INSERT INTO event_fact_workflow(
+                   event_id,event_version,workflow_state,reason_codes_json,
+                   evidence_fingerprint,contract_version,updated_at
+               ) VALUES (?,?,?,?,?,'event-admission-v1',?)
+               ON CONFLICT(event_id,event_version) DO UPDATE SET
+                   workflow_state=excluded.workflow_state,
+                   reason_codes_json=excluded.reason_codes_json,
+                   evidence_fingerprint=excluded.evidence_fingerprint,
+                   contract_version=excluded.contract_version,
+                   updated_at=excluded.updated_at""",
+            (
+                event_id,
+                event_version,
+                workflow_state,
+                stable_json(reasons),
+                evidence_fingerprint,
+                utc_now(),
+            ),
+        )
+
     for row in rows:
         event_id = str(row["event_id"])
+        event_version = int(row["current_version"])
         job_id = str(row["job_id"])
         job_type = str(row["job_type"])
         result["by_job_type"][job_type] = result["by_job_type"].get(job_type, 0) + 1
@@ -307,24 +351,27 @@ def run_pending_evidence_agents(
                 event_id=event_id,
                 evidence_agent=evidence_agent,
             ):
-                connection.execute(
-                    """UPDATE pipeline_jobs
-                       SET status='PENDING_HUMAN_REVIEW',last_error=NULL,updated_at=?
-                       WHERE job_id=? AND job_type=?
-                         AND status='PENDING_EVIDENCE_REVIEW'""",
-                    (now, job_id, job_type),
+                prior_output = existing[0].get("output") or {}
+                advance_fact_state(
+                    event_id=event_id,
+                    event_version=event_version,
+                    job_id=job_id,
+                    job_type=job_type,
+                    decision_status=str(existing[0].get("status") or "INSUFFICIENT"),
+                    evidence_fingerprint=prior_output.get("evidence_receipt_fingerprint"),
                 )
                 result["already_run"] += 1
                 continue
             result["stale_or_legacy_rerun"] += 1
         try:
             decision = evidence_agent.run(event_id)
-            connection.execute(
-                """UPDATE pipeline_jobs
-                   SET status='PENDING_HUMAN_REVIEW',last_error=NULL,updated_at=?
-                   WHERE job_id=? AND job_type=?
-                     AND status='PENDING_EVIDENCE_REVIEW'""",
-                (utc_now(), job_id, job_type),
+            advance_fact_state(
+                event_id=event_id,
+                event_version=event_version,
+                job_id=job_id,
+                job_type=job_type,
+                decision_status=str(decision["status"]),
+                evidence_fingerprint=decision.get("evidence_receipt_fingerprint"),
             )
             result["run"] += 1
             result.setdefault("statuses", {}).setdefault(decision["status"], 0)

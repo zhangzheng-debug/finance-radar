@@ -36,7 +36,7 @@ def _ledger(path: Path) -> None:
         connection.executescript(
             """
             CREATE TABLE event_ledger_schema(version INTEGER);
-            INSERT INTO event_ledger_schema VALUES (12);
+            INSERT INTO event_ledger_schema VALUES (13);
             CREATE TABLE sources(id INTEGER);
             INSERT INTO sources VALUES (1);
             CREATE TABLE raw_observations(id INTEGER);
@@ -52,6 +52,9 @@ def _ledger(path: Path) -> None:
             CREATE TABLE pipeline_jobs(id INTEGER);
             INSERT INTO pipeline_jobs VALUES (1);
             CREATE TABLE alert_outbox(id INTEGER);
+            CREATE TABLE discovery_leads(id INTEGER);
+            CREATE TABLE event_evidence_relations(id INTEGER);
+            CREATE TABLE event_fact_workflow(id INTEGER);
             """
         )
 
@@ -243,7 +246,7 @@ def test_full_encrypted_migration_restore_audit(tmp_path: Path) -> None:
     )
     assert result["status"] == "PASS"
     assert result["archive"]["manifest_all_match"] is True
-    assert result["ledger_restore"]["schema_version"] == 12
+    assert result["ledger_restore"]["schema_version"] == 13
     assert result["ledger_restore"]["audit"] == {
         "trading_boundary_violations": 0,
         "auto_verification_violations": 0,

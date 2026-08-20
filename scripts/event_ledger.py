@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -48,6 +48,39 @@ CREATE TABLE IF NOT EXISTS raw_observations (
     observation_status TEXT NOT NULL,
     FOREIGN KEY (source_id) REFERENCES sources(source_id),
     UNIQUE (source_id, external_id)
+);
+
+CREATE TABLE IF NOT EXISTS discovery_leads (
+    lead_id TEXT PRIMARY KEY,
+    observation_id TEXT NOT NULL UNIQUE,
+    source_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN (
+        'PENDING_ENRICHMENT','NEEDS_EVIDENCE','LEAD_NO_SCOPED_EVENT',
+        'READY_FOR_CANONICAL','PROMOTED','DUPLICATE','EXCLUDED'
+    )),
+    proposed_event_family TEXT,
+    proposed_event_type TEXT,
+    company_name TEXT,
+    ticker_at_event TEXT,
+    event_date TEXT NOT NULL,
+    known_at TEXT NOT NULL,
+    claim_action TEXT,
+    claim_stage TEXT,
+    claim_summary TEXT,
+    evidence_url TEXT,
+    evidence_passage TEXT,
+    evidence_status TEXT,
+    source_content_sha256 TEXT NOT NULL,
+    matched_keywords_json TEXT NOT NULL,
+    admission_reasons_json TEXT NOT NULL,
+    admission_contract_version TEXT NOT NULL,
+    canonical_event_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+    FOREIGN KEY (observation_id) REFERENCES raw_observations(observation_id),
+    FOREIGN KEY (source_id) REFERENCES sources(source_id),
+    FOREIGN KEY (canonical_event_id) REFERENCES canonical_events(event_id)
 );
 
 CREATE TABLE IF NOT EXISTS source_revisions (
@@ -154,6 +187,40 @@ CREATE TABLE IF NOT EXISTS event_evidence (
     FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
     FOREIGN KEY (observation_id) REFERENCES raw_observations(observation_id),
     UNIQUE (event_id, observation_id)
+);
+
+CREATE TABLE IF NOT EXISTS event_evidence_relations (
+    event_id TEXT NOT NULL,
+    evidence_id TEXT NOT NULL,
+    event_version INTEGER NOT NULL,
+    relation_status TEXT NOT NULL CHECK (relation_status IN (
+        'SCOPED_MATCH','HUMAN_CONFIRMED','CONFLICTED','INSUFFICIENT'
+    )),
+    subject_match INTEGER NOT NULL CHECK (subject_match IN (0,1)),
+    event_claim_supported INTEGER NOT NULL CHECK (event_claim_supported IN (0,1)),
+    date_coherent INTEGER NOT NULL CHECK (date_coherent IN (0,1)),
+    modality TEXT NOT NULL,
+    evidence_fingerprint TEXT NOT NULL,
+    contract_version TEXT NOT NULL,
+    assessed_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (event_id,evidence_id,event_version),
+    FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
+    FOREIGN KEY (evidence_id) REFERENCES event_evidence(evidence_id)
+);
+
+CREATE TABLE IF NOT EXISTS event_fact_workflow (
+    event_id TEXT NOT NULL,
+    event_version INTEGER NOT NULL,
+    workflow_state TEXT NOT NULL CHECK (workflow_state IN (
+        'NEEDS_EVIDENCE','EVIDENCE_READY','NEEDS_HUMAN','DUPLICATE','EXCLUDED'
+    )),
+    reason_codes_json TEXT NOT NULL,
+    evidence_fingerprint TEXT,
+    contract_version TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (event_id,event_version),
+    FOREIGN KEY (event_id) REFERENCES canonical_events(event_id)
 );
 
 CREATE TABLE IF NOT EXISTS event_assessments (
@@ -298,6 +365,13 @@ CREATE TABLE IF NOT EXISTS observation_jobs (
     FOREIGN KEY (observation_id) REFERENCES raw_observations(observation_id),
     UNIQUE (observation_id, job_type)
 );
+
+CREATE INDEX IF NOT EXISTS idx_discovery_leads_status
+ON discovery_leads(status,source_id,updated_at);
+CREATE INDEX IF NOT EXISTS idx_event_evidence_relations_current
+ON event_evidence_relations(event_id,event_version,relation_status);
+CREATE INDEX IF NOT EXISTS idx_event_fact_workflow_state
+ON event_fact_workflow(workflow_state,updated_at);
 
 CREATE TABLE IF NOT EXISTS event_market_metrics (
     metric_id TEXT PRIMARY KEY,

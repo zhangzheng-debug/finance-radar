@@ -17,8 +17,19 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
+from app.services.event_admission import (
+    ADMISSION_CONTRACT_VERSION,
+    evaluate_event_admission,
+    public_fact_summary,
+)
 from event_ledger import open_ledger, stable_id, stable_json, utc_now
 from extract_sec_evidence_text import visible_text
+from live_candidate_extractor import (
+    EventRule,
+    canonicalize_url,
+    live_event_id,
+    provisional_grade_cap,
+)
 from telegram_mtproto_listener import load_dotenv
 
 
@@ -32,11 +43,29 @@ RELEVANT_EXHIBIT_PREFIXES = ("EX-2", "EX-4", "EX-10", "EX-99")
 MAX_SELECTED_DOCUMENTS = 8
 ADMINISTRATIVE_NON_EVENT_TYPES = {
     "routine_nav_and_leverage_update",
-    "routine_board_committee_appointment",
-    "equity_incentive_plan_share_reserve_reduction",
-    "routine_nt_10q_extension_request",
-    "auditor_change_without_disagreement",
     "pro_forma_merger_financial_statement_amendment",
+}
+EVENT_ACTION_LABELS = {
+    "bankruptcy": "破产或重整程序",
+    "delisting": "退市或上市资格变化",
+    "debt_default": "债务违约或契约事项",
+    "restructuring": "重组或退出处置活动",
+    "management_change": "管理层任免或离职",
+    "earnings_or_guidance": "经营结果或业绩指引",
+    "material_corporate_transaction": "重大公司交易",
+    "going_concern_financing_dependency": "持续经营或融资依赖",
+    "share_repurchase_authorization_expansion": "股份回购授权",
+}
+EVENT_STAGE_BY_TYPE = {
+    "bankruptcy": "FILED",
+    "delisting": "DISCLOSED",
+    "debt_default": "DISCLOSED",
+    "restructuring": "DISCLOSED",
+    "management_change": "DISCLOSED",
+    "earnings_or_guidance": "DISCLOSED",
+    "material_corporate_transaction": "DISCLOSED",
+    "going_concern_financing_dependency": "DISCLOSED",
+    "share_repurchase_authorization_expansion": "DISCLOSED",
 }
 
 
@@ -1261,6 +1290,428 @@ def pending_rows(
     ).fetchall()
 
 
+def pending_discovery_rows(connection: Any, *, limit: int) -> list[Any]:
+    return connection.execute(
+        """
+        SELECT d.*,r.title,r.summary,r.canonical_url,r.raw_json,r.source_published_at,
+               r.local_received_at,r.content_sha256,s.authority_tier,
+               json_extract(r.raw_json,'$.item.form') AS form
+        FROM discovery_leads d
+        JOIN latest_source_content r ON r.observation_id=d.observation_id
+        JOIN sources s ON s.source_id=d.source_id
+        WHERE d.source_id='sec_current_filings'
+          AND d.status IN ('PENDING_ENRICHMENT','NEEDS_EVIDENCE')
+        ORDER BY CASE d.status WHEN 'NEEDS_EVIDENCE' THEN 0 ELSE 1 END,
+                 d.updated_at,d.lead_id
+        LIMIT ?
+        """,
+        (max(1, int(limit)),),
+    ).fetchall()
+
+
+def _update_discovery_lead(
+    connection: Any,
+    row: Any,
+    *,
+    status: str,
+    classification: Classification,
+    evidence_url: str,
+    evidence_passage: str,
+    evidence_status: str,
+    reasons: list[str],
+    claim_action: str | None = None,
+    claim_stage: str | None = None,
+    claim_summary: str | None = None,
+    canonical_event_id: str | None = None,
+) -> None:
+    connection.execute(
+        """
+        UPDATE discovery_leads
+        SET status=?,proposed_event_family=COALESCE(?,proposed_event_family),
+            proposed_event_type=COALESCE(?,proposed_event_type),claim_action=?,
+            claim_stage=?,claim_summary=?,evidence_url=?,evidence_passage=?,
+            evidence_status=?,matched_keywords_json=?,admission_reasons_json=?,
+            admission_contract_version=?,canonical_event_id=?,updated_at=?
+        WHERE lead_id=?
+        """,
+        (
+            status,
+            classification.event_family,
+            classification.event_type,
+            claim_action,
+            claim_stage,
+            claim_summary,
+            evidence_url,
+            evidence_passage,
+            evidence_status,
+            stable_json(list(classification.keywords)),
+            stable_json(reasons),
+            ADMISSION_CONTRACT_VERSION,
+            canonical_event_id,
+            utc_now(),
+            row["lead_id"],
+        ),
+    )
+
+
+def _promote_discovery_lead(
+    connection: Any,
+    row: Any,
+    *,
+    classification: Classification,
+    evidence_url: str,
+    evidence_passage: str,
+    evidence_status: str,
+    evidence_content_sha256: str,
+) -> tuple[bool, list[str]]:
+    subject = str(row["company_name"] or row["ticker_at_event"] or "").strip()
+    action = str(classification.event_type or "")
+    stage = EVENT_STAGE_BY_TYPE.get(action, "DISCLOSED")
+    action_label = EVENT_ACTION_LABELS.get(action, action.replace("_", " "))
+    summary = public_fact_summary(subject=subject, action_label=action_label, stage_label=stage)
+    matched_rule = EventRule(
+        str(classification.event_family or "other"),
+        action,
+        re.compile(r"$^"),
+    )
+    event_row = {
+        "title": row["title"],
+        "summary": row["summary"],
+        "source_published_at": row["source_published_at"],
+        "local_received_at": row["local_received_at"],
+        "canonical_url": row["canonical_url"],
+        "authority_tier": row["authority_tier"],
+    }
+    event_id = live_event_id(event_row, matched_rule)
+    evidence_id = stable_id("EVID", event_id, str(row["observation_id"]))
+    subject_context = " ".join(
+        str(row[key] or "") for key in ("title", "summary", "raw_json")
+    ).casefold()
+    subject_match = bool(subject) and subject.casefold() in subject_context
+    decision = evaluate_event_admission(
+        event_id=event_id,
+        event_version=1,
+        evidence_id=evidence_id,
+        subject=subject,
+        action=action,
+        stage=stage,
+        known_at=str(row["known_at"]),
+        source_authority_tier=str(row["authority_tier"]),
+        evidence_url=evidence_url,
+        evidence_passage=evidence_passage,
+        evidence_status=evidence_status,
+        content_sha256=evidence_content_sha256,
+        # SEC feed metadata binds the filing to its issuer; this must still be
+        # observable in the frozen title/raw item instead of inferred merely
+        # from a non-empty company field.
+        subject_match=subject_match,
+        event_claim_supported=bool(classification.event_type and classification.keywords),
+        date_coherent=bool(row["event_date"]),
+    )
+    if not decision.admitted:
+        _update_discovery_lead(
+            connection,
+            row,
+            status="NEEDS_EVIDENCE",
+            classification=classification,
+            evidence_url=evidence_url,
+            evidence_passage=evidence_passage,
+            evidence_status=evidence_status,
+            reasons=list(decision.reasons),
+            claim_action=action,
+            claim_stage=stage,
+            claim_summary=summary,
+        )
+        return False, list(decision.reasons)
+
+    existing = connection.execute(
+        "SELECT event_id FROM canonical_events WHERE event_id=?", (event_id,)
+    ).fetchone()
+    if existing is not None:
+        _update_discovery_lead(
+            connection,
+            row,
+            status="DUPLICATE",
+            classification=classification,
+            evidence_url=evidence_url,
+            evidence_passage=evidence_passage,
+            evidence_status=evidence_status,
+            reasons=["CANONICAL_EVENT_ALREADY_EXISTS"],
+            claim_action=action,
+            claim_stage=stage,
+            claim_summary=summary,
+            canonical_event_id=event_id,
+        )
+        return False, ["CANONICAL_EVENT_ALREADY_EXISTS"]
+
+    now = utc_now()
+    grade_cap = provisional_grade_cap(str(row["authority_tier"]))
+    facts = {
+        "candidate_only": True,
+        "public_fact_summary": summary,
+        "claim_subject": subject,
+        "claim_action": action,
+        "claim_stage": stage,
+        "known_at": row["known_at"],
+        "source_observation_id": row["observation_id"],
+        "source_content_sha256": evidence_content_sha256,
+        "evidence_id": evidence_id,
+        "evidence_fingerprint": decision.evidence_fingerprint,
+        "admission_contract_version": ADMISSION_CONTRACT_VERSION,
+        "formal_verification": False,
+        "auto_verification_allowed": False,
+        "no_trading": True,
+    }
+    connection.execute(
+        """
+        INSERT INTO canonical_events(
+            event_id,current_version,status,label_status,event_family,event_type,event_date,
+            first_seen_at,last_updated_at,stable_id,ticker_at_event,company_name,manual_grade,
+            provisional_grade_cap,discovery_source,no_trading
+        ) VALUES (?,1,'candidate','candidate',?,?,?,?,?,NULL,?,?,NULL,?,?,1)
+        """,
+        (
+            event_id,
+            classification.event_family,
+            classification.event_type,
+            row["event_date"],
+            row["local_received_at"],
+            now,
+            row["ticker_at_event"],
+            row["company_name"],
+            grade_cap,
+            row["source_id"],
+        ),
+    )
+    connection.execute(
+        """INSERT INTO event_versions(
+               event_id,version,changed_at,status,label_status,event_family,event_type,
+               manual_grade,facts_json,change_reason
+           ) VALUES (?,1,?,'candidate','candidate',?,?,NULL,?,?)""",
+        (
+            event_id,
+            now,
+            classification.event_family,
+            classification.event_type,
+            stable_json(facts),
+            "discovery_admission_scoped_primary_evidence",
+        ),
+    )
+    connection.execute(
+        "INSERT INTO event_observations VALUES (?,?,?,?)",
+        (event_id, row["observation_id"], "scoped_primary_evidence_candidate", now),
+    )
+    connection.execute(
+        """INSERT INTO event_evidence(
+               evidence_id,event_id,observation_id,evidence_url,filing_date,form,items,
+               evidence_passage,matched_keywords,passage_score,evidence_status,
+               auto_verification_allowed,created_at,updated_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?)""",
+        (
+            evidence_id,
+            event_id,
+            row["observation_id"],
+            evidence_url,
+            str(row["source_published_at"] or "")[:10] or None,
+            row["form"],
+            "",
+            evidence_passage,
+            ";".join(classification.keywords),
+            max(0, min(100, round(classification.confidence * 100))),
+            evidence_status,
+            now,
+            now,
+        ),
+    )
+    connection.execute(
+        """INSERT INTO event_evidence_relations(
+               event_id,evidence_id,event_version,relation_status,subject_match,
+               event_claim_supported,date_coherent,modality,evidence_fingerprint,
+               contract_version,assessed_by,created_at
+           ) VALUES (?,?,1,'SCOPED_MATCH',1,1,1,?,?,?,?,?)""",
+        (
+            event_id,
+            evidence_id,
+            stage,
+            decision.evidence_fingerprint,
+            ADMISSION_CONTRACT_VERSION,
+            "deterministic_sec_document_classifier",
+            now,
+        ),
+    )
+    connection.execute(
+        """INSERT INTO event_fact_workflow(
+               event_id,event_version,workflow_state,reason_codes_json,evidence_fingerprint,
+               contract_version,updated_at
+           ) VALUES (?,1,'EVIDENCE_READY','[]',?,?,?)""",
+        (event_id, decision.evidence_fingerprint, ADMISSION_CONTRACT_VERSION, now),
+    )
+    connection.execute(
+        """INSERT INTO pipeline_jobs(
+               job_id,event_id,job_type,status,priority,attempts,available_at,last_error,
+               payload_json,created_at,updated_at
+           ) VALUES (?,?,'live_primary_evidence_review','PENDING_EVIDENCE_REVIEW',50,0,
+                     ?,NULL,?,?,?)""",
+        (
+            stable_id("JOB", event_id, "live_primary_evidence_review"),
+            event_id,
+            now,
+            stable_json({"admission_contract_version": ADMISSION_CONTRACT_VERSION}),
+            now,
+            now,
+        ),
+    )
+    _update_discovery_lead(
+        connection,
+        row,
+        status="PROMOTED",
+        classification=classification,
+        evidence_url=evidence_url,
+        evidence_passage=evidence_passage,
+        evidence_status=evidence_status,
+        reasons=[],
+        claim_action=action,
+        claim_stage=stage,
+        claim_summary=summary,
+        canonical_event_id=event_id,
+    )
+    return True, []
+
+
+def enrich_pending_discovery_leads(
+    connection: Any,
+    client: SecFilingClient,
+    *,
+    limit: int,
+) -> dict[str, Any]:
+    rows = pending_discovery_rows(connection, limit=limit)
+    result = {
+        "requested": len(rows),
+        "promoted": 0,
+        "duplicate": 0,
+        "no_scoped_event": 0,
+        "needs_evidence": 0,
+        "excluded": 0,
+        "errors": 0,
+    }
+    for row in rows:
+        documents: list[FilingDocument] = []
+        selected: list[FilingDocument] = []
+        fetched_texts: dict[str, str] = {}
+        try:
+            documents = parse_filing_index(client.get(row["canonical_url"]))
+            selected = choose_documents(documents, str(row["form"] or ""))
+            if not selected:
+                _update_discovery_lead(
+                    connection,
+                    row,
+                    status="NEEDS_EVIDENCE",
+                    classification=Classification(None, None, (), 0.0),
+                    evidence_url=str(row["canonical_url"] or ""),
+                    evidence_passage="",
+                    evidence_status="link_only_no_relevant_passage",
+                    reasons=["SEC_DOCUMENT_NOT_AVAILABLE"],
+                )
+                result["needs_evidence"] += 1
+                continue
+            fetched_documents: list[tuple[FilingDocument, str]] = []
+            for document in selected:
+                text = visible_text(client.get(document.url))
+                fetched_texts[document.url] = text
+                fetched_documents.append((document, text))
+            combined_text = "\n".join(
+                f"[DOCUMENT {document.document_type} {document.description}]\n{text}"
+                for document, text in fetched_documents
+                if text
+            )
+            classification = classify_filing_text(combined_text)
+            excerpt_source = select_excerpt_source(fetched_documents, classification)
+            excerpt = evidence_excerpt(excerpt_source, classification.keywords)
+            manifest_json = stable_json(
+                document_manifest(
+                    documents,
+                    selected,
+                    fetched_texts,
+                    item_codes=item_codes_from_raw(str(row["raw_json"] or "")),
+                    error=None,
+                )
+            )
+            coverage = manifest_coverage(manifest_json)
+            evidence_url = manifest_evidence_url(
+                manifest_json,
+                selected[0].url,
+            )
+            if coverage.startswith("INCOMPLETE"):
+                _update_discovery_lead(
+                    connection,
+                    row,
+                    status="NEEDS_EVIDENCE",
+                    classification=classification,
+                    evidence_url=evidence_url,
+                    evidence_passage=excerpt,
+                    evidence_status="attachment_incomplete",
+                    reasons=[f"SEC_EVIDENCE_{coverage}"],
+                )
+                result["needs_evidence"] += 1
+            elif classification.event_type in ADMINISTRATIVE_NON_EVENT_TYPES:
+                _update_discovery_lead(
+                    connection,
+                    row,
+                    status="EXCLUDED",
+                    classification=classification,
+                    evidence_url=evidence_url,
+                    evidence_passage=excerpt,
+                    evidence_status="machine_extracted_non_decision",
+                    reasons=["SEC_ADMINISTRATIVE_NON_EVENT"],
+                )
+                result["excluded"] += 1
+            elif not classification.event_type:
+                _update_discovery_lead(
+                    connection,
+                    row,
+                    status="LEAD_NO_SCOPED_EVENT",
+                    classification=classification,
+                    evidence_url=evidence_url,
+                    evidence_passage=excerpt,
+                    evidence_status="machine_extracted_non_decision",
+                    reasons=["NO_SCOPED_EVENT_MATCH"],
+                )
+                result["no_scoped_event"] += 1
+            else:
+                promoted, _ = _promote_discovery_lead(
+                    connection,
+                    row,
+                    classification=classification,
+                    evidence_url=evidence_url,
+                    evidence_passage=excerpt,
+                    evidence_status="machine_extracted_unreviewed",
+                    evidence_content_sha256=hashlib.sha256(combined_text.encode("utf-8")).hexdigest(),
+                )
+                if promoted:
+                    result["promoted"] += 1
+                else:
+                    updated_status = connection.execute(
+                        "SELECT status FROM discovery_leads WHERE lead_id=?",
+                        (row["lead_id"],),
+                    ).fetchone()[0]
+                    result["duplicate" if updated_status == "DUPLICATE" else "needs_evidence"] += 1
+        except (RuntimeError, urllib.error.URLError, ValueError) as exc:
+            _update_discovery_lead(
+                connection,
+                row,
+                status="NEEDS_EVIDENCE",
+                classification=Classification(None, None, (), 0.0),
+                evidence_url=str(row["canonical_url"] or ""),
+                evidence_passage="",
+                evidence_status="link_only_no_relevant_passage",
+                reasons=[f"SEC_ENRICHMENT_ERROR:{type(exc).__name__}"],
+            )
+            result["errors"] += 1
+        finally:
+            connection.commit()
+    return result
+
+
 def enrich_pending(
     connection: Any,
     client: SecFilingClient,
@@ -1269,13 +1720,20 @@ def enrich_pending(
     refresh_parsed: bool = False,
     event_id: str | None = None,
 ) -> dict[str, Any]:
+    discovery_result = enrich_pending_discovery_leads(
+        connection,
+        client,
+        limit=max(1, limit),
+    )
+    remaining_limit = max(0, int(limit) - int(discovery_result["requested"]))
     rows = pending_rows(
         connection,
-        limit=limit,
+        limit=remaining_limit,
         refresh_parsed=refresh_parsed,
         event_id=event_id,
     )
     result: dict[str, Any] = {
+        "discovery_admission": discovery_result,
         "requested": len(rows),
         "refresh_parsed": refresh_parsed,
         "parsed": 0,

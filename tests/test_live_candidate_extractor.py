@@ -628,7 +628,7 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         self.assertEqual(result["candidates"], 2)
         self.assertEqual(result["unique_events"], 2)
 
-    def test_sec_official_filing_maps_item_and_stays_candidate(self) -> None:
+    def test_sec_official_filing_stays_a_discovery_lead_until_document_admission(self) -> None:
         upsert_source(
             self.connection,
             source_id="sec_current_filings",
@@ -653,14 +653,25 @@ class LiveCandidateExtractorTests(unittest.TestCase):
             raw_json=raw_json,
         )
         result = extractor.process_pending(self.connection, limit=10)
-        self.assertEqual(result["candidates"], 1)
-        event = self.connection.execute("SELECT * FROM canonical_events").fetchone()
-        self.assertEqual(event["event_type"], "earnings_or_guidance")
-        self.assertEqual(event["company_name"], "Example Corp")
-        self.assertEqual(event["provisional_grade_cap"], "A_P0_official_candidate")
-        self.assertEqual(event["status"], "candidate")
-        relation = self.connection.execute("SELECT relation_type FROM event_observations").fetchone()
-        self.assertEqual(relation["relation_type"], "official_primary_candidate")
+        self.assertEqual(result["candidates"], 0)
+        self.assertEqual(result["discovery_leads"], 1)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0],
+            0,
+        )
+        lead = self.connection.execute("SELECT * FROM discovery_leads").fetchone()
+        self.assertEqual(lead["status"], "PENDING_ENRICHMENT")
+        self.assertEqual(lead["company_name"], "Example Corp")
+        self.assertEqual(lead["proposed_event_type"], "earnings_or_guidance")
+        self.assertIsNone(lead["canonical_event_id"])
+        observation_job = self.connection.execute(
+            """SELECT j.status,j.last_error
+               FROM observation_jobs j
+               JOIN raw_observations r ON r.observation_id=j.observation_id
+               WHERE r.external_id='sec-one'"""
+        ).fetchone()
+        self.assertEqual(observation_job["status"], "COMPLETED_DISCOVERY_LEAD")
+        self.assertEqual(observation_job["last_error"], "sec_parse_before_canonical")
 
     def test_same_day_official_releases_with_distinct_urls_do_not_cluster(self) -> None:
         upsert_source(

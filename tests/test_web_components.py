@@ -208,12 +208,24 @@ def test_public_event_copy_does_not_invent_an_event_from_subject_and_family() ->
 def test_public_event_quality_requires_subject_fact_and_citable_passage() -> None:
     event = {
         "company_name": "Example Ltd.",
-        "facts": {"evidence_summary": "交易所公告称该公司收到上市合规通知并说明了整改期限。"},
+        "facts": {
+            "evidence_summary": "交易所公告称该公司收到上市合规通知并说明了整改期限。",
+            "claim_subject": "Example Ltd.",
+            "claim_action": "listing_compliance_notice",
+            "claim_stage": "DISCLOSED",
+            "known_at": "2026-08-20T01:02:03+00:00",
+        },
     }
     evidence = [
         {
             "evidence_url": "https://example.test/original",
             "evidence_passage": "The exchange notice names Example Ltd. and states the exact compliance deadline.",
+            "evidence_status": "machine_extracted_unreviewed",
+            "relation_status": "SCOPED_MATCH",
+            "subject_match": 1,
+            "event_claim_supported": 1,
+            "date_coherent": 1,
+            "authority_tier": "P0_official",
         }
     ]
 

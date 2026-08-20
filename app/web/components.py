@@ -740,7 +740,24 @@ def public_event_quality(
 
     has_subject = public_event_subject(item) != "主体待确认"
     fact_summary, _ = public_event_fact_summary(item)
-    has_fact_summary = len(fact_summary) >= 20
+    facts = item.get("facts") if isinstance(item.get("facts"), dict) else {}
+    claim_subject = _bounded_public_text(
+        item.get("claim_subject") or facts.get("claim_subject"), limit=256
+    )
+    claim_action = _bounded_public_text(
+        item.get("claim_action") or facts.get("claim_action"), limit=128
+    )
+    claim_stage = _bounded_public_text(
+        item.get("claim_stage") or facts.get("claim_stage"), limit=32
+    ).upper()
+    known_at = _bounded_public_text(item.get("known_at") or facts.get("known_at"), limit=64)
+    has_fact_summary = (
+        len(fact_summary) >= 20
+        and len(claim_subject) >= 2
+        and len(claim_action) >= 3
+        and claim_stage in {"PROPOSED", "FILED", "DISCLOSED", "EFFECTIVE", "ONGOING", "COMPLETED"}
+        and len(known_at) >= 20
+    )
     if evidence is None:
         try:
             citable_evidence_count = max(0, int(item.get("citable_evidence_count") or 0))
@@ -750,6 +767,19 @@ def public_event_quality(
         citable_evidence_count = sum(
             bool(_bounded_public_text(row.get("evidence_url"), limit=2048))
             and len(_bounded_public_text(row.get("evidence_passage"), limit=10000)) >= 40
+            and str(row.get("evidence_status") or "")
+            in {
+                "machine_extracted_unreviewed",
+                "candidate_passage",
+                "confirmed_primary",
+                "accepted_manual_primary_evidence",
+            }
+            and str(row.get("relation_status") or "")
+            in {"SCOPED_MATCH", "HUMAN_CONFIRMED"}
+            and bool(row.get("subject_match"))
+            and bool(row.get("event_claim_supported"))
+            and bool(row.get("date_coherent"))
+            and str(row.get("authority_tier") or "").upper().startswith(("P0", "P1"))
             for row in evidence
         )
     gaps: list[str] = []
