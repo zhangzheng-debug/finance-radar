@@ -635,7 +635,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data["demo_mode"] = operations.demo_mode(settings.demo_mode)
         latest_worker = operations.latest_worker_cycle()
         latest_successful_worker = operations.latest_successful_worker_cycle()
+        latest_operational_worker = operations.latest_operational_worker_cycle()
         data["latest_worker_cycle"] = latest_worker
+        data["latest_operational_worker_cycle"] = latest_operational_worker
         data["latest_backup"] = public_backup_status(latest_backup)
         data["latest_backup_attempt"] = public_backup_status(operations.latest_backup())
         # Keep the legacy alias and the explicit update clock exactly aligned.
@@ -658,6 +660,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "latest_worker_success_age_seconds": elapsed_seconds(
                 latest_successful_worker.get("finished_at")
                 if latest_successful_worker
+                else None
+            ),
+            "latest_operational_worker_finished_at": (
+                latest_operational_worker.get("finished_at")
+                if latest_operational_worker
+                else None
+            ),
+            "latest_operational_worker_age_seconds": elapsed_seconds(
+                latest_operational_worker.get("finished_at")
+                if latest_operational_worker
                 else None
             ),
             "latest_new_event_at": data.get("last_new_event_at"),

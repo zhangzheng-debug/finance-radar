@@ -92,6 +92,10 @@ class OperationsRepository:
                     cycle_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT,
                     status TEXT NOT NULL, result_json TEXT NOT NULL, error TEXT
                 );
+                CREATE INDEX IF NOT EXISTS idx_worker_cycles_started
+                    ON worker_cycles(started_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_worker_cycles_success_finished
+                    ON worker_cycles(status, finished_at DESC, started_at DESC);
                 CREATE TABLE IF NOT EXISTS backup_runs(
                     backup_id TEXT PRIMARY KEY, backup_path TEXT NOT NULL, source_bytes INTEGER NOT NULL,
                     backup_bytes INTEGER, quick_check TEXT, restored_count_json TEXT,
@@ -1499,6 +1503,25 @@ class OperationsRepository:
             row = connection.execute(
                 """SELECT * FROM worker_cycles
                    WHERE status='SUCCESS' AND finished_at IS NOT NULL
+                   ORDER BY finished_at DESC,started_at DESC LIMIT 1"""
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["result"] = json.loads(result.pop("result_json"))
+        return result
+
+    def latest_operational_worker_cycle(self) -> dict[str, Any] | None:
+        """Return the newest completed cycle that proves collection made progress.
+
+        A DEGRADED cycle may contain an isolated source failure while the other
+        sources and durable writes complete.  It is operational evidence, but
+        remains distinct from a fully successful cycle for UI disclosure.
+        """
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                """SELECT * FROM worker_cycles
+                   WHERE status IN ('SUCCESS','DEGRADED') AND finished_at IS NOT NULL
                    ORDER BY finished_at DESC,started_at DESC LIMIT 1"""
             ).fetchone()
         if row is None:

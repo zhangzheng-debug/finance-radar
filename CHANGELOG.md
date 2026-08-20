@@ -7,6 +7,19 @@ Releases use the same version prefixed by `v`.
 
 - No unreleased changes.
 
+## 2026.08.20.1
+
+- Added covering indexes for public source-health aggregation and worker-cycle
+  recency queries, eliminating the production full scans that made the public
+  overview exceed its request budget on the resource-limited AWS host.
+- Made the public event feed independent from the aggregate overview: overview
+  requests now use a bounded 20-second budget and an honest degraded state,
+  while live event and evidence queries continue instead of collapsing the
+  whole page into a service-error screen.
+- Distinguished a fresh `DEGRADED` collection cycle from an interrupted worker:
+  isolated source failures remain visible as "部分来源异常", while the newest
+  completed operational cycle supplies the public freshness clock.
+
 ## 2026.08.19.1
 
 - Closed the authentic-human review boundary: Reviewer and Arbiter identities

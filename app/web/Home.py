@@ -366,27 +366,47 @@ header(
 no_trading_banner()
 overview_loading = st.empty()
 overview_loading.caption("正在读取采集状态与核验概览…")
+overview_error: Exception | None = None
+overview_cache = None
 try:
     overview, overview_cache = cached_api_get(
         "/api/v1/overview",
         ttl_seconds=15,
         stale_if_error_seconds=120,
-        timeout_seconds=5,
+        timeout_seconds=20,
     )
 except Exception as exc:
     overview_loading.empty()
-    render_api_error(exc)
-    st.stop()
+    overview_error = exc
+    # The event feed is a separate, much cheaper query.  A slow aggregate
+    # overview must not turn a healthy event ledger into a blank public page.
+    overview = {
+        "counts": {},
+        "event_status": {},
+        "review_queue": 0,
+        "source_health": [],
+        "timing": {},
+        "latest_worker_cycle": {},
+        "audit": {},
+        "schema_version": "unavailable",
+        "quick_check": "not_run",
+    }
+    st.warning("采集状态概览暂时不可用；事件列表和证据仍将单独读取。")
 else:
     overview_loading.empty()
-if overview_cache.stale:
+if overview_cache is not None and overview_cache.stale:
     st.warning(
         "概览接口本次刷新失败；当前显示的是 "
         f"{format_elapsed(overview_cache.age_seconds)} 前的进程内快照。事件列表仍会单独读取。"
     )
 
 public_timing = overview.get("timing") or {}
-public_worker_age = public_timing.get("latest_worker_success_age_seconds")
+public_operational_worker = overview.get("latest_operational_worker_cycle") or {}
+public_operational_status = str(public_operational_worker.get("status") or "").upper()
+public_worker_age = public_timing.get(
+    "latest_operational_worker_age_seconds",
+    public_timing.get("latest_worker_success_age_seconds"),
+)
 try:
     public_worker_age_seconds = float(public_worker_age)
 except (TypeError, ValueError):
@@ -396,6 +416,11 @@ public_worker_fresh = (
 )
 public_worker_stale = UI_ROLE != "admin" and public_worker_age_seconds is not None and not public_worker_fresh
 public_worker_unknown = UI_ROLE != "admin" and public_worker_age_seconds is None
+public_worker_degraded = (
+    UI_ROLE != "admin"
+    and public_operational_status == "DEGRADED"
+    and public_worker_fresh
+)
 
 if public_worker_stale:
     st.error(
@@ -406,6 +431,11 @@ elif public_worker_unknown:
     st.warning(
         "数据更新状态无法确认：没有获得最近一次成功采集时间。"
         "以下内容是事件记录，不能视为实时信息。"
+    )
+elif public_worker_degraded:
+    st.warning(
+        "采集仍在运行，但最近完整周期有部分来源异常。"
+        "事件记录会继续更新；异常来源仍需后台排查。"
     )
 
 active_flow = str(st.query_params.get("preview_flow") or "全部事件")
@@ -483,7 +513,9 @@ if UI_ROLE == "admin":
     attention_sources = source_watch + source_error
 
 review_queue = int(overview["review_queue"] or 0)
-if review_queue:
+if overview_error is not None:
+    brief_copy = "状态聚合暂时较慢；请直接浏览下方事件与证据，页面不会再因此中断。"
+elif review_queue:
     brief_copy = f"有 {review_queue:,} 条事件仍在等待证据或规则核验。"
     brief_copy += (
         "先在当前页预览证据与下一步行动，需要完整工具时再进入人工复核。"
@@ -501,11 +533,14 @@ situation_brief(
     brief_copy,
     focus_label="当前优先级",
     focus_value=(
+        "概览待恢复"
+        if overview_error is not None
+        else
         f"{review_queue:,} {'待复核' if UI_ROLE == 'admin' else '待核验'}"
         if review_queue
         else "队列已清"
     ),
-    focus_state="watch" if review_queue else "ok",
+    focus_state="watch" if overview_error is not None or review_queue else "ok",
 )
 if UI_ROLE != "admin":
     st.markdown(
@@ -532,7 +567,14 @@ if UI_ROLE != "admin":
                 st.query_params[key] = value
             st.rerun()
     st.caption("三个入口分别回答：今天发生了什么、哪些事实仍待核验、哪些粗审线索需要继续补证。")
-if UI_ROLE == "admin":
+if overview_error is not None:
+    status_items = [
+        ("采集状态", "概览不可用", "watch"),
+        ("事件列表", "单独读取", "ok"),
+        ("正式结论", "概览待恢复", "watch"),
+        ("待补证 / 复核", "概览待恢复", "watch"),
+    ]
+elif UI_ROLE == "admin":
     with st.form("terminal-global-search", border=False):
         search_col, submit_col = st.columns([5.4, .8], gap="small", vertical_alignment="bottom")
         terminal_query = search_col.text_input(
@@ -569,7 +611,7 @@ if UI_ROLE == "admin":
         ("最新事件", format_elapsed(event_age), ""),
     ]
 else:
-    latest_worker = overview.get("latest_worker_cycle") or {}
+    latest_worker = public_operational_worker
     worker_status = str(latest_worker.get("status") or "").upper()
     worker_has_finished_time = public_worker_age_seconds is not None
     collector_ok = worker_status in {"SUCCESS", "COMPLETED", "OK"} and public_worker_fresh
@@ -577,12 +619,20 @@ else:
         "正常"
         if collector_ok
         else (
-            "更新状态未知"
+            "部分来源异常"
+            if public_worker_degraded
+            else "更新状态未知"
             if not worker_has_finished_time
             else ("更新已中断" if not public_worker_fresh else "最近采集异常")
         )
     )
-    collector_state = "ok" if collector_ok else ("risk" if public_worker_stale or public_worker_unknown else "watch")
+    collector_state = (
+        "ok"
+        if collector_ok
+        else "risk"
+        if public_worker_stale or public_worker_unknown
+        else "watch"
+    )
     formally_verified = max(0, int(public_funnel.get("verified") or 0))
     formally_excluded = max(0, int(public_funnel.get("excluded") or 0))
     review_needed = sum(

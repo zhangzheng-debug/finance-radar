@@ -40,6 +40,13 @@ class EventLedgerTests(unittest.TestCase):
             "sec_filings_url": "https://www.sec.gov/example",
         }
 
+    def test_source_health_aggregate_has_covering_index(self) -> None:
+        indexes = {
+            row[1]
+            for row in self.connection.execute("PRAGMA index_list('raw_observations')")
+        }
+        self.assertIn("idx_raw_observations_source_received", indexes)
+
     def test_import_is_idempotent_and_preserves_versions(self) -> None:
         queue = [self.queue_row()]
         passages = [

@@ -329,6 +329,27 @@ def test_public_event_feed_failure_never_substitutes_overview_events(monkeypatch
     assert "事件分页" not in rendered
 
 
+def test_public_overview_failure_keeps_event_feed_available(monkeypatch) -> None:
+    def failing_overview_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        if urllib.parse.urlsplit(path).path == "/api/v1/overview":
+            raise web_common.ApiError("overview timed out")
+        return _fake_api(path, **kwargs)
+
+    web_common.clear_api_get_cache()
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", failing_overview_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10).run()
+    rendered = "\n".join(
+        str(item.value) for item in [*page.markdown, *page.warning]
+    )
+
+    assert not page.exception
+    assert "采集状态概览暂时不可用" in rendered
+    assert "事件列表和证据仍将单独读取" in rendered
+    assert "Example Holdings" in rendered
+    assert "数据服务暂时不可用" not in rendered
+
+
 def test_public_collector_marks_missing_success_timestamp_unknown(monkeypatch) -> None:
     def missing_worker_time_api(path: str, **kwargs: Any) -> dict[str, Any]:
         if urllib.parse.urlsplit(path).path == "/api/v1/overview":
@@ -373,3 +394,31 @@ def test_public_collector_marks_overdue_worker_as_stale_not_realtime(monkeypatch
     assert "数据更新已中断" in rendered
     assert "不是实时信息" in rendered
     assert "更新已中断" in rendered
+
+
+def test_public_collector_discloses_fresh_degraded_cycle_without_calling_it_interrupted(
+    monkeypatch,
+) -> None:
+    def degraded_worker_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        if urllib.parse.urlsplit(path).path == "/api/v1/overview":
+            overview = _overview()
+            overview["latest_operational_worker_cycle"] = {"status": "DEGRADED"}
+            overview["timing"] = {
+                **overview["timing"],
+                "latest_operational_worker_age_seconds": 45,
+            }
+            return overview
+        return _fake_api(path, **kwargs)
+
+    web_common.clear_api_get_cache()
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", degraded_worker_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10).run()
+    rendered = "\n".join(
+        str(item.value) for item in [*page.markdown, *page.warning, *page.error]
+    )
+
+    assert not page.exception
+    assert "部分来源异常" in rendered
+    assert "采集仍在运行" in rendered
+    assert "更新已中断" not in rendered

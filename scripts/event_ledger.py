@@ -432,6 +432,8 @@ CREATE TABLE IF NOT EXISTS event_review_triage (
 
 CREATE INDEX IF NOT EXISTS idx_raw_observations_received
     ON raw_observations(local_received_at);
+CREATE INDEX IF NOT EXISTS idx_raw_observations_source_received
+    ON raw_observations(source_id, local_received_at);
 CREATE INDEX IF NOT EXISTS idx_source_revisions_observation
     ON source_revisions(observation_id, revision_no);
 CREATE INDEX IF NOT EXISTS idx_event_chain_members_chain

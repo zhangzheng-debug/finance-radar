@@ -118,6 +118,28 @@ class ProductLayerTests(unittest.TestCase):
         self.assertEqual(source["cursor_status"], "STATIC_IMPORTED")
         self.assertIsNotNone(source["last_success_at"])
 
+    def test_operations_worker_recency_queries_have_indexes(self) -> None:
+        operations = OperationsRepository(self.settings.operations_db)
+        with closing(operations.connect()) as connection:
+            indexes = {
+                row[1]
+                for row in connection.execute("PRAGMA index_list('worker_cycles')")
+            }
+        self.assertIn("idx_worker_cycles_started", indexes)
+        self.assertIn("idx_worker_cycles_success_finished", indexes)
+
+    def test_latest_operational_cycle_accepts_degraded_but_skips_skipped(self) -> None:
+        operations = OperationsRepository(self.settings.operations_db)
+        degraded = operations.start_worker_cycle()
+        operations.finish_worker_cycle(degraded, "DEGRADED", {"errors": ["one source"]})
+        skipped = operations.start_worker_cycle()
+        operations.finish_worker_cycle(skipped, "SKIPPED", {"reason": "lease held"})
+
+        latest = operations.latest_operational_worker_cycle()
+
+        self.assertEqual(latest["cycle_id"], degraded)
+        self.assertEqual(latest["status"], "DEGRADED")
+
     def test_product_metrics_report_samples_and_unavailable_states_honestly(self) -> None:
         report = LedgerRepository(self.ledger_path).product_metrics(window_days=30)
         metrics = {item["id"]: item for item in report["metrics"]}
