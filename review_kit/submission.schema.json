@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finance-radar.example/schemas/event-fact-review-v1.json",
+  "title": "Finance Radar offline event fact review submission",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "contract_version", "batch_id", "reviewer_slot",
+    "assignment_sha256", "reviewer_id", "attestation", "exported_at",
+    "complete", "results", "no_model_output", "no_market_outcome", "no_trading"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "contract_version": {"const": "event-fact-review-v1"},
+    "batch_id": {"type": "string", "minLength": 1},
+    "reviewer_slot": {"enum": ["A", "B"]},
+    "assignment_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reviewer_id": {"type": "string", "minLength": 2, "maxLength": 64},
+    "attestation": {"const": true},
+    "exported_at": {"type": "string", "format": "date-time"},
+    "complete": {"const": true},
+    "no_model_output": {"const": true},
+    "no_market_outcome": {"const": true},
+    "no_trading": {"const": true},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id", "event_version", "evidence_fingerprint", "checks",
+          "modality", "decision", "reason_code", "selected_evidence_id",
+          "severity", "rationale", "reviewed_at", "duration_seconds"
+        ],
+        "properties": {
+          "event_id": {"type": "string", "minLength": 1},
+          "event_version": {"type": "integer", "minimum": 1},
+          "evidence_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "decision": {"enum": ["CONFIRM_EVENT", "REJECT_CANDIDATE", "NEEDS_EVIDENCE", "ESCALATE"]},
+          "modality": {"enum": ["REALIZED", "PROPOSED_OR_CONDITIONAL", "UNCLEAR"]},
+          "reason_code": {"type": "string", "minLength": 1},
+          "selected_evidence_id": {"type": "string"},
+          "severity": {"const": ""},
+          "rationale": {"type": "string", "minLength": 20},
+          "reviewed_at": {"type": "string", "format": "date-time"},
+          "duration_seconds": {"type": "integer", "minimum": 0},
+          "started_at": {"type": "string", "format": "date-time"},
+          "checks": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_accessible", "subject_match", "event_claim_supported", "date_coherent", "primary_evidence", "conflict_found"],
+            "properties": {
+              "source_accessible": {"enum": ["YES", "NO", "UNCLEAR"]},
+              "subject_match": {"enum": ["YES", "NO", "UNCLEAR"]},
+              "event_claim_supported": {"enum": ["YES", "NO", "UNCLEAR"]},
+              "date_coherent": {"enum": ["YES", "NO", "UNCLEAR"]},
+              "primary_evidence": {"enum": ["YES", "NO", "UNCLEAR"]},
+              "conflict_found": {"enum": ["YES", "NO", "UNCLEAR"]}
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Finance Radar 事件事实审核</title>
+  <style>
+    :root{color-scheme:dark;--bg:#07111b;--panel:#0d1b2a;--line:#263b50;--text:#eef6ff;--muted:#9bb0c4;--cyan:#38d5ff;--green:#38e09a;--amber:#ffbc55;--red:#ff6b7d}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(140deg,#07111b,#08131e 55%,#0a1724);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+    button,select,input,textarea{font:inherit} a{color:var(--cyan)}
+    .top{position:sticky;top:0;z-index:5;background:#07111bf2;border-bottom:1px solid var(--line);padding:14px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+    .brand{font-weight:800;font-size:19px}.badge{border:1px solid #28647b;border-radius:999px;padding:3px 10px;color:#aeeeff}.grow{flex:1}.progress{min-width:220px;color:var(--muted)}
+    .bar{height:8px;background:#162638;border-radius:999px;overflow:hidden}.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--green));width:0}
+    .wrap{max-width:1280px;margin:0 auto;padding:22px}.notice{border:1px solid #765b26;background:#241d10;padding:14px 16px;border-radius:12px;color:#ffd995;margin-bottom:18px}
+    .identity,.card,.help{background:rgba(13,27,42,.94);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:18px;box-shadow:0 14px 36px #0003}
+    .identity{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,2fr);gap:16px;align-items:end}
+    label{display:block;color:var(--muted);font-size:14px;margin-bottom:5px}input,select,textarea{width:100%;background:#081522;color:var(--text);border:1px solid #36516b;border-radius:10px;padding:10px 12px}
+    textarea{min-height:110px;resize:vertical}.event-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.event-head h1{font-size:25px;line-height:1.3;margin:0 0 8px}.meta{color:var(--muted)}
+    .claim{background:#091723;border-left:4px solid var(--cyan);padding:14px;margin:16px 0;border-radius:8px}.claim h2{font-size:15px;color:#9deaff;margin:0 0 6px}.claim p{margin:4px 0;white-space:pre-wrap}
+    .evidence{display:grid;gap:12px}.evidence article{border:1px solid #2b4055;background:#081521;border-radius:12px;padding:14px}.evidence header{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.tier{font-weight:800;color:var(--green)}.quote{white-space:pre-wrap;background:#050e17;padding:12px;border-radius:8px;margin:10px 0;color:#dae8f5;max-height:280px;overflow:auto}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}.field{background:#0a1826;border:1px solid #263b50;border-radius:12px;padding:12px}.field label{min-height:44px}
+    .decision-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0}.choice{border:1px solid #36516b;background:#0b1b2a;color:var(--text);padding:14px 8px;border-radius:12px;cursor:pointer;min-height:58px}.choice:hover,.choice.active{border-color:var(--cyan);box-shadow:0 0 0 2px #38d5ff33 inset}.choice[data-value="REJECT_CANDIDATE"]{color:#ffb2bb}.choice[data-value="NEEDS_EVIDENCE"]{color:#ffd28a}.choice[data-value="CONFIRM_EVENT"]{color:#82f0bd}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.error{color:#ff9aaa;background:#2a1017;border:1px solid #6c2e3a;padding:10px 12px;border-radius:9px;display:none}.ok{color:#8ff2c3}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.btn{border:1px solid #3b5a74;background:#102337;color:var(--text);padding:10px 18px;border-radius:10px;cursor:pointer}.btn.primary{background:#0e6886;border-color:#2ebee8}.btn.good{background:#116142;border-color:#2cc78c}.btn:disabled{opacity:.45;cursor:not-allowed}
+    details{border-top:1px solid var(--line);margin-top:16px;padding-top:10px}.small{font-size:13px;color:var(--muted)}kbd{background:#12283a;border:1px solid #3a5266;border-radius:5px;padding:1px 5px}
+    @media(max-width:760px){.wrap{padding:12px}.identity,.grid,.two,.decision-row{grid-template-columns:1fr}.top{position:static}.event-head{display:block}.choice{min-height:48px}.field label{min-height:0}}
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">◇ Finance Radar 事件事实审核</div>
+    <span class="badge">成员 __REVIEWER_SLOT__</span>
+    <div class="grow"></div>
+    <div class="progress"><span id="progressText">0 / 0</span><div class="bar"><i id="progressBar"></i></div></div>
+    <button class="btn" id="draftBtn">导出进度备份</button>
+    <button class="btn good" id="finalBtn">导出最终结果</button>
+  </header>
+  <main class="wrap">
+    <div class="notice" id="expiryNotice">这里只判断原文是否支持事件事实。不要看股价，不要猜未来，不要输出买卖建议。</div>
+    <section class="identity">
+      <div><label for="reviewerId">你的审核代号或 GitHub 账号</label><input id="reviewerId" maxlength="64" placeholder="例如 member-a"></div>
+      <div><label><input id="attestation" type="checkbox" style="width:auto"> 我确认独立审核，没有查看另一名审核人的答案，也没有使用股价或模型结论倒推事实。</label></div>
+    </section>
+    <section class="card" id="reviewCard"></section>
+    <section class="help">
+      <strong>只记住这一句：</strong>主体、事件、阶段、日期和一手原文全部对得上且无冲突，才确认；看不到、看不懂或不完整就选证据不足/升级。
+      <details><summary>为什么不能凭常识确认？</summary><p>“申请破产”不等于“清算”，退市不一定是经营崩溃，反向拆股也不等于必然稀释。你只确认原文明确说出的内容。</p></details>
+    </section>
+  </main>
+  <script>
+  "use strict";
+  const assignment = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob("__ASSIGNMENT_BASE64__"), c => c.charCodeAt(0))));
+  const storageKey = `finance-radar:${assignment.batch_id}:${assignment.reviewer_slot}`;
+  const blank = () => ({checks:{source_accessible:"",subject_match:"",event_claim_supported:"",date_coherent:"",primary_evidence:"",conflict_found:""},modality:"",decision:"",reason_code:"",selected_evidence_id:"",severity:"",rationale:"",reviewed_at:"",duration_seconds:0,started_at:new Date().toISOString()});
+  let saved = JSON.parse(localStorage.getItem(storageKey) || "null") || {reviewer_id:"",attestation:false,index:0,results:{}};
+  assignment.events.forEach(e => { if(!saved.results[e.event_id]) saved.results[e.event_id]=blank(); });
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+  const zh = {YES:"是",NO:"否",UNCLEAR:"不确定",REALIZED:"已经发生/已经生效",PROPOSED_OR_CONDITIONAL:"计划、申请、可能或附条件",CONFIRM_EVENT:"确认事实成立",REJECT_CANDIDATE:"排除当前说法",NEEDS_EVIDENCE:"证据不足",ESCALATE:"升级复杂复核"};
+  const reasonOptions = {
+    CONFIRM_EVENT:[["PRIMARY_EVIDENCE_DIRECTLY_SUPPORTS","一手原文直接支持"]],
+    REJECT_CANDIDATE:[["WRONG_SUBJECT","说的不是这家公司/证券"],["WRONG_EVENT","原文不是这个事件"],["WRONG_EVENT_STAGE","计划/申请被误写成已发生"],["DATE_MISMATCH","日期或事件节点不一致"],["NEGATED_OR_WITHDRAWN","原文否定、撤回或修订了说法"],["DATA_ARTIFACT","明显数据/抽取错误"],["OTHER","其他明确反证"]],
+    NEEDS_EVIDENCE:[["SOURCE_UNAVAILABLE","原始来源打不开"],["NO_EXACT_PASSAGE","没有精确原文"],["ONLY_DISCOVERY_SOURCE","只有标题/聚合发现源"],["SUBJECT_UNCLEAR","主体不清楚"],["DATE_OR_STAGE_UNCLEAR","日期或阶段不清楚"],["CONFLICTING_EVIDENCE","证据冲突"],["OTHER","其他缺口"]],
+    ESCALATE:[["CONFLICTING_EVIDENCE","证据相互冲突"],["POSSIBLE_DUPLICATE","疑似重复事件"],["COMPLEX_EVENT_CHAIN","事件链复杂"],["LEGAL_OR_EQUITY_OUTCOME_UNCLEAR","法律或旧股结局不清"],["CANNOT_UNDERSTAND","无法理解原文"],["OTHER","其他复杂情况"]]
+  };
+  function save(){ saved.reviewer_id=$("reviewerId").value.trim(); saved.attestation=$("attestation").checked; localStorage.setItem(storageKey,JSON.stringify(saved)); updateProgress(); }
+  function current(){ return assignment.events[saved.index]; }
+  function result(){ return saved.results[current().event_id]; }
+  function options(values, selected){ return '<option value="">请选择</option>'+values.map(v=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(zh[v]||v)}</option>`).join(''); }
+  function reasonHtml(decision, selected){ return '<option value="">请选择原因</option>'+((reasonOptions[decision]||[]).map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${esc(l)}</option>`).join('')); }
+  function render(){
+    const e=current(), r=result();
+    const evidence=e.evidence.map((x,i)=>`<article><header><span class="tier">${esc(x.authority_tier)}</span><strong>${esc(x.source_name||x.source_id||'来源')}</strong><span class="small">${esc(x.form||'')} · ${esc(x.filing_date||'日期不明')}</span></header><div class="quote">${esc(x.evidence_passage||'没有精确摘录')}</div><label><input type="radio" name="evidence" value="${esc(x.evidence_id)}" ${r.selected_evidence_id===x.evidence_id?'checked':''}> 选择这条作为主要证据</label>${/^https?:\/\//i.test(x.evidence_url||'')?`<a href="${esc(x.evidence_url)}" target="_blank" rel="noopener noreferrer">打开原始来源 ↗</a>`:'<span class="small">没有可打开的公开链接</span>'}</article>`).join('');
+    const checkDefs=[['source_accessible','原始来源能打开并看到所示原文吗？'],['subject_match','原文说的是屏幕中的公司或证券吗？'],['event_claim_supported','原文明说了当前事件吗？'],['date_coherent','日期与当前事件节点一致吗？'],['primary_evidence','这是监管、法院、交易所或公司一手材料吗？'],['conflict_found','发现相反、撤回或修订信息了吗？']];
+    $("reviewCard").innerHTML=`
+      <div class="event-head"><div><div class="small">第 ${saved.index+1} 条 / ${assignment.event_count} · ${esc(e.event_id)}</div><h1>${esc(e.company_name||e.ticker_at_event||'主体不明')}</h1><div class="meta">${esc(e.ticker_at_event||'无Ticker')} · ${esc(e.event_date)} · ${esc(e.event_family)} / ${esc(e.event_type)} · 版本 ${esc(e.current_version)}</div></div><span class="badge">${esc(e.status)}</span></div>
+      <div class="claim"><h2>系统当前声称</h2><p><strong>${esc(e.claim?.title||'无标题')}</strong></p><p>${esc(e.claim?.summary||'无摘要')}</p></div>
+      <h2>已有证据（只判断它明确写了什么）</h2><div class="evidence">${evidence||'<p>没有可审核证据，请选“证据不足”。</p>'}</div>
+      <div class="grid">${checkDefs.map(([k,l])=>`<div class="field"><label>${esc(l)}</label><select data-check="${k}">${options(['YES','NO','UNCLEAR'],r.checks[k])}</select></div>`).join('')}<div class="field"><label>原文描述哪个阶段？</label><select id="modality">${options(['REALIZED','PROPOSED_OR_CONDITIONAL','UNCLEAR'],r.modality)}</select></div></div>
+      <h2>你的结论</h2><div class="decision-row">${['CONFIRM_EVENT','REJECT_CANDIDATE','NEEDS_EVIDENCE','ESCALATE'].map(v=>`<button class="choice ${r.decision===v?'active':''}" data-decision="${v}">${esc(zh[v])}</button>`).join('')}</div>
+      <div><label>原因</label><select id="reasonCode">${reasonHtml(r.decision,r.reason_code)}</select></div>
+      <label style="margin-top:12px">针对本事件写一句理由（至少20字，禁止复制粘贴同一句）</label><textarea id="rationale" placeholder="例如：SEC 8-K原文明确写明目标公司于该日收到退市决定，主体、事件节点和日期均一致，未发现相反材料。">${esc(r.rationale)}</textarea>
+      <div class="error" id="errorBox"></div>
+      <div class="actions"><button class="btn" id="prevBtn" ${saved.index===0?'disabled':''}>← 上一条</button><button class="btn primary" id="autoBtn">根据答案推荐结论</button><button class="btn primary" id="saveNextBtn">保存并下一条 →</button><span class="small">页面会自动保存，关闭后再次打开仍可继续。</span></div>`;
+    document.querySelectorAll('[data-check]').forEach(el=>el.addEventListener('change',()=>{r.checks[el.dataset.check]=el.value;save();}));
+    document.querySelectorAll('[name=evidence]').forEach(el=>el.addEventListener('change',()=>{r.selected_evidence_id=el.value;save();}));
+    document.querySelectorAll('[data-decision]').forEach(el=>el.addEventListener('click',()=>{r.decision=el.dataset.decision;r.reason_code='';save();render();}));
+    $("modality").addEventListener('change',()=>{r.modality=$("modality").value;save();});
+    $("reasonCode").addEventListener('change',()=>{r.reason_code=$("reasonCode").value;save();});
+    $("rationale").addEventListener('input',()=>{r.rationale=$("rationale").value;save();});
+    $("prevBtn").addEventListener('click',()=>{saved.index=Math.max(0,saved.index-1);save();render();scrollTo(0,0);});
+    $("autoBtn").addEventListener('click',()=>{autoRecommend(r);save();render();});
+    $("saveNextBtn").addEventListener('click',()=>{const errs=validateResult(e,r);if(errs.length){showErrors(errs);return;}finishTiming(r);saved.index=Math.min(assignment.events.length-1,saved.index+1);save();render();scrollTo(0,0);});
+    updateProgress();
+  }
+  function autoRecommend(r){
+    const c=r.checks;
+    if(c.conflict_found==='YES'){r.decision='ESCALATE';r.reason_code='CONFLICTING_EVIDENCE';return;}
+    if(c.source_accessible==='NO'||c.primary_evidence==='NO'||Object.values(c).some(v=>v==='UNCLEAR')||r.modality==='UNCLEAR'){r.decision='NEEDS_EVIDENCE';r.reason_code=c.source_accessible==='NO'?'SOURCE_UNAVAILABLE':'OTHER';return;}
+    if(c.subject_match==='NO'){r.decision='REJECT_CANDIDATE';r.reason_code='WRONG_SUBJECT';return;}
+    if(c.event_claim_supported==='NO'){r.decision='REJECT_CANDIDATE';r.reason_code='WRONG_EVENT';return;}
+    if(c.date_coherent==='NO'||r.modality==='PROPOSED_OR_CONDITIONAL'){r.decision='REJECT_CANDIDATE';r.reason_code=r.modality==='PROPOSED_OR_CONDITIONAL'?'WRONG_EVENT_STAGE':'DATE_MISMATCH';return;}
+    if(['source_accessible','subject_match','event_claim_supported','date_coherent','primary_evidence'].every(k=>c[k]==='YES')&&c.conflict_found==='NO'&&r.modality==='REALIZED'){r.decision='CONFIRM_EVENT';r.reason_code='PRIMARY_EVIDENCE_DIRECTLY_SUPPORTS';return;}
+    r.decision='ESCALATE';r.reason_code='CANNOT_UNDERSTAND';
+  }
+  function finishTiming(r){ if(!r.reviewed_at)r.reviewed_at=new Date().toISOString(); const start=Date.parse(r.started_at||r.reviewed_at); r.duration_seconds=Math.max(0,Math.round((Date.now()-start)/1000)); }
+  function validateResult(e,r){
+    const errors=[]; if(!r.decision)errors.push('请选择一个结论'); if(!r.modality)errors.push('请选择事件阶段'); if(Object.values(r.checks).some(v=>!v))errors.push('六个检查问题必须全部回答'); if(!r.reason_code)errors.push('请选择原因'); if((r.rationale||'').trim().length<20)errors.push('理由至少20字');
+    if(r.decision==='CONFIRM_EVENT'){const yes=['source_accessible','subject_match','event_claim_supported','date_coherent','primary_evidence'];if(yes.some(k=>r.checks[k]!=='YES')||r.checks.conflict_found!=='NO'||r.modality!=='REALIZED')errors.push('确认事实要求五项为“是”、无冲突且已经发生');if(!r.selected_evidence_id)errors.push('确认事实必须选择一条主要证据');}
+    return errors;
+  }
+  function showErrors(errors){const box=$("errorBox");box.textContent=errors.join('；');box.style.display='block';}
+  function completed(){return assignment.events.filter(e=>validateResult(e,saved.results[e.event_id]).length===0).length;}
+  function updateProgress(){const done=completed();$("progressText").textContent=`${done} / ${assignment.event_count}`;$("progressBar").style.width=`${100*done/assignment.event_count}%`;$("finalBtn").disabled=done!==assignment.event_count||!saved.reviewer_id||!saved.attestation;}
+  function submission(final){
+    const now=new Date().toISOString(); const results=assignment.events.map(e=>{const r={...saved.results[e.event_id],checks:{...saved.results[e.event_id].checks}};if(final)finishTiming(r);return {event_id:e.event_id,event_version:e.current_version,evidence_fingerprint:e.evidence_fingerprint,...r};});
+    return {schema_version:1,contract_version:'event-fact-review-v1',batch_id:assignment.batch_id,reviewer_slot:assignment.reviewer_slot,assignment_sha256:assignment.assignment_sha256,reviewer_id:saved.reviewer_id,attestation:saved.attestation,exported_at:now,complete:final,results,no_model_output:true,no_market_outcome:true,no_trading:true};
+  }
+  function download(final){save();if(final&&$("finalBtn").disabled){alert('请先完成全部事件、填写审核代号并勾选独立审核声明。');return;}const payload=submission(final);const blob=new Blob([JSON.stringify(payload,null,2)+'\n'],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${saved.reviewer_id||'reviewer'}_${assignment.batch_id}_${assignment.reviewer_slot}${final?'.review.json':'.draft.json'}`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+  $("reviewerId").value=saved.reviewer_id;$("attestation").checked=saved.attestation;$("reviewerId").addEventListener('input',save);$("attestation").addEventListener('change',save);$("draftBtn").addEventListener('click',()=>download(false));$("finalBtn").addEventListener('click',()=>download(true));
+  const expires=Date.parse(assignment.expires_at);if(Number.isFinite(expires)&&Date.now()>expires){$("expiryNotice").textContent='这个批次已超过有效期。可以继续导出，但负责人导入时会重新检查版本；过期事件不会被写入。';}
+  render();
+  </script>
+</body>
+</html>
