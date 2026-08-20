@@ -13,6 +13,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import event_ledger
 from app.services.event_fact_review import (
+    _EVENT_EVIDENCE_SQL,
+    _event_evidence,
     apply_consensus,
     build_assignment,
     build_authorization_template,
@@ -144,6 +146,72 @@ def test_selection_is_evidence_ready_and_balanced(ledger_path: Path) -> None:
     }
     assert all(event["evidence_fingerprint"] for event in events)
     assert all(event["evidence"][0]["authority_tier"] == "P0" for event in events)
+
+
+def test_event_evidence_uses_latest_revision_without_materializing_full_view(
+    ledger_path: Path,
+) -> None:
+    connection = event_ledger.open_ledger(ledger_path)
+    try:
+        source = connection.execute(
+            """SELECT ee.event_id,ro.source_id,ro.external_id,ro.source_published_at,
+                      ro.local_received_at,ro.title,ro.summary,ro.canonical_url,ro.raw_json
+               FROM event_evidence ee
+               JOIN raw_observations ro ON ro.observation_id=ee.observation_id
+               ORDER BY ee.event_id,ee.evidence_id LIMIT 1"""
+        ).fetchone()
+        event_ledger.record_source_observation(
+            connection,
+            source_id=source["source_id"],
+            external_id=source["external_id"],
+            source_published_at=source["source_published_at"],
+            local_received_at=source["local_received_at"],
+            title=source["title"],
+            summary=source["summary"],
+            canonical_url=source["canonical_url"],
+            content_sha256="latest-revision-content-sha256",
+            raw_json=source["raw_json"],
+            revision_kind="edit",
+        )
+        connection.commit()
+
+        expected_rows = connection.execute(
+            """SELECT ee.evidence_id,ee.evidence_url,ee.filing_date,ee.form,ee.items,
+                      ee.evidence_passage,ee.passage_score,ee.evidence_status,
+                      ro.content_sha256,ro.source_id,s.name AS source_name,
+                      s.authority_tier,s.source_type
+               FROM event_evidence ee
+               LEFT JOIN latest_source_content ro ON ro.observation_id=ee.observation_id
+               LEFT JOIN sources s ON s.source_id=ro.source_id
+               WHERE ee.event_id=?
+               ORDER BY CASE WHEN s.authority_tier='P0' THEN 0
+                             WHEN s.authority_tier='P1' THEN 1 ELSE 2 END,
+                        ee.passage_score DESC,ee.updated_at DESC,ee.evidence_id""",
+            (source["event_id"],),
+        ).fetchall()
+        actual_rows = _event_evidence(connection, source["event_id"])
+        assert len(actual_rows) == len(expected_rows)
+        for actual, expected_row in zip(actual_rows, expected_rows, strict=True):
+            expected = dict(expected_row)
+            assert actual["evidence_id"] == expected["evidence_id"]
+            assert actual["content_sha256"] == expected["content_sha256"]
+            assert actual["source_id"] == expected["source_id"]
+            assert actual["source_name"] == expected["source_name"]
+            assert actual["authority_tier"] == expected["authority_tier"]
+            assert actual["source_type"] == expected["source_type"]
+        assert actual_rows[0]["content_sha256"] == "latest-revision-content-sha256"
+
+        plan = connection.execute(
+            "EXPLAIN QUERY PLAN " + _EVENT_EVIDENCE_SQL,
+            (source["event_id"],),
+        ).fetchall()
+        details = [str(row[3]) for row in plan]
+        assert not any("MATERIALIZE" in detail for detail in details)
+        assert not any(detail.startswith("SCAN ") for detail in details)
+        assert any("idx_evidence_event" in detail for detail in details)
+        assert any("idx_source_revisions_observation" in detail for detail in details)
+    finally:
+        connection.close()
 
 
 def test_submission_validation_rejects_copied_reasons_and_bad_confirmation(ledger_path: Path) -> None:

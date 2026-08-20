@@ -95,21 +95,30 @@ def _event_claim(connection: sqlite3.Connection, event_id: str) -> dict[str, Any
     return dict(row) if row is not None else {}
 
 
+_EVENT_EVIDENCE_SQL = """SELECT ee.evidence_id,ee.evidence_url,ee.filing_date,ee.form,ee.items,
+                                 ee.evidence_passage,ee.passage_score,ee.evidence_status,
+                                 COALESCE(sr.content_sha256,ro.content_sha256) AS content_sha256,
+                                 ro.source_id,s.name AS source_name,
+                                 s.authority_tier,s.source_type
+                          FROM event_evidence ee
+                          LEFT JOIN raw_observations ro
+                            ON ro.observation_id=ee.observation_id
+                          LEFT JOIN source_revisions sr
+                            ON sr.observation_id=ro.observation_id
+                           AND sr.revision_no=(
+                               SELECT MAX(sr2.revision_no)
+                               FROM source_revisions sr2
+                               WHERE sr2.observation_id=ro.observation_id
+                           )
+                          LEFT JOIN sources s ON s.source_id=ro.source_id
+                          WHERE ee.event_id=?
+                          ORDER BY CASE WHEN s.authority_tier='P0' THEN 0
+                                        WHEN s.authority_tier='P1' THEN 1 ELSE 2 END,
+                                   ee.passage_score DESC,ee.updated_at DESC,ee.evidence_id"""
+
+
 def _event_evidence(connection: sqlite3.Connection, event_id: str) -> list[dict[str, Any]]:
-    rows = connection.execute(
-        """SELECT ee.evidence_id,ee.evidence_url,ee.filing_date,ee.form,ee.items,
-                  ee.evidence_passage,ee.passage_score,ee.evidence_status,
-                  ro.content_sha256,ro.source_id,s.name AS source_name,
-                  s.authority_tier,s.source_type
-           FROM event_evidence ee
-           LEFT JOIN latest_source_content ro ON ro.observation_id=ee.observation_id
-           LEFT JOIN sources s ON s.source_id=ro.source_id
-           WHERE ee.event_id=?
-           ORDER BY CASE WHEN s.authority_tier='P0' THEN 0
-                         WHEN s.authority_tier='P1' THEN 1 ELSE 2 END,
-                    ee.passage_score DESC,ee.updated_at DESC,ee.evidence_id""",
-        (event_id,),
-    ).fetchall()
+    rows = connection.execute(_EVENT_EVIDENCE_SQL, (event_id,)).fetchall()
     evidence: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
