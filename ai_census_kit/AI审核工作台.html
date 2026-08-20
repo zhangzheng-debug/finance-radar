@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>金融雷达 · AI事件普查工作台</title>
+<style>
+:root{color-scheme:dark;--bg:#07111d;--panel:#0d1b2c;--line:#26435d;--text:#e8f2fb;--muted:#9db1c5;--cyan:#36c8e8;--green:#3ddc97;--red:#ff6b7d}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 85% 0,#102c44 0,transparent 28%),var(--bg);color:var(--text);font:15px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+button,input,select,textarea{font:inherit}button{border:1px solid var(--line);border-radius:10px;background:#142a40;color:var(--text);padding:10px 15px;cursor:pointer}button:hover:not(:disabled){border-color:var(--cyan)}button.primary{background:#087a98;border-color:#16bce1;font-weight:700}button.good{background:#126844;border-color:#2cbb7d}button:disabled{opacity:.38;cursor:not-allowed}
+.wrap{max-width:1500px;margin:auto;padding:22px}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:18px}h1{font-size:26px;margin:0 0 4px}.sub{color:var(--muted)}.badge{padding:5px 10px;border:1px solid #176584;background:#0c2939;color:#7ce7ff;border-radius:999px;white-space:nowrap}
+.notice{border:1px solid #694b16;background:#2a2112;color:#ffd78c;border-radius:12px;padding:11px 14px;margin-bottom:16px}.panel{background:rgba(13,27,44,.96);border:1px solid var(--line);border-radius:15px;padding:17px;margin-bottom:16px;box-shadow:0 12px 30px #0004}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:13px}.field label{display:block;color:var(--muted);font-size:13px;margin-bottom:5px}input[type=text],select,textarea{width:100%;border:1px solid var(--line);border-radius:9px;background:#071522;color:var(--text);padding:9px 11px}input[readonly]{color:#8fb5c8}
+.locked{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}.lock{border:1px solid #235269;background:#0a2231;padding:5px 9px;border-radius:8px;color:#a9d9e9;font-size:12px}.toolbar{display:flex;flex-wrap:wrap;gap:9px;align-items:center}.toolbar .spacer{flex:1}.progress{height:9px;background:#06101a;border-radius:99px;overflow:hidden;margin-top:12px}.progress div{height:100%;width:0;background:linear-gradient(90deg,var(--cyan),var(--green))}.stats{color:var(--muted);margin-top:6px}
+.main{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(400px,.75fr);gap:16px}.section-title{font-size:18px;font-weight:700;margin:0 0 10px}.event-head{display:grid;grid-template-columns:1fr auto;gap:12px;border-bottom:1px solid var(--line);padding-bottom:11px;margin-bottom:12px}.event-id{color:var(--cyan);font-family:ui-monospace,Consolas,monospace;font-size:13px}.claim{font-size:18px;font-weight:700;margin:7px 0}.meta{display:flex;gap:8px;flex-wrap:wrap}.pill{border:1px solid #31536e;border-radius:999px;padding:2px 8px;color:#bbcede;font-size:12px}
+.evidence{background:#091725;border:1px solid #1c3950;border-radius:10px;padding:11px;margin:9px 0}.evidence .src{color:#79d6ec;font-weight:650}.passage{white-space:pre-wrap;margin-top:5px}details{margin-top:10px}pre{white-space:pre-wrap;word-break:break-word;background:#06101a;border:1px solid #1c354b;border-radius:9px;padding:11px;max-height:360px;overflow:auto;color:#cce0ef}
+textarea{min-height:350px;font:13px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;resize:vertical}.messages{margin-top:10px;max-height:220px;overflow:auto}.msg{border-left:4px solid var(--red);background:#2d151d;padding:7px 10px;margin:5px 0;border-radius:5px}.msg.ok{border-color:var(--green);background:#10281f}.navigator{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;max-height:140px;overflow:auto}.dot{min-width:38px;padding:4px 8px;font-size:12px}.dot.saved{background:#10583e;border-color:#2b9c70}.dot.current{outline:2px solid var(--cyan)}.empty{padding:45px 20px;text-align:center;color:var(--muted)}.footer{color:#7690a7;text-align:center;font-size:12px;margin:18px}
+@media(max-width:980px){.grid{grid-template-columns:1fr 1fr}.main{grid-template-columns:1fr}.top{flex-direction:column}}@media(max-width:560px){.wrap{padding:11px}.grid{grid-template-columns:1fr}.panel{padding:13px}.toolbar button{flex:1}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><div><h1>AI事件普查工作台</h1><div class="sub">逐条复制、粘贴、校验、断点续做；最终导出可直接交付的 JSONL。</div></div><div class="badge">ai-census-v1 · 离线只读</div></div>
+<div class="notice">本页面不会连接任何 AI API，也没有密钥输入框。请自行把提示词复制到 AI 对话，再把单条 JSON 答案粘贴回来。</div>
+<section class="panel"><div class="section-title">1. 填写实际使用的 AI</div><div class="grid">
+<div class="field"><label for="provider">提供商（必填）</label><input id="provider" type="text" placeholder="例如 OpenAI / Anthropic"></div>
+<div class="field"><label for="model">模型名称（必填）</label><input id="model" type="text" placeholder="填写界面实际显示的模型"></div>
+<div class="field"><label for="toolMode">使用方式</label><select id="toolMode"><option value="MANUAL_UPLOAD">MANUAL_UPLOAD（网页复制粘贴）</option><option value="LOCAL_API">LOCAL_API（本机程序）</option><option value="OTHER">OTHER</option></select></div>
+<div class="field"><label for="promptHash">固定提示词 SHA-256（自动核验）</label><input id="promptHash" type="text" readonly></div>
+</div><div class="locked" aria-label="不可修改的安全边界">
+<label class="lock"><input data-boundary-locked disabled checked type="checkbox"> AI辅助</label>
+<label class="lock"><input data-boundary-locked disabled type="checkbox"> 人工审核</label>
+<label class="lock"><input data-boundary-locked disabled type="checkbox"> 正式核验</label>
+<label class="lock"><input data-boundary-locked disabled type="checkbox"> 可修改正式库</label>
+<label class="lock"><input data-boundary-locked disabled checked type="checkbox"> 禁止事后行情</label>
+<label class="lock"><input data-boundary-locked disabled checked type="checkbox"> 禁止交易</label>
+</div></section>
+<section class="panel"><div class="section-title">2. 打开一个任务分片</div><div class="toolbar">
+<input id="fileInput" type="file" accept=".jsonl,application/json"><span id="fileLabel" class="sub">尚未选择文件</span><span class="spacer"></span><button id="prevBtn" disabled>上一条</button><button id="nextBtn" disabled>下一条</button>
+</div><div class="progress"><div id="progressBar"></div></div><div id="stats" class="stats">请选择“任务分片”中的 .input.jsonl。</div><div id="navigator" class="navigator"></div></section>
+<div class="main">
+<section class="panel"><div class="section-title">3. 当前事件</div><div id="eventView" class="empty">选择任务分片后，这里会显示冻结事件与证据。</div><div class="toolbar"><button id="copyBtn" class="primary" disabled>复制总提示词 + 当前事件</button><span id="copyState" class="sub"></span></div></section>
+<section class="panel"><div class="section-title">4. 粘贴 AI 返回的单条 JSON</div><textarea id="answer" disabled spellcheck="false" placeholder="这里只接受一个 ai_census_result JSON 对象，不要粘贴 Markdown 代码块。"></textarea><div class="toolbar" style="margin-top:10px"><button id="validateBtn" class="good" disabled>校验并保存</button><button id="clearBtn" disabled>删除当前已保存结果</button><span class="spacer"></span><button id="exportBtn" class="primary" disabled>导出完整 result.jsonl</button></div><div id="messages" class="messages"></div></section>
+</div>
+<div class="footer">断点仅保存在本浏览器 localStorage。清理浏览器数据会删除断点；导出的 result.jsonl 才是正式回传文件。</div>
+</div>
+<script>
+"use strict";
+var PROMPT_BASE64="IyBBSSDmma7mn6XljZXkuovku7bmgLvmj5DnpLror43vvIhhaS1jZW5zdXMtcHJvbXB0LXYx77yJCgrkvaDmraPlnKjmiafooYzph5Hono3pm7fovr7nmoTigJzlhajph4/kuovku7YgQUkg5pmu5p+l4oCd44CC6L+Z5piv5LqL5a6e5a6h6K6h5ZKM6Zif5YiX5YiG5rWB77yM5LiN5piv5Lq65bel5aSN5qC444CB5q2j5byP5qC46aqM44CB5qih5Z6L6YeR5qCH5oiW5Lqk5piT56CU56m244CCCgrlt6XkvZzlj7Dmr4/mrKHkvJrlnKjmnKzmj5DnpLror43lkI7pmYTkuIrkuIDku70gYGFzc2lnbm1lbnRfY29udGV4dGAg5ZKM5LiA5Lu95Ya757uT55qEIGBldmVudF9wYWNrZXRg44CC5L2g5Y+q6IO95L2/55So5YW25Lit55qE5L+h5oGv5Yik5pat5b2T5YmN6L+Z5LiA5p2h5LqL5Lu277yM5LiN5b6X5pCc57Si5aSW6YOo6LWE5paZ77yM5Lmf5LiN5b6X5rK/55So5q2k5YmN5LqL5Lu255qE5LqL5a6e44CCCgojIyDkuI3lj6/ov53lj43nmoTovrnnlYwKCjEuIOS4jeaQnOe0ouaIluS9v+eUqOS6i+S7tuWPkeeUn+WQjueahOS7t+agvOOAgeaUtuebiuWSjOaIkOS6pOmHj+OAggoyLiDkuI3ovpPlh7rlgZrnqbrml7bmnLrjgIHmlLbnm4rpooTmtYvjgIHku5PkvY3jgIHmj5DphpLmiJborqLljZXjgIIKMy4g5LiN5oqK546w5pyJ5YiG57G75b2T5oiQ5LqL5a6e77ybYHByb3Bvc2VkX2V2ZW50X2ZhbWlseS90eXBlYCDkuZ/pnIDopoHlrqHop4bjgIIKNC4g5LiN54yc5rWL57y65aSx5YaF5a6544CC57y66K+B6YCJ5oupIGBBSV9ORUVEU19FVklERU5DRWDvvJvor4Hmja7lhrLnqoHjgIHlpI3mnYLkuovku7bpk77miJbms5Xlvovnu4jlsYDkuI3muIXpgInmi6kgYEFJX0VTQ0FMQVRFYOOAggo1LiDnu5Pmnpzlp4vnu4jmmK/lu7rorq7vvJpgYWlfYXNzaXN0ZWQ9dHJ1ZWDjgIFgaHVtYW5fcmV2aWV3ZWQ9ZmFsc2Vg44CBYGZvcm1hbF92ZXJpZmljYXRpb249ZmFsc2Vg44CBYGNhbm9uaWNhbF9tdXRhdGlvbl9hbGxvd2VkPWZhbHNlYOOAgWBub19tYXJrZXRfb3V0Y29tZT10cnVlYOOAgWBub190cmFkaW5nPXRydWVg44CCCjYuIOe7neS4jeS/ruaUuei+k+WFpeS4reeahCBzY2hlbWHjgIHlkIjlkIzjgIHmibnmrKHjgIHmiJDlkZjjgIHliIbniYfjgIHkuovku7bnvJblj7fjgIHniYjmnKzjgIHmjIfnurnmiJblk4jluIzjgIIKNy4g5q+P5qyh5Y+q5Zue562U5b2T5YmN5LiA5Liq5LqL5Lu244CC5LiN6KaB6L6T5Ye6IGBzdWJtaXNzaW9uX2hlYWRlcmDvvJvlroPnlLHnprvnur/lt6XkvZzlj7DnlJ/miJDjgIIKCiMjIOi+k+WHuuagvOW8jwoK5Y+q6L6T5Ye65LiA5LiqIEpTT04g5a+56LGh77yM5LiN6KaBIE1hcmtkb3duIOS7o+eggeWdl++8jOS4jeimgeW8gOWktOOAgee7k+WwvuaIluino+mHiuaAp+aWh+Wtl+OAguWtl+auteW/hemhu+S4lOWPquiDveaYr++8mgoKYHJlY29yZF90eXBlLCBzY2hlbWFfdmVyc2lvbiwgY29udHJhY3RfdmVyc2lvbiwgYmF0Y2hfaWQsIHJldmlld2VyX3Nsb3QsIHNoYXJkX2lkLCBhc3NpZ25tZW50X3NoYTI1NiwgZXZlbnRfaWQsIGV2ZW50X3ZlcnNpb24sIGV2ZW50X2ZpbmdlcnByaW50LCBwYWNrZXRfc2hhMjU2LCBjaGVja3MsIGV2ZW50X3N0YWdlLCBtYXRlcmlhbGl0eSwgcG9sYXJpdHksIGV2aWRlbmNlX3N0YXRlLCBkaXNwb3NpdGlvbiwgcmVhc29uX2NvZGVzLCBzZWxlY3RlZF9ldmlkZW5jZV9pZHMsIHBvc3NpYmxlX2R1cGxpY2F0ZV9ldmVudF9pZHMsIHN1bW1hcnksIHJhdGlvbmFsZSwgcmV2aWV3ZWRfYXQsIGFpX2Fzc2lzdGVkLCBodW1hbl9yZXZpZXdlZCwgZm9ybWFsX3ZlcmlmaWNhdGlvbiwgY2Fub25pY2FsX211dGF0aW9uX2FsbG93ZWQsIG5vX21hcmtldF9vdXRjb21lLCBub190cmFkaW5nYAoKYHJlY29yZF90eXBlYCDlv4XpobvkuLogYGFpX2NlbnN1c19yZXN1bHRg44CCYGNoZWNrc2Ag5b+F6aG75LiU5Y+q6IO95YyF5ZCr77yaCgpgc291cmNlX2FjY2Vzc2libGUsIHN1YmplY3RfbWF0Y2gsIGV2ZW50X2NsYWltX3N1cHBvcnRlZCwgZGF0ZV9zdGFnZV9jb2hlcmVudCwgZXZpZGVuY2Vfc3VmZmljaWVudCwgY29uZmxpY3RfZm91bmRgCgrmr4/pobnlj6rog73kvb/nlKggYFlFUy9OTy9VTkNMRUFSYOOAguWFtuS7luaemuS4vuaMiemZhOW4pueahCBgYWktY2Vuc3VzLXYxLmNvbnRyYWN0Lmpzb25g44CCYHNlbGVjdGVkX2V2aWRlbmNlX2lkc2Ag5Y+q6IO95byV55So5b2T5YmN5LqL5Lu25YyF5Lit55qEIGV2aWRlbmNlX2lk77yb5rKh5pyJ5bCx5aGr56m65pWw57uE44CCYHBvc3NpYmxlX2R1cGxpY2F0ZV9ldmVudF9pZHNgIOayoeacieaYjuehruWvueixoeWwseWhq+epuuaVsOe7hOOAgnN1bW1hcnkg6Iez5bCRMTDkuKrlrZfnrKbvvIxyYXRpb25hbGUg6Iez5bCRMjDkuKrlrZfnrKbvvIxgcmV2aWV3ZWRfYXRgIOS9v+eUqOW4puaXtuWMuueahCBJU08tODYwMeOAggoK5aSE55CG5YmN5qC45a+55LqL5Lu26Lqr5Lu95ZKM5Ya757uT5a2X5q6177yM6L6T5Ye65YmN5YaN5qOA5p+l5a2X5q6144CB5p6a5Li+44CB6K+B5o2u57yW5Y+344CB6L6555WM5bi46YeP5Lul5Y+K5aSE572u5p2h5Lu244CC5pyA57uI5Y+q6L+U5Zue5b2T5YmN5LqL5Lu255qE5a6M5pW0IEpTT04g5a+56LGh44CCCg==";
+var EXPECTED_PROMPT_SHA256="883687c79bc2bf826a64d55470487ca0e2e8c2430ccc36767b10ac42f1f7bde5";
+var BOUNDARIES={ai_assisted:true,human_reviewed:false,formal_verification:false,canonical_mutation_allowed:false,no_market_outcome:true,no_trading:true};
+var CHECK_FIELDS=["source_accessible","subject_match","event_claim_supported","date_stage_coherent","evidence_sufficient","conflict_found"];
+var RESULT_FIELDS=["record_type","schema_version","contract_version","batch_id","reviewer_slot","shard_id","assignment_sha256","event_id","event_version","event_fingerprint","packet_sha256","checks","event_stage","materiality","polarity","evidence_state","disposition","reason_codes","selected_evidence_ids","possible_duplicate_event_ids","summary","rationale","reviewed_at","ai_assisted","human_reviewed","formal_verification","canonical_mutation_allowed","no_market_outcome","no_trading"];
+var VALUES={event_stage:["REALIZED","PROPOSED_OR_CONDITIONAL","UNCLEAR"],materiality:["MATERIAL_ADVERSE","NOT_MATERIAL_ADVERSE","UNCLEAR"],polarity:["ADVERSE","POSITIVE","NEUTRAL","MIXED","UNCLEAR"],evidence_state:["PRIMARY_SUPPORTED","MULTI_SOURCE_SUPPORTED","DISCOVERY_ONLY","CONFLICTED","INSUFFICIENT"],disposition:["AI_CONFIRM_CANDIDATE","AI_REJECT_CANDIDATE","AI_NEEDS_EVIDENCE","AI_ESCALATE","AI_DUPLICATE_CANDIDATE"],reason_codes:["SUPPORTED_BY_PRIMARY","SUPPORTED_BY_MULTIPLE","WRONG_SUBJECT","CLAIM_NOT_SUPPORTED","DATE_STAGE_MISMATCH","NEGATED_OR_WITHDRAWN","ONLY_DISCOVERY_SOURCE","NO_EXACT_PASSAGE","SOURCE_UNAVAILABLE","CONFLICTING_EVIDENCE","POSSIBLE_DUPLICATE","COMPLEX_EVENT_CHAIN","LEGAL_OR_EQUITY_OUTCOME_UNCLEAR","CLASSIFICATION_UNCLEAR","OTHER"]};
+var state={header:null,packets:[],results:{},index:0,fileName:"",storageKey:"",promptText:"",promptHash:"",promptOkay:false};
+function el(id){return document.getElementById(id)}
+function escapeHtml(v){return String(v==null?"":v).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function decodePrompt(){var raw=atob(PROMPT_BASE64),bytes=new Uint8Array(raw.length);for(var i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);return new TextDecoder("utf-8").decode(bytes)}
+async function sha256(text){
+ var digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(text));
+ return Array.from(new Uint8Array(digest)).map(function(v){return v.toString(16).padStart(2,"0")}).join("")
+}
+function exactKeys(obj,expected,label,issues){
+ if(!obj||typeof obj!=="object"||Array.isArray(obj)){issues.push(label+" 必须是对象");return}
+ var got=Object.keys(obj),extra=got.filter(function(k){return expected.indexOf(k)<0}),missing=expected.filter(function(k){return got.indexOf(k)<0});
+ if(extra.length)issues.push(label+" 有禁止字段: "+extra.join(", "));
+ if(missing.length)issues.push(label+" 缺少字段: "+missing.join(", "))
+}
+function validTimestamp(v){return typeof v==="string"&&/(Z|[+-]\d\d:\d\d)$/.test(v)&&!isNaN(Date.parse(v))}
+function stringList(v,label,allowed,issues){
+ if(!Array.isArray(v)){issues.push(label+" 必须是数组");return[]}
+ var out=v.map(function(x){return typeof x==="string"?x.trim():""});
+ if(out.some(function(x){return!x}))issues.push(label+" 不能含空值");
+ if(new Set(out).size!==out.length)issues.push(label+" 不能有重复值");
+ if(allowed){var bad=out.filter(function(x){return allowed.indexOf(x)<0});if(bad.length)issues.push(label+" 含非法值: "+bad.join(", "))}
+ return out
+}
+function validateResult(row,packet){
+ var issues=[];exactKeys(row,RESULT_FIELDS,"结果",issues);
+ var fixed={record_type:"ai_census_result",schema_version:state.header.schema_version,contract_version:state.header.contract_version,batch_id:state.header.batch_id,reviewer_slot:state.header.reviewer_slot,shard_id:state.header.shard_id,assignment_sha256:state.header.assignment_sha256,event_id:packet.event_id,event_version:packet.event_version,event_fingerprint:packet.event_fingerprint,packet_sha256:packet.packet_sha256};
+ Object.keys(fixed).forEach(function(k){if(row[k]!==fixed[k])issues.push(k+" 与输入事件不一致")});
+ Object.keys(BOUNDARIES).forEach(function(k){if(row[k]!==BOUNDARIES[k])issues.push(k+" 必须固定为 "+BOUNDARIES[k])});
+ exactKeys(row.checks,CHECK_FIELDS,"checks",issues);
+ CHECK_FIELDS.forEach(function(k){if(!row.checks||["YES","NO","UNCLEAR"].indexOf(row.checks[k])<0)issues.push("checks."+k+" 非法")});
+ ["event_stage","materiality","polarity","evidence_state","disposition"].forEach(function(k){if(VALUES[k].indexOf(row[k])<0)issues.push(k+" 非法")});
+ var reasons=stringList(row.reason_codes,"reason_codes",VALUES.reason_codes,issues);if(!reasons.length)issues.push("至少需要一个 reason_code");
+ var evIds=(packet.evidence||[]).map(function(x){return String(x.evidence_id||"")}).filter(Boolean);
+ var selected=stringList(row.selected_evidence_ids,"selected_evidence_ids",evIds,issues);
+ var dupes=stringList(row.possible_duplicate_event_ids,"possible_duplicate_event_ids",null,issues);
+ if(dupes.indexOf(String(packet.event_id))>=0)issues.push("重复事件不能指向自身");
+ if(typeof row.summary!=="string"||row.summary.trim().length<10)issues.push("summary 至少10个字符");
+ if(typeof row.rationale!=="string"||row.rationale.trim().length<20)issues.push("rationale 至少20个字符");
+ if(!validTimestamp(row.reviewed_at))issues.push("reviewed_at 必须是带时区 ISO-8601");
+ var c=row.checks||{},d=row.disposition,e=row.evidence_state;
+ if(d==="AI_CONFIRM_CANDIDATE"){
+  ["subject_match","event_claim_supported","date_stage_coherent","evidence_sufficient"].forEach(function(k){if(c[k]!=="YES")issues.push("确认候选要求 checks."+k+"=YES")});
+  if(c.conflict_found!=="NO")issues.push("确认候选要求 conflict_found=NO");
+  if(["PRIMARY_SUPPORTED","MULTI_SOURCE_SUPPORTED"].indexOf(e)<0)issues.push("确认候选要求已支持的 evidence_state");
+  if(!selected.length)issues.push("确认候选至少选择一条证据")
+ }else if(d==="AI_REJECT_CANDIDATE"){
+  if(!["subject_match","event_claim_supported","date_stage_coherent"].some(function(k){return c[k]==="NO"}))issues.push("排除候选要求主体/主张/日期阶段至少一项为 NO")
+ }else if(d==="AI_NEEDS_EVIDENCE"){
+  if(["DISCOVERY_ONLY","INSUFFICIENT"].indexOf(e)<0)issues.push("待补证要求 DISCOVERY_ONLY 或 INSUFFICIENT")
+ }else if(d==="AI_ESCALATE"){
+  var esc=["CONFLICTING_EVIDENCE","COMPLEX_EVENT_CHAIN","LEGAL_OR_EQUITY_OUTCOME_UNCLEAR","CLASSIFICATION_UNCLEAR"];
+  if(!(c.conflict_found==="YES"||e==="CONFLICTED"||reasons.some(function(x){return esc.indexOf(x)>=0})))issues.push("升级人工要求冲突或升级原因")
+ }else if(d==="AI_DUPLICATE_CANDIDATE"){
+  if(!dupes.length||reasons.indexOf("POSSIBLE_DUPLICATE")<0)issues.push("重复候选要求重复ID和 POSSIBLE_DUPLICATE 原因")
+ }
+ return issues
+}
+function parseJsonl(text){
+ var records=[];String(text).replace(/\r\n?/g,"\n").split("\n").forEach(function(line,i){if(!line.trim())return;try{var obj=JSON.parse(line);if(!obj||typeof obj!=="object"||Array.isArray(obj))throw new Error("必须是对象");records.push(obj)}catch(err){throw new Error("第 "+(i+1)+" 行不是有效 JSON: "+err.message)}});
+ return records
+}
+function validateAssignment(records){
+ var issues=[];if(records.length<2)return["文件至少需要一行 assignment_header 和一个 event_packet"];
+ var h=records[0],packets=records.slice(1);if(h.record_type!=="assignment_header")issues.push("第一行必须是 assignment_header");
+ if(h.schema_version!==1||h.contract_version!=="ai-census-v1"||h.prompt_version!=="ai-census-prompt-v1")issues.push("合同或提示词版本不支持");
+ if(["A","B"].indexOf(h.reviewer_slot)<0)issues.push("reviewer_slot 必须是 A 或 B");
+ if(h.event_count!==packets.length)issues.push("event_count 与实际事件数不符");
+ Object.keys(BOUNDARIES).forEach(function(k){if(h[k]!==BOUNDARIES[k])issues.push("分片边界 "+k+" 被修改")});
+ var ids={};packets.forEach(function(p,i){if(p.record_type!=="event_packet")issues.push("第 "+(i+2)+" 行不是 event_packet");if(!p.event_id||ids[p.event_id])issues.push("事件编号为空或重复: "+p.event_id);ids[p.event_id]=true;Object.keys(BOUNDARIES).forEach(function(k){if(p[k]!==BOUNDARIES[k])issues.push("事件 "+p.event_id+" 边界 "+k+" 被修改")})});
+ return issues
+}
+function storagePayload(){return{version:1,prompt_sha256:state.promptHash,system:{provider:el("provider").value,model:el("model").value,tool_mode:el("toolMode").value},results:state.results,index:state.index}}
+function saveState(){if(!state.storageKey)return;try{localStorage.setItem(state.storageKey,JSON.stringify(storagePayload()))}catch(err){showMessages(["断点保存失败: "+err.message],false)}}
+function restoreState(){
+ var raw=localStorage.getItem(state.storageKey);if(!raw)return;
+ try{var s=JSON.parse(raw);if(s.prompt_sha256!==state.promptHash)return;state.results=s.results||{};state.index=Math.max(0,Math.min(Number(s.index)||0,state.packets.length-1));if(s.system){el("provider").value=s.system.provider||"";el("model").value=s.system.model||"";el("toolMode").value=s.system.tool_mode||"MANUAL_UPLOAD"}}catch(err){}
+}
+function systemValid(){return el("provider").value.trim().length>=2&&el("model").value.trim().length>=2&&["MANUAL_UPLOAD","LOCAL_API","OTHER"].indexOf(el("toolMode").value)>=0&&state.promptOkay}
+function showMessages(items,ok){el("messages").innerHTML=items.map(function(x){return'<div class="msg '+(ok?"ok":"")+'">'+escapeHtml(x)+"</div>"}).join("")}
+function render(){
+ var loaded=!!state.header,packet=state.packets[state.index],saved=packet&&state.results[String(packet.event_id)];
+ el("prevBtn").disabled=!loaded||state.index===0;el("nextBtn").disabled=!loaded||state.index>=state.packets.length-1;el("copyBtn").disabled=!loaded||!state.promptOkay;el("answer").disabled=!loaded;el("validateBtn").disabled=!loaded;el("clearBtn").disabled=!saved;
+ var done=Object.keys(state.results).length,total=state.packets.length;el("progressBar").style.width=(total?done/total*100:0)+"%";
+ el("stats").textContent=loaded?(state.header.shard_id+" · 已完成 "+done+" / "+total+" · 当前 "+(state.index+1)+" / "+total):"请选择“任务分片”中的 .input.jsonl。";
+ el("exportBtn").disabled=!(loaded&&done===total&&systemValid());
+ el("navigator").innerHTML=state.packets.map(function(p,i){var cls="dot"+(state.results[String(p.event_id)]?" saved":"")+(i===state.index?" current":"");return'<button class="'+cls+'" data-index="'+i+'">'+(i+1)+"</button>"}).join("");
+ Array.from(el("navigator").querySelectorAll("button")).forEach(function(b){b.onclick=function(){state.index=Number(b.dataset.index);saveState();render()}});
+ if(!packet){el("eventView").className="empty";el("eventView").textContent="选择任务分片后，这里会显示冻结事件与证据。";el("answer").value="";return}
+ el("eventView").className="";
+ var claim=packet.claim||{},evidence=packet.evidence||[];
+ el("eventView").innerHTML='<div class="event-head"><div><div class="event-id">'+escapeHtml(packet.event_id)+" · v"+escapeHtml(packet.event_version)+'</div><div class="claim">'+escapeHtml(claim.title||claim.summary||"未提供标题")+'</div><div class="meta"><span class="pill">'+escapeHtml(packet.company_name||"主体未知")+'</span><span class="pill">'+escapeHtml(packet.ticker_at_event||"无Ticker")+'</span><span class="pill">'+escapeHtml(packet.event_date||"日期未知")+'</span><span class="pill">'+escapeHtml(packet.proposed_event_family||"分类未知")+'</span></div></div><div class="pill">'+evidence.length+' 条证据</div></div><div>'+escapeHtml(claim.summary||"")+"</div>"+evidence.map(function(x,n){return'<div class="evidence"><div class="src">证据 '+(n+1)+" · "+escapeHtml(x.evidence_id||"无ID")+" · "+escapeHtml(x.source_name||x.form||"未知来源")+'</div><div class="sub">'+escapeHtml(x.evidence_url||"")+'</div><div class="passage">'+escapeHtml(x.evidence_passage||"未提供精确段落")+"</div></div>"}).join("")+'<details><summary>查看冻结原始 JSON</summary><pre>'+escapeHtml(JSON.stringify(packet,null,2))+"</pre></details>";
+ el("answer").value=saved?JSON.stringify(saved,null,2):"";showMessages(saved?["当前事件已有通过校验的结果。再次保存会覆盖它。"]:[],true)
+}
+function promptFor(packet){
+ var context={record_type:"assignment_context",schema_version:state.header.schema_version,contract_version:state.header.contract_version,prompt_version:state.header.prompt_version,batch_id:state.header.batch_id,reviewer_slot:state.header.reviewer_slot,shard_id:state.header.shard_id,assignment_sha256:state.header.assignment_sha256,allowed_values:VALUES,checks:{fields:CHECK_FIELDS,values:["YES","NO","UNCLEAR"]},mandatory_boundaries:BOUNDARIES};
+ return state.promptText+"\n--- assignment_context ---\n"+JSON.stringify(context,null,2)+"\n\n--- event_packet ---\n"+JSON.stringify(packet,null,2)
+}
+function copyPrompt(){
+ var text=promptFor(state.packets[state.index]);
+ function done(){el("copyState").textContent="已复制第 "+(state.index+1)+" 条";setTimeout(function(){el("copyState").textContent=""},2200)}
+ if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done).catch(function(){fallbackCopy(text,done)})}else fallbackCopy(text,done)
+}
+function fallbackCopy(text,done){var ta=document.createElement("textarea");ta.value=text;ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.select();try{document.execCommand("copy");done()}catch(err){showMessages(["复制失败，请换用支持剪贴板的浏览器。"],false)}ta.remove()}
+function loadFile(file){
+ var reader=new FileReader();
+ reader.onload=function(){try{var records=parseJsonl(reader.result),issues=validateAssignment(records);if(issues.length)throw new Error(issues.join("；"));state.header=records[0];state.packets=records.slice(1);state.results={};state.index=0;state.fileName=file.name;state.storageKey="finance-radar-ai-census-v1:"+state.header.assignment_sha256;restoreState();el("fileLabel").textContent=file.name;render();showMessages(["分片已通过基础校验。找到 "+state.packets.length+" 条事件；已恢复 "+Object.keys(state.results).length+" 条断点。"],true)}catch(err){state.header=null;state.packets=[];state.results={};el("fileLabel").textContent="载入失败";render();showMessages([err.message],false)}};
+ reader.onerror=function(){showMessages(["无法读取文件。"],false)};reader.readAsText(file,"utf-8")
+}
+function saveCurrent(){
+ var packet=state.packets[state.index],raw=el("answer").value.trim(),row;
+ try{if(raw.indexOf(String.fromCharCode(96,96,96))>=0)throw new Error("不能包含 Markdown 代码块");row=JSON.parse(raw);if(!row||typeof row!=="object"||Array.isArray(row))throw new Error("答案必须是一个 JSON 对象")}catch(err){showMessages(["JSON 解析失败: "+err.message],false);return}
+ var issues=validateResult(row,packet);if(issues.length){showMessages(issues,false);return}
+ state.results[String(packet.event_id)]=row;saveState();showMessages(["校验通过并已保存到浏览器断点。"],true);if(state.index<state.packets.length-1)state.index++;saveState();render()
+}
+function exportResults(){
+ if(el("exportBtn").disabled)return;
+ var header={record_type:"submission_header",schema_version:state.header.schema_version,contract_version:state.header.contract_version,batch_id:state.header.batch_id,reviewer_slot:state.header.reviewer_slot,shard_id:state.header.shard_id,assignment_sha256:state.header.assignment_sha256,ai_system:{provider:el("provider").value.trim(),model:el("model").value.trim(),prompt_version:"ai-census-prompt-v1",prompt_sha256:state.promptHash,tool_mode:el("toolMode").value},complete:true,ai_assisted:true,human_reviewed:false,formal_verification:false,canonical_mutation_allowed:false,no_market_outcome:true,no_trading:true,exported_at:new Date().toISOString()};
+ var records=[header].concat(state.packets.map(function(p){return state.results[String(p.event_id)]})),content=records.map(function(x){return JSON.stringify(x)}).join("\n")+"\n";
+ var blob=new Blob([content],{type:"application/x-ndjson;charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=state.fileName.replace(/\.input\.jsonl$/i,".result.jsonl");if(a.download===state.fileName)a.download=state.header.shard_id+".result.jsonl";a.click();setTimeout(function(){URL.revokeObjectURL(a.href)},1000);saveState();showMessages(["已导出 "+a.download+"。请把文件放进“结果放这里”。"],true)
+}
+async function init(){
+ state.promptText=decodePrompt();state.promptHash=await sha256(state.promptText);state.promptOkay=state.promptHash===EXPECTED_PROMPT_SHA256;el("promptHash").value=state.promptHash;
+ if(!state.promptOkay)showMessages(["固定提示词完整性校验失败，工作台已禁止复制和导出。请重新解压原始交付包。"],false);
+ el("fileInput").addEventListener("change",function(){if(this.files&&this.files[0])loadFile(this.files[0])});
+ el("provider").addEventListener("input",function(){saveState();render()});el("model").addEventListener("input",function(){saveState();render()});el("toolMode").addEventListener("change",function(){saveState();render()});
+ el("prevBtn").onclick=function(){state.index--;saveState();render()};el("nextBtn").onclick=function(){state.index++;saveState();render()};el("copyBtn").onclick=copyPrompt;el("validateBtn").onclick=saveCurrent;
+ el("clearBtn").onclick=function(){var p=state.packets[state.index];if(p&&confirm("删除当前事件已保存的结果？")){delete state.results[String(p.event_id)];saveState();render()}};
+ el("exportBtn").onclick=exportResults;render()
+}
+init().catch(function(err){showMessages(["工作台初始化失败: "+err.message],false)});
+</script>
+</body>
+</html>

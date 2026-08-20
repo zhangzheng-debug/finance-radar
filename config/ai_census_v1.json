@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "contract_version": "ai-census-v1",
+  "prompt_version": "ai-census-prompt-v1",
+  "prompt_sha256": "883687c79bc2bf826a64d55470487ca0e2e8c2430ccc36767b10ac42f1f7bde5",
+  "status": "ADVISORY_ONLY",
+  "purpose": "Use AI to census every frozen event packet for queue routing, evidence gaps, conflicts, likely duplicates and historical-integrity review.",
+  "allocation": {
+    "reviewer_slots": ["A", "B"],
+    "collective_full_coverage": true,
+    "deterministic_overlap_rate": 0.05,
+    "overlap_purpose": "Measure cross-operator and cross-model consistency; disagreement always routes to human follow-up."
+  },
+  "independent_axes": {
+    "materiality": ["MATERIAL_ADVERSE", "NOT_MATERIAL_ADVERSE", "UNCLEAR"],
+    "polarity": ["ADVERSE", "POSITIVE", "NEUTRAL", "MIXED", "UNCLEAR"],
+    "evidence_state": ["PRIMARY_SUPPORTED", "MULTI_SOURCE_SUPPORTED", "DISCOVERY_ONLY", "CONFLICTED", "INSUFFICIENT"]
+  },
+  "event_stage": ["REALIZED", "PROPOSED_OR_CONDITIONAL", "UNCLEAR"],
+  "dispositions": {
+    "AI_CONFIRM_CANDIDATE": "The frozen packet directly supports the subject, claim and date/stage with primary or independent corroborating evidence.",
+    "AI_REJECT_CANDIDATE": "The subject, claim or date/stage is affirmatively wrong; this remains an advisory candidate for human review.",
+    "AI_NEEDS_EVIDENCE": "The claim cannot be closed from the frozen packet because evidence is discovery-only, unavailable or insufficient.",
+    "AI_ESCALATE": "The packet contains conflict, complex chain/finality questions or another ambiguity requiring a human.",
+    "AI_DUPLICATE_CANDIDATE": "The event appears to duplicate another identified event and must be reconciled by a human."
+  },
+  "checks": {
+    "fields": ["source_accessible", "subject_match", "event_claim_supported", "date_stage_coherent", "evidence_sufficient", "conflict_found"],
+    "values": ["YES", "NO", "UNCLEAR"]
+  },
+  "reason_codes": [
+    "SUPPORTED_BY_PRIMARY",
+    "SUPPORTED_BY_MULTIPLE",
+    "WRONG_SUBJECT",
+    "CLAIM_NOT_SUPPORTED",
+    "DATE_STAGE_MISMATCH",
+    "NEGATED_OR_WITHDRAWN",
+    "ONLY_DISCOVERY_SOURCE",
+    "NO_EXACT_PASSAGE",
+    "SOURCE_UNAVAILABLE",
+    "CONFLICTING_EVIDENCE",
+    "POSSIBLE_DUPLICATE",
+    "COMPLEX_EVENT_CHAIN",
+    "LEGAL_OR_EQUITY_OUTCOME_UNCLEAR",
+    "CLASSIFICATION_UNCLEAR",
+    "OTHER"
+  ],
+  "mandatory_boundaries": {
+    "ai_assisted": true,
+    "human_reviewed": false,
+    "formal_verification": false,
+    "canonical_mutation_allowed": false,
+    "no_market_outcome": true,
+    "no_trading": true
+  },
+  "forbidden_inputs": [
+    "model predictions or current risk-router outputs",
+    "post-event price or return outcomes",
+    "peer answers",
+    "credentials, environment files, databases or raw evidence-store objects"
+  ],
+  "forbidden_uses": [
+    "changing canonical event status or evidence",
+    "claiming human review or formal verification",
+    "using AI census output as human gold labels",
+    "training or evaluating on the sealed human blind set",
+    "producing a short entry, expected return, position size, alert or order"
+  ]
+}
