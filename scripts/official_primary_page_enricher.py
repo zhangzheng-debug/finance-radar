@@ -285,6 +285,30 @@ def canonical_official_url(source_id: str, url: str) -> str | None:
     return None
 
 
+def official_fetch_urls(source_id: str, url: str) -> tuple[str, ...]:
+    """Return bounded official URL fallbacks for known upstream alias defects.
+
+    SEC litigation RSS occasionally publishes a Drupal alias ending in ``-0``
+    even though the live canonical page omits that suffix.  The fallback stays
+    on the already allowlisted SEC host and is attempted only after the feed URL
+    returns HTTP 404; the original observation remains unchanged in the ledger.
+    """
+
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        source_id == "sec_litigation_releases"
+        and re.fullmatch(
+            r"/enforcement-litigation/litigation-releases/lr-\d+-0", parsed.path
+        )
+    ):
+        canonical_path = parsed.path[:-2]
+        fallback = urllib.parse.urlunsplit(
+            (parsed.scheme, parsed.netloc, canonical_path, parsed.query, "")
+        )
+        return (url, fallback)
+    return (url,)
+
+
 def fetch_page(url: str, user_agent: str, timeout: float) -> FetchResult:
     request = urllib.request.Request(
         url,
@@ -455,6 +479,7 @@ def enrich(
         "errors": [],
         "by_type": {},
         "http_upgraded_to_https": 0,
+        "canonical_url_fallbacks": 0,
         "jobs_advanced": advance_existing_evidence_jobs(connection),
         "light_followup_selected": 0,
     }
@@ -472,18 +497,34 @@ def enrich(
             continue
         if urllib.parse.urlsplit(original_url).scheme.casefold() == "http":
             result["http_upgraded_to_https"] += 1
-        path = cache_path(cache_dir, url)
         try:
-            if path.is_file():
-                payload = path.read_bytes()
-                final_url = url
-            else:
-                fetched = fetcher(url, user_agent, timeout)
+            payload: bytes | None = None
+            final_url = url
+            fetch_urls = official_fetch_urls(source_id, url)
+            for fetch_index, fetch_url in enumerate(fetch_urls):
+                path = cache_path(cache_dir, fetch_url)
+                if path.is_file():
+                    payload = path.read_bytes()
+                    final_url = fetch_url
+                    if fetch_index:
+                        result["canonical_url_fallbacks"] += 1
+                    break
+                try:
+                    fetched = fetcher(fetch_url, user_agent, timeout)
+                except urllib.error.HTTPError as exc:
+                    if exc.code == 404 and fetch_index + 1 < len(fetch_urls):
+                        continue
+                    raise
                 payload = fetched.body
                 final_url = fetched.final_url
                 if not host_allowed(source_id, final_url):
                     raise ValueError(f"redirected to disallowed host: {final_url}")
                 path.write_bytes(payload)
+                if fetch_index:
+                    result["canonical_url_fallbacks"] += 1
+                break
+            if payload is None:
+                raise ValueError("official page fetch produced no payload")
             passage = select_passage(
                 document_text(payload, final_url),
                 title=str(row["title"]),
@@ -560,6 +601,7 @@ def write_report(path: Path, result: dict[str, Any]) -> None:
         f"- Evidence rows inserted: `{result['inserted']}`",
         f"- Relevant passages extracted: `{result['passages']}`",
         f"- Link-only rows: `{result['link_only']}`",
+        f"- Canonical URL fallbacks: `{result.get('canonical_url_fallbacks', 0)}`",
         f"- Review jobs advanced: `{result.get('jobs_advanced', 0)}`",
         f"- Errors: `{len(result['errors'])}`",
         "- Safety: extracted text is review-only; status and severity are never auto-promoted.",

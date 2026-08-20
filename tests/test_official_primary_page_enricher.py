@@ -4,6 +4,7 @@ import hashlib
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 from pathlib import Path
 
@@ -304,6 +305,49 @@ class OfficialPrimaryPageEnricherTests(unittest.TestCase):
         self.assertEqual(fetched_urls, ["https://www.fda.gov/example-recall"])
         self.assertEqual(result["http_upgraded_to_https"], 1)
         self.assertEqual(result["passages"], 1)
+
+    def test_sec_litigation_broken_dash_zero_alias_falls_back_to_canonical_url(self) -> None:
+        self.add_candidate(
+            source_id="sec_litigation_releases",
+            title="SEC charges Example Corp with fraud",
+            url="https://www.sec.gov/enforcement-litigation/litigation-releases/lr-26611-0",
+        )
+        fetched_urls: list[str] = []
+
+        def fetcher(url: str, user_agent: str, timeout: float) -> enricher.FetchResult:
+            fetched_urls.append(url)
+            if url.endswith("-0"):
+                raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+            return enricher.FetchResult(
+                b"<html><body><p>The SEC complaint charged Example Corp with fraud and requested a civil penalty.</p></body></html>",
+                url,
+            )
+
+        result = enricher.enrich(
+            self.connection,
+            cache_dir=self.root / "cache",
+            user_agent="FinanceRadar test@example.com",
+            limit=10,
+            timeout=1,
+            max_chars=500,
+            fetcher=fetcher,
+        )
+
+        canonical_url = "https://www.sec.gov/enforcement-litigation/litigation-releases/lr-26611"
+        self.assertEqual(
+            fetched_urls,
+            [
+                "https://www.sec.gov/enforcement-litigation/litigation-releases/lr-26611-0",
+                canonical_url,
+            ],
+        )
+        self.assertEqual(result["canonical_url_fallbacks"], 1)
+        self.assertEqual(result["errors"], [])
+        evidence = self.connection.execute(
+            "SELECT evidence_url,evidence_status FROM event_evidence"
+        ).fetchone()
+        self.assertEqual(evidence["evidence_url"], canonical_url)
+        self.assertEqual(evidence["evidence_status"], "machine_extracted_unreviewed")
 
     def test_material_facts_outrank_keyword_heavy_page_title(self) -> None:
         self.add_candidate(

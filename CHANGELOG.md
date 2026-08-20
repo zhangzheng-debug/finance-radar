@@ -7,6 +7,13 @@ Releases use the same version prefixed by `v`.
 
 - No unreleased changes.
 
+## 2026.08.20.2
+
+- Repaired a bounded SEC litigation-release alias defect: when an allowlisted
+  official `lr-<number>-0` page returns 404, the evidence collector retries the
+  matching `lr-<number>` SEC URL, preserves the original feed observation, and
+  records the working official URL without weakening other HTTP failures.
+
 ## 2026.08.20.1
 
 - Added covering indexes for public source-health aggregation and worker-cycle
