@@ -5,7 +5,15 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
-- No unreleased changes.
+- Added a read-only public-reader quality gate: a canonical record enters the
+  public event feed only when it has a named subject, a structured fact summary,
+  and a citable URL plus exact source passage. Incomplete candidates remain in
+  the canonical ledger and internal review path as a separately counted
+  discovery backlog; no canonical status or evidence row is rewritten.
+- Replaced the generic subject-plus-category fallback (for example, a ticker
+  followed only by “listing status”) with an explicit discovery-only explanation
+  that states the missing subject/action/stage or source evidence instead of
+  implying that a specific event occurred.
 
 ## 2026.08.19.1
 

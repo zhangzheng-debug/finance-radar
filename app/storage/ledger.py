@@ -49,6 +49,14 @@ ranked_light_followups AS (
     WHERE job_type='light_verification_followup'
       AND status IN ('PENDING_EVIDENCE_REVIEW','PENDING_HUMAN_REVIEW')
 ),
+event_reader_evidence AS (
+    SELECT event_id,
+           COUNT(*) AS citable_evidence_count
+    FROM event_evidence
+    WHERE TRIM(COALESCE(evidence_url,''))!=''
+      AND LENGTH(TRIM(COALESCE(evidence_passage,'')))>=40
+    GROUP BY event_id
+),
 event_public AS (
     SELECT canonical.*,
            light.status AS light_followup_status,
@@ -78,13 +86,55 @@ event_public AS (
              CASE WHEN json_valid(rough.payload_json)
                THEN json_extract(rough.payload_json,'$.rough_review.reviewed_at')
              END,
-             rough.updated_at
-           ) AS reviewed_at
+              rough.updated_at
+           ) AS reviewed_at,
+           COALESCE(reader_evidence.citable_evidence_count,0) AS citable_evidence_count,
+           CASE WHEN json_valid(current_version.facts_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
+               NULLIF(TRIM(json_extract(current_version.facts_json,'$.fact_summary')),''),
+               NULLIF(TRIM(json_extract(current_version.facts_json,'$.evidence_summary')),'')
+             )
+           END AS public_fact_summary,
+           CASE WHEN COALESCE(
+             NULLIF(TRIM(canonical.company_name),''),
+             NULLIF(TRIM(canonical.ticker_at_event),''),
+             ''
+           )!=''
+             THEN 1 ELSE 0
+           END AS reader_has_subject,
+           CASE WHEN json_valid(current_version.facts_json) AND LENGTH(COALESCE(
+             NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
+             NULLIF(TRIM(json_extract(current_version.facts_json,'$.fact_summary')),''),
+             NULLIF(TRIM(json_extract(current_version.facts_json,'$.evidence_summary')),''),
+             ''
+           ))>=20 THEN 1 ELSE 0 END AS reader_has_fact_summary,
+           CASE WHEN
+             COALESCE(
+               NULLIF(TRIM(canonical.company_name),''),
+               NULLIF(TRIM(canonical.ticker_at_event),''),
+               ''
+             )!=''
+             AND COALESCE(reader_evidence.citable_evidence_count,0)>0
+             AND json_valid(current_version.facts_json)
+             AND LENGTH(COALESCE(
+               NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
+               NULLIF(TRIM(json_extract(current_version.facts_json,'$.fact_summary')),''),
+               NULLIF(TRIM(json_extract(current_version.facts_json,'$.evidence_summary')),''),
+               ''
+             ))>=20
+             THEN 1 ELSE 0
+           END AS reader_ready
     FROM canonical_events canonical
     LEFT JOIN ranked_rough_reviews rough
       ON rough.event_id=canonical.event_id AND rough.rough_rank=1
     LEFT JOIN ranked_light_followups light
       ON light.event_id=canonical.event_id AND light.followup_rank=1
+    LEFT JOIN event_reader_evidence reader_evidence
+      ON reader_evidence.event_id=canonical.event_id
+    LEFT JOIN event_versions current_version
+      ON current_version.event_id=canonical.event_id
+     AND current_version.version=canonical.current_version
 )
 """.strip()
 
@@ -197,17 +247,23 @@ class LedgerRepository:
                     "SELECT status, COUNT(*) AS n FROM pipeline_jobs GROUP BY status"
                 )
             }
-            review_queue = connection.execute(
-                """SELECT COUNT(DISTINCT j.event_id)
+            review_counts = connection.execute(
+                PUBLIC_EVENT_STATE_CTE
+                + """
+                   SELECT COUNT(DISTINCT j.event_id) AS review_queue,
+                          COUNT(DISTINCT CASE WHEN e.reader_ready=1 THEN j.event_id END)
+                            AS reader_review_queue
                    FROM pipeline_jobs j
-                   JOIN canonical_events e ON e.event_id=j.event_id
+                   JOIN event_public e ON e.event_id=j.event_id
                    WHERE e.status IN ('candidate','weak')
                      AND j.status IN (
                          'PENDING_PRIMARY_EVIDENCE',
                          'PENDING_EVIDENCE_REVIEW',
                          'PENDING_HUMAN_REVIEW'
                      )"""
-            ).fetchone()[0]
+            ).fetchone()
+            review_queue = int(review_counts["review_queue"] or 0)
+            reader_review_queue = int(review_counts["reader_review_queue"] or 0)
             alert_status = {
                 row["status"]: row["n"]
                 for row in connection.execute(
@@ -215,10 +271,15 @@ class LedgerRepository:
                 )
             }
             public_funnel = self._public_funnel(connection)
+            reader_quality = self._reader_quality(connection)
         return {
             **health,
             "public_funnel": public_funnel,
+            "reader_funnel": reader_quality["reader_funnel"],
+            "reader_quality": reader_quality,
             "review_queue": review_queue,
+            "reader_review_queue": reader_review_queue,
+            "discovery_backlog": max(0, review_queue - reader_review_queue),
             "rough_reviewed": int(job_status.get("COMPLETED_AUTHORIZED_ROUGH_REVIEW", 0)),
             "job_status": job_status,
             "alert_status": alert_status,
@@ -567,6 +628,77 @@ class LedgerRepository:
             },
         }
 
+    @staticmethod
+    def _reader_quality(connection: sqlite3.Connection) -> dict[str, Any]:
+        """Measure which canonical records are useful in the public reader.
+
+        A discovery candidate remains preserved even when this gate fails.  The
+        gate changes only public browsing: it requires a named subject, a
+        structured statement of what happened, and a citable source passage.
+        """
+
+        rows = connection.execute(
+            PUBLIC_EVENT_STATE_CTE
+            + """
+               SELECT public_state,
+                      COUNT(*) AS total,
+                      SUM(reader_ready) AS reader_ready,
+                      SUM(CASE WHEN reader_has_subject=0 THEN 1 ELSE 0 END)
+                        AS missing_subject,
+                      SUM(CASE WHEN reader_has_fact_summary=0 THEN 1 ELSE 0 END)
+                        AS missing_fact_summary,
+                      SUM(CASE WHEN citable_evidence_count=0 THEN 1 ELSE 0 END)
+                        AS missing_citable_evidence
+               FROM event_public
+               GROUP BY public_state"""
+        ).fetchall()
+        state_counts = {
+            "verified": 0,
+            "excluded": 0,
+            "insufficient": 0,
+            "pending_verification": 0,
+            "rough_reviewed": 0,
+        }
+        total = 0
+        ready = 0
+        missing_subject = 0
+        missing_fact_summary = 0
+        missing_citable_evidence = 0
+        for row in rows:
+            state = str(row["public_state"])
+            state_ready = int(row["reader_ready"] or 0)
+            if state in state_counts:
+                state_counts[state] = state_ready
+            total += int(row["total"] or 0)
+            ready += state_ready
+            missing_subject += int(row["missing_subject"] or 0)
+            missing_fact_summary += int(row["missing_fact_summary"] or 0)
+            missing_citable_evidence += int(row["missing_citable_evidence"] or 0)
+        return {
+            "schema_version": 1,
+            "definition": (
+                "named subject + structured fact summary + citable URL and exact passage"
+            ),
+            "total": total,
+            "reader_ready": ready,
+            "discovery_only": max(0, total - ready),
+            "gap_counts_nonexclusive": {
+                "missing_subject": missing_subject,
+                "missing_fact_summary": missing_fact_summary,
+                "missing_citable_evidence": missing_citable_evidence,
+            },
+            "reader_funnel": {
+                "schema_version": 1,
+                "total": ready,
+                **state_counts,
+                "partition_total": sum(state_counts.values()),
+                "partition_complete": sum(state_counts.values()) == ready,
+                "definition": "reader-ready subset of the exhaustive public funnel",
+            },
+            "read_only": True,
+            "canonical_mutation": False,
+        }
+
     def list_source_health(self) -> list[dict[str, Any]]:
         with closing(self.connect()) as connection:
             sources = [dict(row) for row in connection.execute("SELECT * FROM sources ORDER BY authority_tier, name")]
@@ -612,6 +744,7 @@ class LedgerRepository:
         query: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
+        reader_ready: bool | None = None,
         sort: str = "event_date",
         limit: int = 50,
         offset: int = 0,
@@ -669,6 +802,9 @@ class LedgerRepository:
         if date_to:
             where.append("e.event_date<=?")
             params.append(date_to)
+        if reader_ready is not None:
+            where.append("e.reader_ready=?")
+            params.append(int(reader_ready))
         if query:
             where.append(
                 "(LOWER(COALESCE(e.company_name,'') || ' ' || COALESCE(e.ticker_at_event,'') || ' ' || "
@@ -734,44 +870,61 @@ class LedgerRepository:
             "public_state": public_state,
             "date_from": date_from,
             "date_to": date_to,
+            "reader_ready": reader_ready,
             "sort": sort,
         }
 
-    def event_facets(self) -> dict[str, Any]:
+    def event_facets(self, *, reader_ready: bool | None = None) -> dict[str, Any]:
         """Return bounded, live filter suggestions without exposing event content."""
+        source_table = "canonical_events" if reader_ready is None else "event_public"
+        where = "" if reader_ready is None else " AND reader_ready=?"
+        params: tuple[Any, ...] = () if reader_ready is None else (int(reader_ready),)
         with closing(self.connect()) as connection:
             families = [
                 {"value": row["value"], "count": int(row["n"])}
                 for row in connection.execute(
-                    """SELECT event_family AS value, COUNT(*) AS n
-                       FROM canonical_events
+                    ((PUBLIC_EVENT_STATE_CTE + " ") if reader_ready is not None else "")
+                    + f"""SELECT event_family AS value, COUNT(*) AS n
+                       FROM {source_table}
                        WHERE event_family IS NOT NULL AND TRIM(event_family) != ''
+                       {where}
                        GROUP BY event_family
                        ORDER BY n DESC, value ASC
-                       LIMIT 100"""
+                       LIMIT 100""",
+                    params,
                 )
             ]
             sources = [
                 {"value": row["value"], "count": int(row["n"])}
                 for row in connection.execute(
-                    """SELECT discovery_source AS value, COUNT(*) AS n
-                       FROM canonical_events
+                    ((PUBLIC_EVENT_STATE_CTE + " ") if reader_ready is not None else "")
+                    + f"""SELECT discovery_source AS value, COUNT(*) AS n
+                       FROM {source_table}
                        WHERE discovery_source IS NOT NULL AND TRIM(discovery_source) != ''
+                       {where}
                        GROUP BY discovery_source
                        ORDER BY n DESC, value ASC
-                       LIMIT 100"""
+                       LIMIT 100""",
+                    params,
                 )
             ]
         return {
             "families": families,
             "sources": sources,
+            "reader_ready": reader_ready,
             "read_only": True,
             "no_trading": True,
         }
 
     def event_detail(self, event_id: str) -> dict[str, Any] | None:
         with closing(self.connect()) as connection:
-            event = _dict(connection.execute("SELECT * FROM canonical_events WHERE event_id=?", (event_id,)).fetchone())
+            event = _dict(
+                connection.execute(
+                    PUBLIC_EVENT_STATE_CTE
+                    + " SELECT * FROM event_public WHERE event_id=?",
+                    (event_id,),
+                ).fetchone()
+            )
             if event is None:
                 return None
             rough_row = connection.execute(

@@ -36,6 +36,7 @@ from app.web.components import (
     focus_event_preview,
     next_action_guidance,
     public_event_copy,
+    public_event_quality,
     public_event_state,
     render_evidence_route,
     render_event_feed,
@@ -94,10 +95,15 @@ def public_source_label(value: str, counts: dict[str, int]) -> str:
 def render_public_reading_prompt(event: dict[str, object], evidence: list[dict[str, object]]) -> None:
     """Give public readers a useful next step without exposing review tooling."""
     state = public_event_state(event)
-    if not evidence:
-        title = "先等待可引用的原始证据"
-        reason = "当前事件没有可展示的证据段落，不应把摘要当作已确认事实。"
-        steps = ("确认主体与事件日期", "寻找监管、交易所或公司原始文件", "在证据补齐前保留不确定性")
+    quality = public_event_quality(event, evidence)
+    if not quality["reader_ready"]:
+        title = "这还不是一条可读事件"
+        reason = "当前只是一条发现线索：" + "、".join(quality["gaps"]) + "。"
+        steps = (
+            "先确认是谁、做了什么以及处于哪个阶段",
+            "找到监管、交易所或公司原始文件中的精确段落",
+            "补齐中文事实摘要前，不把分类标签当作事件结论",
+        )
         tone = "risk"
     elif state == "verified":
         title = "回到原始来源核对上下文"
@@ -457,7 +463,7 @@ rough_reviewed = int(
     or (overview.get("job_status") or {}).get("COMPLETED_AUTHORIZED_ROUGH_REVIEW")
     or 0
 )
-public_funnel = overview.get("public_funnel") or {
+canonical_public_funnel = overview.get("public_funnel") or {
     "total": int(counts.get("canonical_events") or 0),
     "verified": int(event_status.get("verified") or 0),
     "excluded": int(event_status.get("rejected") or 0),
@@ -468,6 +474,8 @@ public_funnel = overview.get("public_funnel") or {
         int(event_status.get("candidate") or 0) - rough_reviewed,
     ),
 }
+public_funnel = overview.get("reader_funnel") or canonical_public_funnel
+discovery_backlog = max(0, int(overview.get("discovery_backlog") or 0))
 timing = overview.get("timing", {})
 event_age = timing.get("latest_new_event_age_seconds", timing.get("latest_event_age_seconds"))
 worker_age = timing.get("latest_worker_success_age_seconds")
@@ -482,9 +490,16 @@ if UI_ROLE == "admin":
     )
     attention_sources = source_watch + source_error
 
-review_queue = int(overview["review_queue"] or 0)
+review_queue = int(
+    (
+        overview.get("review_queue")
+        if UI_ROLE == "admin"
+        else overview.get("reader_review_queue", overview.get("review_queue"))
+    )
+    or 0
+)
 if review_queue:
-    brief_copy = f"有 {review_queue:,} 条事件仍在等待证据或规则核验。"
+    brief_copy = f"有 {review_queue:,} 条可读事件仍在等待证据或规则核验。"
     brief_copy += (
         "先在当前页预览证据与下一步行动，需要完整工具时再进入人工复核。"
         if UI_ROLE == "admin"
@@ -494,7 +509,12 @@ else:
     brief_copy = (
         "当前没有等待复核的事件。可以浏览最新事件流，或按需展开运行健康与来源状态。"
         if UI_ROLE == "admin"
-        else "当前没有等待核验的事件。你可以从最新事件流开始浏览。"
+        else "当前没有满足公共阅读门槛、同时仍等待核验的事件。"
+    )
+if UI_ROLE != "admin" and discovery_backlog:
+    brief_copy += (
+        f"另有 {discovery_backlog:,} 条仅发现线索缺少完整事实或可引证原文，"
+        "已与公共事件流分开。"
     )
 situation_brief(
     "先看需要判断的事件" if UI_ROLE == "admin" else "先看证据是否足够",
@@ -633,7 +653,7 @@ if UI_ROLE != "admin":
     )
 try:
     facets, facets_cache = cached_api_get(
-        "/api/v1/events/facets",
+        query_path("/api/v1/events/facets", reader_ready=True),
         ttl_seconds=30,
         stale_if_error_seconds=300,
         timeout_seconds=5,
@@ -742,6 +762,7 @@ try:
                 source=public_source,
                 q=preview_query,
                 date_from=date_from,
+                reader_ready=True,
                 sort=public_sort,
                 limit=public_page_size,
                 offset=(public_page - 1) * public_page_size,
@@ -967,7 +988,7 @@ if preview_event_id:
                     next_action_guidance(preview_event, preview_evidence, preview_model)
                 )
             else:
-                render_public_reading_prompt(preview_event, preview_evidence)
+                render_public_reading_prompt(copy_input, preview_evidence)
             if UI_ROLE == "admin":
                 full_col, close_col = st.columns([1.25, 1], gap="small")
                 if full_col.button(
@@ -1027,13 +1048,14 @@ elif UI_ROLE != "admin":
         st.rerun()
     active_state_label = PUBLIC_STATE_LABELS.get(public_state, "全部状态")
     st.markdown(
-        '<section class="queue-card queue-card-horizontal" aria-label="优先核验队列">'
+        '<section class="queue-card queue-card-horizontal" aria-label="可核验事件队列">'
         '<div>'
-        '<div class="queue-card-label">优先核验队列</div>'
+        '<div class="queue-card-label">可核验事件队列</div>'
         f'<div class="queue-card-value">{review_queue:,}</div>'
         '</div>'
         '<div class="queue-card-copy">'
-        '这里只统计仍需要补证或规则处理的优先事项；它不是全部“待核验”事件，也不代表市场方向。'
+        '这里只统计已有明确主体、结构化事实摘要和可引用原文，但仍需补证或规则处理的记录。'
+        f'<div>另有 {discovery_backlog:,} 条仅发现线索未混入事件流。</div>'
         '<div class="queue-card-next">下一步 · 打开事件，先读中文结论，再核对原始证据</div>'
         '</div>'
         '</section>',

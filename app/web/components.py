@@ -733,6 +733,41 @@ def public_event_fact_summary(item: dict[str, Any]) -> tuple[str, str]:
     return "", ""
 
 
+def public_event_quality(
+    item: dict[str, Any], evidence: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Explain whether a record is complete enough for the public event feed."""
+
+    has_subject = public_event_subject(item) != "主体待确认"
+    fact_summary, _ = public_event_fact_summary(item)
+    has_fact_summary = len(fact_summary) >= 20
+    if evidence is None:
+        try:
+            citable_evidence_count = max(0, int(item.get("citable_evidence_count") or 0))
+        except (TypeError, ValueError):
+            citable_evidence_count = 0
+    else:
+        citable_evidence_count = sum(
+            bool(_bounded_public_text(row.get("evidence_url"), limit=2048))
+            and len(_bounded_public_text(row.get("evidence_passage"), limit=10000)) >= 40
+            for row in evidence
+        )
+    gaps: list[str] = []
+    if not has_subject:
+        gaps.append("主体未明确")
+    if not has_fact_summary:
+        gaps.append("缺少主体—动作—阶段事实摘要")
+    if citable_evidence_count == 0:
+        gaps.append("缺少可定位的原文段落")
+    return {
+        "reader_ready": not gaps,
+        "has_subject": has_subject,
+        "has_fact_summary": has_fact_summary,
+        "citable_evidence_count": citable_evidence_count,
+        "gaps": gaps,
+    }
+
+
 def public_event_timing(item: dict[str, Any]) -> list[tuple[str, str]]:
     """Expose time semantics instead of presenting every timestamp as "latest"."""
     event_date = _bounded_public_text(item.get("event_date"), limit=32)
@@ -773,12 +808,12 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
     authority = str(item.get("credibility_tier") or "P?")
     authority_label = PUBLIC_AUTHORITY_LABELS.get(authority, "来源待核实")
     fact_summary, fact_provenance = public_event_fact_summary(item)
-    summary_templates = {
-        "verified": f"{subject}出现一项与{family}相关的公开记录，当前已有证据支持。",
-        "excluded": f"{subject}相关的{family}线索已被排除，不作为有效事件结论。",
-        "insufficient": f"{subject}相关的{family}线索目前证据不足，系统不形成确定结论。",
-        "rough_reviewed": f"{subject}相关的{family}线索已完成粗审，仍需正式证据核验。",
-        "pending_verification": f"{subject}出现一项与{family}相关的公开线索，仍需核对原始文件。",
+    state_suffixes = {
+        "verified": "账本状态为已核验，但当前缺少可公开复述的结构化事实摘要。",
+        "excluded": "当前线索已排除，不作为有效事实结论。",
+        "insufficient": "当前证据不足，不将这条线索作为确定事实。",
+        "rough_reviewed": "当前仅完成粗审，仍需正式证据核验。",
+        "pending_verification": "当前仍需核对原始文件与上下文。",
     }
     if fact_summary:
         state_suffix = {
@@ -791,7 +826,10 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
         separator = " " if fact_summary[-1:] in {"。", "！", "？", ".", "!", "?"} else "。"
         summary = f"{fact_provenance}：{fact_summary}{separator}{state_suffix}"
     else:
-        summary = summary_templates[state]
+        summary = (
+            f"目前只记录到{subject}的一条“{family}”分类线索；"
+            f"尚没有可公开复述的主体—动作—阶段事实。{state_suffixes[state]}"
+        )
     return {
         "subject": subject,
         "family": family,
@@ -800,10 +838,14 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
         "state": state,
         "state_label": PUBLIC_STATE_LABELS[state],
         "summary": summary,
-        "summary_provenance": fact_provenance or "状态说明",
-        "relevance": EVENT_FAMILY_RELEVANCE.get(
-            family_key,
-            "请结合原始来源、主体、日期与上下文判断其实际意义。",
+        "summary_provenance": fact_provenance or "发现线索说明",
+        "relevance": (
+            EVENT_FAMILY_RELEVANCE.get(
+                family_key,
+                "请结合原始来源、主体、日期与上下文判断其实际意义。",
+            )
+            if fact_summary
+            else f"先确认具体动作、阶段和原始来源，再判断这条{family}线索是否值得关注。"
         ),
     }
 

@@ -727,6 +727,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         q: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        reader_ready: bool | None = None,
         sort: Literal["latest", "event_date", "subject"] = "event_date",
         limit: int = Query(50, ge=1, le=200),
         offset: int = Query(0, ge=0),
@@ -749,6 +750,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 query=q,
                 date_from=date_from.isoformat() if date_from else None,
                 date_to=date_to.isoformat() if date_to else None,
+                reader_ready=reader_ready,
                 sort=sort,
                 limit=limit,
                 offset=offset,
@@ -756,8 +758,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @application.get("/api/v1/events/facets")
-    def event_facets(request: Request):
-        return envelope(request, ledger.event_facets())
+    def event_facets(request: Request, reader_ready: bool | None = None):
+        return envelope(request, ledger.event_facets(reader_ready=reader_ready))
 
     @application.get("/api/v1/events/{event_id}")
     def event_detail(request: Request, event_id: str):

@@ -19,6 +19,8 @@ def _overview() -> dict[str, Any]:
         "counts": {"canonical_events": 12, "event_evidence": 9},
         "event_status": {"verified": 5, "candidate": 4, "weak": 2, "rejected": 1},
         "review_queue": 6,
+        "reader_review_queue": 1,
+        "discovery_backlog": 5,
         "rough_reviewed": 3,
         "public_funnel": {
             "total": 12,
@@ -27,6 +29,14 @@ def _overview() -> dict[str, Any]:
             "insufficient": 2,
             "rough_reviewed": 3,
             "pending_verification": 1,
+        },
+        "reader_funnel": {
+            "total": 7,
+            "verified": 5,
+            "excluded": 1,
+            "insufficient": 0,
+            "rough_reviewed": 1,
+            "pending_verification": 0,
         },
         "job_status": {"COMPLETED_AUTHORIZED_ROUGH_REVIEW": 3},
         "timing": {
@@ -88,7 +98,9 @@ def _fake_api(path: str, **_kwargs: Any) -> dict[str, Any]:
                     "authority_tier": "P0",
                     "source_name": "Official source",
                     "evidence_status": "confirmed",
-                    "evidence_passage": "Exact primary-source passage.",
+                    "evidence_passage": (
+                        "Exact primary-source passage naming the issuer, action, and event stage."
+                    ),
                     "evidence_url": "https://example.test/source",
                 }
             ]
@@ -117,7 +129,8 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert not page.exception
     assert "事件浏览" in rendered
     assert "Example Holdings" in rendered
-    assert "优先核验队列" in rendered
+    assert "可核验事件队列" in rendered
+    assert "另有 5 条仅发现线索未混入事件流" in rendered
     assert "先看证据是否足够" in rendered
     assert "证据路径" not in rendered
     assert "UTC" in rendered
@@ -151,7 +164,7 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     rendered = "\n".join(str(item.value) for item in page.markdown)
     assert not page.exception
     assert "当前页事件预览" in rendered
-    assert "Exact primary-source passage." in rendered
+    assert "Exact primary-source passage naming the issuer, action, and event stage." in rendered
     assert "阅读提示" in rendered
     assert "粗审已完成，继续核对正式证据" in rendered
     assert "监管执法" in rendered

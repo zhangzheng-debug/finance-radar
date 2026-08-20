@@ -23,6 +23,7 @@ from app.web.components import (
     market_context_markup,
     market_horizon_items,
     public_event_copy,
+    public_event_quality,
     public_event_state,
     score_dimensions,
     source_health_state,
@@ -178,6 +179,49 @@ def test_public_event_copy_prefers_structured_fact_and_keeps_state_boundary() ->
     assert "交易所公告称该公司收到上市合规通知" in copy["summary"]
     assert "当前证据不足" in copy["summary"]
     assert "UNRELATED RAW ENGLISH EXCERPT" not in copy["summary"]
+
+
+def test_public_event_copy_does_not_invent_an_event_from_subject_and_family() -> None:
+    event = {
+        "status": "candidate",
+        "public_state": "pending_verification",
+        "event_family": "listing_status",
+        "ticker_at_event": "ICX",
+        "event_type": "listing_status",
+    }
+
+    copy = public_event_copy(event)
+    quality = public_event_quality(event, [])
+
+    assert "ICX" in copy["summary"]
+    assert "上市状态" in copy["summary"]
+    assert "尚没有可公开复述的主体—动作—阶段事实" in copy["summary"]
+    assert "出现一项" not in copy["summary"]
+    assert copy["summary_provenance"] == "发现线索说明"
+    assert quality["reader_ready"] is False
+    assert quality["gaps"] == [
+        "缺少主体—动作—阶段事实摘要",
+        "缺少可定位的原文段落",
+    ]
+
+
+def test_public_event_quality_requires_subject_fact_and_citable_passage() -> None:
+    event = {
+        "company_name": "Example Ltd.",
+        "facts": {"evidence_summary": "交易所公告称该公司收到上市合规通知并说明了整改期限。"},
+    }
+    evidence = [
+        {
+            "evidence_url": "https://example.test/original",
+            "evidence_passage": "The exchange notice names Example Ltd. and states the exact compliance deadline.",
+        }
+    ]
+
+    quality = public_event_quality(event, evidence)
+
+    assert quality["reader_ready"] is True
+    assert quality["gaps"] == []
+    assert quality["citable_evidence_count"] == 1
 
 
 def test_public_event_row_labels_its_distinct_time_clocks() -> None:

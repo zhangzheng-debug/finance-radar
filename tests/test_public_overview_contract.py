@@ -291,6 +291,97 @@ def test_active_light_followup_is_visible_as_pending_evidence_work() -> None:
         }
 
 
+def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        ledger_path = _populated_ledger(root)
+        connection = open_ledger(ledger_path)
+        evidence_at = "2026-08-04T15:00:00+00:00"
+        fact_summary = "交易所原始公告明确列出该公司的上市合规通知、具体动作和整改期限。"
+        passage = (
+            "The exchange notice names Zulu Pending, identifies the listing compliance action, "
+            "and states the remediation deadline."
+        )
+        connection.execute(
+            """INSERT INTO event_versions VALUES (
+               'pending-0',1,?,'candidate','candidate','regulatory','filing',NULL,?,'seed')""",
+            (evidence_at, json.dumps({"evidence_summary": fact_summary}, ensure_ascii=False)),
+        )
+        connection.execute(
+            """INSERT INTO raw_observations(
+               observation_id,source_id,external_id,source_published_at,local_received_at,
+               title,summary,canonical_url,content_sha256,raw_json,observation_status
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "reader-ready-observation",
+                "src",
+                "reader-ready-external",
+                evidence_at,
+                evidence_at,
+                "Zulu Pending listing compliance notice",
+                fact_summary,
+                "https://example.test/original-notice",
+                "reader-ready-content-sha256",
+                "{}",
+                "captured",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO event_observations VALUES ('pending-0','reader-ready-observation','primary',?)",
+            (evidence_at,),
+        )
+        connection.execute(
+            """INSERT INTO event_evidence VALUES (
+               'reader-ready-evidence','pending-0','reader-ready-observation',?,NULL,NULL,NULL,
+               ?,NULL,100,'candidate_passage',0,?,?)""",
+            ("https://example.test/original-notice", passage, evidence_at, evidence_at),
+        )
+        connection.execute(
+            """INSERT INTO pipeline_jobs VALUES (
+               'discovery-only-job','rough-insufficient-00','reader_quality_backlog',
+               'PENDING_EVIDENCE_REVIEW',50,0,?,NULL,'{}',?,?)""",
+            (evidence_at, evidence_at, evidence_at),
+        )
+        connection.commit()
+        connection.close()
+
+        repository = LedgerRepository(ledger_path)
+        overview = repository.overview(run_integrity_check=False)
+        ready = repository.list_events(reader_ready=True, limit=200)
+        discovery_only = repository.list_events(reader_ready=False, limit=200)
+        facets = repository.event_facets(reader_ready=True)
+
+        assert overview["review_queue"] == 2
+        assert overview["reader_review_queue"] == 1
+        assert overview["discovery_backlog"] == 1
+        assert overview["reader_quality"]["total"] == 20
+        assert overview["reader_quality"]["reader_ready"] == 1
+        assert overview["reader_quality"]["discovery_only"] == 19
+        assert overview["reader_funnel"]["total"] == 1
+        assert overview["reader_funnel"]["pending_verification"] == 1
+        assert overview["reader_funnel"]["partition_complete"] is True
+        assert ready["total"] == 1
+        assert ready["items"][0]["event_id"] == "pending-0"
+        assert ready["items"][0]["public_fact_summary"] == fact_summary
+        assert ready["items"][0]["citable_evidence_count"] == 1
+        assert discovery_only["total"] == 19
+        assert facets["reader_ready"] is True
+        assert facets["families"] == [{"value": "regulatory", "count": 1}]
+        assert facets["sources"] == [{"value": "src", "count": 1}]
+
+        application = create_app(_settings(root, ledger_path))
+        with TestClient(application) as client:
+            response = client.get("/api/v1/events", params={"reader_ready": "true"})
+            facet_response = client.get(
+                "/api/v1/events/facets", params={"reader_ready": "true"}
+            )
+        assert response.status_code == 200
+        assert response.json()["data"]["total"] == 1
+        assert response.json()["data"]["reader_ready"] is True
+        assert facet_response.status_code == 200
+        assert facet_response.json()["data"]["reader_ready"] is True
+
+
 def test_repository_public_filters_dates_sorting_and_legacy_status_compose_safely() -> None:
     with tempfile.TemporaryDirectory() as directory:
         repository = LedgerRepository(_populated_ledger(Path(directory)))
