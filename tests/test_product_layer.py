@@ -96,7 +96,7 @@ class ProductLayerTests(unittest.TestCase):
     def test_repository_exposes_evidence_linked_event(self) -> None:
         repository = LedgerRepository(self.ledger_path)
         health = repository.health()
-        self.assertEqual(health["schema_version"], 13)
+        self.assertEqual(health["schema_version"], 14)
         self.assertEqual(health["audit"]["trading_boundary_violations"], 0)
         detail = repository.event_detail("evt-1")
         self.assertEqual(detail["event"]["no_trading"], 1)
@@ -239,7 +239,18 @@ class ProductLayerTests(unittest.TestCase):
         self.assertTrue(all(not item["order_endpoints_present"] for item in providers.values()))
         self.assertEqual(
             capabilities["horizon_policy"]["windows"],
-            ["t_plus_5m", "t_plus_30m", "t_plus_1d"],
+            [
+                "t_plus_5m",
+                "t_plus_30m",
+                "t_plus_2h",
+                "next_close",
+                "t_plus_1d",
+                "t_plus_5d",
+            ],
+        )
+        self.assertEqual(
+            capabilities["horizon_policy"]["baseline"],
+            "version_bound_exact_event_anchor",
         )
         self.assertFalse(capabilities["horizon_policy"]["continuous_quote_feed"])
 

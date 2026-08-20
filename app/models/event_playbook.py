@@ -31,10 +31,9 @@ PLAYBOOK_PATH = ROOT / "config" / "event_playbook_v1.json"
 PLAYBOOK_SCHEMA_VERSION = 1
 
 # A window is only auditable when the anchor it was measured from is recorded.
-# ``first_capture`` is deliberately listed: it is what the market observer
-# currently uses, it drifts with collector latency, and naming it as DEGRADED is
-# how the price-window audit can report an honest offset instead of implying the
-# measurement started at the event.
+# ``first_capture`` remains only as an explicit legacy/degraded vocabulary item.
+# The v2 observer rejects it as a reaction anchor, while older receipts can still
+# be described honestly instead of being silently relabelled.
 TIME_ANCHORS = ("event_occurred", "source_published", "filing_effective", "first_capture")
 DEGRADED_TIME_ANCHORS = frozenset({"first_capture"})
 

@@ -1214,12 +1214,15 @@ def terminal_search_state(query: str, *, limit: int = 50) -> dict[str, str]:
 MARKET_HORIZONS = (
     ("t_plus_5m", "T+5M"),
     ("t_plus_30m", "T+30M"),
+    ("t_plus_2h", "T+2H"),
+    ("next_close", "下个收盘"),
     ("t_plus_1d", "T+1D"),
+    ("t_plus_5d", "T+5D"),
 )
 
 
 def market_horizon_items(detail: dict[str, Any], asset_id: str) -> list[dict[str, str]]:
-    """Return honest observer-relative window states for one reviewed asset."""
+    """Return honest reaction-anchor-relative window states for one reviewed asset."""
     jobs = {
         str(item.get("observation_window")): item
         for item in detail.get("market_jobs") or []
@@ -1231,7 +1234,9 @@ def market_horizon_items(detail: dict[str, Any], asset_id: str) -> list[dict[str
             continue
         name = str(metric.get("metric_name") or "")
         for window, _label in MARKET_HORIZONS:
-            if name.startswith(f"observer_return_{window}_pct__"):
+            if name.startswith(
+                (f"reaction_return_{window}_pct__", f"observer_return_{window}_pct__")
+            ):
                 metrics[window] = metric
     items = []
     for window, label in MARKET_HORIZONS:

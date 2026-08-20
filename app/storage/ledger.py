@@ -1070,13 +1070,29 @@ class LedgerRepository:
             market_jobs = [
                 dict(row)
                 for row in connection.execute(
-                    """SELECT market_job_id,event_id,asset_id,provider,observation_window,
-                              status,scheduled_at,completed_at,attempts,last_error,no_trading
-                       FROM market_jobs WHERE event_id=?
-                       ORDER BY asset_id,scheduled_at,observation_window""",
+                    """SELECT j.market_job_id,j.event_id,j.asset_id,j.provider,
+                              j.observation_window,j.status,j.scheduled_at,j.completed_at,
+                              j.attempts,j.last_error,j.no_trading,
+                              anchor.event_version AS anchor_event_version,
+                              anchor.declared_anchor_kind,anchor.reaction_anchor_at,
+                              anchor.known_at,anchor.timestamp_precision,
+                              anchor.anchor_status,anchor.reason_code AS anchor_reason_code,
+                              anchor.unsupported_windows_json,
+                              link.offset_seconds,link.window_contract_version
+                       FROM market_jobs j
+                       LEFT JOIN market_job_anchor_links link
+                         ON link.market_job_id=j.market_job_id
+                       LEFT JOIN market_event_anchors anchor
+                         ON anchor.anchor_id=link.anchor_id
+                       WHERE j.event_id=?
+                       ORDER BY j.asset_id,j.scheduled_at,j.observation_window""",
                     (event_id,),
                 )
             ]
+            for job in market_jobs:
+                job["unsupported_windows"] = _json(
+                    job.pop("unsupported_windows_json"), []
+                )
             preferred_source = _dict(
                 connection.execute(
                     """SELECT r.title,r.summary,r.source_id,r.source_published_at,
@@ -1237,8 +1253,17 @@ class LedgerRepository:
                 "ibkr": "local_capability_probe_only",
             },
             "horizon_policy": {
-                "baseline": "first_real_observer_snapshot",
-                "windows": ["t_plus_5m", "t_plus_30m", "t_plus_1d"],
+                "baseline": "version_bound_exact_event_anchor",
+                "anchor_contract": "market-anchor-v1",
+                "known_at_rule": "max_source_published_at_local_received_at",
+                "windows": [
+                    "t_plus_5m",
+                    "t_plus_30m",
+                    "t_plus_2h",
+                    "next_close",
+                    "t_plus_1d",
+                    "t_plus_5d",
+                ],
                 "missed_window_behavior": "record_MISSED_WINDOW_without_latest_quote_substitution",
                 "return_metric_scope": "post_event_audit_only",
                 "continuous_quote_feed": False,

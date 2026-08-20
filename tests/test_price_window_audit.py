@@ -63,6 +63,12 @@ class PriceWindowAuditTests(unittest.TestCase):
                       '2026-08-01',?,?,'sec_current_filings',1,'Test Corp')""",
             (now, now),
         )
+        self.connection.execute(
+            """INSERT INTO event_versions VALUES (
+                   'EVT1',1,?,'verified','verified','delisting_or_suspension',
+                   'delisted',NULL,'{}','test fixture')""",
+            (now,),
+        )
         self.connection.commit()
 
     def _add_job(
@@ -74,9 +80,11 @@ class PriceWindowAuditTests(unittest.TestCase):
         scheduled: datetime,
         completed: datetime | None = None,
         provider: str | None = None,
+        anchored: bool = True,
     ) -> None:
         # market_jobs is unique on (event, asset, provider, window), which mirrors
         # reality: two providers may observe the same window for the same event.
+        provider_name = provider or f"provider_{job_id.lower()}"
         self.connection.execute(
             """INSERT INTO market_jobs(
                    market_job_id,event_id,asset_id,provider,observation_window,status,
@@ -84,13 +92,42 @@ class PriceWindowAuditTests(unittest.TestCase):
                VALUES(?,'EVT1','AST1',?,?,?,?,?,0,NULL,1)""",
             (
                 job_id,
-                provider or f"provider_{job_id.lower()}",
+                provider_name,
                 window,
                 status,
                 _iso(scheduled),
                 _iso(completed) if completed else None,
             ),
         )
+        if anchored:
+            expected_offset = audit.WINDOW_OFFSET_SECONDS.get(window, 3600)
+            anchor_at = scheduled - timedelta(seconds=expected_offset)
+            anchor_id = f"ANCHOR-{job_id}"
+            self.connection.execute(
+                """INSERT INTO market_event_anchors(
+                       anchor_id,event_id,event_version,asset_id,provider,
+                       declared_anchor_kind,reaction_anchor_at,source_published_at,
+                       local_received_at,known_at,timestamp_precision,anchor_status,
+                       anchor_lag_seconds,unsupported_windows_json,reason_code,
+                       contract_version,created_at,updated_at,no_trading)
+                   VALUES(?,'EVT1',1,'AST1',?,'filing_effective',?,?,?,?,'EXACT_TIMESTAMP',
+                          'EXACT',60,'[]',NULL,'market-anchor-v1',?,?,1)""",
+                (
+                    anchor_id,
+                    provider_name,
+                    _iso(anchor_at),
+                    _iso(anchor_at),
+                    _iso(anchor_at + timedelta(minutes=1)),
+                    _iso(anchor_at + timedelta(minutes=1)),
+                    _iso(BASE),
+                    _iso(BASE),
+                ),
+            )
+            self.connection.execute(
+                """INSERT INTO market_job_anchor_links VALUES (
+                       ?,?,?, 'market-windows-v2',?)""",
+                (job_id, anchor_id, expected_offset, _iso(BASE)),
+            )
         self.connection.commit()
 
     def _add_snapshot(self, job_id: str, captured: datetime, snapshot_id: str) -> None:
@@ -106,20 +143,40 @@ class PriceWindowAuditTests(unittest.TestCase):
         self.connection.commit()
 
     # ── 1. anchor ────────────────────────────────────────────────
-    def test_anchor_mismatch_is_reported_against_the_declared_anchor(self) -> None:
-        """The observer anchors on first capture; delisting declares filing_effective."""
+    def test_exact_version_bound_anchor_matches_the_declared_anchor(self) -> None:
 
         self._add_job("J1", "t_plus_5m", "COMPLETED", scheduled=BASE, completed=BASE)
         report = audit.build_report(self.db_path)
         anchor = report["anchor"]
 
-        self.assertEqual(anchor["observed_anchor"], "first_capture")
-        self.assertTrue(anchor["observed_anchor_is_degraded"])
-        self.assertEqual(anchor["families_with_anchor_mismatch"], 1)
+        self.assertTrue(anchor["anchor_integrity_holds"])
+        self.assertEqual(anchor["legacy_jobs_without_anchor"], 0)
+        self.assertEqual(anchor["jobs_with_declaration_mismatch"], 0)
         family = anchor["families"][0]
         self.assertEqual(family["event_family"], "delisting_or_suspension")
         self.assertEqual(family["declared_anchor"], "filing_effective")
-        self.assertFalse(family["anchor_matches_declaration"])
+        self.assertTrue(family["anchor_matches_declaration"])
+        self.assertEqual(report["status"], "PASS")
+
+    def test_legacy_job_without_anchor_is_reported_not_reinterpreted(self) -> None:
+        self._add_job(
+            "J1", "t_plus_5m", "COMPLETED", scheduled=BASE, completed=BASE, anchored=False
+        )
+        report = audit.build_report(self.db_path)
+        self.assertEqual(report["anchor"]["legacy_jobs_without_anchor"], 1)
+        self.assertFalse(report["anchor"]["anchor_integrity_holds"])
+        self.assertEqual(report["status"], "ATTENTION")
+
+    def test_capture_before_known_at_is_a_contract_violation(self) -> None:
+        self._add_job("J1", "initial", "COMPLETED", scheduled=BASE, completed=BASE)
+        self._add_snapshot("J1", BASE + timedelta(seconds=30), "SNAP1")
+        self.connection.execute(
+            "UPDATE market_event_anchors SET known_at=? WHERE anchor_id='ANCHOR-J1'",
+            (_iso(BASE + timedelta(minutes=1)),),
+        )
+        self.connection.commit()
+        report = audit.build_report(self.db_path)
+        self.assertEqual(report["anchor"]["captures_before_known_at"], 1)
         self.assertEqual(report["status"], "ATTENTION")
 
     # ── 2. fulfilment ────────────────────────────────────────────

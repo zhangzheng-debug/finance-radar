@@ -73,8 +73,8 @@ eight device-local named Flows storing only filter state, a read-only facet API,
 fuzzy event-family suggestions, exact source filtering, data-backed commands and a
 consistent Chinese interaction layer for controls, forms, replay steps and status
 copy while preserving machine-readable enums. It
-also schedules observer-relative T+5m/T+30m/T+1d captures from the first real
-snapshot, records missed windows without substituting a latest quote, and keeps
+also schedules reaction-anchor-relative T+5m/T+30m/T+2h/next-close/T+1d/T+5d captures from an exact, version-bound
+event timestamp, records missed windows without substituting a latest quote, and keeps
 all computed returns in the post-event audit channel. It also contains the
 HTTPS-only official HTML/PDF snapshot worker, domain/redirect/MIME/size safety
 gates, `/api/v1/evidence/archive`, and the Operations evidence-archive panel.

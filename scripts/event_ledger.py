@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -312,6 +312,43 @@ CREATE TABLE IF NOT EXISTS market_jobs (
     UNIQUE (event_id, asset_id, provider, observation_window)
 );
 
+CREATE TABLE IF NOT EXISTS market_event_anchors (
+    anchor_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    event_version INTEGER NOT NULL,
+    asset_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    declared_anchor_kind TEXT,
+    reaction_anchor_at TEXT,
+    source_published_at TEXT,
+    local_received_at TEXT,
+    known_at TEXT,
+    timestamp_precision TEXT NOT NULL CHECK (timestamp_precision IN (
+        'EXACT_TIMESTAMP','DATE_ONLY','MISSING','INVALID'
+    )),
+    anchor_status TEXT NOT NULL CHECK (anchor_status IN ('EXACT','UNAVAILABLE')),
+    anchor_lag_seconds INTEGER,
+    unsupported_windows_json TEXT NOT NULL,
+    reason_code TEXT,
+    contract_version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+    FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
+    FOREIGN KEY (asset_id) REFERENCES assets(asset_id),
+    UNIQUE (event_id,event_version,asset_id,provider)
+);
+
+CREATE TABLE IF NOT EXISTS market_job_anchor_links (
+    market_job_id TEXT PRIMARY KEY,
+    anchor_id TEXT NOT NULL,
+    offset_seconds INTEGER NOT NULL,
+    window_contract_version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (market_job_id) REFERENCES market_jobs(market_job_id),
+    FOREIGN KEY (anchor_id) REFERENCES market_event_anchors(anchor_id)
+);
+
 CREATE TABLE IF NOT EXISTS market_snapshots (
     snapshot_id TEXT PRIMARY KEY,
     market_job_id TEXT NOT NULL,
@@ -524,6 +561,8 @@ CREATE INDEX IF NOT EXISTS idx_event_asset_impacts_event
     ON event_asset_impacts(event_id, market_observation_allowed);
 CREATE INDEX IF NOT EXISTS idx_market_jobs_status
     ON market_jobs(status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_market_event_anchors_status
+    ON market_event_anchors(anchor_status,event_id,event_version);
 CREATE INDEX IF NOT EXISTS idx_market_snapshots_event
     ON market_snapshots(event_id, captured_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_status_priority
@@ -1367,12 +1406,17 @@ def ledger_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         "event_versions",
         "event_observations",
         "event_evidence",
+        "discovery_leads",
+        "event_evidence_relations",
+        "event_fact_workflow",
         "event_assessments",
         "entities",
         "assets",
         "event_entities",
         "event_asset_impacts",
         "market_jobs",
+        "market_event_anchors",
+        "market_job_anchor_links",
         "market_snapshots",
         "event_market_metrics",
         "observation_jobs",

@@ -78,7 +78,7 @@ def _overview() -> dict[str, Any]:
             },
         ],
         "audit": {"no_trading": 0, "no_auto_verify": 0, "no_leakage": 0},
-        "schema_version": 13,
+        "schema_version": 14,
         "quick_check": "ok",
     }
 

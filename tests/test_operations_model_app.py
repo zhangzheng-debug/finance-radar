@@ -76,7 +76,7 @@ def _fake_api(
                 "ibkr": "local_capability_probe_only",
             },
             "horizon_policy": {
-                "baseline": "first_real_observer_snapshot",
+                "baseline": "version_bound_exact_event_anchor",
                 "missed_window_behavior": "record_MISSED_WINDOW_without_latest_quote_substitution",
             },
             "boundary": {"read_only": True, "no_trading": True},
@@ -121,7 +121,7 @@ def test_operations_page_separates_event_sources_and_market_capabilities(monkeyp
     assert "不使用账户数据" in rendered
     assert "crypto=binance_public" in rendered
     assert "MISSED_WINDOW=1" in tables
-    assert "first_real_observer_snapshot" in rendered
+    assert "version_bound_exact_event_anchor" in rendered
     assert "最近证据对象均已重新计算" in rendered
     assert "3 raw" in rendered
 

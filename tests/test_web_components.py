@@ -440,7 +440,7 @@ def test_market_horizons_distinguish_observed_pending_and_missed() -> None:
         "market_metrics": [
             {
                 "stable_id": "asset-1",
-                "metric_name": "observer_return_t_plus_5m_pct__ETHUSDT",
+                "metric_name": "reaction_return_t_plus_5m_pct__ETHUSDT",
                 "metric_value": "5.123456",
             }
         ],
@@ -449,10 +449,13 @@ def test_market_horizons_distinguish_observed_pending_and_missed() -> None:
     assert [(item["label"], item["value"]) for item in items] == [
         ("T+5M", "+5.12%"),
         ("T+30M", "PENDING"),
+        ("T+2H", "NOT SCHEDULED"),
+        ("下个收盘", "NOT SCHEDULED"),
         ("T+1D", "MISSED"),
+        ("T+5D", "NOT SCHEDULED"),
     ]
     assert items[0]["state"] == "evidence"
-    assert items[2]["state"] == "risk"
+    assert items[4]["state"] == "risk"
 
 
 def test_adjacent_event_navigation_is_bounded_and_recovers_unknown_current() -> None:
