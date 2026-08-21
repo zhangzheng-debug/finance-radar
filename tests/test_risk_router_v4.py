@@ -53,6 +53,23 @@ class EvidenceGateTests(unittest.TestCase):
         )
         self.assertEqual(context["state"], "DISCOVERY_ONLY")
 
+    def test_dual_human_evidence_requires_strict_current_receipt(self) -> None:
+        evidence = {
+            "evidence_status": "accepted_dual_human_primary_evidence",
+            "relation_status": "HUMAN_CONFIRMED",
+            "subject_match": 1,
+            "event_claim_supported": 1,
+            "date_coherent": 1,
+            "dual_human_receipt_consistent": 1,
+        }
+        supported = derive_evidence_context([evidence])
+        self.assertEqual(supported["state"], "PRIMARY_SUPPORTED_REVIEWED")
+        self.assertEqual(supported["reason_codes"], ["dual_human_primary_exact_passage"])
+
+        evidence["dual_human_receipt_consistent"] = 0
+        stale = derive_evidence_context([evidence])
+        self.assertEqual(stale["state"], "INSUFFICIENT")
+
 
 class SemanticPolicyTests(unittest.TestCase):
     def test_high_precision_risk_and_non_target_rules(self) -> None:

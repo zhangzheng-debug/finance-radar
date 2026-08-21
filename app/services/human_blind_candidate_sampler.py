@@ -21,6 +21,7 @@ from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from app.evidence_policy import is_primary_authority_tier
 from app.services.adjudication import HUMAN_BLIND_CONTRACT_VERSION
 from app.services.ai_event_census import CONTRACT_VERSION as AI_CENSUS_CONTRACT_VERSION
 from app.services.ai_event_census import parse_assignment_records, read_jsonl
@@ -126,16 +127,17 @@ def _evidence_time_values(row: dict[str, Any]) -> list[tuple[str, datetime]]:
 
 def _authority_class(value: Any) -> str:
     tier = _clean_text(value).upper()
-    if tier.startswith("P0"):
+    if not is_primary_authority_tier(tier):
+        raise ValueError("only P0/P1 authority tiers are eligible")
+    if tier.split("_", 1)[0] == "P0":
         return "PRIMARY_OFFICIAL"
-    if tier.startswith("P1"):
-        return "ISSUER_OFFICIAL"
-    raise ValueError("only P0/P1 authority tiers are eligible")
+    return "ISSUER_OFFICIAL"
 
 
 def _authority_sort_key(value: Any) -> tuple[int, str]:
     tier = _clean_text(value).upper()
-    return (0 if tier.startswith("P0") or tier == "PRIMARY_OFFICIAL" else 1, tier)
+    is_p0 = is_primary_authority_tier(tier) and tier.split("_", 1)[0] == "P0"
+    return (0 if is_p0 or tier == "PRIMARY_OFFICIAL" else 1, tier)
 
 
 def _masked_group(prefix: str, value: str) -> str:
@@ -172,7 +174,7 @@ def _eligible_passages(
             exclusions["evidence_not_object"] += 1
             continue
         tier = _clean_text(row.get("authority_tier")).upper()
-        if not tier.startswith(("P0", "P1")):
+        if not is_primary_authority_tier(tier):
             exclusions["not_p0_p1"] += 1
             continue
         passage = _clean_text(row.get("evidence_passage"))

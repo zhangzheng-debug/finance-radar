@@ -7,6 +7,8 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.evidence_policy import register_sqlite_integrity_functions
+
 
 EVIDENCE_SNAPSHOT_SOURCE_IDS = (
     "bls_key_indicators",
@@ -29,8 +31,500 @@ EVIDENCE_SNAPSHOT_SOURCE_IDS = (
 )
 
 
-PUBLIC_EVENT_STATE_CTE = """
-WITH ranked_rough_reviews AS (
+_CURRENT_SOURCE_CONTENT_CTES = """
+ranked_source_revisions AS (
+    SELECT sr.*,
+           ROW_NUMBER() OVER (
+               PARTITION BY sr.observation_id
+               ORDER BY sr.revision_no DESC
+           ) AS source_revision_rank
+    FROM source_revisions sr
+),
+current_source_content AS (
+    SELECT r.observation_id,
+           r.source_id,
+           r.external_id,
+           r.source_published_at,
+           r.local_received_at,
+           COALESCE(sr.title,r.title) AS title,
+           COALESCE(sr.summary,r.summary) AS summary,
+           r.canonical_url,
+           COALESCE(sr.content_sha256,r.content_sha256) AS content_sha256,
+           COALESCE(sr.raw_json,r.raw_json) AS raw_json,
+           CASE WHEN sr.revision_kind='delete'
+                THEN 'deleted' ELSE r.observation_status END AS observation_status,
+           COALESCE(sr.revision_no,0) AS latest_revision_no,
+           COALESCE(sr.revision_kind,'new') AS latest_revision_kind,
+           COALESCE(sr.revision_at,r.local_received_at) AS latest_revision_at
+    FROM raw_observations r
+    LEFT JOIN ranked_source_revisions sr
+      ON sr.observation_id=r.observation_id
+     AND sr.source_revision_rank=1
+)
+""".strip()
+
+
+_DUAL_HUMAN_RECEIPT_MATCH_SQL = """
+json_valid(current_version.facts_json)
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.contract_version'
+    )='dual-human-selected-evidence-receipt-v2'
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.contract_version'
+    )='event-fact-review-v2'
+AND json_extract(
+      current_version.facts_json,
+      '$.human_fact_claim.contract_version'
+    )='human-fact-claim-v1'
+AND json_sha256(json_remove(
+      json_extract(
+        current_version.facts_json,
+        '$.dual_human_fact_review.selected_evidence_receipt'
+      ),
+      '$.receipt_sha256'
+    ))=LOWER(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.receipt_sha256'
+    ))
+AND json_sha256(json_remove(
+      json_extract(current_version.facts_json,'$.human_fact_claim'),
+      '$.canonical_claim_sha256',
+      '$.public_fact_summary',
+      '$.public_fact_summary_sha256'
+    ))=LOWER(json_extract(
+      current_version.facts_json,'$.human_fact_claim.canonical_claim_sha256'
+    ))
+AND text_sha256(json_extract(
+      current_version.facts_json,'$.human_fact_claim.public_fact_summary'
+    ))=LOWER(json_extract(
+      current_version.facts_json,'$.human_fact_claim.public_fact_summary_sha256'
+    ))
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.target_status'
+    )='verified'
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_id'
+    )=ev.evidence_id
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.event_id'
+    )=ev.event_id
+AND CAST(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.event_version'
+    ) AS INTEGER)=rel.event_version
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.evidence_id'
+    )=ev.evidence_id
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.evidence_status_after'
+    )=ev.evidence_status
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.evidence_url'
+    )=TRIM(ev.evidence_url)
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.evidence_passage'
+    )=ev.evidence_passage
+AND LOWER(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_content_sha256'
+    ))=LOWER(ro.content_sha256)
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_id'
+    )=ro.source_id
+AND UPPER(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_authority_tier'
+    ))=UPPER(src.authority_tier)
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_observation_status'
+    )=ro.observation_status
+AND CAST(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_revision_no'
+    ) AS INTEGER)=ro.latest_revision_no
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_revision_kind'
+    )=ro.latest_revision_kind
+AND CAST(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_passage_currently_proven'
+    ) AS INTEGER)=CASE
+      WHEN ro.latest_revision_kind NOT IN ('edit','delete') THEN 1
+      WHEN INSTR(
+        COALESCE(ro.title,'') || CHAR(10) || COALESCE(ro.summary,'') || CHAR(10) ||
+        COALESCE(ro.raw_json,''),TRIM(ev.evidence_passage)
+      )>0 THEN 1 ELSE 0 END
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.evidence_fingerprint_before'
+    )=rel.evidence_fingerprint
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.canonical_claim_sha256'
+    )=json_extract(
+      current_version.facts_json,
+      '$.human_fact_claim.canonical_claim_sha256'
+    )
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.canonical_claim_sha256'
+    )=json_extract(
+      current_version.facts_json,
+      '$.human_fact_claim.canonical_claim_sha256'
+    )
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.public_fact_summary_sha256'
+    )=json_extract(
+      current_version.facts_json,
+      '$.human_fact_claim.public_fact_summary_sha256'
+    )
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.public_fact_summary_sha256'
+    )=json_extract(
+      current_version.facts_json,
+      '$.human_fact_claim.public_fact_summary_sha256'
+    )
+AND json_extract(
+      current_version.facts_json,'$.public_fact_summary'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.public_fact_summary'
+    )
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.predicate'
+    )=ce.event_type
+AND json_extract(
+      current_version.facts_json,'$.claim_subject'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject'
+    )
+AND json_extract(
+      current_version.facts_json,'$.claim_action'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.action_quote'
+    )
+AND json_extract(
+      current_version.facts_json,'$.claim_stage'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.stage'
+    )
+AND UPPER(json_extract(
+      current_version.facts_json,'$.human_fact_claim.stage'
+    )) IN ('FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED')
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.modality'
+    )='REALIZED'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject'
+    ) IN (TRIM(ce.company_name),TRIM(ce.ticker_at_event))
+AND INSTR(
+      ev.evidence_passage,
+      json_extract(current_version.facts_json,'$.human_fact_claim.action_quote')
+    )>0
+AND INSTR(
+      ev.evidence_passage,
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote')
+    )>0
+AND INSTR(
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.action_quote')
+    )>0
+AND (
+      LENGTH(json_extract(
+        current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'
+      ))-LENGTH(REPLACE(
+        json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'),
+        json_extract(current_version.facts_json,'$.human_fact_claim.action_quote'),
+        ''
+      ))
+    )/LENGTH(json_extract(
+      current_version.facts_json,'$.human_fact_claim.action_quote'
+    ))=1
+AND (
+      COALESCE(json_extract(
+        current_version.facts_json,'$.human_fact_claim.object_quote'
+      ),'')=''
+      OR (
+        INSTR(ev.evidence_passage,json_extract(
+          current_version.facts_json,'$.human_fact_claim.object_quote'
+        ))>0
+        AND INSTR(json_extract(
+          current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'
+        ),json_extract(
+          current_version.facts_json,'$.human_fact_claim.object_quote'
+        ))>0
+      )
+    )
+AND (
+      COALESCE(json_extract(
+        current_version.facts_json,'$.human_fact_claim.event_date_or_effective_date'
+      ),'')=''
+      OR INSTR(ev.evidence_passage,json_extract(
+        current_version.facts_json,'$.human_fact_claim.event_date_or_effective_date'
+      ))>0
+    )
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_basis'
+    )='EXACT_IN_PASSAGE'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_binding_contract'
+    )='minimal-subject-action-clause-v1'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.realized_language_gate_contract'
+    )='realized-language-fail-closed-v1'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.realized_action_head_contract'
+    )='realized-action-head-allowlist-v1'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.fact_predicate_contract'
+    )='human-fact-predicate-map-v1'
+AND human_fact_predicate_compatible(
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_predicate'),
+      ce.event_type,
+      ce.event_family,
+      json_extract(current_version.facts_json,'$.human_fact_claim.action_quote'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.object_quote')
+    )=1
+AND text_sha256(ev.evidence_passage)=LOWER(json_extract(
+      current_version.facts_json,'$.human_fact_claim.evidence_passage_sha256'
+    ))
+AND fact_quote_context_valid(
+      ev.evidence_passage,
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_start'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_end')
+    )=1
+AND realized_claim_language_safe(
+      json_extract(current_version.facts_json,'$.human_fact_claim.action_quote'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.subject_surface_quote'),
+      ev.evidence_passage
+    )=1
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_surface_quote'
+    ) IN (
+      json_extract(current_version.facts_json,'$.human_fact_claim.subject'),
+      '$' || json_extract(current_version.facts_json,'$.human_fact_claim.subject')
+    )
+AND LENGTH(json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_gap_quote'
+    ))>0
+AND SUBSTR(json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_gap_quote'
+    ),1,1) NOT GLOB '[A-Za-z0-9]'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_prefix_quote'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_surface_quote'
+    ) || json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_gap_quote'
+    ) || json_extract(
+      current_version.facts_json,'$.human_fact_claim.action_quote'
+    )
+AND SUBSTR(
+      LTRIM(
+        json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'),
+        ' ' || CHAR(9) || CHAR(10) || CHAR(13)
+      ),
+      1,
+      LENGTH(json_extract(
+        current_version.facts_json,'$.human_fact_claim.subject_action_prefix_quote'
+      ))
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_prefix_quote'
+    )
+AND LOWER(TRIM(
+      json_extract(
+        current_version.facts_json,'$.human_fact_claim.subject_action_gap_quote'
+      ),
+      ' ' || CHAR(9) || CHAR(10) || CHAR(13) || ',;:()[]-–—'
+    ))=json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+    )
+AND (
+      json_extract(
+        current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+      )=''
+      OR json_extract(
+        current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+      ) IN (
+        'has','had','have','is','was','were','are','did','does','do',
+        'formally','officially','successfully','voluntarily','immediately','now','also'
+      )
+      OR (
+        SUBSTR(
+          json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),
+          1,
+          INSTR(json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),' ')-1
+        ) IN ('has','had','have','is','was','were','are','did','does','do')
+        AND SUBSTR(
+          json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),
+          INSTR(json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),' ')+1
+        ) IN ('formally','officially','successfully','voluntarily','immediately','now','also')
+        AND INSTR(SUBSTR(
+          json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),
+          INSTR(json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),' ')+1
+        ),' ')=0
+      )
+    )
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.public_fact_summary'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject'
+    ) || '：' || json_extract(
+      current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'
+    )
+AND rel.contract_version='event-fact-review-v2'
+""".strip()
+
+
+_CURRENT_EVIDENCE_PASSAGE_MATCH_SQL = """
+ro.observation_status!='deleted'
+AND (
+  ro.latest_revision_kind NOT IN ('edit','delete')
+  OR INSTR(
+       COALESCE(ro.title,'') || CHAR(10) ||
+       COALESCE(ro.summary,'') || CHAR(10) ||
+       COALESCE(ro.raw_json,''),
+       TRIM(ev.evidence_passage)
+     )>0
+)
+""".strip()
+
+
+_SEC_CURRENT_SUPPORTED_FACT_SLOT_CTE = """
+sec_current_supported_fact_slots AS (
+    SELECT current_version.event_id,current_version.version
+    FROM event_versions current_version
+    JOIN canonical_events slot_event
+      ON slot_event.event_id=current_version.event_id
+     AND slot_event.current_version=current_version.version
+    JOIN event_evidence slot_evidence
+      ON slot_evidence.event_id=current_version.event_id
+     AND slot_evidence.evidence_id=json_extract(
+           current_version.facts_json,'$.evidence_id'
+         )
+    JOIN json_each(
+      CASE WHEN json_valid(current_version.facts_json)
+           THEN current_version.facts_json ELSE '{}' END,
+      '$.claim_fact_slots.facts'
+    ) slot
+    WHERE LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.predicate'),'')))>0
+      AND CAST(json_extract(slot.value,'$.event_type_compatible') AS INTEGER)=1
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.action_text'),'')))>0
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.object'),'')))>0
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.evidence_sentence'),'')))>=20
+      AND LOWER(json_extract(
+            current_version.facts_json,'$.claim_fact_slots.event_type'
+          ))=LOWER(TRIM(slot_event.event_type))
+      AND INSTR(slot_evidence.evidence_passage,json_extract(
+            slot.value,'$.evidence_sentence'
+          ))>0
+      AND INSTR(json_extract(
+            current_version.facts_json,'$.public_fact_summary'
+          ),json_extract(slot.value,'$.action_text'))>0
+      AND INSTR(json_extract(
+            current_version.facts_json,'$.public_fact_summary'
+          ),json_extract(slot.value,'$.object'))>0
+      AND (
+        (
+          json_extract(slot.value,'$.subject_binding') IN (
+            'EXPLICIT_ISSUER','EXPLICIT_ISSUER_CONTEXT'
+          )
+          AND CAST(json_extract(
+                slot.value,'$.issuer_name_explicit_in_passage'
+              ) AS INTEGER)=1
+          AND LOWER(TRIM(json_extract(slot.value,'$.subject')))=LOWER(TRIM(
+                json_extract(current_version.facts_json,'$.claim_subject')
+              ))
+        )
+      )
+    GROUP BY current_version.event_id,current_version.version
+)
+""".strip()
+
+
+_SEC_CURRENT_FACT_SLOT_MATCH_SQL = """
+json_valid(current_version.facts_json)
+AND json_extract(
+      current_version.facts_json,
+      '$.admission_contract_version'
+    )='event-admission-v3'
+AND json_extract(
+      current_version.facts_json,
+      '$.fact_slot_contract_version'
+    )='deterministic-evidence-fact-slots-v2'
+AND json_extract(
+      current_version.facts_json,
+      '$.claim_fact_slots.contract_version'
+    )='deterministic-evidence-fact-slots-v2'
+AND LOWER(json_extract(
+      current_version.facts_json,
+      '$.claim_fact_slots.event_type'
+    ))=LOWER(TRIM(ce.event_type))
+AND LOWER(json_extract(
+      current_version.facts_json,
+      '$.claim_action'
+    ))=LOWER(TRIM(ce.event_type))
+AND LENGTH(json_extract(
+      current_version.facts_json,
+      '$.claim_fact_slots.passage_sha256'
+    ))=64
+AND LENGTH(json_extract(
+      current_version.facts_json,
+      '$.claim_fact_slots.canonical_passage_sha256'
+    ))=64
+AND CAST(json_extract(
+      current_version.facts_json,
+      '$.claim_fact_slots.compatible_fact_count'
+    ) AS INTEGER)>0
+AND LENGTH(json_extract(
+      current_version.facts_json,
+      '$.fact_slot_receipt_sha256'
+    ))=64
+AND json_extract(current_version.facts_json,'$.evidence_id')=ev.evidence_id
+AND json_extract(
+      current_version.facts_json,
+      '$.source_observation_id'
+    )=ev.observation_id
+AND LOWER(json_extract(
+      current_version.facts_json,
+      '$.source_content_sha256'
+    ))=LOWER(ro.content_sha256)
+AND ro.observation_status!='deleted'
+AND sec_slot.event_id IS NOT NULL
+""".strip()
+
+
+PUBLIC_EVENT_STATE_CTE = f"""
+WITH {_CURRENT_SOURCE_CONTENT_CTES},
+{_SEC_CURRENT_SUPPORTED_FACT_SLOT_CTE},
+ranked_rough_reviews AS (
     SELECT job_id,event_id,payload_json,updated_at,
            ROW_NUMBER() OVER (
                PARTITION BY event_id
@@ -58,19 +552,44 @@ event_reader_evidence AS (
       ON rel.event_id=ev.event_id
      AND rel.evidence_id=ev.evidence_id
      AND rel.event_version=ce.current_version
-    JOIN raw_observations ro ON ro.observation_id=ev.observation_id
+    JOIN current_source_content ro ON ro.observation_id=ev.observation_id
     JOIN sources src ON src.source_id=ro.source_id
+    JOIN event_versions current_version
+      ON current_version.event_id=ce.event_id
+     AND current_version.version=ce.current_version
+    LEFT JOIN sec_current_supported_fact_slots sec_slot
+      ON sec_slot.event_id=ce.event_id
+     AND sec_slot.version=ce.current_version
     WHERE TRIM(COALESCE(ev.evidence_url,''))!=''
       AND LENGTH(TRIM(COALESCE(ev.evidence_passage,'')))>=40
-      AND ev.evidence_status IN (
-          'machine_extracted_unreviewed','candidate_passage',
-          'confirmed_primary','accepted_manual_primary_evidence'
+      AND (
+        (
+          ev.evidence_status IN (
+            'machine_extracted_unreviewed','candidate_passage',
+            'confirmed_primary','accepted_manual_primary_evidence',
+            'accepted_light_primary_evidence'
+          )
+          AND rel.relation_status IN ('SCOPED_MATCH','HUMAN_CONFIRMED')
+          AND {_SEC_CURRENT_FACT_SLOT_MATCH_SQL}
+          AND rel.contract_version='event-admission-v3'
+          AND rel.evidence_fingerprint=json_extract(
+                current_version.facts_json,'$.evidence_fingerprint'
+              )
+        ) OR (
+          ev.evidence_status='accepted_dual_human_primary_evidence'
+          AND rel.relation_status='HUMAN_CONFIRMED'
+          AND {_DUAL_HUMAN_RECEIPT_MATCH_SQL}
+        )
       )
-      AND rel.relation_status IN ('SCOPED_MATCH','HUMAN_CONFIRMED')
       AND rel.subject_match=1
       AND rel.event_claim_supported=1
       AND rel.date_coherent=1
-      AND UPPER(src.authority_tier) GLOB 'P[01]*'
+      AND {_CURRENT_EVIDENCE_PASSAGE_MATCH_SQL}
+      AND (
+        UPPER(src.authority_tier) IN ('P0','P1')
+        OR UPPER(src.authority_tier) GLOB 'P0_*'
+        OR UPPER(src.authority_tier) GLOB 'P1_*'
+      )
     GROUP BY ev.event_id
 ),
 event_public AS (
@@ -220,6 +739,7 @@ class LedgerRepository:
             timeout=5,
         )
         connection.row_factory = sqlite3.Row
+        register_sqlite_integrity_functions(connection)
         connection.execute("PRAGMA query_only=ON")
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=5000")
@@ -332,11 +852,35 @@ class LedgerRepository:
             "reader_quality": reader_quality,
             "review_queue": review_queue,
             "reader_review_queue": reader_review_queue,
-            "discovery_backlog": max(0, review_queue - reader_review_queue),
+            "reader_hidden_inventory": int(reader_quality["discovery_only"]),
+            "discovery_backlog": int(reader_quality["discovery_only"]),
+            "inventory_contract": {
+                "reader_hidden_inventory": {
+                    "authoritative": True,
+                    "definition": (
+                        "all canonical events currently hidden by the public reader gate"
+                    ),
+                },
+                "discovery_backlog": {
+                    "deprecated": True,
+                    "replacement": "reader_hidden_inventory",
+                    "definition": (
+                        "legacy numeric alias; it includes every reader-hidden canonical event, "
+                        "not only discovery-stage leads"
+                    ),
+                },
+            },
+            "review_queue_hidden_by_reader_gate": max(
+                0, review_queue - reader_review_queue
+            ),
             "rough_reviewed": int(job_status.get("COMPLETED_AUTHORIZED_ROUGH_REVIEW", 0)),
             "job_status": job_status,
             "alert_status": alert_status,
-            "recent_events": self.list_events(status="verified", limit=recent_limit)["items"],
+            "recent_events": self.list_events(
+                status="verified",
+                reader_ready=True,
+                limit=recent_limit,
+            )["items"],
             "source_health": self.list_source_health(),
         }
 
@@ -1300,21 +1844,77 @@ class LedgerRepository:
     def event_evidence(self, event_id: str) -> list[dict[str, Any]]:
         with closing(self.connect()) as connection:
             rows = connection.execute(
-                """SELECT ev.*, o.title AS observation_title, o.summary AS observation_summary,
-                           o.source_published_at, o.local_received_at, s.source_id, s.name AS source_name,
-                           s.authority_tier, s.source_type,rel.event_version AS relation_event_version,
+                f"""WITH {_CURRENT_SOURCE_CONTENT_CTES},
+                    {_SEC_CURRENT_SUPPORTED_FACT_SLOT_CTE}
+                    SELECT ev.*, ro.title AS observation_title, ro.summary AS observation_summary,
+                           ro.source_published_at,ro.local_received_at,ro.content_sha256,
+                           ro.observation_status,ro.latest_revision_no,ro.latest_revision_kind,
+                           src.source_id,src.name AS source_name,
+                           src.authority_tier,src.source_type,
+                           rel.event_version AS relation_event_version,
                            rel.relation_status,rel.subject_match,rel.event_claim_supported,
                            rel.date_coherent,rel.modality,rel.evidence_fingerprint,
-                           rel.contract_version AS relation_contract_version
+                           rel.contract_version AS relation_contract_version,
+                           CASE WHEN ev.evidence_status='accepted_dual_human_primary_evidence'
+                                  AND rel.relation_status='HUMAN_CONFIRMED'
+                                  AND {_DUAL_HUMAN_RECEIPT_MATCH_SQL}
+                                THEN 1 ELSE 0 END AS dual_human_receipt_consistent,
+                           CASE WHEN
+                             (
+                               (
+                                 ev.evidence_status IN (
+                                   'machine_extracted_unreviewed','candidate_passage',
+                                   'confirmed_primary','accepted_manual_primary_evidence',
+                                   'accepted_light_primary_evidence'
+                                 )
+                                 AND rel.relation_status IN ('SCOPED_MATCH','HUMAN_CONFIRMED')
+                                 AND {_SEC_CURRENT_FACT_SLOT_MATCH_SQL}
+                                 AND rel.contract_version='event-admission-v3'
+                                 AND rel.evidence_fingerprint=json_extract(
+                                       current_version.facts_json,'$.evidence_fingerprint'
+                                     )
+                               ) OR (
+                                 ev.evidence_status='accepted_dual_human_primary_evidence'
+                                 AND rel.relation_status='HUMAN_CONFIRMED'
+                                 AND {_DUAL_HUMAN_RECEIPT_MATCH_SQL}
+                               )
+                             )
+                             AND rel.subject_match=1
+                             AND rel.event_claim_supported=1
+                             AND rel.date_coherent=1
+                             AND rel.event_version=ce.current_version
+                             AND {_CURRENT_EVIDENCE_PASSAGE_MATCH_SQL}
+                             AND TRIM(COALESCE(ev.evidence_url,''))!=''
+                             AND LENGTH(TRIM(COALESCE(ev.evidence_passage,'')))>=40
+                             AND (
+                               UPPER(src.authority_tier) IN ('P0','P1')
+                               OR UPPER(src.authority_tier) GLOB 'P0_*'
+                               OR UPPER(src.authority_tier) GLOB 'P1_*'
+                             )
+                           THEN 1 ELSE 0 END AS reader_eligible
                     FROM event_evidence ev
-                    JOIN raw_observations o ON o.observation_id=ev.observation_id
-                    JOIN sources s ON s.source_id=o.source_id
+                    JOIN current_source_content ro ON ro.observation_id=ev.observation_id
+                    JOIN sources src ON src.source_id=ro.source_id
                     LEFT JOIN canonical_events ce ON ce.event_id=ev.event_id
+                    LEFT JOIN event_versions current_version
+                      ON current_version.event_id=ce.event_id
+                     AND current_version.version=ce.current_version
+                    LEFT JOIN sec_current_supported_fact_slots sec_slot
+                      ON sec_slot.event_id=ce.event_id
+                     AND sec_slot.version=ce.current_version
                     LEFT JOIN event_evidence_relations rel
                       ON rel.event_id=ev.event_id AND rel.evidence_id=ev.evidence_id
                      AND rel.event_version=ce.current_version
                     WHERE ev.event_id=?
-                   ORDER BY ev.passage_score DESC, ev.updated_at DESC""",
+                   ORDER BY reader_eligible DESC,
+                            CASE
+                              WHEN UPPER(src.authority_tier)='P0'
+                                OR UPPER(src.authority_tier) GLOB 'P0_*' THEN 0
+                              WHEN UPPER(src.authority_tier)='P1'
+                                OR UPPER(src.authority_tier) GLOB 'P1_*' THEN 1
+                              ELSE 9
+                            END,
+                            ev.passage_score DESC,ev.updated_at DESC,ev.evidence_id""",
                 (event_id,),
             ).fetchall()
         return [dict(row) for row in rows]

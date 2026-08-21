@@ -226,6 +226,7 @@ def test_public_event_quality_requires_subject_fact_and_citable_passage() -> Non
             "event_claim_supported": 1,
             "date_coherent": 1,
             "authority_tier": "P0_official",
+            "reader_eligible": 1,
         }
     ]
 
@@ -234,6 +235,40 @@ def test_public_event_quality_requires_subject_fact_and_citable_passage() -> Non
     assert quality["reader_ready"] is True
     assert quality["gaps"] == []
     assert quality["citable_evidence_count"] == 1
+
+
+def test_public_event_quality_requires_strict_dual_human_receipt() -> None:
+    event = {
+        "company_name": "Example Ltd.",
+        "facts": {
+            "public_fact_summary": "Example Ltd. disclosed that its chief financial officer resigned.",
+            "claim_subject": "Example Ltd.",
+            "claim_action": "chief financial officer resigned",
+            "claim_stage": "DISCLOSED",
+            "known_at": "2026-08-20T01:02:03+00:00",
+        },
+    }
+    evidence = {
+        "evidence_url": "https://www.sec.gov/example",
+        "evidence_passage": (
+            "Example Ltd. disclosed that its chief financial officer resigned "
+            "effective immediately."
+        ),
+        "evidence_status": "accepted_dual_human_primary_evidence",
+        "relation_status": "HUMAN_CONFIRMED",
+        "subject_match": 1,
+        "event_claim_supported": 1,
+        "date_coherent": 1,
+        "authority_tier": "P0",
+        "dual_human_receipt_consistent": 1,
+        "reader_eligible": 1,
+    }
+
+    assert public_event_quality(event, [evidence])["reader_ready"] is True
+    evidence["dual_human_receipt_consistent"] = 0
+    quality = public_event_quality(event, [evidence])
+    assert quality["reader_ready"] is False
+    assert quality["citable_evidence_count"] == 0
 
 
 def test_public_event_row_labels_its_distinct_time_clocks() -> None:

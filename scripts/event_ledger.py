@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from app.evidence_policy import register_sqlite_integrity_functions
+
 
 SCHEMA_VERSION = 14
 
@@ -671,6 +673,7 @@ def open_ledger(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
     connection.row_factory = sqlite3.Row
+    register_sqlite_integrity_functions(connection)
     connection.executescript(SCHEMA)
     connection.execute(
         "INSERT OR IGNORE INTO event_ledger_schema(version, applied_at) VALUES (?, ?)",

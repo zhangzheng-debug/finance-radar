@@ -20,6 +20,7 @@ def _overview() -> dict[str, Any]:
         "event_status": {"verified": 5, "candidate": 4, "weak": 2, "rejected": 1},
         "review_queue": 6,
         "reader_review_queue": 1,
+        "reader_hidden_inventory": 5,
         "discovery_backlog": 5,
         "rough_reviewed": 3,
         "public_funnel": {
@@ -102,6 +103,7 @@ def _fake_api(path: str, **_kwargs: Any) -> dict[str, Any]:
                     "subject_match": 1,
                     "event_claim_supported": 1,
                     "date_coherent": 1,
+                    "reader_eligible": 1,
                     "evidence_passage": (
                         "Exact primary-source passage naming the issuer, action, and event stage."
                     ),
@@ -142,7 +144,7 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert "事件浏览" in rendered
     assert "Example Holdings" in rendered
     assert "可核验事件队列" in rendered
-    assert "另有 5 条仅发现线索未混入事件流" in rendered
+    assert "另有 5 条历史或发现记录未达到公开可读标准" in rendered
     assert "先看证据是否足够" in rendered
     assert "证据路径" not in rendered
     assert "UTC" in rendered
@@ -226,7 +228,13 @@ def test_public_preview_reports_changes_since_last_view(monkeypatch) -> None:
                     "evidence_id": "ev-primary-2",
                     "authority_tier": "P0",
                     "source_name": "Official source",
-                    "evidence_status": "confirmed",
+                        "evidence_status": "confirmed",
+                        "relation_event_version": 2,
+                        "relation_status": "HUMAN_CONFIRMED",
+                        "subject_match": 1,
+                        "event_claim_supported": 1,
+                        "date_coherent": 1,
+                        "reader_eligible": 1,
                     "evidence_passage": "A newly published exact passage.",
                     "evidence_url": "https://example.test/source-2",
                 }

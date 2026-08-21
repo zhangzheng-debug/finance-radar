@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://finance-radar.example/schemas/event-fact-review-v1.json",
+  "$id": "https://finance-radar.example/schemas/event-fact-review-v2.json",
   "title": "Finance Radar offline event fact review submission",
   "type": "object",
   "additionalProperties": false,
@@ -11,7 +11,7 @@
   ],
   "properties": {
     "schema_version": {"const": 1},
-    "contract_version": {"const": "event-fact-review-v1"},
+    "contract_version": {"const": "event-fact-review-v2"},
     "batch_id": {"type": "string", "minLength": 1},
     "reviewer_slot": {"enum": ["A", "B"]},
     "assignment_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -30,7 +30,7 @@
         "required": [
           "event_id", "event_version", "evidence_fingerprint", "checks",
           "modality", "decision", "reason_code", "selected_evidence_id",
-          "severity", "rationale", "reviewed_at", "duration_seconds"
+          "severity", "rationale", "human_fact_claim", "reviewed_at", "duration_seconds"
         ],
         "properties": {
           "event_id": {"type": "string", "minLength": 1},
@@ -45,6 +45,55 @@
           "reviewed_at": {"type": "string", "format": "date-time"},
           "duration_seconds": {"type": "integer", "minimum": 0},
           "started_at": {"type": "string", "format": "date-time"},
+          "human_fact_claim": {
+            "oneOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "contract_version", "subject", "subject_basis", "predicate",
+                  "fact_predicate", "action_quote", "object_quote", "stage", "modality",
+                  "fact_sentence_quote", "fact_sentence_start", "fact_sentence_end",
+                  "evidence_passage_sha256"
+                ],
+                "properties": {
+                  "contract_version": {"const": "human-fact-claim-v1"},
+                  "subject": {"type": "string", "minLength": 1},
+                  "subject_basis": {
+                    "const": "EXACT_IN_PASSAGE",
+                    "description": "V2首版只接受以canonical subject开头且由该主体执行动作的最小原文子句；文件代词不得正式确认。"
+                  },
+                  "predicate": {"type": "string", "minLength": 1},
+                  "fact_predicate": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "必须从该事件分配内的 allowed_human_fact_predicates 选择。"
+                  },
+                  "action_quote": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "所选最小事实子句内恰好出现一次的连续原文动作。"
+                  },
+                  "object_quote": {"type": "string"},
+                  "stage": {"enum": ["FILED", "DISCLOSED", "EFFECTIVE", "ONGOING", "COMPLETED"]},
+                  "modality": {"const": "REALIZED"},
+                  "fact_sentence_quote": {
+                    "type": "string",
+                    "minLength": 12,
+                    "description": "逐字连续最小事实子句，必须以canonical subject或$TICKER开头，经受控助词/副词后紧接动作，且不得含否定、条件、计划、推测或未来语言。"
+                  },
+                  "fact_sentence_start": {"type": "integer", "minimum": 0},
+                  "fact_sentence_end": {"type": "integer", "minimum": 1},
+                  "evidence_passage_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "event_date_or_effective_date": {"type": "string"}
+                }
+              }
+            ]
+          },
           "checks": {
             "type": "object",
             "additionalProperties": false,
@@ -58,7 +107,14 @@
               "conflict_found": {"enum": ["YES", "NO", "UNCLEAR"]}
             }
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"decision": {"const": "CONFIRM_EVENT"}}},
+            "then": {"properties": {"human_fact_claim": {"type": "object"}}},
+            "else": {"properties": {"human_fact_claim": {"type": "null"}}}
+          }
+        ]
       }
     }
   }

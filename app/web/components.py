@@ -9,6 +9,8 @@ from urllib.parse import quote, urlencode
 
 import streamlit as st
 
+from app.evidence_policy import is_reader_supporting_evidence
+
 
 FLOW_PRESETS: dict[str, dict[str, str]] = {
     "待复核": {"status": "candidate"},
@@ -765,22 +767,7 @@ def public_event_quality(
             citable_evidence_count = 0
     else:
         citable_evidence_count = sum(
-            bool(_bounded_public_text(row.get("evidence_url"), limit=2048))
-            and len(_bounded_public_text(row.get("evidence_passage"), limit=10000)) >= 40
-            and str(row.get("evidence_status") or "")
-            in {
-                "machine_extracted_unreviewed",
-                "candidate_passage",
-                "confirmed_primary",
-                "accepted_manual_primary_evidence",
-            }
-            and str(row.get("relation_status") or "")
-            in {"SCOPED_MATCH", "HUMAN_CONFIRMED"}
-            and bool(row.get("subject_match"))
-            and bool(row.get("event_claim_supported"))
-            and bool(row.get("date_coherent"))
-            and str(row.get("authority_tier") or "").upper().startswith(("P0", "P1"))
-            for row in evidence
+            is_reader_supporting_evidence(row) for row in evidence
         )
     gaps: list[str] = []
     if not has_subject:

@@ -156,7 +156,8 @@ def public_source_url(evidence: list[dict[str, object]]) -> str | None:
     return value if parsed.scheme in {"http", "https"} and parsed.netloc else None
 
 
-def public_evidence_sort_key(item: dict[str, object]) -> tuple[int, float, str]:
+def public_evidence_sort_key(item: dict[str, object]) -> tuple[int, int, float, str]:
+    eligibility_rank = 0 if int(item.get("reader_eligible") or 0) == 1 else 1
     authority = str(item.get("authority_tier") or "P9").upper()
     try:
         rank = int(authority[1:]) if authority.startswith("P") else 9
@@ -166,7 +167,7 @@ def public_evidence_sort_key(item: dict[str, object]) -> tuple[int, float, str]:
         passage_score = float(item.get("passage_score") or 0)
     except (TypeError, ValueError):
         passage_score = 0.0
-    return rank, -passage_score, str(item.get("evidence_id") or "")
+    return eligibility_rank, rank, -passage_score, str(item.get("evidence_id") or "")
 
 
 def public_event_snapshot(
@@ -475,7 +476,13 @@ canonical_public_funnel = overview.get("public_funnel") or {
     ),
 }
 public_funnel = overview.get("reader_funnel") or canonical_public_funnel
-discovery_backlog = max(0, int(overview.get("discovery_backlog") or 0))
+reader_hidden_inventory = max(
+    0,
+    int(
+        overview.get("reader_hidden_inventory", overview.get("discovery_backlog"))
+        or 0
+    ),
+)
 timing = overview.get("timing", {})
 event_age = timing.get("latest_new_event_age_seconds", timing.get("latest_event_age_seconds"))
 worker_age = timing.get("latest_worker_success_age_seconds")
@@ -511,10 +518,10 @@ else:
         if UI_ROLE == "admin"
         else "当前没有满足公共阅读门槛、同时仍等待核验的事件。"
     )
-if UI_ROLE != "admin" and discovery_backlog:
+if UI_ROLE != "admin" and reader_hidden_inventory:
     brief_copy += (
-        f"另有 {discovery_backlog:,} 条仅发现线索缺少完整事实或可引证原文，"
-        "已与公共事件流分开。"
+        f"另有 {reader_hidden_inventory:,} 条历史或发现记录尚未达到公开可读标准，"
+        "已与当前事件流分开。"
     )
 situation_brief(
     "先看需要判断的事件" if UI_ROLE == "admin" else "先看证据是否足够",
@@ -814,6 +821,10 @@ if preview_event_id:
             api_request(f"/api/v1/events/{preview_event_id}/evidence")["items"],
             key=public_evidence_sort_key,
         )
+        if UI_ROLE != "admin":
+            preview_evidence = [
+                item for item in preview_evidence if int(item.get("reader_eligible") or 0) == 1
+            ]
     except Exception as exc:
         render_api_error(exc)
     else:
@@ -1055,7 +1066,7 @@ elif UI_ROLE != "admin":
         '</div>'
         '<div class="queue-card-copy">'
         '这里只统计已有明确主体、结构化事实摘要和可引用原文，但仍需补证或规则处理的记录。'
-        f'<div>另有 {discovery_backlog:,} 条仅发现线索未混入事件流。</div>'
+        f'<div>另有 {reader_hidden_inventory:,} 条历史或发现记录未达到公开可读标准。</div>'
         '<div class="queue-card-next">下一步 · 打开事件，先读中文结论，再核对原始证据</div>'
         '</div>'
         '</section>',

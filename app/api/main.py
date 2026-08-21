@@ -183,6 +183,90 @@ def error_envelope(request: Request, code: str, message: str, details: Any = Non
     }
 
 
+def public_verification_method(
+    facts: Any,
+    evidence: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Expose a verification receipt without reviewer or authorization secrets.
+
+    A dual-human label is public only while its selected evidence remains the
+    current, reader-eligible receipt-bound relation. The public summary omits
+    reviewer identities, submission hashes, rationales, and authorization data.
+    """
+
+    if not isinstance(facts, dict):
+        return None
+    dual_review = facts.get("dual_human_fact_review")
+    if isinstance(dual_review, dict) and dual_review.get("target_status") == "verified":
+        human_claim = facts.get("human_fact_claim")
+        selected_evidence_id = str(dual_review.get("selected_evidence_id") or "")
+        selected = next(
+            (
+                item
+                for item in evidence
+                if str(item.get("evidence_id") or "") == selected_evidence_id
+            ),
+            None,
+        )
+        reviewers = dual_review.get("reviewers")
+        reviewer_values = (
+            list(reviewers.values())
+            if isinstance(reviewers, dict)
+            else reviewers
+            if isinstance(reviewers, list)
+            else []
+        )
+        independent_reviews = (
+            len(
+                {
+                    str(reviewer).strip()
+                    for reviewer in reviewer_values
+                    if str(reviewer).strip()
+                }
+            )
+        )
+        if (
+            selected is not None
+            and selected_evidence_id
+            and dual_review.get("contract_version") == "event-fact-review-v2"
+            and isinstance(human_claim, dict)
+            and human_claim.get("contract_version") == "human-fact-claim-v1"
+            and dual_review.get("canonical_claim_sha256")
+            == human_claim.get("canonical_claim_sha256")
+            and dual_review.get("public_fact_summary_sha256")
+            == human_claim.get("public_fact_summary_sha256")
+            and independent_reviews == 2
+            and str(selected.get("evidence_status") or "")
+            == "accepted_dual_human_primary_evidence"
+            and str(selected.get("relation_status") or "") == "HUMAN_CONFIRMED"
+            and int(selected.get("subject_match") or 0) == 1
+            and int(selected.get("event_claim_supported") or 0) == 1
+            and int(selected.get("date_coherent") or 0) == 1
+            and int(selected.get("dual_human_receipt_consistent") or 0) == 1
+            and int(selected.get("reader_eligible") or 0) == 1
+        ):
+            return {
+                "kind": "dual_human_fact_review",
+                "version": dual_review.get("contract_version"),
+                "reviewed_at": dual_review.get("applied_at"),
+                "evidence_ids": [selected_evidence_id],
+                "independent_reviews": independent_reviews,
+                "no_trading": True,
+            }
+    light_verification = facts.get("light_verification")
+    if isinstance(light_verification, dict):
+        evidence_ids = light_verification.get("evidence_ids")
+        return {
+            "kind": "light_verification",
+            "version": light_verification.get("version"),
+            "reviewed_at": light_verification.get("reviewed_at"),
+            "evidence_ids": evidence_ids if isinstance(evidence_ids, list) else [],
+            "score": light_verification.get("score"),
+            "no_trading": True,
+        }
+    return None
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     ledger = LedgerRepository(settings.ledger_db)
@@ -349,6 +433,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 403,
                 {"code": "REVIEWER_TOKEN_REQUIRED", "message": "valid X-Reviewer-Token required"},
             )
+
+    def internal_reader_access(
+        x_reviewer_token: str | None = Header(default=None),
+        x_admin_token: str | None = Header(default=None),
+    ) -> bool:
+        """Grant unfiltered reads only to an existing reviewer/admin credential.
+
+        These endpoints remain publicly callable, so an absent or invalid
+        credential deliberately falls back to the public reader view instead
+        of turning a safe read into an authentication oracle.  This helper
+        never grants mutation authority.
+        """
+
+        if settings.admin_token and secrets.compare_digest(
+            x_admin_token or "", settings.admin_token
+        ):
+            return True
+        supplied = x_reviewer_token or ""
+        if any(
+            secrets.compare_digest(supplied, token)
+            for _principal_id, _role, token in settings.reviewer_principals
+        ):
+            return True
+        return bool(
+            settings.reviewer_token
+            and secrets.compare_digest(supplied, settings.reviewer_token)
+        )
 
     def require_bound_reviewer_principal(
         x_reviewer_token: str | None = Header(default=None),
@@ -545,11 +656,298 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             result["status"] = "degraded"
         return result
 
-    def event_or_404(event_id: str) -> dict[str, Any]:
+    def event_or_404(
+        event_id: str,
+        *,
+        require_reader_ready: bool = False,
+    ) -> dict[str, Any]:
         event = ledger.event_detail(event_id)
-        if event is None:
+        if event is None or (
+            require_reader_ready
+            and int((event.get("event") or {}).get("reader_ready") or 0) != 1
+        ):
             raise HTTPException(404, {"code": "EVENT_NOT_FOUND", "message": f"event not found: {event_id}"})
         return event
+
+    public_event_fields = (
+        "event_id",
+        "current_version",
+        "status",
+        "public_state",
+        "event_family",
+        "event_type",
+        "event_date",
+        "first_seen_at",
+        "last_updated_at",
+        "ticker_at_event",
+        "company_name",
+        "discovery_source",
+        "reviewed_at",
+        "citable_evidence_count",
+        "public_fact_summary",
+        "claim_subject",
+        "claim_action",
+        "claim_stage",
+        "known_at",
+        "reader_ready",
+        "no_trading",
+    )
+    public_evidence_fields = (
+        "evidence_id",
+        "evidence_url",
+        "evidence_passage",
+        "filing_date",
+        "form",
+        "source_name",
+        "authority_tier",
+        "source_type",
+        "source_published_at",
+        "local_received_at",
+        "evidence_status",
+        "relation_status",
+        "subject_match",
+        "event_claim_supported",
+        "date_coherent",
+        "dual_human_receipt_consistent",
+        "reader_eligible",
+    )
+
+    def public_event_item(value: dict[str, Any]) -> dict[str, Any]:
+        return {key: value.get(key) for key in public_event_fields}
+
+    def public_evidence_item(value: dict[str, Any]) -> dict[str, Any]:
+        return {key: value.get(key) for key in public_evidence_fields}
+
+    def public_worker_cycle(value: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Expose only the user-facing state and timing of one worker cycle."""
+
+        if value is None:
+            return None
+        started_at = value.get("started_at")
+        finished_at = value.get("finished_at")
+        return {
+            "status": value.get("status"),
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "elapsed_seconds": elapsed_seconds(started_at, finished_at),
+        }
+
+    def public_model_status(value: dict[str, Any]) -> dict[str, Any]:
+        """Return model availability and gate posture without diagnostics."""
+
+        structured = value.get("structured_evidence_gate")
+        semantic = value.get("semantic_policy_gate")
+        operational = value.get("operational_scope_gate")
+        structured = structured if isinstance(structured, dict) else {}
+        semantic = semantic if isinstance(semantic, dict) else {}
+        operational = operational if isinstance(operational, dict) else {}
+        return {
+            "status": value.get("status"),
+            "model_version": value.get("model_version"),
+            "architecture": value.get("architecture"),
+            "structured_evidence_gate": {
+                "version": structured.get("version"),
+                "required_for_v4": structured.get("required_for_v4"),
+            },
+            "semantic_policy_gate": {
+                "version": semantic.get("version"),
+                "enforced_for_v4": semantic.get("enforced_for_v4"),
+            },
+            "operational_scope_gate": {
+                "version": operational.get("version"),
+                "enforced": operational.get("enforced"),
+            },
+            "shadow": bool(value.get("shadow", True)),
+            "no_trading": bool(value.get("no_trading", True)),
+        }
+
+    def public_source_health(value: dict[str, Any]) -> dict[str, Any]:
+        """Return the public source label and last successful collection state."""
+
+        return {
+            "name": value.get("name"),
+            "source_type": value.get("source_type"),
+            "authority_tier": value.get("authority_tier"),
+            "status": value.get("cursor_status"),
+            "last_success_at": value.get("last_success_at"),
+        }
+
+    def public_market_capabilities(value: dict[str, Any]) -> dict[str, Any]:
+        """Expose provider availability without jobs, errors or routing details."""
+
+        raw_providers = value.get("providers")
+        raw_providers = raw_providers if isinstance(raw_providers, list) else []
+        providers = []
+        for raw_provider in raw_providers:
+            if not isinstance(raw_provider, dict):
+                continue
+            providers.append(
+                {
+                    "provider_id": raw_provider.get("provider_id"),
+                    "name": raw_provider.get("name"),
+                    "status": raw_provider.get("status"),
+                    "freshness_status": raw_provider.get("freshness_status"),
+                    "last_snapshot_at": raw_provider.get("last_snapshot_at"),
+                    "read_only": bool(raw_provider.get("read_only")),
+                    "order_endpoints_present": bool(
+                        raw_provider.get("order_endpoints_present")
+                    ),
+                }
+            )
+        raw_boundary = value.get("boundary")
+        raw_boundary = raw_boundary if isinstance(raw_boundary, dict) else {}
+        return {
+            "providers": providers,
+            "boundary": {
+                "read_only": bool(raw_boundary.get("read_only")),
+                "no_trading": bool(raw_boundary.get("no_trading")),
+                "post_event_audit_only": bool(
+                    raw_boundary.get("post_event_audit_only")
+                ),
+            },
+        }
+
+    public_replay_observation_fields = (
+        "at_seconds",
+        "source",
+        "authority_tier",
+        "title",
+        "passage",
+        "contradicts",
+        "revision_kind",
+    )
+
+    def public_replay_case(value: dict[str, Any]) -> dict[str, Any]:
+        """Keep only the frozen teaching material consumed by Replay Lab."""
+
+        raw_observations = value.get("observations")
+        raw_observations = (
+            raw_observations if isinstance(raw_observations, list) else []
+        )
+        return {
+            "case_id": value.get("case_id"),
+            "display_name": value.get("title"),
+            "display_description": value.get("description"),
+            "observations": [
+                {
+                    key: observation.get(key)
+                    for key in public_replay_observation_fields
+                }
+                for observation in raw_observations
+                if isinstance(observation, dict)
+            ],
+        }
+
+    def public_replay_run(
+        value: dict[str, Any],
+        *,
+        display_names: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Describe a replay outcome without its result, error or internal id."""
+
+        case_id = str(value.get("case_id") or "")
+        raw_status = str(value.get("status") or "").upper()
+        summaries = {
+            "RUNNING": "Replay is running.",
+            "COMPLETED": "Replay completed successfully.",
+            "FAILED": "Replay did not complete; details are available to reviewers.",
+        }
+        status = raw_status if raw_status in summaries else "UNKNOWN"
+        return {
+            "case_id": case_id,
+            "display_name": display_names.get(case_id) or "Replay case",
+            "status": status,
+            "started_at": value.get("started_at"),
+            "finished_at": value.get("finished_at"),
+            "summary": summaries.get(status, "Replay status is unavailable."),
+        }
+
+    def reader_scoped_evidence(
+        event_id: str,
+        *,
+        internal_reader: bool,
+    ) -> list[dict[str, Any]]:
+        items = ledger.event_evidence(event_id)
+        if internal_reader:
+            return items
+        return [
+            public_evidence_item(item)
+            for item in items
+            if int(item.get("reader_eligible") or 0) == 1
+        ]
+
+    def public_event_detail(
+        value: dict[str, Any],
+        *,
+        evidence: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Return only fields consumed by the public event dossier.
+
+        The repository detail object also carries reviewer workflow, market
+        job errors, receipts and internal model diagnostics.  Those remain
+        available to an authenticated reviewer/admin but must not cross the
+        public read boundary.
+        """
+
+        raw_event = value.get("event") if isinstance(value.get("event"), dict) else {}
+        version = (
+            value.get("current_version")
+            if isinstance(value.get("current_version"), dict)
+            else {}
+        )
+        facts = version.get("facts") if isinstance(version.get("facts"), dict) else {}
+        public_fact_fields = (
+            "public_fact_summary",
+            "claim_subject",
+            "claim_action",
+            "claim_stage",
+            "known_at",
+        )
+        result: dict[str, Any] = {
+            "event": public_event_item(raw_event),
+            "current_version": {
+                "version": version.get("version"),
+                "facts": {
+                    key: facts.get(key)
+                    for key in public_fact_fields
+                    if key in facts
+                },
+            },
+            "preferred_source": {
+                "source_published_at": (
+                    value.get("preferred_source") or {}
+                ).get("source_published_at")
+            },
+            "evidence_count": len(evidence),
+            "no_trading_banner": value.get("no_trading_banner"),
+        }
+        verification = value.get("verification_method")
+        if isinstance(verification, dict):
+            eligible_ids = {
+                str(item.get("evidence_id") or "")
+                for item in evidence
+                if str(item.get("evidence_id") or "")
+            }
+            allowed_verification_fields = (
+                "kind",
+                "version",
+                "reviewed_at",
+                "score",
+                "independent_reviews",
+                "no_trading",
+            )
+            public_verification = {
+                key: verification.get(key)
+                for key in allowed_verification_fields
+                if key in verification
+            }
+            public_verification["evidence_ids"] = [
+                evidence_id
+                for evidence_id in verification.get("evidence_ids", [])
+                if str(evidence_id) in eligible_ids
+            ]
+            result["verification_method"] = public_verification
+        return result
 
     @application.get("/")
     def root(request: Request):
@@ -578,7 +976,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @application.get("/api/v1/health")
-    def health(request: Request):
+    def health(
+        request: Request,
+        internal_reader: bool = Depends(internal_reader_access),
+    ):
         try:
             latest_backup = operations.latest_verified_backup()
             ledger_health = public_health_paths(
@@ -594,6 +995,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # remain mandatory in the independently verified backup workflow.
             ops_health = public_health_paths(operations.health(run_integrity_check=False))
             model_health = router.status()
+            if not internal_reader:
+                model_health = public_model_status(model_health)
             status = "ok" if ledger_health["status"] == ops_health["status"] == "ok" else "degraded"
             return envelope(
                 request,
@@ -626,16 +1029,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(503, {"code": "LEDGER_UNAVAILABLE", "message": str(exc)}) from exc
 
     @application.get("/api/v1/overview")
-    def overview(request: Request):
+    def overview(
+        request: Request,
+        internal_reader: bool = Depends(internal_reader_access),
+    ):
         latest_backup = operations.latest_verified_backup()
         data = health_from_latest_verified_backup(
             ledger.overview(run_integrity_check=False),
             latest_backup,
         )
+        if not internal_reader:
+            data["recent_events"] = [
+                public_event_item(item) for item in data.get("recent_events", [])
+            ]
+            data["source_health"] = [
+                public_source_health(item) for item in data.get("source_health", [])
+            ]
         data["demo_mode"] = operations.demo_mode(settings.demo_mode)
         latest_worker = operations.latest_worker_cycle()
         latest_successful_worker = operations.latest_successful_worker_cycle()
-        data["latest_worker_cycle"] = latest_worker
+        data["latest_worker_cycle"] = (
+            latest_worker if internal_reader else public_worker_cycle(latest_worker)
+        )
         data["latest_backup"] = public_backup_status(latest_backup)
         data["latest_backup_attempt"] = public_backup_status(operations.latest_backup())
         # Keep the legacy alias and the explicit update clock exactly aligned.
@@ -672,12 +1087,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return envelope(request, ledger.product_metrics(window_days=window_days))
 
     @application.get("/api/v1/sources/health")
-    def sources_health(request: Request):
-        return envelope(request, {"items": ledger.list_source_health()})
+    def sources_health(
+        request: Request,
+        internal_reader: bool = Depends(internal_reader_access),
+    ):
+        items = ledger.list_source_health()
+        if not internal_reader:
+            items = [public_source_health(item) for item in items]
+        return envelope(request, {"items": items})
 
     @application.get("/api/v1/market/capabilities")
-    def market_capabilities(request: Request):
-        return envelope(request, ledger.market_capabilities())
+    def market_capabilities(
+        request: Request,
+        internal_reader: bool = Depends(internal_reader_access),
+    ):
+        data = ledger.market_capabilities()
+        if not internal_reader:
+            data = public_market_capabilities(data)
+        return envelope(request, data)
 
     @application.get("/api/v1/evidence/archive", dependencies=[Depends(require_operator)])
     def evidence_archive(request: Request):
@@ -731,6 +1158,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sort: Literal["latest", "event_date", "subject"] = "event_date",
         limit: int = Query(50, ge=1, le=200),
         offset: int = Query(0, ge=0),
+        internal_reader: bool = Depends(internal_reader_access),
     ):
         if date_from and date_to and date_from > date_to:
             raise HTTPException(
@@ -740,31 +1168,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "message": "date_from must not be after date_to",
                 },
             )
-        return envelope(
-            request,
-            ledger.list_events(
-                status=status,
-                public_state=public_state,
-                family=family,
-                source=source,
-                query=q,
-                date_from=date_from.isoformat() if date_from else None,
-                date_to=date_to.isoformat() if date_to else None,
-                reader_ready=reader_ready,
-                sort=sort,
-                limit=limit,
-                offset=offset,
-            ),
+        effective_reader_ready = reader_ready if internal_reader else True
+        data = ledger.list_events(
+            status=status,
+            public_state=public_state,
+            family=family,
+            source=source,
+            query=q,
+            date_from=date_from.isoformat() if date_from else None,
+            date_to=date_to.isoformat() if date_to else None,
+            reader_ready=effective_reader_ready,
+            sort=sort,
+            limit=limit,
+            offset=offset,
         )
+        if not internal_reader:
+            data["items"] = [public_event_item(item) for item in data["items"]]
+        return envelope(request, data)
 
     @application.get("/api/v1/events/facets")
-    def event_facets(request: Request, reader_ready: bool | None = None):
-        return envelope(request, ledger.event_facets(reader_ready=reader_ready))
+    def event_facets(
+        request: Request,
+        reader_ready: bool | None = None,
+        internal_reader: bool = Depends(internal_reader_access),
+    ):
+        effective_reader_ready = reader_ready if internal_reader else True
+        return envelope(request, ledger.event_facets(reader_ready=effective_reader_ready))
 
     @application.get("/api/v1/events/{event_id}")
-    def event_detail(request: Request, event_id: str):
-        data = event_or_404(event_id)
-        evidence = ledger.event_evidence(event_id)
+    def event_detail(
+        request: Request,
+        event_id: str,
+        internal_reader: bool = Depends(internal_reader_access),
+    ):
+        data = event_or_404(event_id, require_reader_ready=not internal_reader)
+        evidence = reader_scoped_evidence(event_id, internal_reader=internal_reader)
         facts = data.get("current_version", {}).get("facts", {}) if data.get("current_version") else {}
         preferred_source = data.get("preferred_source") or {}
         text = "\n".join(
@@ -777,38 +1215,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ]
         )
         data["evidence_count"] = len(evidence)
-        light_verification = facts.get("light_verification") if isinstance(facts, dict) else None
-        if isinstance(light_verification, dict):
-            data["verification_method"] = {
-                "kind": "light_verification",
-                "version": light_verification.get("version"),
-                "reviewed_at": light_verification.get("reviewed_at"),
-                "evidence_ids": light_verification.get("evidence_ids", []),
-                "score": light_verification.get("score"),
-                "rationale": light_verification.get("rationale"),
-                "no_trading": True,
-            }
-        evidence_context = derive_evidence_context(evidence)
-        data["model_shadow_output"] = router.predict(text, evidence_context=evidence_context)
-        data["model_input_contract"] = {
-            "uses_source_content": True,
-            "uses_evidence_passages": True,
-            "uses_structured_evidence_state": True,
-            "excludes_event_taxonomy_shortcuts": True,
-            "shadow_only": True,
-        }
+        verification_method = public_verification_method(facts, evidence)
+        if verification_method is not None:
+            data["verification_method"] = verification_method
         data["no_trading_banner"] = "Intelligence and review only. No execution capability is present."
+        if internal_reader:
+            evidence_context = derive_evidence_context(evidence)
+            data["model_shadow_output"] = router.predict(
+                text,
+                evidence_context=evidence_context,
+            )
+            data["model_input_contract"] = {
+                "uses_source_content": True,
+                "uses_evidence_passages": True,
+                "uses_structured_evidence_state": True,
+                "excludes_event_taxonomy_shortcuts": True,
+                "shadow_only": True,
+            }
+        else:
+            data = public_event_detail(data, evidence=evidence)
         return envelope(request, data)
 
-    @application.get("/api/v1/events/{event_id}/timeline")
+    @application.get(
+        "/api/v1/events/{event_id}/timeline",
+        dependencies=[Depends(require_reviewer)],
+    )
     def event_timeline(request: Request, event_id: str):
         event_or_404(event_id)
         return envelope(request, {"items": ledger.event_timeline(event_id)})
 
     @application.get("/api/v1/events/{event_id}/evidence")
-    def event_evidence(request: Request, event_id: str):
-        event_or_404(event_id)
-        return envelope(request, {"items": ledger.event_evidence(event_id)})
+    def event_evidence(
+        request: Request,
+        event_id: str,
+        internal_reader: bool = Depends(internal_reader_access),
+    ):
+        event_or_404(event_id, require_reader_ready=not internal_reader)
+        return envelope(
+            request,
+            {"items": reader_scoped_evidence(event_id, internal_reader=internal_reader)},
+        )
 
     @application.get("/api/v1/events/{event_id}/trace", dependencies=[Depends(require_reviewer)])
     def event_trace(request: Request, event_id: str):
@@ -1009,8 +1455,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ) from exc
 
     @application.get("/api/v1/replays")
-    def replay_cases(request: Request):
-        return envelope(request, {"items": replay.cases(), "recent_runs": operations.replay_runs()})
+    def replay_cases(
+        request: Request,
+        internal_reader: bool = Depends(internal_reader_access),
+    ):
+        items = replay.cases()
+        recent_runs = operations.replay_runs()
+        if internal_reader:
+            return envelope(request, {"items": items, "recent_runs": recent_runs})
+        display_names = {
+            str(item.get("case_id") or ""): item.get("title")
+            for item in items
+            if isinstance(item, dict)
+        }
+        return envelope(
+            request,
+            {
+                "items": [
+                    public_replay_case(item)
+                    for item in items
+                    if isinstance(item, dict)
+                ],
+                "recent_runs": [
+                    public_replay_run(item, display_names=display_names)
+                    for item in recent_runs
+                    if isinstance(item, dict)
+                ],
+            },
+        )
 
     @application.post("/api/v1/replays/{case_id}/run", dependencies=[Depends(require_operator)])
     def replay_run(request: Request, case_id: str):

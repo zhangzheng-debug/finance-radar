@@ -20,7 +20,7 @@
     .evidence{display:grid;gap:12px}.evidence article{border:1px solid #2b4055;background:#081521;border-radius:12px;padding:14px}.evidence header{display:flex;gap:9px;align-items:center;flex-wrap:wrap}.tier{font-weight:800;color:var(--green)}.quote{white-space:pre-wrap;background:#050e17;padding:12px;border-radius:8px;margin:10px 0;color:#dae8f5;max-height:280px;overflow:auto}
     .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}.field{background:#0a1826;border:1px solid #263b50;border-radius:12px;padding:12px}.field label{min-height:44px}
     .decision-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0}.choice{border:1px solid #36516b;background:#0b1b2a;color:var(--text);padding:14px 8px;border-radius:12px;cursor:pointer;min-height:58px}.choice:hover,.choice.active{border-color:var(--cyan);box-shadow:0 0 0 2px #38d5ff33 inset}.choice[data-value="REJECT_CANDIDATE"]{color:#ffb2bb}.choice[data-value="NEEDS_EVIDENCE"]{color:#ffd28a}.choice[data-value="CONFIRM_EVENT"]{color:#82f0bd}
-    .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.error{color:#ff9aaa;background:#2a1017;border:1px solid #6c2e3a;padding:10px 12px;border-radius:9px;display:none}.ok{color:#8ff2c3}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.fact-builder{border:1px solid #28745c;background:#092119;padding:16px;border-radius:14px;margin:16px 0}.fact-builder h3{margin:0 0 6px;color:#82f0bd}.fact-preview{border-left:3px solid var(--green);padding:10px 12px;background:#071710;margin-top:12px;white-space:pre-wrap}.error{color:#ff9aaa;background:#2a1017;border:1px solid #6c2e3a;padding:10px 12px;border-radius:9px;display:none}.ok{color:#8ff2c3}
     .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.btn{border:1px solid #3b5a74;background:#102337;color:var(--text);padding:10px 18px;border-radius:10px;cursor:pointer}.btn.primary{background:#0e6886;border-color:#2ebee8}.btn.good{background:#116142;border-color:#2cc78c}.btn:disabled{opacity:.45;cursor:not-allowed}
     details{border-top:1px solid var(--line);margin-top:16px;padding-top:10px}.small{font-size:13px;color:var(--muted)}kbd{background:#12283a;border:1px solid #3a5266;border-radius:5px;padding:1px 5px}
     @media(max-width:760px){.wrap{padding:12px}.identity,.grid,.two,.decision-row{grid-template-columns:1fr}.top{position:static}.event-head{display:block}.choice{min-height:48px}.field label{min-height:0}}
@@ -51,12 +51,13 @@
   "use strict";
   const assignment = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob("__ASSIGNMENT_BASE64__"), c => c.charCodeAt(0))));
   const storageKey = `finance-radar:${assignment.batch_id}:${assignment.reviewer_slot}`;
-  const blank = () => ({checks:{source_accessible:"",subject_match:"",event_claim_supported:"",date_coherent:"",primary_evidence:"",conflict_found:""},modality:"",decision:"",reason_code:"",selected_evidence_id:"",severity:"",rationale:"",reviewed_at:"",duration_seconds:0,started_at:new Date().toISOString()});
+  const claimBlank = e => ({contract_version:"human-fact-claim-v1",subject:e.company_name||e.ticker_at_event||"",subject_basis:"EXACT_IN_PASSAGE",predicate:e.event_type||"",fact_predicate:(e.allowed_human_fact_predicates||[])[0]||"",action_quote:"",object_quote:"",stage:"",modality:"",fact_sentence_quote:"",fact_sentence_start:-1,fact_sentence_end:-1,evidence_passage_sha256:"",event_date_or_effective_date:""});
+  const blank = () => ({checks:{source_accessible:"",subject_match:"",event_claim_supported:"",date_coherent:"",primary_evidence:"",conflict_found:""},modality:"",decision:"",reason_code:"",selected_evidence_id:"",severity:"",rationale:"",human_fact_claim:null,reviewed_at:"",duration_seconds:0,started_at:new Date().toISOString()});
   let saved = JSON.parse(localStorage.getItem(storageKey) || "null") || {reviewer_id:"",attestation:false,index:0,results:{}};
   assignment.events.forEach(e => { if(!saved.results[e.event_id]) saved.results[e.event_id]=blank(); });
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? "").replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-  const zh = {YES:"是",NO:"否",UNCLEAR:"不确定",REALIZED:"已经发生/已经生效",PROPOSED_OR_CONDITIONAL:"计划、申请、可能或附条件",CONFIRM_EVENT:"确认事实成立",REJECT_CANDIDATE:"排除当前说法",NEEDS_EVIDENCE:"证据不足",ESCALATE:"升级复杂复核"};
+  const zh = {YES:"是",NO:"否",UNCLEAR:"不确定",REALIZED:"已经发生/已经生效",PROPOSED_OR_CONDITIONAL:"计划、申请、可能或附条件",PROPOSED:"拟议",FILED:"已提交/已申请",DISCLOSED:"已披露",EFFECTIVE:"已生效",ONGOING:"进行中",COMPLETED:"已完成",EXACT_IN_PASSAGE:"主体在最小事实子句开头并执行动作",BANKRUPTCY_PETITION_FILED:"已提交破产申请",LIQUIDATION_COMMENCED:"已开始清算/解散",OFFICER_DEPARTED:"高管已离任",OFFICER_APPOINTED:"高管已任命",DELISTED_OR_SUSPENDED:"已退市/停牌",LISTING_NOTICE_RECEIVED:"已收到上市合规通知",SECURITIES_ISSUED_OR_SOLD:"已发行/出售证券",OFFERING_PRICED:"发行已定价",OFFERING_COMPLETED_OR_CLOSED:"融资/发行已完成",DEBT_REFINANCED_OR_FACILITY_AMENDED:"债务已再融资/授信已修订",MERGER_OR_ACQUISITION_COMPLETED:"并购已完成",TRANSACTION_AGREEMENT_ENTERED:"已签订交易协议",TRANSACTION_TERMINATED:"交易已终止",REVERSE_SPLIT_EFFECTIVE:"反向拆股已生效",DEBT_DEFAULT_OR_COVENANT_BREACH:"债务违约/违反契约",ENFORCEMENT_ACTION_FILED:"执法/诉讼已提出",CONFIRM_EVENT:"确认事实成立",REJECT_CANDIDATE:"排除当前说法",NEEDS_EVIDENCE:"证据不足",ESCALATE:"升级复杂复核"};
   const reasonOptions = {
     CONFIRM_EVENT:[["PRIMARY_EVIDENCE_DIRECTLY_SUPPORTS","一手原文直接支持"]],
     REJECT_CANDIDATE:[["WRONG_SUBJECT","说的不是这家公司/证券"],["WRONG_EVENT","原文不是这个事件"],["WRONG_EVENT_STAGE","计划/申请被误写成已发生"],["DATE_MISMATCH","日期或事件节点不一致"],["NEGATED_OR_WITHDRAWN","原文否定、撤回或修订了说法"],["DATA_ARTIFACT","明显数据/抽取错误"],["OTHER","其他明确反证"]],
@@ -68,6 +69,77 @@
   function result(){ return saved.results[current().event_id]; }
   function options(values, selected){ return '<option value="">请选择</option>'+values.map(v=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(zh[v]||v)}</option>`).join(''); }
   function reasonHtml(decision, selected){ return '<option value="">请选择原因</option>'+((reasonOptions[decision]||[]).map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${esc(l)}</option>`).join('')); }
+  function deterministicSummary(claim){const sentence=String(claim?.fact_sentence_quote||'').trim(),subject=String(claim?.subject||'').trim();if(!sentence)return '填写完整原文事实句后自动预览';return `${subject}：${sentence}`;}
+  const subjectActionAux=new Set(['has','had','have','is','was','were','are','did','does','do']);
+  const subjectActionAdverb=new Set(['formally','officially','successfully','voluntarily','immediately','now','also']);
+  const realizedActionHeads=new Set(['accepted','appointed','approved','authorized','breached','ceased','closed','commenced','completed','consummated','converted','defaulted','departed','designated','dismissed','dissolved','elected','entered','executed','exercised','filed','gave','issued','liquidated','named','notified','provided','received','refinanced','removed','repaid','resigned','retired','sold','sent','signed','suspended','terminated','transferred','withdrew']);
+  const factPredicateRules={
+    BANKRUPTCY_PETITION_FILED:{heads:['filed'],object:/\b(chapter\s+(7|11)|bankruptcy|petition(\s+for\s+relief)?)\b/i},
+    LIQUIDATION_COMMENCED:{heads:['commenced','liquidated','dissolved'],object:/\b(liquidation|dissolution|winding[ -]up|chapter\s+7)\b/i},
+    OFFICER_DEPARTED:{heads:['resigned','retired','departed','removed','dismissed','terminated'],object:/\b(officer|director|president|chair(man|woman|person)?|ceo|cfo)\b/i},
+    OFFICER_APPOINTED:{heads:['appointed','named','elected','designated'],object:/\b(officer|director|president|chair(man|woman|person)?|ceo|cfo)\b/i},
+    DELISTED_OR_SUSPENDED:{heads:['delisted','suspended','ceased'],object:/\b(listing|trading|common\s+(stock|shares)|ordinary\s+shares|securit(y|ies))\b/i},
+    LISTING_NOTICE_RECEIVED:{heads:['received'],object:/\b(notice|notification|deficien(cy|t)|noncompliance)\b/i},
+    SECURITIES_ISSUED_OR_SOLD:{heads:['issued','sold'],object:/\b(stock|shares?|warrants?|notes?|securit(y|ies)|offering|placement)\b/i},
+    OFFERING_PRICED:{heads:['priced'],object:/\b(offering|placement|stock|shares?|notes?|securit(y|ies))\b/i},
+    OFFERING_COMPLETED_OR_CLOSED:{heads:['completed','closed','consummated'],object:/\b(offering|placement|financing|sale\s+of\s+securit(y|ies))\b/i},
+    DEBT_REFINANCED_OR_FACILITY_AMENDED:{heads:['refinanced','repaid','amended'],object:/\b(debt|notes?|loan|credit\s+facility|facility|agreement)\b/i},
+    MERGER_OR_ACQUISITION_COMPLETED:{heads:['completed','closed','consummated'],object:/\b(merger|acquisition|transaction|business\s+combination)\b/i},
+    TRANSACTION_AGREEMENT_ENTERED:{heads:['entered','executed','signed'],object:/\b(agreement|merger|acquisition|transaction)\b/i},
+    TRANSACTION_TERMINATED:{heads:['terminated'],object:/\b(agreement|merger|acquisition|transaction)\b/i},
+    REVERSE_SPLIT_EFFECTIVE:{heads:['completed','effected','implemented'],object:/\b(reverse\s+(stock\s+)?split|share\s+consolidation)\b/i},
+    DEBT_DEFAULT_OR_COVENANT_BREACH:{heads:['defaulted','breached'],object:/\b(debt|notes?|loan|covenant|credit\s+facility|agreement)\b/i},
+    ENFORCEMENT_ACTION_FILED:{heads:['filed'],object:/\b(complaint|charges?|enforcement\s+action|lawsuit|proceeding)\b/i}
+  };
+  const nonRealizedLanguage=/(^|[^A-Za-z0-9])(not|never|without|did(?:n't|n’t)|fail|failed|fails|failing|decline|declined|declines|declining|cancel|canceled|cancelled|cancels|canceling|cancelling|abandon|abandoned|abandons|abandoning|rescind|rescinded|rescinds|rescinding|consider|considered|considers|considering|explore|explored|explores|exploring|seek|seeks|seeking|sought|schedule|scheduled|schedules|scheduling|set\s+to|attempt|attempted|attempts|attempting|deny|denied|denies|denying|refuse|refused|refuses|refusing|withdraw|withdrew|withdrawn|withdraws|withdrawing|allege|alleged|alleges|alleging|expect|expected|expects|expecting|plan|planned|plans|planning|intend|intended|intends|intending|propose|proposed|proposes|proposing|purport|purported|purports|purporting|suggest|suggested|suggests|suggesting|claim|claimed|claims|claiming|may|might|could|would|will|shall|if|unless|subject\s+to|contingent\s+on|conditional\s+on|rumou?r|hearsay|hypothetical|counterfactual|example|illustrative|headline|title|phrase|quote|quoted|read|reads|scenario|pro\s+forma)(?=$|[^A-Za-z0-9])/i;
+  function actionHead(action){const match=String(action||'').replace(/^[ \t\r\n,;:()\[\]\-–—]+/,'').match(/^[A-Za-z]+(?:['’][A-Za-z]+)?/);return match?match[0].toLowerCase():'';}
+  function predicateCompatible(event,claim){const rule=factPredicateRules[claim?.fact_predicate],allowed=event.allowed_human_fact_predicates||[];return !!rule&&allowed.includes(claim.fact_predicate)&&rule.heads.includes(actionHead(claim.action_quote))&&!!String(claim.object_quote||'').trim()&&rule.object.test(claim.object_quote);}
+  function realizedLanguageSafe(subject,action,sentence,passage){
+    if(!subject||!action||!sentence||!passage)return false;
+    const actionHead=String(action).replace(/^[ \t\r\n,;:()\[\]\-–—]+/,'').match(/^[A-Za-z]+(?:['’][A-Za-z]+)?/);
+    if(!actionHead||!realizedActionHeads.has(actionHead[0].toLowerCase()))return false;
+    const text=String(sentence).replace(/^[ \t\r\n]+/,'');
+    const surfaces=subject.startsWith('$')?[subject]:[`$${subject}`,subject];
+    const surface=surfaces.find(value=>text.startsWith(value)&&(text.length===value.length||!/^[A-Za-z0-9]$/.test(text[value.length])));
+    if(!surface||nonRealizedLanguage.test(text.slice(surface.length)))return false;
+    return !nonRealizedLanguage.test(String(passage).split(surface).join(' '));
+  }
+  function factQuoteContext(passage,quote){const source=String(passage||''),value=String(quote||'');if(!value)return null;const start=source.indexOf(value);if(start<0||source.lastIndexOf(value)!==start)return null;const end=start+value.length;let left=start-1;while(left>=0&&/[ \t\r]/.test(source[left]))left--;if(left>=0&&!/[.?!\n]/.test(source[left]))return null;let right=end;while(right<source.length&&/[ \t\r]/.test(source[right]))right++;const tail=value.replace(/[ \t\r\n]+$/,'');if(!tail||(!/[.?!\n]/.test(tail.slice(-1))&&right<source.length&&!/[.?!\n]/.test(source[right])))return null;return {start,end};}
+  function subjectControlsAction(subject,action,sentence){
+    if(!subject||!action||!sentence||String(sentence).split(action).length-1!==1)return false;
+    const text=String(sentence).replace(/^[ \t\r\n]+/,'');
+    const surfaces=subject.startsWith('$')?[subject]:[`$${subject}`,subject];
+    const surface=surfaces.find(value=>text.startsWith(value)&&(text.length===value.length||!/^[A-Za-z0-9]$/.test(text[value.length])));
+    if(!surface)return false;
+    const tail=text.slice(surface.length),position=tail.indexOf(action);
+    if(position<0)return false;
+    const gap=tail.slice(0,position);
+    if(!gap||/^[A-Za-z0-9]/.test(gap))return false;
+    const normalized=gap.replace(/^[ \t\r\n,;:()\[\]\-–—]+|[ \t\r\n,;:()\[\]\-–—]+$/g,'').toLowerCase();
+    if(!normalized)return true;
+    if(subjectActionAux.has(normalized)||subjectActionAdverb.has(normalized))return true;
+    const words=normalized.split(' ');
+    return words.length===2&&subjectActionAux.has(words[0])&&subjectActionAdverb.has(words[1]);
+  }
+  function claimBuilderHtml(e,r){
+    if(r.decision!=='CONFIRM_EVENT')return '';
+    if(!r.human_fact_claim)r.human_fact_claim=claimBlank(e);
+    const c=r.human_fact_claim,subjects=[e.company_name,e.ticker_at_event].filter((v,i,a)=>v&&a.indexOf(v)===i),selected=(e.evidence||[]).find(x=>x.evidence_id===r.selected_evidence_id),allowedPredicates=e.allowed_human_fact_predicates||[];
+    c.predicate=e.event_type||'';c.modality=r.modality||'';
+    if(!allowedPredicates.includes(c.fact_predicate))c.fact_predicate=allowedPredicates[0]||'';
+    if(c.subject_basis!=='EXACT_IN_PASSAGE')c.subject_basis='EXACT_IN_PASSAGE';
+    const subjectBases=['EXACT_IN_PASSAGE'];
+    return `<section class="fact-builder"><h3>最后一步：逐字确认“谁做了什么”</h3><p class="small">请从你选中的同一条原文复制，不能改写。系统只用这些受控字段生成公开摘要，不接受自由填写摘要。</p>
+      <div class="two"><div><label>主体（只能选本事件公司/Ticker）</label><select data-claim="subject">${subjects.map(v=>`<option value="${esc(v)}" ${c.subject===v?'selected':''}>${esc(v)}</option>`).join('')}</select></div><div><label>主体如何绑定原文</label><select data-claim="subject_basis">${options(subjectBases,c.subject_basis)}</select><span class="small">首版不接受“the Company / we”等文件代词。若主体没有逐字出现并执行动作，请选“证据不足”。</span></div></div>
+      <div class="two"><div><label>事件类型（系统锁定，不可改）</label><input value="${esc(e.event_type||'')}" readonly></div><div><label>具体事实动作（必须与事件类型一致）</label><select data-claim="fact_predicate">${options(allowedPredicates,c.fact_predicate)}</select>${allowedPredicates.length?'':'<span class="small">当前事件类型尚无受控事实动作，不能确认，请选证据不足。</span>'}</div></div>
+      <div><label>事实阶段</label><select data-claim="stage">${options(['PROPOSED','FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED'],c.stage)}</select></div>
+      <label>动作原文（逐字复制，如 “resigned” / “filed a voluntary petition”）</label><input data-claim="action_quote" value="${esc(c.action_quote)}" placeholder="必须是所选证据原文中的连续文字">
+      <label>对象原文（没有对象可留空，但不能删除此字段）</label><input data-claim="object_quote" value="${esc(c.object_quote)}" placeholder="例如 the chief financial officer；没有则留空">
+      <label>最小事实子句原文（逐字复制；必须以所选主体开头，随后就是动作）</label><textarea data-claim="fact_sentence_quote" placeholder="例如：Example Corp has formally filed a voluntary petition（不要把背景公司或交易对手一起抄入）">${esc(c.fact_sentence_quote)}</textarea>
+      <div class="small">位置收据：${Number.isInteger(c.fact_sentence_start)&&c.fact_sentence_start>=0?`${c.fact_sentence_start}–${c.fact_sentence_end}`:'尚未形成唯一、完整句界'} · 上下文 ${esc((c.evidence_passage_sha256||selected?.evidence_passage_sha256||'').slice(0,12)||'未绑定')}</div>
+      <label>事件日/生效日原文（可留空；填写时也必须逐字出现在所选原文）</label><input data-claim="event_date_or_effective_date" value="${esc(c.event_date_or_effective_date)}" placeholder="例如 January 1, 2026">
+      <div class="fact-preview"><strong>系统将生成：</strong> <span id="factPreview">${esc(deterministicSummary(c))}</span></div></section>`;
+  }
   function render(){
     const e=current(), r=result();
     const evidence=e.evidence.map((x,i)=>`<article><header><span class="tier">${esc(x.authority_tier)}</span><strong>${esc(x.source_name||x.source_id||'来源')}</strong><span class="small">${esc(x.form||'')} · ${esc(x.filing_date||'日期不明')}</span></header><div class="quote">${esc(x.evidence_passage||'没有精确摘录')}</div><label><input type="radio" name="evidence" value="${esc(x.evidence_id)}" ${r.selected_evidence_id===x.evidence_id?'checked':''}> 选择这条作为主要证据</label>${/^https?:\/\//i.test(x.evidence_url||'')?`<a href="${esc(x.evidence_url)}" target="_blank" rel="noopener noreferrer">打开原始来源 ↗</a>`:'<span class="small">没有可打开的公开链接</span>'}</article>`).join('');
@@ -78,14 +150,16 @@
       <h2>已有证据（只判断它明确写了什么）</h2><div class="evidence">${evidence||'<p>没有可审核证据，请选“证据不足”。</p>'}</div>
       <div class="grid">${checkDefs.map(([k,l])=>`<div class="field"><label>${esc(l)}</label><select data-check="${k}">${options(['YES','NO','UNCLEAR'],r.checks[k])}</select></div>`).join('')}<div class="field"><label>原文描述哪个阶段？</label><select id="modality">${options(['REALIZED','PROPOSED_OR_CONDITIONAL','UNCLEAR'],r.modality)}</select></div></div>
       <h2>你的结论</h2><div class="decision-row">${['CONFIRM_EVENT','REJECT_CANDIDATE','NEEDS_EVIDENCE','ESCALATE'].map(v=>`<button class="choice ${r.decision===v?'active':''}" data-decision="${v}">${esc(zh[v])}</button>`).join('')}</div>
+      ${claimBuilderHtml(e,r)}
       <div><label>原因</label><select id="reasonCode">${reasonHtml(r.decision,r.reason_code)}</select></div>
       <label style="margin-top:12px">针对本事件写一句理由（至少20字，禁止复制粘贴同一句）</label><textarea id="rationale" placeholder="例如：SEC 8-K原文明确写明目标公司于该日收到退市决定，主体、事件节点和日期均一致，未发现相反材料。">${esc(r.rationale)}</textarea>
       <div class="error" id="errorBox"></div>
       <div class="actions"><button class="btn" id="prevBtn" ${saved.index===0?'disabled':''}>← 上一条</button><button class="btn primary" id="autoBtn">根据答案推荐结论</button><button class="btn primary" id="saveNextBtn">保存并下一条 →</button><span class="small">页面会自动保存，关闭后再次打开仍可继续。</span></div>`;
     document.querySelectorAll('[data-check]').forEach(el=>el.addEventListener('change',()=>{r.checks[el.dataset.check]=el.value;save();}));
-    document.querySelectorAll('[name=evidence]').forEach(el=>el.addEventListener('change',()=>{r.selected_evidence_id=el.value;save();}));
-    document.querySelectorAll('[data-decision]').forEach(el=>el.addEventListener('click',()=>{r.decision=el.dataset.decision;r.reason_code='';save();render();}));
-    $("modality").addEventListener('change',()=>{r.modality=$("modality").value;save();});
+    document.querySelectorAll('[name=evidence]').forEach(el=>el.addEventListener('change',()=>{r.selected_evidence_id=el.value;if(r.human_fact_claim){r.human_fact_claim.action_quote='';r.human_fact_claim.object_quote='';r.human_fact_claim.fact_sentence_quote='';r.human_fact_claim.fact_sentence_start=-1;r.human_fact_claim.fact_sentence_end=-1;r.human_fact_claim.evidence_passage_sha256='';r.human_fact_claim.event_date_or_effective_date='';}save();render();}));
+    document.querySelectorAll('[data-decision]').forEach(el=>el.addEventListener('click',()=>{r.decision=el.dataset.decision;r.reason_code='';if(r.decision==='CONFIRM_EVENT'&&!r.human_fact_claim)r.human_fact_claim=claimBlank(e);if(r.decision!=='CONFIRM_EVENT')r.human_fact_claim=null;save();render();}));
+    $("modality").addEventListener('change',()=>{r.modality=$("modality").value;if(r.human_fact_claim)r.human_fact_claim.modality=r.modality;save();});
+    document.querySelectorAll('[data-claim]').forEach(el=>el.addEventListener('input',()=>{if(!r.human_fact_claim)r.human_fact_claim=claimBlank(e);r.human_fact_claim[el.dataset.claim]=el.value;r.human_fact_claim.predicate=e.event_type||'';r.human_fact_claim.modality=r.modality||'';if(el.dataset.claim==='fact_sentence_quote'){const selected=(e.evidence||[]).find(x=>x.evidence_id===r.selected_evidence_id),context=factQuoteContext(selected?.evidence_passage||'',el.value);r.human_fact_claim.fact_sentence_start=context?.start??-1;r.human_fact_claim.fact_sentence_end=context?.end??-1;r.human_fact_claim.evidence_passage_sha256=selected?.evidence_passage_sha256||'';}const preview=$("factPreview");if(preview)preview.textContent=deterministicSummary(r.human_fact_claim);save();}));
     $("reasonCode").addEventListener('change',()=>{r.reason_code=$("reasonCode").value;save();});
     $("rationale").addEventListener('input',()=>{r.rationale=$("rationale").value;save();});
     $("prevBtn").addEventListener('click',()=>{saved.index=Math.max(0,saved.index-1);save();render();scrollTo(0,0);});
@@ -105,8 +179,37 @@
   }
   function finishTiming(r){ if(!r.reviewed_at)r.reviewed_at=new Date().toISOString(); const start=Date.parse(r.started_at||r.reviewed_at); r.duration_seconds=Math.max(0,Math.round((Date.now()-start)/1000)); }
   function validateResult(e,r){
-    const errors=[]; if(!r.decision)errors.push('请选择一个结论'); if(!r.modality)errors.push('请选择事件阶段'); if(Object.values(r.checks).some(v=>!v))errors.push('六个检查问题必须全部回答'); if(!r.reason_code)errors.push('请选择原因'); if((r.rationale||'').trim().length<20)errors.push('理由至少20字');
-    if(r.decision==='CONFIRM_EVENT'){const yes=['source_accessible','subject_match','event_claim_supported','date_coherent','primary_evidence'];if(yes.some(k=>r.checks[k]!=='YES')||r.checks.conflict_found!=='NO'||r.modality!=='REALIZED')errors.push('确认事实要求五项为“是”、无冲突且已经发生');if(!r.selected_evidence_id)errors.push('确认事实必须选择一条主要证据');}
+    const errors=[];
+    if(!r.decision)errors.push('请选择一个结论');
+    if(!r.modality)errors.push('请选择事件阶段');
+    if(Object.values(r.checks).some(v=>!v))errors.push('六个检查问题必须全部回答');
+    if(!r.reason_code)errors.push('请选择原因');
+    if((r.rationale||'').trim().length<20)errors.push('理由至少20字');
+    if(r.decision==='CONFIRM_EVENT'){
+      const yes=['source_accessible','subject_match','event_claim_supported','date_coherent','primary_evidence'];
+      if(yes.some(k=>r.checks[k]!=='YES')||r.checks.conflict_found!=='NO'||r.modality!=='REALIZED')errors.push('确认事实要求五项为“是”、无冲突且已经发生');
+      if(!r.selected_evidence_id)errors.push('确认事实必须选择一条主要证据');
+      const c=r.human_fact_claim,selected=(e.evidence||[]).find(x=>x.evidence_id===r.selected_evidence_id),p=String(selected?.evidence_passage||'');
+      if(!c)errors.push('确认事实必须填写“谁做了什么”');
+      else{
+        if(c.contract_version!=='human-fact-claim-v1'||c.predicate!==e.event_type)errors.push('事件事实合同或事件类型不匹配');
+        if(![e.company_name,e.ticker_at_event].filter(Boolean).includes(c.subject))errors.push('主体只能是本事件公司或Ticker');
+        if(c.subject_basis!=='EXACT_IN_PASSAGE')errors.push('首版确认只接受主体逐字出现的最小事实子句；文件代词请选证据不足');
+        if(!c.action_quote||!p.includes(c.action_quote))errors.push('动作必须逐字复制自所选原文');
+        if(!c.fact_sentence_quote||c.fact_sentence_quote.length<12||!p.includes(c.fact_sentence_quote))errors.push('最小事实子句必须逐字复制自所选原文且至少12字');
+        const context=factQuoteContext(p,c.fact_sentence_quote);
+        if(!context||c.fact_sentence_start!==context.start||c.fact_sentence_end!==context.end||c.evidence_passage_sha256!==selected?.evidence_passage_sha256)errors.push('事实子句必须在所选原文中唯一出现、位于完整句界，并绑定正确位置与上下文摘要');
+        if(c.action_quote&&String(c.fact_sentence_quote).split(c.action_quote).length-1!==1)errors.push('动作在最小事实子句中必须恰好出现一次');
+        if(c.action_quote&&!subjectControlsAction(c.subject,c.action_quote,c.fact_sentence_quote))errors.push('最小事实子句必须以所选主体开头，随后仅可有受控助词/副词，再由该主体执行动作');
+        if(!predicateCompatible(e,c))errors.push('具体事实动作、动作原文和对象原文与当前事件类型不兼容；不要把相邻事件当成当前事件');
+        if(c.action_quote&&!realizedLanguageSafe(c.subject,c.action_quote,c.fact_sentence_quote,p))errors.push('所选原文上下文含否定、计划、条件、传闻、举例、推测或未来语言，不能确认为已发生');
+        if(c.object_quote&&(!p.includes(c.object_quote)||!c.fact_sentence_quote.includes(c.object_quote)))errors.push('对象原文必须同时出现在所选原文和最小事实子句');
+        if(c.event_date_or_effective_date&&!p.includes(c.event_date_or_effective_date))errors.push('日期必须逐字出现在所选原文');
+        if(!['FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED'].includes(c.stage))errors.push('确认事实必须选择已提交/披露/生效/进行中/完成阶段');
+        if(c.modality!=='REALIZED'||c.modality!==r.modality)errors.push('具体事实的情态必须与本页结论一致且为已发生');
+      }
+    }
+    if(r.decision!=='CONFIRM_EVENT')r.human_fact_claim=null;
     return errors;
   }
   function showErrors(errors){const box=$("errorBox");box.textContent=errors.join('；');box.style.display='block';}
@@ -114,7 +217,7 @@
   function updateProgress(){const done=completed();$("progressText").textContent=`${done} / ${assignment.event_count}`;$("progressBar").style.width=`${100*done/assignment.event_count}%`;$("finalBtn").disabled=done!==assignment.event_count||!saved.reviewer_id||!saved.attestation;}
   function submission(final){
     const now=new Date().toISOString(); const results=assignment.events.map(e=>{const r={...saved.results[e.event_id],checks:{...saved.results[e.event_id].checks}};if(final)finishTiming(r);return {event_id:e.event_id,event_version:e.current_version,evidence_fingerprint:e.evidence_fingerprint,...r};});
-    return {schema_version:1,contract_version:'event-fact-review-v1',batch_id:assignment.batch_id,reviewer_slot:assignment.reviewer_slot,assignment_sha256:assignment.assignment_sha256,reviewer_id:saved.reviewer_id,attestation:saved.attestation,exported_at:now,complete:final,results,no_model_output:true,no_market_outcome:true,no_trading:true};
+    return {schema_version:1,contract_version:assignment.contract_version,batch_id:assignment.batch_id,reviewer_slot:assignment.reviewer_slot,assignment_sha256:assignment.assignment_sha256,reviewer_id:saved.reviewer_id,attestation:saved.attestation,exported_at:now,complete:final,results,no_model_output:true,no_market_outcome:true,no_trading:true};
   }
   function download(final){save();if(final&&$("finalBtn").disabled){alert('请先完成全部事件、填写审核代号并勾选独立审核声明。');return;}const payload=submission(final);const blob=new Blob([JSON.stringify(payload,null,2)+'\n'],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${saved.reviewer_id||'reviewer'}_${assignment.batch_id}_${assignment.reviewer_slot}${final?'.review.json':'.draft.json'}`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
   $("reviewerId").value=saved.reviewer_id;$("attestation").checked=saved.attestation;$("reviewerId").addEventListener('input',save);$("attestation").addEventListener('change',save);$("draftBtn").addEventListener('click',()=>download(false));$("finalBtn").addEventListener('click',()=>download(true));

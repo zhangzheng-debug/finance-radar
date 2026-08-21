@@ -292,10 +292,17 @@ class ProductLayerTests(unittest.TestCase):
             facets = client.get("/api/v1/events/facets")
             self.assertEqual(facets.status_code, 200)
             self.assertTrue(facets.json()["data"]["read_only"])
-            filtered = client.get("/api/v1/events", params={"source": "test"})
+            filtered = client.get(
+                "/api/v1/events",
+                params={"source": "test"},
+                headers={"X-Admin-Token": "test-secret"},
+            )
             self.assertEqual(filtered.status_code, 200)
             self.assertEqual(filtered.json()["data"]["total"], 1)
-            detail = client.get("/api/v1/events/evt-1")
+            detail = client.get(
+                "/api/v1/events/evt-1",
+                headers={"X-Admin-Token": "test-secret"},
+            )
             self.assertEqual(detail.status_code, 200)
             self.assertTrue(detail.json()["data"]["model_shadow_output"]["no_trading"])
             self.assertTrue(

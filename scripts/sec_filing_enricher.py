@@ -19,8 +19,11 @@ from typing import Any
 
 from app.services.event_admission import (
     ADMISSION_CONTRACT_VERSION,
+    FACT_SLOT_CONTRACT_VERSION,
     evaluate_event_admission,
+    extract_evidence_fact_slots,
     public_fact_summary,
+    requires_specific_fact_extraction,
 )
 from event_ledger import open_ledger, stable_id, stable_json, utc_now
 from extract_sec_evidence_text import visible_text
@@ -1368,7 +1371,17 @@ def _promote_discovery_lead(
     action = str(classification.event_type or "")
     stage = EVENT_STAGE_BY_TYPE.get(action, "DISCLOSED")
     action_label = EVENT_ACTION_LABELS.get(action, action.replace("_", " "))
-    summary = public_fact_summary(subject=subject, action_label=action_label, stage_label=stage)
+    fact_extraction = extract_evidence_fact_slots(
+        evidence_passage=evidence_passage,
+        event_type=action,
+        expected_subject=subject,
+    )
+    summary = public_fact_summary(
+        subject=subject,
+        action_label=action_label,
+        stage_label=stage,
+        extraction=fact_extraction,
+    )
     matched_rule = EventRule(
         str(classification.event_family or "other"),
         action,
@@ -1405,8 +1418,16 @@ def _promote_discovery_lead(
         # observable in the frozen title/raw item instead of inferred merely
         # from a non-empty company field.
         subject_match=subject_match,
-        event_claim_supported=bool(classification.event_type and classification.keywords),
+        event_claim_supported=bool(classification.event_type and classification.keywords)
+        # SEC classification is discovery routing, never event truth.  Every
+        # event type, including types whose extractor is not implemented yet,
+        # stays NEEDS_EVIDENCE until the exact passage yields an issuer-bound
+        # fact.  This deliberately trades recall for a truthful public reader.
+        and requires_specific_fact_extraction(action)
+        and fact_extraction.supports_specific_fact,
         date_coherent=bool(row["event_date"]),
+        fact_extraction=fact_extraction,
+        public_fact_summary_text=summary,
     )
     if not decision.admitted:
         _update_discovery_lead(
@@ -1452,6 +1473,9 @@ def _promote_discovery_lead(
         "claim_subject": subject,
         "claim_action": action,
         "claim_stage": stage,
+        "claim_fact_slots": fact_extraction.as_dict(),
+        "fact_slot_contract_version": FACT_SLOT_CONTRACT_VERSION,
+        "fact_slot_receipt_sha256": decision.fact_slot_receipt_sha256,
         "known_at": row["known_at"],
         "source_observation_id": row["observation_id"],
         "source_content_sha256": evidence_content_sha256,
@@ -1535,7 +1559,7 @@ def _promote_discovery_lead(
             stage,
             decision.evidence_fingerprint,
             ADMISSION_CONTRACT_VERSION,
-            "deterministic_sec_document_classifier",
+            "deterministic_sec_passage_fact_classifier",
             now,
         ),
     )
@@ -1556,7 +1580,12 @@ def _promote_discovery_lead(
             stable_id("JOB", event_id, "live_primary_evidence_review"),
             event_id,
             now,
-            stable_json({"admission_contract_version": ADMISSION_CONTRACT_VERSION}),
+            stable_json(
+                {
+                    "admission_contract_version": ADMISSION_CONTRACT_VERSION,
+                    "fact_slot_contract_version": FACT_SLOT_CONTRACT_VERSION,
+                }
+            ),
             now,
             now,
         ),

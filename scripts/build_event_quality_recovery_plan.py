@@ -14,7 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.services.event_quality_recovery import build_recovery_plan, stable_json
+from app.services.event_quality_recovery import (
+    build_recovery_authorization_template,
+    build_recovery_plan,
+    stable_json,
+)
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -32,13 +36,15 @@ def _sha256(path: Path) -> str:
 
 def _markdown(plan: dict) -> str:
     lines = [
-        "# 历史事件质量恢复计划（只读）",
+        "# 历史事件质量恢复计划",
         "",
         f"- 合同：`{plan['contract_version']}`",
         f"- 源事件：**{plan['source_event_count']:,}**",
         f"- 逻辑快照：`{plan['logical_snapshot_sha256']}`",
+        f"- 全库逻辑哈希：`{plan['source_database_logical_sha256']}`",
         f"- 分桶完整：**{plan['partition_complete']}**",
-        "- 本报告没有修改正式事件、标签或证据。",
+        f"- 可机器重建关系：**{plan['machine_relation_backfill_eligible']:,}**",
+        "- 生成本报告没有修改正式事件、标签或证据。",
         "",
         "## 互斥分桶",
         "",
@@ -56,8 +62,12 @@ def _markdown(plan: dict) -> str:
             "## 执行边界",
             "",
             "任何后续写入必须逐条重新核对 event_version、evidence_fingerprint 与 "
-            "facts_sha256；不一致即 STALE，禁止写入。正式状态变更还需要独立、动作级授权，"
-            "并保存变更前快照与追加式审计记录。",
+            "facts/relations/workflow 哈希；不一致即 STALE，禁止写入。机器恢复只允许插入"
+            "已经由当前 facts 精确绑定的证据关系和工作流，不改变 event_version、status 或"
+            "label。旧 verified/rejected 永不进入机器恢复范围。",
+            "",
+            "实际执行必须另备份账本、填写 authorization_template.json，并显式调用 apply CLI 的"
+            " --apply；缺少任一项时只能 dry-run。",
             "",
         ]
     )
@@ -72,6 +82,15 @@ def build(ledger: Path, output: Path) -> dict:
     _write_text(
         output / "recovery_plan.jsonl",
         "".join(stable_json(record) + "\n" for record in plan["records"]),
+    )
+    _write_text(
+        output / "authorization_template.json",
+        json.dumps(
+            build_recovery_authorization_template(plan),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
     )
     _write_text(output / "README.md", _markdown(plan))
     with (output / "bucket_summary.csv").open("w", encoding="utf-8-sig", newline="") as handle:

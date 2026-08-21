@@ -1,40 +1,20 @@
-"""Canonical evidence-state predicates shared by review and model gates."""
+"""Backward-compatible imports for the canonical evidence policy."""
 
-from __future__ import annotations
-
-from typing import Any
-
-
-# These are terminal contradiction states in the evidence lifecycle.  Keep the
-# vocabulary centralized: a contradiction must never be downgraded to a
-# supporting edge merely because one caller recognizes a different spelling.
-CONFLICTING_EVIDENCE_STATUSES = frozenset(
-    {
-        "contradicted",
-        "contradicted_by_primary",
-        "conflict",
-        "conflicted",
-        "denied",
-        "denied_by_primary",
-        "disputed",
-        "disputed_by_primary",
-        "rejected",
-        "rejected_primary",
-        "retracted",
-        "retracted_by_primary",
-        "withdrawn",
-        "withdrawn_by_primary",
-    }
+from app.evidence_policy import (  # noqa: F401
+    CONFLICTING_EVIDENCE_STATUSES,
+    DUAL_HUMAN_EVIDENCE_STATUS,
+    DUAL_HUMAN_SELECTED_EVIDENCE_RECEIPT_V1,
+    DUAL_HUMAN_SELECTED_EVIDENCE_RECEIPT_VERSION,
+    HUMAN_FACT_CLAIM_CONTRACT_VERSION,
+    STANDARD_READER_EVIDENCE_STATUSES,
+    build_dual_human_selected_evidence_receipt,
+    canonicalize_human_fact_claim,
+    dual_human_selected_evidence_receipt_matches,
+    is_conflicting_evidence_status,
+    is_http_evidence_url,
+    is_primary_authority_tier,
+    is_reader_supporting_evidence,
+    is_strict_dual_human_evidence,
+    normalize_evidence_status,
+    strict_selected_evidence_issues,
 )
-
-
-def normalize_evidence_status(value: Any) -> str:
-    """Normalize a persisted lifecycle state without inventing a new state."""
-
-    return "_".join(str(value or "").replace("-", "_").casefold().split())
-
-
-def is_conflicting_evidence_status(value: Any) -> bool:
-    """Whether a persisted evidence lifecycle state requires human review."""
-
-    return normalize_evidence_status(value) in CONFLICTING_EVIDENCE_STATUSES
