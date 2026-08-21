@@ -35,6 +35,12 @@ Open a pull request, wait for CI, and merge only when the acceptance evidence
 matches the change. Do not mix unrelated generated reports into a code-only
 change.
 
+Contributors who hand work over as an archive follow
+`docs/UI_SUBMISSION_GUIDE.md`: the archive is transport, the reviewable
+deliverable is a commit authored by the person who did the work. The archive is
+never committed; `scripts/audit_ui_submission.py` binds it to the branch by
+comparing every member against the tracked tree.
+
 ## New accepted backup version
 
 1. Finish and verify the application change.
