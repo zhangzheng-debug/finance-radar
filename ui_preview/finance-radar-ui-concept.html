@@ -1,0 +1,1335 @@
+<div id="finance-radar-ui-concept" class="fr-shell">
+  <style>
+    #finance-radar-ui-concept {
+      --fr-bg: light-dark(#f4f2ec, #070c12);
+      --fr-panel: light-dark(#fbfaf6, #0c131d);
+      --fr-panel-strong: light-dark(#ffffff, #111b27);
+      --fr-text: light-dark(#172028, #edf3f7);
+      --fr-muted: light-dark(#65717a, #8fa0ad);
+      --fr-faint: light-dark(#879198, #647583);
+      --fr-line: light-dark(#d8d6cf, #263543);
+      --fr-line-soft: light-dark(#e8e5de, #182532);
+      --fr-cyan: light-dark(#087b88, #62c6cf);
+      --fr-cyan-soft: light-dark(#e1f0ef, #102c33);
+      --fr-amber: light-dark(#9a5d00, #e8b563);
+      --fr-amber-soft: light-dark(#f7ead2, #2d2416);
+      --fr-green: light-dark(#147b52, #69c99d);
+      --fr-red: light-dark(#a3444c, #e28a91);
+      color-scheme: light dark;
+      display: grid;
+      grid-template-columns: 218px minmax(0, 1fr);
+      min-height: 780px;
+      overflow: hidden;
+      background: var(--fr-bg);
+      color: var(--fr-text);
+      border: 1px solid var(--fr-line);
+      border-radius: 12px;
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      box-shadow: 0 18px 50px light-dark(rgb(38 45 50 / 0.10), rgb(0 0 0 / 0.28));
+    }
+
+    #finance-radar-ui-concept * { box-sizing: border-box; }
+    #finance-radar-ui-concept button,
+    #finance-radar-ui-concept input { font: inherit; }
+
+    #finance-radar-ui-concept .fr-rail {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      padding: 24px 18px 18px;
+      background: var(--fr-panel);
+      border-right: 1px solid var(--fr-line);
+    }
+
+    #finance-radar-ui-concept .fr-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 2px 6px 22px;
+      border-bottom: 1px solid var(--fr-line-soft);
+    }
+
+    #finance-radar-ui-concept .fr-brand-mark {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      color: var(--fr-cyan);
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    #finance-radar-ui-concept .fr-brand-name {
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: .08em;
+    }
+
+    #finance-radar-ui-concept .fr-brand-sub {
+      margin-top: 2px;
+      color: var(--fr-muted);
+      font-size: 11px;
+    }
+
+    #finance-radar-ui-concept .fr-nav-label {
+      margin: 24px 8px 8px;
+      color: var(--fr-faint);
+      font-size: 11px;
+    }
+
+    #finance-radar-ui-concept .fr-nav {
+      display: grid;
+      gap: 4px;
+    }
+
+    #finance-radar-ui-concept .fr-nav button {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 10px;
+      align-items: start;
+      width: 100%;
+      padding: 11px 10px;
+      color: var(--fr-muted);
+      text-align: left;
+      background: transparent;
+      border: 0;
+      border-radius: 7px;
+      cursor: pointer;
+    }
+
+    #finance-radar-ui-concept .fr-nav button:hover { background: var(--fr-cyan-soft); color: var(--fr-text); }
+    #finance-radar-ui-concept .fr-nav button[aria-pressed="true"] {
+      color: var(--fr-text);
+      background: var(--fr-cyan-soft);
+      box-shadow: inset 2px 0 0 var(--fr-cyan);
+    }
+
+    #finance-radar-ui-concept .fr-nav strong { display: block; font-size: 13px; font-weight: 500; }
+    #finance-radar-ui-concept .fr-nav small { display: block; margin-top: 3px; color: var(--fr-faint); font-size: 10px; line-height: 1.45; }
+
+    #finance-radar-ui-concept .fr-boundary {
+      margin-top: auto;
+      padding: 16px 8px 2px;
+      color: var(--fr-muted);
+      font-size: 11px;
+      line-height: 1.6;
+      border-top: 1px solid var(--fr-line-soft);
+    }
+
+    #finance-radar-ui-concept .fr-boundary span {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin-right: 7px;
+      background: var(--fr-green);
+      border-radius: 50%;
+    }
+
+    #finance-radar-ui-concept .fr-stage { min-width: 0; padding: 0 30px 42px; }
+    #finance-radar-ui-concept .fr-mobile-bar { display: none; }
+
+    #finance-radar-ui-concept .fr-topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+      min-height: 70px;
+      border-bottom: 1px solid var(--fr-line);
+    }
+
+    #finance-radar-ui-concept .fr-context {
+      color: var(--fr-muted);
+      font-size: 12px;
+    }
+
+    #finance-radar-ui-concept .fr-live {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--fr-muted);
+      font-size: 11px;
+    }
+
+    #finance-radar-ui-concept .fr-live::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      background: var(--fr-green);
+      border-radius: 50%;
+    }
+
+    #finance-radar-ui-concept .fr-api-state {
+      display: none;
+      margin: 14px 0 0;
+      padding: 10px 12px;
+      color: var(--fr-muted);
+      background: var(--fr-panel);
+      border-left: 2px solid var(--fr-amber);
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    #finance-radar-ui-concept .fr-api-state.is-visible { display: block; }
+    #finance-radar-ui-concept .fr-api-state.is-connected { border-left-color: var(--fr-green); }
+
+    #finance-radar-ui-concept .fr-hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 28px;
+      align-items: end;
+      padding: 34px 0 26px;
+    }
+
+    #finance-radar-ui-concept .fr-kicker {
+      margin-bottom: 8px;
+      color: var(--fr-cyan);
+      font-size: 11px;
+      letter-spacing: .08em;
+    }
+
+    #finance-radar-ui-concept h1,
+    #finance-radar-ui-concept h2,
+    #finance-radar-ui-concept h3,
+    #finance-radar-ui-concept p { margin: 0; }
+
+    #finance-radar-ui-concept h1 {
+      font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+      font-size: clamp(30px, 4vw, 48px);
+      font-weight: 500;
+      letter-spacing: -.02em;
+    }
+
+    #finance-radar-ui-concept .fr-hero p {
+      max-width: 620px;
+      margin-top: 12px;
+      color: var(--fr-muted);
+      font-size: 13px;
+      line-height: 1.75;
+    }
+
+    #finance-radar-ui-concept .fr-priority {
+      flex: 0 0 auto;
+      padding-left: 22px;
+      border-left: 1px solid var(--fr-line);
+    }
+
+    #finance-radar-ui-concept .fr-priority span { display: block; color: var(--fr-muted); font-size: 11px; }
+    #finance-radar-ui-concept .fr-priority strong {
+      display: block;
+      margin-top: 5px;
+      color: var(--fr-amber);
+      font: 500 25px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    #finance-radar-ui-concept .fr-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      padding: 15px 0;
+      border-top: 1px solid var(--fr-line);
+      border-bottom: 1px solid var(--fr-line);
+    }
+
+    #finance-radar-ui-concept .fr-metric { padding: 0 18px; border-right: 1px solid var(--fr-line-soft); }
+    #finance-radar-ui-concept .fr-metric:first-child { padding-left: 0; }
+    #finance-radar-ui-concept .fr-metric:last-child { border-right: 0; }
+    #finance-radar-ui-concept .fr-metric span { display: block; color: var(--fr-muted); font-size: 11px; }
+    #finance-radar-ui-concept .fr-metric strong {
+      display: block;
+      margin-top: 6px;
+      font: 500 17px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    #finance-radar-ui-concept .fr-pipeline {
+      padding: 20px 0 18px;
+      border-bottom: 1px solid var(--fr-line);
+    }
+
+    #finance-radar-ui-concept .fr-pipeline-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 13px;
+    }
+
+    #finance-radar-ui-concept .fr-pipeline-title {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    #finance-radar-ui-concept .fr-pipeline-title strong { font-size: 13px; font-weight: 500; }
+    #finance-radar-ui-concept .fr-pipeline-title span { color: var(--fr-muted); font-size: 11px; }
+
+    #finance-radar-ui-concept .fr-flow-play {
+      padding: 7px 11px;
+      color: var(--fr-cyan);
+      background: transparent;
+      border: 1px solid var(--fr-line);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    #finance-radar-ui-concept .fr-flow-board {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(190px, 1fr) 128px minmax(240px, 1.2fr);
+      align-items: center;
+      gap: 34px;
+      min-height: 174px;
+      isolation: isolate;
+    }
+
+    #finance-radar-ui-concept .fr-flow-board::before,
+    #finance-radar-ui-concept .fr-flow-board::after {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      top: 50%;
+      height: 1px;
+      background: var(--fr-line);
+    }
+
+    #finance-radar-ui-concept .fr-flow-board::before { left: 23%; width: 22%; }
+    #finance-radar-ui-concept .fr-flow-board::after { left: 56%; width: 17%; }
+
+    #finance-radar-ui-concept .fr-source-caption,
+    #finance-radar-ui-concept .fr-result-caption {
+      margin-bottom: 9px;
+      color: var(--fr-faint);
+      font-size: 10px;
+      letter-spacing: .06em;
+    }
+
+    #finance-radar-ui-concept .fr-source-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    #finance-radar-ui-concept .fr-source-chip {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 34px;
+      padding: 6px 8px;
+      color: var(--fr-muted);
+      background: var(--fr-panel);
+      border: 1px solid var(--fr-line-soft);
+      border-radius: 6px;
+      font-size: 10px;
+    }
+
+    #finance-radar-ui-concept .fr-source-chip b {
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      color: var(--fr-cyan);
+      background: var(--fr-cyan-soft);
+      border-radius: 50%;
+      font-size: 8px;
+      font-weight: 500;
+    }
+
+    #finance-radar-ui-concept .fr-source-volume {
+      margin-top: 9px;
+      color: var(--fr-muted);
+      font-size: 10px;
+    }
+
+    #finance-radar-ui-concept .fr-source-volume strong {
+      color: var(--fr-amber);
+      font: 500 15px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    #finance-radar-ui-concept .fr-radar-wrap { text-align: center; }
+
+    #finance-radar-ui-concept .fr-radar {
+      position: relative;
+      width: 104px;
+      height: 104px;
+      margin: 0 auto;
+      overflow: hidden;
+      background: var(--fr-panel-strong);
+      border: 1px solid var(--fr-line);
+      border-radius: 50%;
+    }
+
+    #finance-radar-ui-concept .fr-radar::before,
+    #finance-radar-ui-concept .fr-radar::after {
+      content: "";
+      position: absolute;
+      border: 1px solid color-mix(in srgb, var(--fr-cyan) 38%, transparent);
+      border-radius: 50%;
+    }
+
+    #finance-radar-ui-concept .fr-radar::before { inset: 17px; }
+    #finance-radar-ui-concept .fr-radar::after { inset: 36px; background: var(--fr-cyan); }
+
+    #finance-radar-ui-concept .fr-radar-axis-x,
+    #finance-radar-ui-concept .fr-radar-axis-y {
+      position: absolute;
+      left: 13px;
+      right: 13px;
+      top: 51px;
+      height: 1px;
+      background: var(--fr-line-soft);
+    }
+
+    #finance-radar-ui-concept .fr-radar-axis-y {
+      left: 51px;
+      right: auto;
+      top: 13px;
+      bottom: 13px;
+      width: 1px;
+      height: auto;
+    }
+
+    #finance-radar-ui-concept .fr-radar-sweep {
+      position: absolute;
+      z-index: 2;
+      left: 51px;
+      top: 51px;
+      width: 44px;
+      height: 1px;
+      transform: rotate(-90deg);
+      transform-origin: left center;
+      background: linear-gradient(90deg, var(--fr-cyan), transparent);
+      opacity: .35;
+    }
+
+    #finance-radar-ui-concept .fr-radar-wrap p {
+      margin-top: 8px;
+      color: var(--fr-muted);
+      font-size: 9px;
+      line-height: 1.5;
+    }
+
+    #finance-radar-ui-concept .fr-result-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    #finance-radar-ui-concept .fr-result-column h3 {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding-bottom: 7px;
+      font-size: 11px;
+      font-weight: 500;
+      border-bottom: 1px solid var(--fr-line);
+    }
+
+    #finance-radar-ui-concept .fr-result-column h3 span { color: var(--fr-faint); font-size: 9px; font-weight: 400; }
+    #finance-radar-ui-concept .fr-result-column.is-priority h3 { color: var(--fr-green); }
+    #finance-radar-ui-concept .fr-result-column.is-noise h3 { color: var(--fr-red); }
+
+    #finance-radar-ui-concept .fr-result-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 28px;
+      color: var(--fr-muted);
+      border-bottom: 1px solid var(--fr-line-soft);
+      font-size: 9px;
+    }
+
+    #finance-radar-ui-concept .fr-result-row i {
+      display: grid;
+      place-items: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      font-style: normal;
+      font-size: 10px;
+    }
+
+    #finance-radar-ui-concept .is-priority .fr-result-row i { color: var(--fr-green); background: color-mix(in srgb, var(--fr-green) 10%, transparent); }
+    #finance-radar-ui-concept .is-noise .fr-result-row i { color: var(--fr-red); background: color-mix(in srgb, var(--fr-red) 10%, transparent); }
+
+    #finance-radar-ui-concept .fr-flow-token {
+      position: absolute;
+      z-index: 4;
+      left: 24%;
+      top: 46%;
+      width: 20px;
+      height: 27px;
+      border: 1px solid var(--fr-line);
+      border-radius: 4px;
+      background: var(--fr-panel-strong);
+      opacity: 0;
+      box-shadow: 0 5px 12px light-dark(rgb(36 44 47 / .08), rgb(0 0 0 / .18));
+    }
+
+    #finance-radar-ui-concept .fr-flow-token::before {
+      content: "";
+      position: absolute;
+      left: 4px;
+      right: 4px;
+      top: 7px;
+      height: 1px;
+      background: var(--fr-faint);
+      box-shadow: 0 4px 0 var(--fr-faint), 0 8px 0 var(--fr-faint);
+      opacity: .5;
+    }
+
+    #finance-radar-ui-concept .fr-flow-status {
+      min-height: 20px;
+      margin-top: 8px;
+      color: var(--fr-muted);
+      font-size: 10px;
+    }
+
+    #finance-radar-ui-concept .fr-pipeline.is-playing .fr-source-chip { animation: fr-source-pulse .52s ease-out 1 both; }
+    #finance-radar-ui-concept .fr-pipeline.is-playing .fr-source-chip:nth-child(2) { animation-delay: .12s; }
+    #finance-radar-ui-concept .fr-pipeline.is-playing .fr-source-chip:nth-child(3) { animation-delay: .24s; }
+    #finance-radar-ui-concept .fr-pipeline.is-playing .fr-source-chip:nth-child(4) { animation-delay: .36s; }
+    #finance-radar-ui-concept .fr-pipeline.is-playing .fr-flow-token.is-priority { animation: fr-token-priority 3.6s cubic-bezier(.42,0,.22,1) .35s 1 both; }
+    #finance-radar-ui-concept .fr-pipeline.is-playing .fr-flow-token.is-noise { animation: fr-token-noise 3.6s cubic-bezier(.42,0,.22,1) .72s 1 both; }
+    #finance-radar-ui-concept .fr-pipeline.is-playing .fr-flow-token.is-late { animation-delay: 1.04s; }
+    #finance-radar-ui-concept .fr-pipeline.is-playing .fr-radar-sweep { animation: fr-radar-scan .95s linear 1.35s 2 both; }
+    #finance-radar-ui-concept .fr-pipeline.is-playing .fr-radar { animation: fr-radar-confirm .4s ease-out 3.32s 1 both; }
+    #finance-radar-ui-concept .fr-pipeline.is-playing .is-priority .fr-result-row { animation: fr-result-confirm .38s ease-out 3.52s 1 both; }
+    #finance-radar-ui-concept .fr-pipeline.is-playing .is-noise .fr-result-row { animation: fr-result-dim .38s ease-out 3.72s 1 both; }
+
+    @keyframes fr-source-pulse {
+      0% { transform: translateY(0); }
+      45% { transform: translateY(-3px); border-color: var(--fr-cyan); }
+      100% { transform: translateY(0); }
+    }
+
+    @keyframes fr-radar-scan {
+      from { transform: rotate(-90deg); opacity: .3; }
+      to { transform: rotate(270deg); opacity: .8; }
+    }
+
+    @keyframes fr-radar-confirm {
+      0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--fr-green) 32%, transparent); }
+      100% { box-shadow: 0 0 0 10px transparent; border-color: var(--fr-green); }
+    }
+
+    @keyframes fr-token-priority {
+      0% { left: 23%; top: 45%; opacity: 0; transform: rotate(-4deg); }
+      12% { opacity: 1; }
+      48% { left: 49%; top: 45%; opacity: 1; transform: rotate(2deg); }
+      66% { left: 49%; top: 45%; opacity: .65; transform: scale(.88); }
+      100% { left: 75%; top: 36%; opacity: 0; transform: scale(.72); }
+    }
+
+    @keyframes fr-token-noise {
+      0% { left: 23%; top: 52%; opacity: 0; transform: rotate(4deg); }
+      12% { opacity: 1; }
+      48% { left: 49%; top: 48%; opacity: 1; transform: rotate(-2deg); }
+      66% { left: 49%; top: 48%; opacity: .65; transform: scale(.88); }
+      100% { left: 87%; top: 61%; opacity: 0; transform: scale(.72); }
+    }
+
+    @keyframes fr-result-confirm {
+      0% { transform: translateX(0); background: transparent; }
+      50% { transform: translateX(3px); background: color-mix(in srgb, var(--fr-green) 8%, transparent); }
+      100% { transform: translateX(0); background: transparent; }
+    }
+
+    @keyframes fr-result-dim {
+      0% { opacity: 1; }
+      50% { opacity: .42; }
+      100% { opacity: 1; }
+    }
+
+    #finance-radar-ui-concept .fr-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      padding: 22px 0 16px;
+    }
+
+    #finance-radar-ui-concept .fr-search {
+      position: relative;
+      flex: 1 1 260px;
+    }
+
+    #finance-radar-ui-concept .fr-search input {
+      width: 100%;
+      height: 40px;
+      padding: 0 38px 0 13px;
+      color: var(--fr-text);
+      background: var(--fr-panel);
+      border: 1px solid var(--fr-line);
+      border-radius: 7px;
+    }
+
+    #finance-radar-ui-concept .fr-search i,
+    #finance-radar-ui-concept .fr-search > svg { position: absolute; right: 12px; top: 12px; color: var(--fr-muted); }
+
+    #finance-radar-ui-concept .fr-filter-group { display: flex; flex-wrap: wrap; gap: 3px; }
+    #finance-radar-ui-concept .fr-filter-group button {
+      padding: 9px 12px;
+      color: var(--fr-muted);
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #finance-radar-ui-concept .fr-filter-group button:hover { color: var(--fr-text); background: var(--fr-panel); }
+    #finance-radar-ui-concept .fr-filter-group button[aria-pressed="true"] { color: var(--fr-text); background: var(--fr-panel-strong); }
+
+    #finance-radar-ui-concept .fr-content-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.7fr) minmax(270px, .8fr);
+      gap: 28px;
+      align-items: start;
+    }
+
+    #finance-radar-ui-concept .fr-section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 0 10px;
+    }
+    #finance-radar-ui-concept .fr-section-head h2 { font-size: 15px; font-weight: 500; }
+    #finance-radar-ui-concept .fr-section-head span { color: var(--fr-muted); font-size: 11px; }
+
+    #finance-radar-ui-concept .fr-feed { border-top: 1px solid var(--fr-line); }
+    #finance-radar-ui-concept .fr-empty-feed {
+      padding: 28px 0;
+      color: var(--fr-muted);
+      font-size: 12px;
+      line-height: 1.7;
+      border-bottom: 1px solid var(--fr-line-soft);
+    }
+    #finance-radar-ui-concept .fr-event[hidden] { display: none; }
+    #finance-radar-ui-concept .fr-event {
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr) 18px;
+      gap: 16px;
+      width: 100%;
+      padding: 18px 10px 18px 0;
+      color: inherit;
+      text-align: left;
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid var(--fr-line-soft);
+      cursor: pointer;
+    }
+    #finance-radar-ui-concept .fr-event:hover { background: var(--fr-panel); }
+    #finance-radar-ui-concept .fr-event[aria-selected="true"] {
+      padding-left: 10px;
+      background: var(--fr-panel-strong);
+      box-shadow: inset 2px 0 0 var(--fr-cyan);
+    }
+    #finance-radar-ui-concept .fr-event-time {
+      color: var(--fr-muted);
+      font: 500 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    #finance-radar-ui-concept .fr-event-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-right: 7px;
+      margin-bottom: 7px;
+      color: var(--fr-amber);
+      font-size: 11px;
+    }
+    #finance-radar-ui-concept .fr-event-status::before { content: "◇"; }
+    #finance-radar-ui-concept .fr-event[data-status="verified"] .fr-event-status { color: var(--fr-green); }
+    #finance-radar-ui-concept .fr-event[data-status="excluded"] .fr-event-status { color: var(--fr-red); }
+    #finance-radar-ui-concept .fr-event-title { font-size: 14px; font-weight: 500; }
+    #finance-radar-ui-concept .fr-event-summary { display: block; margin-top: 6px; color: var(--fr-muted); font-size: 12px; line-height: 1.6; }
+    #finance-radar-ui-concept .fr-event-meta { display: block; margin-top: 8px; color: var(--fr-faint); font-size: 10px; }
+    #finance-radar-ui-concept .fr-event-arrow { align-self: center; color: var(--fr-faint); }
+
+    #finance-radar-ui-concept .fr-detail {
+      margin-top: 14px;
+      padding: 18px;
+      background: var(--fr-panel);
+      border: 1px solid var(--fr-line);
+      border-radius: 8px;
+    }
+    #finance-radar-ui-concept .fr-detail-label { color: var(--fr-cyan); font-size: 11px; }
+    #finance-radar-ui-concept .fr-detail h3 { margin-top: 12px; font-size: 17px; font-weight: 500; line-height: 1.45; }
+    #finance-radar-ui-concept .fr-detail p { margin-top: 10px; color: var(--fr-muted); font-size: 12px; line-height: 1.7; }
+    #finance-radar-ui-concept .fr-detail dl { margin: 18px 0 0; }
+    #finance-radar-ui-concept .fr-detail-row {
+      display: grid;
+      grid-template-columns: 70px 1fr;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid var(--fr-line-soft);
+    }
+    #finance-radar-ui-concept .fr-detail dt { color: var(--fr-faint); font-size: 10px; }
+    #finance-radar-ui-concept .fr-detail dd { margin: 0; color: var(--fr-text); font-size: 11px; line-height: 1.55; }
+    #finance-radar-ui-concept .fr-primary-action {
+      width: 100%;
+      margin-top: 16px;
+      padding: 11px 14px;
+      color: var(--fr-bg);
+      background: var(--fr-text);
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    #finance-radar-ui-concept .fr-page { display: none; }
+    #finance-radar-ui-concept .fr-page.is-active { display: block; }
+
+    #finance-radar-ui-concept .fr-timeline {
+      margin-top: 10px;
+      border-top: 1px solid var(--fr-line);
+    }
+    #finance-radar-ui-concept .fr-step {
+      display: grid;
+      grid-template-columns: 108px 20px minmax(0, 1fr);
+      gap: 14px;
+      padding: 18px 0;
+      border-bottom: 1px solid var(--fr-line-soft);
+    }
+    #finance-radar-ui-concept .fr-step time { color: var(--fr-muted); font: 11px/1.5 ui-monospace, monospace; }
+    #finance-radar-ui-concept .fr-step-dot { width: 9px; height: 9px; margin-top: 4px; background: var(--fr-cyan); border-radius: 50%; }
+    #finance-radar-ui-concept .fr-step:last-child .fr-step-dot { background: var(--fr-green); }
+    #finance-radar-ui-concept .fr-step h3 { font-size: 14px; font-weight: 500; }
+    #finance-radar-ui-concept .fr-step p { margin-top: 6px; color: var(--fr-muted); font-size: 12px; line-height: 1.65; }
+
+    #finance-radar-ui-concept .fr-method-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 26px;
+      padding-top: 16px;
+      border-top: 1px solid var(--fr-line);
+    }
+    #finance-radar-ui-concept .fr-method-grid article { padding-top: 6px; }
+    #finance-radar-ui-concept .fr-method-grid h3 { font-size: 15px; font-weight: 500; }
+    #finance-radar-ui-concept .fr-method-grid p { margin-top: 10px; color: var(--fr-muted); font-size: 12px; line-height: 1.75; }
+    #finance-radar-ui-concept .fr-rule-line {
+      display: flex;
+      gap: 18px;
+      align-items: baseline;
+      margin-top: 30px;
+      padding: 20px 0;
+      border-top: 1px solid var(--fr-line);
+      border-bottom: 1px solid var(--fr-line);
+    }
+    #finance-radar-ui-concept .fr-rule-line strong { color: var(--fr-green); font-size: 18px; font-weight: 500; }
+    #finance-radar-ui-concept .fr-rule-line span { color: var(--fr-muted); font-size: 12px; }
+
+    @media (max-width: 820px) {
+      #finance-radar-ui-concept { grid-template-columns: 72px minmax(0, 1fr); }
+      #finance-radar-ui-concept .fr-rail { padding: 20px 10px; }
+      #finance-radar-ui-concept .fr-brand-copy,
+      #finance-radar-ui-concept .fr-nav-label,
+      #finance-radar-ui-concept .fr-nav button span,
+      #finance-radar-ui-concept .fr-boundary { display: none; }
+      #finance-radar-ui-concept .fr-brand { justify-content: center; padding-inline: 0; }
+      #finance-radar-ui-concept .fr-nav { margin-top: 18px; }
+      #finance-radar-ui-concept .fr-nav button { display: grid; place-items: center; grid-template-columns: 1fr; padding: 12px; }
+      #finance-radar-ui-concept .fr-stage { padding-inline: 22px; }
+      #finance-radar-ui-concept .fr-content-grid { grid-template-columns: 1fr; }
+      #finance-radar-ui-concept .fr-detail { margin-top: 0; }
+      #finance-radar-ui-concept .fr-method-grid { grid-template-columns: 1fr; gap: 16px; }
+      #finance-radar-ui-concept .fr-flow-board { grid-template-columns: minmax(170px, 1fr) 112px minmax(210px, 1.1fr); gap: 20px; }
+      #finance-radar-ui-concept .fr-radar { width: 92px; height: 92px; }
+      #finance-radar-ui-concept .fr-radar-axis-x { top: 45px; }
+      #finance-radar-ui-concept .fr-radar-axis-y { left: 45px; }
+      #finance-radar-ui-concept .fr-radar-sweep { left: 45px; top: 45px; width: 38px; }
+    }
+
+    @media (max-width: 560px) {
+      #finance-radar-ui-concept {
+        display: block;
+        min-height: 0;
+        border-radius: 8px;
+      }
+      #finance-radar-ui-concept .fr-rail { display: none; }
+      #finance-radar-ui-concept .fr-stage { padding: 0 14px 30px; }
+      #finance-radar-ui-concept .fr-mobile-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        min-height: 58px;
+        border-bottom: 1px solid var(--fr-line);
+      }
+      #finance-radar-ui-concept .fr-mobile-brand { font-size: 11px; font-weight: 500; letter-spacing: .06em; }
+      #finance-radar-ui-concept .fr-mobile-nav { display: flex; gap: 4px; }
+      #finance-radar-ui-concept .fr-mobile-nav button {
+        padding: 8px;
+        color: var(--fr-muted);
+        background: transparent;
+        border: 0;
+        border-radius: 5px;
+      }
+      #finance-radar-ui-concept .fr-mobile-nav button[aria-pressed="true"] { color: var(--fr-text); background: var(--fr-panel); }
+      #finance-radar-ui-concept .fr-topline { min-height: 50px; }
+      #finance-radar-ui-concept .fr-context { font-size: 11px; }
+      #finance-radar-ui-concept .fr-live { font-size: 10px; }
+      #finance-radar-ui-concept .fr-hero { display: block; padding: 26px 0 20px; }
+      #finance-radar-ui-concept h1 { font-size: 34px; }
+      #finance-radar-ui-concept .fr-priority { margin-top: 20px; padding: 15px 0 0; border-left: 0; border-top: 1px solid var(--fr-line-soft); }
+      #finance-radar-ui-concept .fr-metrics { grid-template-columns: repeat(2, 1fr); gap: 14px 0; }
+      #finance-radar-ui-concept .fr-metric { padding: 0 12px; }
+      #finance-radar-ui-concept .fr-metric:nth-child(2) { border-right: 0; }
+      #finance-radar-ui-concept .fr-metric:nth-child(3) { padding-left: 0; }
+      #finance-radar-ui-concept .fr-toolbar { align-items: stretch; }
+      #finance-radar-ui-concept .fr-filter-group { width: 100%; }
+      #finance-radar-ui-concept .fr-filter-group button { flex: 1; }
+      #finance-radar-ui-concept .fr-event { grid-template-columns: 62px minmax(0, 1fr); gap: 11px; }
+      #finance-radar-ui-concept .fr-event-arrow { display: none; }
+      #finance-radar-ui-concept .fr-step { grid-template-columns: 78px 14px minmax(0, 1fr); gap: 8px; }
+      #finance-radar-ui-concept .fr-rule-line { display: block; }
+      #finance-radar-ui-concept .fr-rule-line span { display: block; margin-top: 8px; }
+      #finance-radar-ui-concept .fr-pipeline-head { align-items: flex-start; }
+      #finance-radar-ui-concept .fr-pipeline-title { display: block; }
+      #finance-radar-ui-concept .fr-pipeline-title span { display: block; margin-top: 4px; }
+      #finance-radar-ui-concept .fr-flow-board {
+        grid-template-columns: 1fr;
+        gap: 22px;
+        min-height: 500px;
+        align-items: start;
+      }
+      #finance-radar-ui-concept .fr-flow-board::before { left: 50%; top: 26%; width: 1px; height: 18%; }
+      #finance-radar-ui-concept .fr-flow-board::after { left: 50%; top: 57%; width: 1px; height: 12%; }
+      #finance-radar-ui-concept .fr-source-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #finance-radar-ui-concept .fr-result-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #finance-radar-ui-concept .fr-flow-token { left: 44%; top: 29%; }
+      @keyframes fr-token-priority {
+        0% { left: 40%; top: 27%; opacity: 0; transform: rotate(-4deg); }
+        12% { opacity: 1; }
+        48% { left: 47%; top: 49%; opacity: 1; transform: rotate(2deg); }
+        66% { left: 47%; top: 49%; opacity: .65; transform: scale(.88); }
+        100% { left: 21%; top: 78%; opacity: 0; transform: scale(.72); }
+      }
+      @keyframes fr-token-noise {
+        0% { left: 56%; top: 27%; opacity: 0; transform: rotate(4deg); }
+        12% { opacity: 1; }
+        48% { left: 47%; top: 49%; opacity: 1; transform: rotate(-2deg); }
+        66% { left: 47%; top: 49%; opacity: .65; transform: scale(.88); }
+        100% { left: 73%; top: 78%; opacity: 0; transform: scale(.72); }
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #finance-radar-ui-concept .fr-pipeline *,
+      #finance-radar-ui-concept .fr-pipeline *::before,
+      #finance-radar-ui-concept .fr-pipeline *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+  </style>
+
+  <aside class="fr-rail" aria-label="Finance Radar 导航">
+    <div class="fr-brand">
+      <span class="fr-brand-mark" aria-hidden="true">◎</span>
+      <div class="fr-brand-copy">
+        <div class="fr-brand-name">FINANCE RADAR</div>
+        <div class="fr-brand-sub">金融事件证据台</div>
+      </div>
+    </div>
+    <div class="fr-nav-label">公开浏览</div>
+    <nav class="fr-nav">
+      <button type="button" data-page-target="overview" aria-pressed="true">
+        <i data-lucide="radio" aria-hidden="true"></i><span><strong>态势总览</strong><small>事件、证据与更新状态</small></span>
+      </button>
+      <button type="button" data-page-target="replay" aria-pressed="false">
+        <i data-lucide="git-branch" aria-hidden="true"></i><span><strong>证据演示</strong><small>看判断如何随证据变化</small></span>
+      </button>
+      <button type="button" data-page-target="method" aria-pressed="false">
+        <i data-lucide="shield-check" aria-hidden="true"></i><span><strong>方法与边界</strong><small>来源、时间与使用原则</small></span>
+      </button>
+    </nav>
+    <div class="fr-boundary"><span></span>只读情报 · 证据驱动核验<br>不下单 · 不代替人工判断</div>
+  </aside>
+
+  <main class="fr-stage">
+    <div class="fr-mobile-bar">
+      <span class="fr-mobile-brand">◎ FINANCE RADAR</span>
+      <div class="fr-mobile-nav" aria-label="移动端页面">
+        <button type="button" data-page-target="overview" aria-label="态势总览" aria-pressed="true"><i data-lucide="radio" aria-hidden="true"></i></button>
+        <button type="button" data-page-target="replay" aria-label="证据演示" aria-pressed="false"><i data-lucide="git-branch" aria-hidden="true"></i></button>
+        <button type="button" data-page-target="method" aria-label="方法与边界" aria-pressed="false"><i data-lucide="shield-check" aria-hidden="true"></i></button>
+      </div>
+    </div>
+
+    <div class="fr-topline">
+      <span class="fr-context">公开研究工作台 · 只读</span>
+      <span class="fr-live" data-live-status>正在连接只读接口…</span>
+    </div>
+
+    <section class="fr-page is-active" data-page="overview">
+      <header class="fr-hero">
+        <div>
+          <div class="fr-kicker">先证据，后判断</div>
+          <h1>今天值得核验什么</h1>
+          <p>把事件、原始来源和修订过程放在同一条阅读路径上。证据未闭合时，系统明确保留不确定性。</p>
+        </div>
+        <div class="fr-priority"><span>当前优先队列</span><strong data-priority-count>8,413</strong></div>
+      </header>
+
+      <p class="fr-api-state" data-api-state role="status" aria-live="polite"></p>
+
+      <div class="fr-metrics" aria-label="当前系统摘要">
+        <div class="fr-metric"><span>今日新增</span><strong data-metric-today>38</strong></div>
+        <div class="fr-metric"><span>事件总量</span><strong data-metric-total>14,391</strong></div>
+        <div class="fr-metric"><span>正式核验</span><strong data-metric-verified>546</strong></div>
+        <div class="fr-metric"><span>已排除</span><strong data-metric-excluded>1,445</strong></div>
+      </div>
+
+      <section class="fr-pipeline" aria-label="证据分流动画">
+        <div class="fr-pipeline-head">
+          <div class="fr-pipeline-title"><strong>证据如何进入优先队列</strong><span>多来源输入 → 原文核对 → 优先核验 / 噪音留档</span></div>
+          <button class="fr-flow-play" type="button">播放流程</button>
+        </div>
+        <div class="fr-flow-board">
+          <div>
+            <div class="fr-source-caption">多来源输入</div>
+            <div class="fr-source-list">
+              <div class="fr-source-chip"><b>SEC</b><span>官方申报</span></div>
+              <div class="fr-source-chip"><b>REG</b><span>监管公告</span></div>
+              <div class="fr-source-chip"><b>RSS</b><span>新闻线索</span></div>
+              <div class="fr-source-chip"><b>IR</b><span>公司披露</span></div>
+            </div>
+            <div class="fr-source-volume"><strong data-flow-source-count>1,248</strong> 条累计观察记录</div>
+          </div>
+          <div class="fr-radar-wrap">
+            <div class="fr-radar" aria-label="来源、时间与原文核对">
+              <span class="fr-radar-axis-x" aria-hidden="true"></span>
+              <span class="fr-radar-axis-y" aria-hidden="true"></span>
+              <span class="fr-radar-sweep" aria-hidden="true"></span>
+            </div>
+            <p>来源核对<br>时间对齐 · 证据分级</p>
+          </div>
+          <div>
+            <div class="fr-result-caption">核验结果</div>
+            <div class="fr-result-grid">
+              <div class="fr-result-column is-priority">
+                <h3>优先核验 <span data-flow-priority-count>12 条</span></h3>
+                <div class="fr-result-row"><i>✓</i><span>原始材料已定位</span></div>
+                <div class="fr-result-row"><i>✓</i><span>影响路径待复核</span></div>
+              </div>
+              <div class="fr-result-column is-noise">
+                <h3>噪音留档 <span>不进入结论</span></h3>
+                <div class="fr-result-row"><i>×</i><span>转载、重复或旧闻</span></div>
+                <div class="fr-result-row"><i>×</i><span>缺少可引用原文</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="fr-flow-token is-priority" aria-hidden="true"></span>
+          <span class="fr-flow-token is-noise" aria-hidden="true"></span>
+          <span class="fr-flow-token is-priority is-late" aria-hidden="true"></span>
+        </div>
+        <p class="fr-flow-status" aria-live="polite">点击“播放流程”查看证据卡片如何被核对与分流</p>
+      </section>
+
+      <div class="fr-toolbar">
+        <label class="fr-search">
+          <span class="sr-only">搜索主体或事件</span>
+          <input type="search" data-event-search placeholder="搜索主体、事件或来源">
+          <i data-lucide="search" aria-hidden="true"></i>
+        </label>
+        <div class="fr-filter-group" aria-label="事件状态筛选">
+          <button type="button" data-status-filter="all" aria-pressed="true">全部</button>
+          <button type="button" data-status-filter="pending" aria-pressed="false">待核验</button>
+          <button type="button" data-status-filter="verified" aria-pressed="false">已核验</button>
+          <button type="button" data-status-filter="excluded" aria-pressed="false">已排除</button>
+        </div>
+      </div>
+
+      <div class="fr-content-grid">
+        <section>
+          <div class="fr-section-head"><h2>事件流</h2><span data-visible-count>4 条示例 · 最近发现优先</span></div>
+          <div class="fr-feed" data-event-feed>
+            <button class="fr-event" type="button" data-event-id="apollo" data-status="excluded" aria-selected="false">
+              <span class="fr-event-time">08-20<br>01:17 UTC</span>
+              <span><span class="fr-event-status">已排除</span><span class="fr-event-title">Apollo Debt Solutions BDC</span><span class="fr-event-summary">基金报告线索已被排除，不作为有效事件结论。</span><span class="fr-event-meta">基金报告 · SEC 官方文件 · 事件日 2026-08-19</span></span>
+              <i class="fr-event-arrow" data-lucide="chevron-right" aria-hidden="true"></i>
+            </button>
+            <button class="fr-event" type="button" data-event-id="golden" data-status="pending" aria-selected="false">
+              <span class="fr-event-time">08-20<br>01:17 UTC</span>
+              <span><span class="fr-event-status">待核验</span><span class="fr-event-title">Golden Sun Technology Group Ltd.</span><span class="fr-event-summary">发现经营困境相关公开线索，仍需核对原始文件。</span><span class="fr-event-meta">经营困境 · SEC 官方文件 · 系统发现 08-19 20:16 UTC</span></span>
+              <i class="fr-event-arrow" data-lucide="chevron-right" aria-hidden="true"></i>
+            </button>
+            <button class="fr-event" type="button" data-event-id="elevra" data-status="pending" aria-selected="false">
+              <span class="fr-event-time">08-20<br>01:17 UTC</span>
+              <span><span class="fr-event-status">待核验</span><span class="fr-event-title">Elevra Lithium Ltd</span><span class="fr-event-summary">发现业绩披露相关公开线索，尚未形成正式结论。</span><span class="fr-event-meta">业绩披露 · SEC 官方文件 · 事件日 2026-08-19</span></span>
+              <i class="fr-event-arrow" data-lucide="chevron-right" aria-hidden="true"></i>
+            </button>
+            <button class="fr-event" type="button" data-event-id="peoples" data-status="pending" aria-selected="true">
+              <span class="fr-event-time">08-20<br>00:47 UTC</span>
+              <span><span class="fr-event-status">待核验</span><span class="fr-event-title">PEOPLES FINANCIAL SERVICES CORP.</span><span class="fr-event-summary">出现公司行动相关公开线索，仍需核对原始文件。</span><span class="fr-event-meta">公司行动 · SEC 官方文件 · 系统发现 08-19 20:16 UTC</span></span>
+              <i class="fr-event-arrow" data-lucide="chevron-right" aria-hidden="true"></i>
+            </button>
+          </div>
+        </section>
+
+        <aside class="fr-detail" aria-live="polite">
+          <div class="fr-detail-label">当前选择 · 待核验</div>
+          <h3 data-detail-title>PEOPLES FINANCIAL SERVICES CORP.</h3>
+          <p data-detail-summary>公司行动可能改变组织结构、证券权利或后续安排。当前只有公开线索，尚不能形成正式结论。</p>
+          <dl>
+            <div class="fr-detail-row"><dt>证据等级</dt><dd data-detail-authority>P0 · SEC 官方文件</dd></div>
+            <div class="fr-detail-row"><dt>为什么关注</dt><dd data-detail-relevance>可能改变组织结构、证券权利或后续安排</dd></div>
+            <div class="fr-detail-row"><dt>下一步</dt><dd>先读中文结论，再逐段核对原始证据</dd></div>
+          </dl>
+          <button class="fr-primary-action" type="button">查看事件与证据</button>
+        </aside>
+      </div>
+    </section>
+
+    <section class="fr-page" data-page="replay">
+      <header class="fr-hero">
+        <div><div class="fr-kicker">冻结案例 · 只读教学</div><h1>判断如何随证据变化</h1><p>按时间顺序查看同一事件从线索、原始文件到人工复核的变化，不读取当前生产结论。</p></div>
+        <div class="fr-priority"><span>演示案例</span><strong>04</strong></div>
+      </header>
+      <div class="fr-content-grid">
+        <section>
+          <div class="fr-section-head"><h2>官方申报确认破产风险</h2><span>SEC 固定回放 · 不写入</span></div>
+          <div class="fr-timeline">
+            <article class="fr-step"><time>09:02 UTC</time><span class="fr-step-dot"></span><div><h3>聚合线索出现</h3><p>只作为发现入口。由于缺少 P0/P1 原始证据，系统保持“证据不足”。</p></div></article>
+            <article class="fr-step"><time>09:18 UTC</time><span class="fr-step-dot"></span><div><h3>取得 SEC 原始申报</h3><p>精确引文和来源快照进入证据链，事件获得初步支撑，但仍不自动核验。</p></div></article>
+            <article class="fr-step"><time>10:06 UTC</time><span class="fr-step-dot"></span><div><h3>人工复核完成</h3><p>复核人确认关键事实与身份一致，系统记录正式结论和完整理由。</p></div></article>
+          </div>
+        </section>
+        <aside class="fr-detail">
+          <div class="fr-detail-label">演示结论</div>
+          <h3>证据不足时拒绝；证据到齐后再升级</h3>
+          <p>这页只解释规则如何工作，不触发实时采集、模型运行、数据库写入或任何交易操作。</p>
+          <dl><div class="fr-detail-row"><dt>起点</dt><dd>INSUFFICIENT</dd></div><div class="fr-detail-row"><dt>终点</dt><dd>HUMAN REVIEWED</dd></div><div class="fr-detail-row"><dt>边界</dt><dd>只读回放 · 不代表当前输出</dd></div></dl>
+        </aside>
+      </div>
+    </section>
+
+    <section class="fr-page" data-page="method">
+      <header class="fr-hero">
+        <div><div class="fr-kicker">方法与边界</div><h1>看清系统知道什么</h1><p>来源、时间和证据状态分别呈现；缺失、冲突与弃权不被包装成确定答案。</p></div>
+        <div class="fr-priority"><span>使用原则</span><strong style="font-family:inherit;font-size:18px">可追溯 · 可复核</strong></div>
+      </header>
+      <div class="fr-method-grid">
+        <article><h3>01 · 来源</h3><p>优先展示监管机构、法院、公司公告等原始材料。聚合页面只用于发现线索，关键结论必须能回到可引用的原文。</p></article>
+        <article><h3>02 · 时间</h3><p>事件发生、来源发布、系统发现和最后核验是不同时间。旧事件因修订重新出现时，不会被包装成刚发生的新事实。</p></article>
+        <article><h3>03 · 置信度</h3><p>置信度只说明当前证据是否足以支撑陈述，不代表价格方向或收益概率。证据缺失、冲突或主体不清时保留不确定性。</p></article>
+      </div>
+      <div class="fr-rule-line"><strong>先证据，再形成判断</strong><span>行情只作为事后上下文 · AI 不替代人工复核 · 系统不提供交易执行</span></div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const root = document.getElementById('finance-radar-ui-concept');
+      const pageButtons = [...root.querySelectorAll('[data-page-target]')];
+      const pages = [...root.querySelectorAll('[data-page]')];
+      const filterButtons = [...root.querySelectorAll('[data-status-filter]')];
+      const search = root.querySelector('[data-event-search]');
+      const feed = root.querySelector('[data-event-feed]');
+      const visibleCount = root.querySelector('[data-visible-count]');
+      const apiState = root.querySelector('[data-api-state]');
+      const pipeline = root.querySelector('.fr-pipeline');
+      const flowPlay = root.querySelector('.fr-flow-play');
+      const flowStatus = root.querySelector('.fr-flow-status');
+      const detailAction = root.querySelector('.fr-primary-action');
+      const stateQuery = {
+        pending: 'pending_verification',
+        verified: 'verified',
+        excluded: 'excluded'
+      };
+      const stateLabels = {
+        pending_verification: '待核验',
+        rough_reviewed: '已粗审',
+        insufficient: '证据不足',
+        verified: '已核验',
+        excluded: '已排除'
+      };
+      let activeStatus = 'all';
+      let connected = false;
+      let selectedEvent = null;
+      let events = [...root.querySelectorAll('.fr-event')];
+      let flowTimers = [];
+      let searchTimer = null;
+
+      const number = value => new Intl.NumberFormat('zh-CN').format(Number(value || 0));
+
+      function setText(selector, value) {
+        const element = root.querySelector(selector);
+        if (element) element.textContent = value;
+      }
+
+      function setApiState(copy, isConnected) {
+        apiState.textContent = copy;
+        apiState.classList.add('is-visible');
+        apiState.classList.toggle('is-connected', Boolean(isConnected));
+      }
+
+      async function api(path) {
+        const response = await fetch(path, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          credentials: 'omit'
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message = payload?.error?.message || `接口返回 ${response.status}`;
+          throw new Error(message);
+        }
+        return payload.data;
+      }
+
+      function elapsed(seconds) {
+        if (seconds === null || seconds === undefined || seconds === '') return '更新时间未知';
+        const value = Number(seconds);
+        if (!Number.isFinite(value)) return '更新时间未知';
+        if (value < 60) return `${Math.max(1, Math.round(value))} 秒前`;
+        if (value < 3600) return `${Math.round(value / 60)} 分钟前`;
+        if (value < 86400) return `${Math.round(value / 3600)} 小时前`;
+        return `${Math.round(value / 86400)} 天前`;
+      }
+
+      function dateParts(value) {
+        const parsed = value ? new Date(value) : null;
+        if (!parsed || Number.isNaN(parsed.getTime())) return ['—', '时间未知'];
+        const iso = parsed.toISOString();
+        return [iso.slice(5, 10), `${iso.slice(11, 16)} UTC`];
+      }
+
+      function normalizedUiState(item) {
+        const state = String(item.public_state || '').toLowerCase();
+        if (state === 'verified') return 'verified';
+        if (state === 'excluded') return 'excluded';
+        return 'pending';
+      }
+
+      function eventSummary(item) {
+        return item.source_summary
+          || item.evidence_excerpt
+          || item.source_title
+          || '当前只有结构化事件记录，仍需打开原始材料核对。';
+      }
+
+      function eventRelevance(item) {
+        const family = item.event_family || item.event_type || '金融事件';
+        return `${String(family).replaceAll('_', ' ')}可能影响公司事实判断，仍应结合原始来源阅读`;
+      }
+
+      function updateDetail(item, detail = null) {
+        selectedEvent = item;
+        const event = detail?.event || item;
+        const facts = detail?.current_version?.facts || {};
+        const preferred = detail?.preferred_source || {};
+        const summary = facts.evidence_summary
+          || preferred.summary
+          || eventSummary(item);
+        const authority = preferred.authority_tier
+          || item.credibility_tier
+          || '证据等级待核对';
+        const sourceName = preferred.title || item.source_title || item.discovery_source || '原始来源';
+        setText('[data-detail-title]', event.company_name || event.ticker_at_event || event.event_id || '未命名事件');
+        setText('[data-detail-summary]', summary);
+        setText('[data-detail-authority]', `${authority} · ${sourceName}`);
+        setText('[data-detail-relevance]', eventRelevance(event));
+        const label = root.querySelector('.fr-detail-label');
+        if (label) label.textContent = `当前选择 · ${stateLabels[item.public_state] || '待核验'}`;
+      }
+
+      function resetDetail() {
+        selectedEvent = null;
+        setText('[data-detail-title]', '当前没有可展示的事件');
+        setText('[data-detail-summary]', '只读接口已连接，但当前筛选范围内没有事件记录。数据进入事件账本后，这里会显示证据摘要。');
+        setText('[data-detail-authority]', '暂无证据');
+        setText('[data-detail-relevance]', '等待新的事件与原始来源');
+        const label = root.querySelector('.fr-detail-label');
+        if (label) label.textContent = '当前选择 · 暂无事件';
+        detailAction.disabled = true;
+        detailAction.textContent = '暂无事件详情';
+      }
+
+      async function loadDetail(item, button) {
+        events.forEach(peer => peer.setAttribute('aria-selected', String(peer === button)));
+        updateDetail(item);
+        detailAction.disabled = true;
+        detailAction.textContent = '正在读取完整详情…';
+        try {
+          const detail = await api(`/api/v1/events/${encodeURIComponent(item.event_id)}`);
+          updateDetail(item, detail);
+          detailAction.textContent = '完整事件详情已载入';
+        } catch (error) {
+          detailAction.textContent = '详情暂不可用，已保留列表摘要';
+        } finally {
+          detailAction.disabled = false;
+        }
+      }
+
+      function buildEvent(item, index) {
+        const button = document.createElement('button');
+        button.className = 'fr-event';
+        button.type = 'button';
+        button.dataset.eventId = item.event_id || '';
+        button.dataset.status = normalizedUiState(item);
+        button.setAttribute('aria-selected', String(index === 0));
+
+        const time = document.createElement('span');
+        time.className = 'fr-event-time';
+        const [day, clock] = dateParts(item.last_updated_at || item.event_date);
+        time.append(day, document.createElement('br'), clock);
+
+        const body = document.createElement('span');
+        const status = document.createElement('span');
+        status.className = 'fr-event-status';
+        status.textContent = stateLabels[item.public_state] || '待核验';
+        const title = document.createElement('span');
+        title.className = 'fr-event-title';
+        title.textContent = item.company_name || item.ticker_at_event || item.event_id || '未命名事件';
+        const summary = document.createElement('span');
+        summary.className = 'fr-event-summary';
+        summary.textContent = eventSummary(item);
+        const meta = document.createElement('span');
+        meta.className = 'fr-event-meta';
+        meta.textContent = [
+          String(item.event_family || item.event_type || '事件').replaceAll('_', ' '),
+          item.discovery_source || '来源待核对',
+          item.event_date ? `事件日 ${item.event_date}` : null
+        ].filter(Boolean).join(' · ');
+        body.append(status, title, summary, meta);
+
+        const arrow = document.createElement('span');
+        arrow.className = 'fr-event-arrow';
+        arrow.setAttribute('aria-hidden', 'true');
+        arrow.textContent = '›';
+        button.append(time, body, arrow);
+        button.addEventListener('click', () => loadDetail(item, button));
+        return button;
+      }
+
+      function renderEvents(items, total) {
+        feed.replaceChildren();
+        events = [];
+        if (!items.length) {
+          const empty = document.createElement('p');
+          empty.className = 'fr-empty-feed';
+          empty.textContent = '当前筛选没有匹配事件。可以清除搜索词或切换状态筛选。';
+          feed.append(empty);
+          visibleCount.textContent = `0 条 · 共 ${number(total)} 条`;
+          resetDetail();
+          return;
+        }
+        detailAction.disabled = false;
+        detailAction.textContent = '查看事件与证据';
+        items.forEach((item, index) => {
+          const button = buildEvent(item, index);
+          feed.append(button);
+          events.push(button);
+        });
+        visibleCount.textContent = `${number(items.length)} 条 · 共 ${number(total)} 条 · 最近发现优先`;
+        loadDetail(items[0], events[0]);
+      }
+
+      function filterStaticEvents() {
+        const query = search.value.trim().toLowerCase();
+        let visible = 0;
+        events.forEach(event => {
+          const statusMatch = activeStatus === 'all' || event.dataset.status === activeStatus;
+          const queryMatch = !query || event.textContent.toLowerCase().includes(query);
+          event.hidden = !(statusMatch && queryMatch);
+          if (!event.hidden) visible += 1;
+        });
+        visibleCount.textContent = `${visible} 条示例 · 接口未连接`;
+      }
+
+      async function loadEvents() {
+        const params = new URLSearchParams({ sort: 'latest', limit: '24', offset: '0' });
+        const query = search.value.trim();
+        if (query) params.set('q', query);
+        if (activeStatus !== 'all') params.set('public_state', stateQuery[activeStatus]);
+        visibleCount.textContent = '正在读取事件…';
+        const result = await api(`/api/v1/events?${params.toString()}`);
+        renderEvents(result.items || [], result.total || 0);
+      }
+
+      async function loadOverview() {
+        const now = new Date();
+        const today = [
+          now.getFullYear(),
+          String(now.getMonth() + 1).padStart(2, '0'),
+          String(now.getDate()).padStart(2, '0')
+        ].join('-');
+        const [overview, todayEvents] = await Promise.all([
+          api('/api/v1/overview'),
+          api(`/api/v1/events?date_from=${today}&date_to=${today}&limit=1&offset=0`)
+        ]);
+        const counts = overview.counts || {};
+        const funnel = overview.public_funnel || {};
+        const timing = overview.timing || {};
+        const priority = Number(overview.review_queue || 0);
+        setText('[data-metric-today]', number(todayEvents.total));
+        setText('[data-metric-total]', number(counts.canonical_events));
+        setText('[data-metric-verified]', number(funnel.verified ?? overview.event_status?.verified));
+        setText('[data-metric-excluded]', number(funnel.excluded ?? overview.event_status?.rejected));
+        setText('[data-priority-count]', number(priority));
+        setText('[data-flow-source-count]', number(counts.raw_observations || counts.canonical_events));
+        setText('[data-flow-priority-count]', `${number(priority)} 条`);
+        setText('[data-live-status]', `只读接口已连接 · ${elapsed(timing.latest_worker_success_age_seconds)}`);
+      }
+
+      async function connectReadOnlyApi() {
+        try {
+          await Promise.all([loadOverview(), loadEvents()]);
+          connected = true;
+          setApiState('已连接 Finance Radar 只读接口；总览、事件列表和事件详情均来自当前本地数据。', true);
+        } catch (error) {
+          connected = false;
+          setText('[data-live-status]', '只读接口未连接');
+          setApiState(`接口暂不可用，当前保留示例数据：${error.message}`, false);
+          filterStaticEvents();
+        }
+      }
+
+      function activatePage(target) {
+        pages.forEach(page => page.classList.toggle('is-active', page.dataset.page === target));
+        pageButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.pageTarget === target)));
+      }
+
+      pageButtons.forEach(button => button.addEventListener('click', () => activatePage(button.dataset.pageTarget)));
+      filterButtons.forEach(button => button.addEventListener('click', () => {
+        activeStatus = button.dataset.statusFilter;
+        filterButtons.forEach(peer => peer.setAttribute('aria-pressed', String(peer === button)));
+        if (connected) loadEvents().catch(error => setApiState(`事件接口暂不可用：${error.message}`, false));
+        else filterStaticEvents();
+      }));
+      search.addEventListener('input', () => {
+        window.clearTimeout(searchTimer);
+        searchTimer = window.setTimeout(() => {
+          if (connected) loadEvents().catch(error => setApiState(`事件接口暂不可用：${error.message}`, false));
+          else filterStaticEvents();
+        }, 280);
+      });
+      events.forEach(event => event.addEventListener('click', () => {
+        events.forEach(peer => peer.setAttribute('aria-selected', String(peer === event)));
+      }));
+      detailAction.addEventListener('click', () => {
+        if (selectedEvent) loadDetail(selectedEvent, events.find(item => item.dataset.eventId === selectedEvent.event_id));
+      });
+
+      flowPlay.addEventListener('click', () => {
+        flowTimers.forEach(window.clearTimeout);
+        flowTimers = [];
+        pipeline.classList.remove('is-playing');
+        void pipeline.offsetWidth;
+        pipeline.classList.add('is-playing');
+        flowPlay.textContent = '重新播放';
+        const priorityCopy = root.querySelector('[data-flow-priority-count]').textContent;
+
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          flowStatus.textContent = `核验完成：当前 ${priorityCopy} 进入优先队列，其余作为噪音、重复或证据不足信息留档`;
+          return;
+        }
+
+        flowStatus.textContent = '正在接收官方申报、监管公告、新闻线索与公司披露…';
+        flowTimers.push(window.setTimeout(() => { flowStatus.textContent = '正在核对来源、发布时间与可引用原文…'; }, 1350));
+        flowTimers.push(window.setTimeout(() => { flowStatus.textContent = '正在区分一手证据、转载重复与证据缺口…'; }, 2700));
+        flowTimers.push(window.setTimeout(() => { flowStatus.textContent = `核验完成：当前 ${priorityCopy} 进入优先队列，其余作为噪音、重复或证据不足信息留档`; }, 4200));
+      });
+
+      connectReadOnlyApi();
+    })();
+  </script>
+</div>
