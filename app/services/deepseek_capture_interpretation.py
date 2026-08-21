@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .capture_interpretation import (
+    ASSET_PATTERNS,
     CAPTURE_INTERPRETATION_PROMPT,
+    MODEL_OUTPUT_FIELDS,
     CaptureInterpretationContractError,
     validate_model_output,
 )
@@ -180,6 +182,68 @@ def _restore_source_quote_casing(
     return repaired
 
 
+def _numeric_tokens(text: str) -> set[str]:
+    pattern = re.compile(r"(?<![\w])(?:[$¥€£]\s*)?\d[\d,]*(?:\.\d+)?%?")
+    return {
+        re.sub(r"[\s,$¥€£]", "", token).casefold()
+        for token in pattern.findall(str(text or ""))
+    }
+
+
+def _has_only_grounded_numbers(text: Any, source_numbers: set[str]) -> bool:
+    return isinstance(text, str) and _numeric_tokens(text).issubset(source_numbers)
+
+
+def _narrow_model_output(output: Any, source_text: str) -> Any:
+    """Apply deterministic, information-reducing repairs before validation.
+
+    DeepSeek occasionally adds wrapper/extra keys, returns asset objects, or
+    repeats a number that is absent from the retained capture.  Those are
+    formatting failures rather than useful claims.  This helper may only drop
+    model-controlled material or replace ungrounded prose with a number-free
+    boundary statement; the strict contract validator still makes the final
+    decision.
+    """
+
+    if not isinstance(output, dict):
+        return output
+    candidate = output
+    wrapped = output.get("output")
+    if isinstance(wrapped, dict) and MODEL_OUTPUT_FIELDS.issubset(wrapped):
+        candidate = wrapped
+    if not MODEL_OUTPUT_FIELDS.issubset(candidate):
+        return output
+
+    repaired = {key: candidate[key] for key in MODEL_OUTPUT_FIELDS}
+    repaired["affected_assets"] = [
+        name for name, pattern in ASSET_PATTERNS if pattern.search(source_text)
+    ]
+
+    source_numbers = _numeric_tokens(source_text)
+    if not _has_only_grounded_numbers(repaired.get("one_line_zh"), source_numbers):
+        repaired["one_line_zh"] = (
+            "来源描述了一项相关事项；具体表述以系统保留的原始文本为准。"
+        )
+
+    claims = repaired.get("what_source_says")
+    if isinstance(claims, list):
+        for claim in claims:
+            if isinstance(claim, dict) and not _has_only_grounded_numbers(
+                claim.get("text_zh"), source_numbers
+            ):
+                claim["text_zh"] = "来源表达了所引用的内容。"
+
+    for key in ("what_source_does_not_prove_zh", "missing_to_change_state_zh"):
+        values = repaired.get(key)
+        if isinstance(values, list):
+            repaired[key] = [
+                value
+                for value in values
+                if _has_only_grounded_numbers(value, source_numbers)
+            ]
+    return repaired
+
+
 @dataclass(frozen=True)
 class DeepSeekCaptureInterpretationProvider:
     api_key: str
@@ -269,12 +333,13 @@ class DeepSeekCaptureInterpretationProvider:
                 payload.get("summary_or_content") or ""
             )
             parsed = _restore_source_quote_casing(parsed, source_text)
+            parsed = _narrow_model_output(parsed, source_text)
             validated = validate_model_output(parsed, source_text)
         except CaptureInterpretationContractError as exc:
             raise DeepSeekCaptureInterpretationError(
                 f"DEEPSEEK_CONTRACT_{str(exc)}",
                 usage=usage,
-                retryable=False,
+                retryable=True,
                 error_class="CONTRACT_REJECTED",
             ) from None
         usage["finish_reason"] = str(choice.get("finish_reason") or "")[:80]

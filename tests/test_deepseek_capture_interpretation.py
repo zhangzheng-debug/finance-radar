@@ -138,12 +138,14 @@ def test_deepseek_provider_rejects_unapproved_model_and_hallucinated_quote() -> 
     with pytest.raises(DeepSeekCaptureInterpretationError, match="UNSUPPORTED_SOURCE_QUOTE") as error:
         provider.interpret(_normalized())
     assert error.value.error_class == "CONTRACT_REJECTED"
-    assert error.value.retryable is False
+    assert error.value.retryable is True
 
 
 def test_deepseek_contract_failure_carries_billable_usage() -> None:
     invalid = _model_output()
-    invalid["affected_assets"] = ["BTC"]
+    invalid["what_source_says"] = [
+        {"text_zh": "虚构事实。", "quote": "The Fed released the minutes"}
+    ]
 
     def requester(url, headers, payload, timeout):
         return {
@@ -190,3 +192,30 @@ def test_deepseek_provider_restores_case_only_quotes_to_captured_text() -> None:
         "MARKETS AWAITED THE FED MEETING MINUTES"
     )
     assert validated["actors"][0]["quote"] == "FED"
+
+
+def test_deepseek_provider_narrows_extra_fields_asset_objects_and_ungrounded_numbers() -> None:
+    output = _model_output()
+    output["affected_assets"] = [{"symbol": "BTC"}]
+    output["one_line_zh"] = "来源称价格上涨了 20%，涉及 BTC。"
+    output["what_source_says"][0]["text_zh"] = "市场已经等待了 20 天。"
+    output["unexpected"] = "must be removed"
+
+    def requester(url, headers, payload, timeout):
+        return {
+            "choices": [
+                {"message": {"content": json.dumps(output)}, "finish_reason": "stop"}
+            ],
+            "usage": {},
+        }
+
+    provider = DeepSeekCaptureInterpretationProvider(
+        api_key="unit-test-secret",
+        requester=requester,
+    )
+    validated, _ = provider.interpret(_normalized())
+
+    assert set(validated) == set(_model_output())
+    assert validated["affected_assets"] == ["GOLD"]
+    assert "20" not in validated["one_line_zh"]
+    assert validated["what_source_says"][0]["text_zh"] == "来源表达了所引用的内容。"
