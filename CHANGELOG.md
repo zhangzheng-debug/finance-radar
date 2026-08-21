@@ -5,6 +5,14 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.22.2
+
+- Fixed the production capture-interpretation systemd entry point and hardened
+  DeepSeek JSON adaptation with information-reducing normalization for extra
+  fields, malformed asset lists and ungrounded numeric prose. The strict quote,
+  schema and canonical no-mutation gates remain authoritative; transient model
+  contract failures are bounded and retryable.
+
 ## 2026.08.22.1
 
 - Closed the captured-source interpretation path with grounded Chinese summaries,
