@@ -39,8 +39,10 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         *,
         source_id: str = "opennews_free",
         published_at: str = "2026-07-15T10:00:00Z",
-        raw_json: str = "{}",
+        raw_json: str | None = None,
     ) -> None:
+        if raw_json is None:
+            raw_json = json.dumps({"item": {"company": "Fixture Subject"}})
         now = utc_now()
         observation_id = stable_id("OBS", source_id, external_id)
         self.connection.execute(
@@ -86,6 +88,40 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         self.assertEqual(event["no_trading"], 1)
         job = self.connection.execute("SELECT * FROM pipeline_jobs").fetchone()
         self.assertEqual(job["status"], "PENDING_PRIMARY_EVIDENCE")
+
+    def test_subject_unresolved_observation_never_enters_canonical_ledger(self) -> None:
+        self.add_observation(
+            "unknown-subject",
+            "Unnamed issuer files for Chapter 11 bankruptcy",
+            "https://example.test/unknown-subject",
+            raw_json="{}",
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["subject_filtered"], 1)
+        self.assertEqual(result["candidates"], 0)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0],
+            0,
+        )
+        job = self.connection.execute("SELECT status,last_error FROM observation_jobs").fetchone()
+        self.assertEqual(job["status"], "COMPLETED_SUBJECT_FILTERED")
+        self.assertEqual(job["last_error"], "subject_unresolved_not_canonical")
+
+    def test_legal_company_name_in_headline_satisfies_subject_gate(self) -> None:
+        self.add_observation(
+            "named-subject",
+            "Example Corp files for Chapter 11 bankruptcy",
+            "https://example.test/named-subject",
+            raw_json="{}",
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["candidates"], 1)
+        event = self.connection.execute("SELECT company_name FROM canonical_events").fetchone()
+        self.assertEqual(event["company_name"], "Example Corp")
 
     def test_same_canonical_url_clusters_and_no_rule_completes(self) -> None:
         self.add_observation("a", "Firm announces a cross-border merger", "https://x.com/a/1")
@@ -396,7 +432,9 @@ class LiveCandidateExtractorTests(unittest.TestCase):
                 external_id,
                 title,
                 url,
-                raw_json=json.dumps({"item": {"title": title, "coins": []}}),
+                raw_json=json.dumps(
+                    {"item": {"title": title, "coins": [], "company": "Fixture Subject"}}
+                ),
             )
         result = extractor.process_pending(self.connection, limit=10)
         self.assertEqual(result["candidates"], 2)
@@ -675,12 +713,14 @@ class LiveCandidateExtractorTests(unittest.TestCase):
             "Federal Reserve announces first monetary policy action",
             "https://www.federalreserve.gov/release-one.htm",
             source_id="federal_reserve_press",
+            raw_json="{}",
         )
         self.add_observation(
             "fed-two",
             "Federal Reserve announces second monetary policy action",
             "https://www.federalreserve.gov/release-two.htm",
             source_id="federal_reserve_press",
+            raw_json="{}",
         )
         result = extractor.process_pending(self.connection, limit=10)
         self.assertEqual(result["candidates"], 2)

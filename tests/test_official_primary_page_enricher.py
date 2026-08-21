@@ -38,7 +38,7 @@ class OfficialPrimaryPageEnricherTests(unittest.TestCase):
         now = utc_now()
         self.connection.execute(
             """INSERT INTO raw_observations VALUES (
-               ?,?,?,?,?,?,?,?,?,'{}','captured')""",
+               ?,?,?,?,?,?,?,?,?,?,'captured')""",
             (
                 observation_id,
                 source_id,
@@ -49,6 +49,7 @@ class OfficialPrimaryPageEnricherTests(unittest.TestCase):
                 title,
                 url,
                 hashlib.sha256(title.encode()).hexdigest(),
+                '{"item":{"company":"Example Corp"}}',
             ),
         )
         enqueue_observation_job(
