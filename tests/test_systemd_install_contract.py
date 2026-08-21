@@ -19,6 +19,12 @@ OPERATOR_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-
 ACTIVATOR = Path(__file__).parents[1] / "deployment" / "systemd" / "activate_prepared_restore.sh"
 SLICE_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar.slice"
 LLM_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-evidence-llm.service"
+CAPTURE_INTERPRETATION_UNIT = (
+    Path(__file__).parents[1]
+    / "deployment"
+    / "systemd"
+    / "finance-radar-capture-interpretation.service"
+)
 RECEIPT_VALIDATOR = Path(__file__).parents[1] / "deployment" / "systemd" / "verify_backup_receipt.py"
 LOCAL_LLM_INSTALLER = Path(__file__).parents[1] / "deployment" / "systemd" / "install_local_evidence_model.sh"
 MIGRATION_BACKUP = Path(__file__).parents[1] / "deployment" / "systemd" / "create_migration_backup.sh"
@@ -58,6 +64,13 @@ def test_remote_installer_keeps_venv_readable_by_service_account() -> None:
     assert "runuser -u finance-radar" in source
     assert "import sklearn, sklearn.pipeline" in source
     assert 'sklearn.__version__ == "1.8.0"' in source
+
+
+def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() -> None:
+    source = CAPTURE_INTERPRETATION_UNIT.read_text(encoding="utf-8")
+
+    assert "scripts/run_capture_interpretation_worker.py --limit 3" in source
+    assert "--env-file /dev/null" not in source
 
 
 def test_remote_installer_uses_explicit_current_public_url() -> None:
