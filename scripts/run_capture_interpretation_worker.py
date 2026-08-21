@@ -25,6 +25,8 @@ from app.services.source_observation_recovery import (  # noqa: E402
 )
 from app.storage import OperationsRepository  # noqa: E402
 from scripts.run_capture_interpretation_deepseek import (  # noqa: E402
+    RUN_CACHED,
+    RUN_COMPLETED,
     load_local_env,
     run as run_single,
 )
@@ -35,6 +37,14 @@ PRIORITY = {"NO_URL_RAW_ONLY": 0, "P2_CAPTURE_ONLY": 1}
 
 def _safe_json(**values: Any) -> None:
     print(json.dumps(values, ensure_ascii=False, sort_keys=True))
+
+
+def classify_run_code(code: int) -> str:
+    if code == RUN_COMPLETED:
+        return "COMPLETED"
+    if code == RUN_CACHED:
+        return "CACHED"
+    return "FAILED"
 
 
 def candidates(plan: dict[str, Any]) -> list[dict[str, str]]:
@@ -99,7 +109,13 @@ def run(args: argparse.Namespace) -> int:
                     env_file=args.env_file,
                 )
             )
-            completed += int(code == 0)
+            outcome = classify_run_code(code)
+            if outcome == "COMPLETED":
+                completed += 1
+            elif outcome == "CACHED":
+                skipped_terminal += 1
+            else:
+                failed += 1
         except RuntimeError as exc:
             code = str(exc)
             if "DAILY_REQUEST_CAP_REACHED" in code or "DAILY_CNY_CAP_REACHED" in code:

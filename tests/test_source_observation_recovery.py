@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from app.services.source_observation_recovery import build_source_observation_recovery_plan
+from app.storage import LedgerRepository
 from build_source_observation_recovery import build
 from event_ledger import open_ledger, upsert_source
 
@@ -166,6 +167,10 @@ def test_source_observation_recovery_is_complete_read_only_and_deterministic() -
             "semantic_content_sha256"
         ]
         assert "raw_json" not in sec["captures"][0]
+        ledger_capture = LedgerRepository(ledger).captured_sources("e-sec")[0]
+        assert sec["captures"][0]["capture_receipt_sha256"] == ledger_capture[
+            "capture_receipt_sha256"
+        ]
 
 
 def test_cli_builds_manifest_records_and_hashes() -> None:

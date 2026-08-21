@@ -68,6 +68,8 @@ def load_local_env(path: Path) -> None:
 
 RESERVED_CNY_PER_REQUEST = 0.02
 MAX_ATTEMPTS = 4
+RUN_COMPLETED = 0
+RUN_CACHED = 3
 
 
 def _credential() -> str:
@@ -157,7 +159,7 @@ def run(args: argparse.Namespace) -> int:
             canonical_state_unchanged=True,
             no_trading=True,
         )
-        return 0
+        return RUN_CACHED
 
     claim = operations.claim_capture_interpretation(
         provider=provider.provider_name,
@@ -229,7 +231,7 @@ def run(args: argparse.Namespace) -> int:
         canonical_state_unchanged=True,
         no_trading=True,
     )
-    return 0
+    return RUN_COMPLETED
 
 
 def parser() -> argparse.ArgumentParser:
@@ -245,7 +247,11 @@ def parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = parser().parse_args()
     try:
-        return run(args)
+        code = run(args)
+        # A direct single-job invocation treats an immutable cache hit as a
+        # successful no-op.  The batch worker imports ``run`` directly and uses
+        # RUN_CACHED to continue scanning instead of consuming its work limit.
+        return RUN_COMPLETED if code == RUN_CACHED else code
     except Exception as exc:
         _safe_result(status="FAILED", error=str(exc)[:240], no_trading=True)
         return 2

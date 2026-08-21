@@ -91,7 +91,22 @@ def _capture(row: sqlite3.Row) -> dict[str, Any]:
         "observation_status": str(row["observation_status"] or "captured"),
         "relation_type": row["relation_type"],
     }
-    capture["capture_receipt_sha256"] = sha256_json(capture)
+    # Keep this receipt byte-for-byte compatible with
+    # ``LedgerRepository.captured_sources``.  The recovery plan intentionally
+    # exposes fewer display fields, but an interpretation job must still bind
+    # to the same immutable capture identity used by the canonical ledger.
+    receipt_payload = {
+        "source_id": capture.get("source_id"),
+        "external_id": capture.get("external_id"),
+        "semantic_content_sha256": capture.get("semantic_content_sha256"),
+        "canonical_url": capture.get("canonical_url"),
+        "source_published_at": capture.get("source_published_at"),
+        "local_received_at": capture.get("local_received_at"),
+        "latest_revision_no": capture.get("latest_revision_no"),
+        "latest_revision_kind": capture.get("latest_revision_kind"),
+        "raw_payload_sha256": capture.get("raw_payload_sha256"),
+    }
+    capture["capture_receipt_sha256"] = sha256_json(receipt_payload)
     return capture
 
 

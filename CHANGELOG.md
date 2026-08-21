@@ -5,6 +5,13 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.22.3
+
+- Fixed the five-minute capture-interpretation queue so recovery-plan receipts
+  match canonical captured-source receipts. Immutable cache hits no longer
+  consume the per-run completion limit, preventing new candidates from being
+  starved while preserving cache reuse and zero canonical mutation.
+
 ## 2026.08.22.2
 
 - Fixed the production capture-interpretation systemd entry point and hardened

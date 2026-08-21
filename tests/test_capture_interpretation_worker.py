@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from scripts.run_capture_interpretation_worker import candidates
+from scripts.run_capture_interpretation_deepseek import RUN_CACHED, RUN_COMPLETED
+from scripts.run_capture_interpretation_worker import candidates, classify_run_code
 
 
 def test_worker_only_selects_nonempty_live_zero_evidence_capture_buckets() -> None:
@@ -31,3 +32,9 @@ def test_worker_only_selects_nonempty_live_zero_evidence_capture_buckets() -> No
 
     selected = candidates(plan)
     assert [item["event_id"] for item in selected] == ["raw", "p2"]
+
+
+def test_cached_single_job_does_not_consume_batch_completion_limit() -> None:
+    assert classify_run_code(RUN_COMPLETED) == "COMPLETED"
+    assert classify_run_code(RUN_CACHED) == "CACHED"
+    assert classify_run_code(99) == "FAILED"
