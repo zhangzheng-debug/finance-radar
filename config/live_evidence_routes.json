@@ -159,15 +159,6 @@
         "support_level": "partial_context_only",
         "note": "Officially confirms an ongoing Iran port blockade and enforcement in June, but does not by itself confirm the July 15 claim that it was newly reimposed."
       }
-    ],
-    "FR-LIVE-a8b94684ba13a7e2317cd943f20cf841": [
-      {
-        "source_name": "European Central Bank",
-        "evidence_url": "https://www.ecb.europa.eu/press/accounts/2026/html/ecb.mg260709~0e7f8241c9.en.html",
-        "evidence_date": "2026-07-09",
-        "support_level": "partial_context_only",
-        "note": "Officially confirms that the Middle East conflict and shipping disruption affect ECB inflation and rate analysis, but not the reported July 15 Nagel wording or next-week timing."
-      }
     ]
   }
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -69,6 +70,21 @@ class LiveAssetRelationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Candidate event"):
                 relations.apply_relations(connection, self.definition("FR-LIVE-test", True))
             connection.close()
+
+    def test_retired_subjectless_event_has_no_static_runtime_references(self) -> None:
+        retired_event_id = "FR-LIVE-a8b94684ba13a7e2317cd943f20cf841"
+        relation_config = json.loads(
+            (ROOT / "config" / "live_asset_relations.json").read_text(encoding="utf-8")
+        )
+        evidence_config = json.loads(
+            (ROOT / "config" / "live_evidence_routes.json").read_text(encoding="utf-8")
+        )
+
+        self.assertNotIn(
+            retired_event_id,
+            {event["event_id"] for event in relation_config["events"]},
+        )
+        self.assertNotIn(retired_event_id, evidence_config.get("known_context", {}))
 
 
 if __name__ == "__main__":

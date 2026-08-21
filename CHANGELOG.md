@@ -7,6 +7,12 @@ Releases use the same version prefixed by `v`.
 
 - No unreleased changes.
 
+## 2026.08.21.2
+
+- Removed the reviewed asset-relation and evidence-context references to the
+  subjectless ECB projection retired by the 2026.08.21.1 cleanup. Continuous
+  collection no longer fails while replaying that intentionally removed event.
+
 ## 2026.08.21.1
 
 - Prevented observations with neither a company name nor an event-time ticker
