@@ -1284,6 +1284,7 @@ def market_context_items(
             )
             continue
         captured_at = str(snapshot.get("captured_at") or "")
+        provider_as_of = str(snapshot.get("provider_as_of") or "")
         parsed = parse_datetime(captured_at)
         seconds = max(0, int((now - parsed).total_seconds())) if parsed else None
         state = "ok" if seconds is not None and seconds <= 900 else "watch"
@@ -1301,7 +1302,9 @@ def market_context_items(
                 "freshness": f"CAPTURED {age_label(captured_at, now=now).upper()}",
                 "state": state,
                 "detail": (
-                    "只读事件后观察 · 提供商未返回源时间戳"
+                    f"只读分钟行情 · 提供商时间 {provider_as_of} · 系统采集 {captured_at}"
+                    if safe_boundary and provider_as_of
+                    else "只读事件后观察 · 提供商未返回源时间戳"
                     if safe_boundary
                     else "BOUNDARY VIOLATION · 快照未声明只读/禁止交易"
                 ),

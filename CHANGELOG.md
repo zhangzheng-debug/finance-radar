@@ -5,6 +5,25 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.22.1
+
+- Closed the captured-source interpretation path with grounded Chinese summaries,
+  immutable source references, DeepSeek JSON-contract validation, retry leases,
+  failure accounting and an optional bounded systemd worker. Daily request and
+  CNY ceilings are intentionally unlimited by owner decision while usage,
+  per-batch, timeout, retry and output-token controls remain enforced.
+- Added source-observation recovery for API payloads without a usable original
+  URL, preserving raw content as reviewable P2 captures without promoting it to
+  citable evidence or changing canonical event status.
+- Added minute-bar market observations with provider timestamps, a 24-card
+  financial knowledge layer with FTS5 retrieval and traceable calculators, and
+  a leak-resistant dual-human-gold preparation/training bridge that remains
+  shadow-only until authentic labels return.
+- Hardened the public overview and event dossier with bounded aggregation caches,
+  supported-source selection, financial context, explicit degraded states and
+  historical Schema 14 compatibility. Full local regression passed with
+  `981 passed, 5 skipped`.
+
 - Added a read-only public-reader quality gate: a canonical record enters the
   public event feed only when it has a named subject, a structured fact summary,
   and a citable URL plus exact source passage. Incomplete candidates remain in

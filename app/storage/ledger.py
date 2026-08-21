@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from contextlib import closing
 from datetime import date, datetime, timezone
@@ -44,11 +45,28 @@ current_source_content AS (
     SELECT r.observation_id,
            r.source_id,
            r.external_id,
-           r.source_published_at,
+           CASE
+             WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.published_at')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.created_at')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.posted_at')),''),
+               r.source_published_at
+             )
+             ELSE r.source_published_at
+           END AS source_published_at,
            r.local_received_at,
            COALESCE(sr.title,r.title) AS title,
            COALESCE(sr.summary,r.summary) AS summary,
-           r.canonical_url,
+           CASE
+             WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.link')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.url')),''),
+               r.canonical_url
+             )
+             ELSE r.canonical_url
+           END AS canonical_url,
            COALESCE(sr.content_sha256,r.content_sha256) AS content_sha256,
            COALESCE(sr.raw_json,r.raw_json) AS raw_json,
            CASE WHEN sr.revision_kind='delete'
@@ -1342,6 +1360,7 @@ class LedgerRepository:
         date_from: str | None = None,
         date_to: str | None = None,
         reader_ready: bool | None = None,
+        captured_source_required: bool = False,
         sort: str = "event_date",
         limit: int = 50,
         offset: int = 0,
@@ -1402,14 +1421,23 @@ class LedgerRepository:
         if reader_ready is not None:
             where.append("e.reader_ready=?")
             params.append(int(reader_ready))
+        if captured_source_required:
+            where.append(
+                "EXISTS (SELECT 1 FROM event_observations ceo "
+                "JOIN latest_source_content csr ON csr.observation_id=ceo.observation_id "
+                "WHERE ceo.event_id=e.event_id AND csr.observation_status!='deleted')"
+            )
         if query:
+            source_relation_filter = (
+                "" if captured_source_required else "AND qeo.relation_type!='filtered_aggregated_noise' "
+            )
             where.append(
                 "(LOWER(COALESCE(e.company_name,'') || ' ' || COALESCE(e.ticker_at_event,'') || ' ' || "
                 "e.event_type || ' ' || COALESCE(e.event_family,'') || ' ' || "
                 "COALESCE(e.discovery_source,'') || ' ' || e.event_id) LIKE ? OR EXISTS ("
                 "SELECT 1 FROM event_observations qeo JOIN latest_source_content qr "
                 "ON qr.observation_id=qeo.observation_id WHERE qeo.event_id=e.event_id "
-                "AND qeo.relation_type!='filtered_aggregated_noise' "
+                f"{source_relation_filter}"
                 "AND LOWER(COALESCE(qr.title,'') || ' ' || COALESCE(qr.summary,'')) LIKE ?))"
             )
             params.extend([f"%{query.lower()}%", f"%{query.lower()}%"])
@@ -1426,6 +1454,10 @@ class LedgerRepository:
             )
             SELECT e.*,
                    (SELECT COUNT(*) FROM event_evidence x WHERE x.event_id=e.event_id) AS evidence_count,
+                   (SELECT COUNT(*) FROM event_observations xeo
+                    JOIN latest_source_content xr ON xr.observation_id=xeo.observation_id
+                    WHERE xeo.event_id=e.event_id AND xr.observation_status!='deleted')
+                     AS captured_source_count,
                    (SELECT severity_grade FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS severity_grade,
                    (SELECT credibility_tier FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS credibility_tier,
                    (SELECT evidence_passage FROM event_evidence x WHERE x.event_id=e.event_id AND evidence_passage IS NOT NULL ORDER BY passage_score DESC, updated_at DESC LIMIT 1) AS evidence_excerpt,
@@ -1468,6 +1500,7 @@ class LedgerRepository:
             "date_from": date_from,
             "date_to": date_to,
             "reader_ready": reader_ready,
+            "captured_source_required": captured_source_required,
             "sort": sort,
         }
 
@@ -1524,6 +1557,15 @@ class LedgerRepository:
             )
             if event is None:
                 return None
+            event["captured_source_count"] = int(
+                connection.execute(
+                    """SELECT COUNT(*) FROM event_observations eo
+                       JOIN latest_source_content r
+                         ON r.observation_id=eo.observation_id
+                       WHERE eo.event_id=? AND r.observation_status!='deleted'""",
+                    (event_id,),
+                ).fetchone()[0]
+            )
             rough_row = connection.execute(
                 """SELECT payload_json,updated_at
                    FROM pipeline_jobs
@@ -1659,6 +1701,63 @@ class LedgerRepository:
             "market_jobs": market_jobs,
             "preferred_source": preferred_source,
         }
+
+    def captured_sources(self, event_id: str) -> list[dict[str, Any]]:
+        """Return every retained discovery capture, including filtered edges.
+
+        These records explain what the collector actually received.  They are
+        deliberately separate from ``event_evidence`` and never imply that a
+        source supports the canonical event claim.
+        """
+
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                f"""WITH {_CURRENT_SOURCE_CONTENT_CTES}
+                    SELECT eo.relation_type,eo.linked_at,
+                           r.observation_id,r.source_id,r.external_id,
+                           r.source_published_at,r.local_received_at,
+                           r.title,r.summary,r.canonical_url,r.content_sha256,
+                           r.raw_json,r.observation_status,r.latest_revision_no,
+                           r.latest_revision_kind,r.latest_revision_at,
+                           s.name AS source_name,s.source_type,s.authority_tier
+                    FROM event_observations eo
+                    JOIN current_source_content r
+                      ON r.observation_id=eo.observation_id
+                    JOIN sources s ON s.source_id=r.source_id
+                    WHERE eo.event_id=?
+                    ORDER BY CASE WHEN r.observation_status='deleted' THEN 1 ELSE 0 END,
+                             r.local_received_at DESC,r.observation_id DESC""",
+                (event_id,),
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            raw_payload = str(item.get("raw_json") or "")
+            item["raw_payload_sha256"] = hashlib.sha256(
+                raw_payload.encode("utf-8")
+            ).hexdigest()
+            receipt_payload = {
+                "source_id": item.get("source_id"),
+                "external_id": item.get("external_id"),
+                "semantic_content_sha256": item.get("content_sha256"),
+                "canonical_url": item.get("canonical_url"),
+                "source_published_at": item.get("source_published_at"),
+                "local_received_at": item.get("local_received_at"),
+                "latest_revision_no": item.get("latest_revision_no"),
+                "latest_revision_kind": item.get("latest_revision_kind"),
+                "raw_payload_sha256": item["raw_payload_sha256"],
+            }
+            item["capture_receipt_sha256"] = hashlib.sha256(
+                json.dumps(
+                    receipt_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            item["semantic_content_sha256"] = item.pop("content_sha256", None)
+            result.append(item)
+        return result
 
     def market_capabilities(self) -> dict[str, Any]:
         """Summarize observed read-only providers without exposing credentials."""

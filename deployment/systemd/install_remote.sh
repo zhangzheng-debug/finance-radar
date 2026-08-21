@@ -864,6 +864,8 @@ ROLLBACK_SERVICE_UNITS=(
     finance-radar-backup.service
     finance-radar-backup.timer
     finance-radar-evidence-llm.service
+    finance-radar-capture-interpretation.service
+    finance-radar-capture-interpretation.timer
 )
 ROLLBACK_PATHS=(
     /etc/finance-radar.env
@@ -878,6 +880,8 @@ ROLLBACK_PATHS=(
     /etc/systemd/system/finance-radar-backup.service
     /etc/systemd/system/finance-radar-backup.timer
     /etc/systemd/system/finance-radar-evidence-llm.service
+    /etc/systemd/system/finance-radar-capture-interpretation.service
+    /etc/systemd/system/finance-radar-capture-interpretation.timer
     /etc/systemd/system/finance-radar.slice
     "$BACKUP_QUIESCE_WRAPPER_TARGET"
     /etc/systemd/system/finance-radar-worker.service.d/telegram-send.conf
@@ -1927,6 +1931,13 @@ if [ -f "$RELEASE/deployment/systemd/finance-radar-evidence-llm.service" ]; then
     install -m 0644 "$RELEASE/deployment/systemd/finance-radar-evidence-llm.service" \
         /etc/systemd/system/
 fi
+# Install the bounded external interpretation units without enabling them.
+# Activation requires a separately provisioned root-only credential and an
+# explicit operator decision after shadow validation.
+install -m 0644 "$RELEASE/deployment/systemd/finance-radar-capture-interpretation.service" \
+    /etc/systemd/system/
+install -m 0644 "$RELEASE/deployment/systemd/finance-radar-capture-interpretation.timer" \
+    /etc/systemd/system/
 remove_legacy_managed_property_dropins || \
     abort_cutover 'refusing to replace an unrecognized Finance Radar memory override' 4
 systemctl daemon-reload

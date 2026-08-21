@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
 DEFAULT_ENV = ROOT / ".env"
 DEFAULT_REPORT = ROOT / "reports" / "live_market_observation_latest.md"
-BINANCE_MARKET_DATA_URL = "https://data-api.binance.vision/api/v3/ticker/price"
+BINANCE_MARKET_DATA_URL = "https://data-api.binance.vision/api/v3/klines"
 BINANCE_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]{5,24}$")
 ANCHOR_CONTRACT_VERSION = "market-anchor-v1"
 WINDOW_CONTRACT_VERSION = "market-windows-v2"
@@ -463,6 +463,76 @@ def fetch_twelve_prices(
     return payload
 
 
+def _minute_bounds(value: str | dt.datetime) -> tuple[dt.datetime, dt.datetime]:
+    minute = _as_utc(value).replace(second=0, microsecond=0)
+    return minute, minute + dt.timedelta(minutes=1)
+
+
+def normalize_twelve_minute_bar(
+    payload: dict[str, Any], *, symbol: str, scheduled_at: str
+) -> dict[str, Any]:
+    if payload.get("status") == "error":
+        raise RuntimeError(f"Twelve Data error: {payload.get('message', 'unknown')}")
+    values = payload.get("values")
+    if not isinstance(values, list) or not values or not isinstance(values[0], dict):
+        raise RuntimeError("Twelve Data minute bar missing")
+    bar = values[0]
+    start, end = _minute_bounds(scheduled_at)
+    try:
+        provider_at = _as_utc(str(bar["datetime"]) + ("+00:00" if "+" not in str(bar["datetime"]) and not str(bar["datetime"]).endswith("Z") else ""))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("Twelve Data minute bar timestamp missing") from exc
+    if not start <= provider_at < end:
+        raise RuntimeError("Twelve Data minute bar timestamp outside requested window")
+    close = bar.get("close")
+    if close in (None, ""):
+        raise RuntimeError("Twelve Data minute close missing")
+    return {
+        "symbol": symbol,
+        "price": str(close),
+        "provider_as_of": provider_at.isoformat(),
+        "interval": "1min",
+        "price_kind": "bar_close",
+        "open": bar.get("open"),
+        "high": bar.get("high"),
+        "low": bar.get("low"),
+        "close": close,
+        "volume": bar.get("volume"),
+    }
+
+
+def fetch_twelve_minute_bar(
+    symbol: str, scheduled_at: str, api_key: str, timeout: float = 20.0
+) -> dict[str, Any]:
+    start, end = _minute_bounds(scheduled_at)
+    params = urllib.parse.urlencode(
+        {
+            "symbol": symbol,
+            "interval": "1min",
+            "start_date": start.strftime("%Y-%m-%d %H:%M:%S"),
+            "end_date": end.strftime("%Y-%m-%d %H:%M:%S"),
+            "timezone": "UTC",
+            "order": "ASC",
+            "outputsize": 1,
+            "apikey": api_key,
+        }
+    )
+    request = urllib.request.Request(
+        f"https://api.twelvedata.com/time_series?{params}",
+        headers={"User-Agent": "FinanceRadar/1.0", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Twelve Data minute bars HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Twelve Data minute bars request failed") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("Twelve Data minute bars returned a non-object response")
+    return normalize_twelve_minute_bar(payload, symbol=symbol, scheduled_at=scheduled_at)
+
+
 def fetch_binance_prices(symbols: list[str], timeout: float = 20.0) -> dict[str, Any]:
     """Fetch public spot price tickers without an API key or signed request."""
     invalid = [symbol for symbol in symbols if not BINANCE_SYMBOL_PATTERN.fullmatch(symbol)]
@@ -494,6 +564,65 @@ def fetch_binance_prices(symbols: list[str], timeout: float = 20.0) -> dict[str,
     if missing:
         raise RuntimeError(f"Binance public market data missing: {', '.join(missing)}")
     return quotes
+
+
+def normalize_binance_minute_bar(
+    payload: Any, *, symbol: str, scheduled_at: str
+) -> dict[str, Any]:
+    if not isinstance(payload, list) or not payload or not isinstance(payload[0], list):
+        raise RuntimeError("Binance public minute bar missing")
+    bar = payload[0]
+    if len(bar) < 7:
+        raise RuntimeError("Binance public minute bar shape invalid")
+    start, end = _minute_bounds(scheduled_at)
+    try:
+        provider_at = dt.datetime.fromtimestamp(int(bar[0]) / 1000, tz=dt.timezone.utc)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError("Binance public minute timestamp invalid") from exc
+    if not start <= provider_at < end:
+        raise RuntimeError("Binance public minute bar timestamp outside requested window")
+    return {
+        "symbol": symbol,
+        "price": str(bar[4]),
+        "provider_as_of": provider_at.isoformat(),
+        "interval": "1min",
+        "price_kind": "bar_close",
+        "open": str(bar[1]),
+        "high": str(bar[2]),
+        "low": str(bar[3]),
+        "close": str(bar[4]),
+        "volume": str(bar[5]),
+        "close_time_ms": int(bar[6]),
+    }
+
+
+def fetch_binance_minute_bar(
+    symbol: str, scheduled_at: str, timeout: float = 20.0
+) -> dict[str, Any]:
+    if not BINANCE_SYMBOL_PATTERN.fullmatch(symbol):
+        raise ValueError(f"Invalid Binance symbol: {symbol}")
+    start, end = _minute_bounds(scheduled_at)
+    params = urllib.parse.urlencode(
+        {
+            "symbol": symbol,
+            "interval": "1m",
+            "startTime": int(start.timestamp() * 1000),
+            "endTime": int(end.timestamp() * 1000) - 1,
+            "limit": 1,
+        }
+    )
+    request = urllib.request.Request(
+        f"{BINANCE_MARKET_DATA_URL}?{params}",
+        headers={"User-Agent": "FinanceRadar/1.0", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Binance public minute bars HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Binance public minute bars request failed") from exc
+    return normalize_binance_minute_bar(payload, symbol=symbol, scheduled_at=scheduled_at)
 
 
 def _mark_retry(connection: Any, rows: list[Any], error: str) -> None:
@@ -531,6 +660,7 @@ def _persist_quotes(
             errors += 1
             continue
         currency = "USDT" if provider == "binance_public" else row["currency"]
+        provider_as_of = str(quote.get("provider_as_of") or captured_at)
         raw_json = stable_json(
             {
                 "provider": provider,
@@ -554,6 +684,9 @@ def _persist_quotes(
                         ).total_seconds()
                     ),
                 ),
+                "provider_as_of": provider_as_of,
+                "interval": quote.get("interval") or "legacy_point",
+                "price_kind": quote.get("price_kind") or "point_in_time",
             }
         )
         snapshot_id = stable_id("SNAP", row["market_job_id"], captured_at)
@@ -568,7 +701,7 @@ def _persist_quotes(
                snapshot_id,market_job_id,event_id,asset_id,provider,provider_symbol,
                data_scope,price,currency,provider_as_of,captured_at,freshness_status,
                raw_json,read_only,no_trading
-               ) VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?,?,1,1)""",
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)""",
             (
                 snapshot_id,
                 row["market_job_id"],
@@ -579,6 +712,7 @@ def _persist_quotes(
                 data_scope,
                 str(quote["price"]),
                 currency,
+                provider_as_of,
                 captured_at,
                 freshness_status,
                 raw_json,
@@ -683,6 +817,8 @@ def run_pending(
     api_key: str = "",
     requester: Callable[[list[str], str, float], dict[str, Any]] = fetch_twelve_prices,
     binance_requester: Callable[[list[str], float], dict[str, Any]] = fetch_binance_prices,
+    twelve_bar_requester: Callable[[str, str, str, float], dict[str, Any]] = fetch_twelve_minute_bar,
+    binance_bar_requester: Callable[[str, str, float], dict[str, Any]] = fetch_binance_minute_bar,
     timeout: float = 20.0,
     now: dt.datetime | None = None,
 ) -> dict[str, Any]:
@@ -740,7 +876,17 @@ def run_pending(
         try:
             if provider == "binance_public":
                 symbols = sorted({binance_symbol(row["symbol"]) for row in provider_rows})
-                payload = binance_requester(symbols, timeout)
+                if binance_requester is fetch_binance_prices:
+                    payload = {
+                        binance_symbol(str(row["symbol"])): binance_bar_requester(
+                            binance_symbol(str(row["symbol"])),
+                            str(row["scheduled_at"]),
+                            timeout,
+                        )
+                        for row in provider_rows
+                    }
+                else:
+                    payload = binance_requester(symbols, timeout)
                 completed, errors = _persist_quotes(
                     connection,
                     provider_rows,
@@ -751,7 +897,18 @@ def run_pending(
                 )
             else:
                 symbols = sorted({row["provider_symbol"] for row in provider_rows})
-                payload = requester(symbols, api_key, timeout)
+                if requester is fetch_twelve_prices:
+                    payload = {
+                        str(row["provider_symbol"]): twelve_bar_requester(
+                            str(row["provider_symbol"]),
+                            str(row["scheduled_at"]),
+                            api_key,
+                            timeout,
+                        )
+                        for row in provider_rows
+                    }
+                else:
+                    payload = requester(symbols, api_key, timeout)
                 completed, errors = _persist_quotes(
                     connection,
                     provider_rows,

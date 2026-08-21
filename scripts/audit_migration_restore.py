@@ -101,10 +101,16 @@ OPERATIONS_V6_TABLES = (
 OPERATIONS_V7_TABLES = (
     "adjudication_freezes",
 )
+OPERATIONS_V8_TABLES = (
+    "capture_interpretation_runs",
+)
+OPERATIONS_V9_TABLES = (
+    "capture_interpretation_attempts",
+)
 # Versions 2--4 are historical recovery points.  Version 6 is the currently
 # deployed operations store.  There was no released schema 5 migration, so do
 # not silently accept an unknown intermediate shape.
-SUPPORTED_OPERATIONS_SCHEMA_VERSIONS = frozenset({2, 3, 4, 6, 7})
+SUPPORTED_OPERATIONS_SCHEMA_VERSIONS = frozenset({2, 3, 4, 6, 7, 8, 9})
 
 
 def utc_now() -> str:
@@ -459,6 +465,10 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
             tables += OPERATIONS_V6_TABLES
         if not ledger and schema_version >= 7:
             tables += OPERATIONS_V7_TABLES
+        if not ledger and schema_version >= 8:
+            tables += OPERATIONS_V8_TABLES
+        if not ledger and schema_version >= 9:
+            tables += OPERATIONS_V9_TABLES
         counts: dict[str, int] = {}
         for table in tables:
             try:

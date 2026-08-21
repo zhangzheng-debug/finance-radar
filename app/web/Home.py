@@ -96,7 +96,12 @@ def render_public_reading_prompt(event: dict[str, object], evidence: list[dict[s
     """Give public readers a useful next step without exposing review tooling."""
     state = public_event_state(event)
     quality = public_event_quality(event, evidence)
-    if not quality["reader_ready"]:
+    if state == "excluded":
+        title = "保留排除结果，等待真正的新证据"
+        reason = "当前线索已被排除；采集到的来源记录可解释系统为什么曾捕获它，但不构成事实证据。"
+        steps = ("查看最初捕获内容", "核对排除理由", "只有新增高权威材料时才重新判断")
+        tone = "ok"
+    elif not quality["reader_ready"]:
         title = "这还不是一条可读事件"
         reason = "当前只是一条发现线索：" + "、".join(quality["gaps"]) + "。"
         steps = (
@@ -109,11 +114,6 @@ def render_public_reading_prompt(event: dict[str, object], evidence: list[dict[s
         title = "回到原始来源核对上下文"
         reason = f"当前事件已关联 {len(evidence)} 条证据；摘要仍不能替代完整原文。"
         steps = ("打开原始来源", "核对主体、日期和版本", "区分已发生事实与前瞻性表述")
-        tone = "ok"
-    elif state == "excluded":
-        title = "保留排除结果，等待真正的新证据"
-        reason = "当前线索已被排除；只有来源修订或新增高权威材料才应重新判断。"
-        steps = ("核对排除理由", "确认是否出现修订文件", "没有新证据时不重复放大线索")
         tone = "ok"
     elif state == "insufficient":
         title = "证据不足，暂不形成事实结论"
@@ -147,6 +147,22 @@ def public_source_url(evidence: list[dict[str, object]]) -> str | None:
     if not evidence:
         return None
     value = str(evidence[0].get("evidence_url") or "").strip()
+    if len(value) > 2048:
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    return value if parsed.scheme in {"http", "https"} and parsed.netloc else None
+
+
+def public_capture_url(sources: list[dict[str, object]]) -> str | None:
+    """Return a validated discovery-source link without treating it as evidence."""
+    if not sources:
+        return None
+    value = str(
+        sources[0].get("source_url") or sources[0].get("canonical_url") or ""
+    ).strip()
     if len(value) > 2048:
         return None
     try:
@@ -378,7 +394,10 @@ try:
         "/api/v1/overview",
         ttl_seconds=15,
         stale_if_error_seconds=120,
-        timeout_seconds=5,
+        # Large migrated ledgers can need several seconds for the first public
+        # funnel projection.  A five-second client cutoff produced a false
+        # outage even while /overview was healthy and completed at ~9 seconds.
+        timeout_seconds=15,
     )
 except Exception as exc:
     overview_loading.empty()
@@ -825,6 +844,45 @@ if preview_event_id:
             preview_evidence = [
                 item for item in preview_evidence if int(item.get("reader_eligible") or 0) == 1
             ]
+        preview_sources: list[dict[str, object]] = []
+        preview_interpretations: list[dict[str, object]] = []
+        preview_knowledge: dict[str, object] = {}
+        preview_sources_error: Exception | None = None
+        preview_interpretations_error: Exception | None = None
+        try:
+            knowledge_response = api_request(
+                f"/api/v1/events/{preview_event_id}/knowledge"
+            )
+            if isinstance(knowledge_response, dict):
+                preview_knowledge = knowledge_response
+        except Exception:
+            # Knowledge is explanatory and must not hide the underlying event.
+            preview_knowledge = {}
+        try:
+            source_response = api_request(
+                f"/api/v1/events/{preview_event_id}/sources"
+            )
+            source_items = source_response.get("items", [])
+            if isinstance(source_items, list):
+                preview_sources = [
+                    item for item in source_items if isinstance(item, dict)
+                ]
+        except Exception as exc:
+            # Discovery history is explanatory and must never turn an
+            # otherwise readable event detail into a total page failure.
+            preview_sources_error = exc
+        if preview_sources:
+            try:
+                interpretation_response = api_request(
+                    f"/api/v1/events/{preview_event_id}/source-interpretations"
+                )
+                interpretation_items = interpretation_response.get("items", [])
+                if isinstance(interpretation_items, list):
+                    preview_interpretations = [
+                        item for item in interpretation_items if isinstance(item, dict)
+                    ]
+            except Exception as exc:
+                preview_interpretations_error = exc
     except Exception as exc:
         render_api_error(exc)
     else:
@@ -934,7 +992,13 @@ if preview_event_id:
                     '<article><span>当前状态</span>'
                     f'<p><strong>{escape(public_copy["state_label"])}</strong> · {review_copy}</p></article>'
                     '<article><span>证据情况</span>'
-                    f'<p>{len(preview_evidence):,} 条关联证据 · {escape(evidence_authority)}</p></article>'
+                    f'<p>{len(preview_evidence):,} 条可引用支持证据 · {escape(evidence_authority)}'
+                    + (
+                        f' · {len(preview_sources):,} 条采集来源记录'
+                        if preview_sources
+                        else ''
+                    )
+                    + '</p></article>'
                     '</div>'
                     '</section>',
                     unsafe_allow_html=True,
@@ -994,6 +1058,154 @@ if preview_event_id:
                         '</div>',
                         unsafe_allow_html=True,
                     )
+            if preview_sources:
+                source = preview_sources[0]
+                source_title = " ".join(
+                    str(
+                        source.get("source_title")
+                        or source.get("title")
+                        or "已捕获一条来源记录"
+                    ).split()
+                )
+                source_excerpt = " ".join(
+                    str(
+                        source.get("source_excerpt")
+                        or source.get("summary")
+                        or "来源没有提供更多摘要。"
+                    ).split()
+                )
+                if len(source_excerpt) > 900:
+                    source_excerpt = source_excerpt[:897].rstrip() + "…"
+                receipt = str(source.get("capture_receipt_sha256") or "")
+                interpretation = next(
+                    (
+                        item
+                        for item in preview_interpretations
+                        if str(item.get("capture_receipt_sha256") or "") == receipt
+                    ),
+                    preview_interpretations[0] if preview_interpretations else None,
+                )
+                with st.expander(
+                    "查看采集到的原始线索与内容解读（未核验、非证据）",
+                    expanded=not bool(preview_evidence),
+                ):
+                    st.markdown(
+                        '<div class="preview-evidence raw-evidence discovery-capture">'
+                        '<span>API 发现载荷 · 不参与正式结论</span>'
+                        f'<h3>{escape(source_title)}</h3>'
+                        f'<p>{escape(source_excerpt)}</p>'
+                        '<small>该记录仅说明系统当时收到了什么；它不是 P0/P1 权威证据，'
+                        '也不会改变已排除状态或触发交易。'
+                        + (
+                            f' 当前仅展示前 {int(source.get("source_excerpt_original_length") or 0):,} 字中的限长节选。'
+                            if source.get("source_excerpt_truncated")
+                            else ''
+                        )
+                        + '</small>'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
+                    if interpretation:
+                        one_line = escape(
+                            str(
+                                interpretation.get("one_line_zh")
+                                or "当前没有可展示的解读。"
+                            )
+                        )
+                        mode = str(interpretation.get("mode") or "DETERMINISTIC")
+                        status = str(interpretation.get("status") or "PARTIAL")
+                        label = (
+                            "AI 辅助解读 · 未核验 · 非证据"
+                            if mode == "LLM_ASSISTED"
+                            else "确定性预览 · 外部模型待接入"
+                        )
+                        claim_items = interpretation.get("what_source_says") or []
+                        claim_markup = "".join(
+                            '<li><span>'
+                            + escape(str(item.get("text_zh") or ""))
+                            + '</span><small>原文：'
+                            + escape(str(item.get("quote") or ""))
+                            + '</small></li>'
+                            for item in claim_items[:4]
+                            if isinstance(item, dict)
+                        )
+                        missing_items = interpretation.get("missing_to_change_state_zh") or []
+                        missing_markup = "".join(
+                            f'<li>{escape(str(item))}</li>' for item in missing_items[:3]
+                        )
+                        not_proven_items = (
+                            interpretation.get("what_source_does_not_prove_zh") or []
+                        )
+                        not_proven_markup = "".join(
+                            f'<li>{escape(str(item))}</li>' for item in not_proven_items[:3]
+                        )
+                        assets = ", ".join(
+                            escape(str(item))
+                            for item in (interpretation.get("affected_assets") or [])[:8]
+                        )
+                        st.markdown(
+                            '<section class="capture-interpretation" aria-label="API发现内容解读">'
+                            '<div class="capture-interpretation-head">'
+                            f'<span>{escape(label)}</span>'
+                            f'<small>{escape(status)} · {escape(str(interpretation.get("coverage") or ""))}</small>'
+                            '</div>'
+                            '<h4>一句话看懂</h4>'
+                            f'<p class="capture-interpretation-summary">{one_line}</p>'
+                            + (
+                                '<h4>原文明确表达</h4><ul class="capture-claim-list">'
+                                + claim_markup
+                                + '</ul>'
+                                if claim_markup
+                                else ''
+                            )
+                            + (
+                                f'<p class="capture-assets"><strong>受影响资产：</strong>{assets}</p>'
+                                if assets
+                                else ''
+                            )
+                            + '<div class="capture-interpretation-grid">'
+                            '<article><h4>仅凭这段未核验来源仍不能确认</h4><ul>'
+                            + not_proven_markup
+                            + '</ul></article>'
+                            '<article><h4>要改变当前结论，还需要</h4><ul>'
+                            + missing_markup
+                            + '</ul></article>'
+                            '</div>'
+                            f'<p class="capture-disposition">{escape(str(interpretation.get("why_current_state_zh") or ""))}</p>'
+                            '<small class="capture-boundary">解释只绑定当前捕获版本；来源修订后自动失效。'
+                            '它不进入正式事实、风险路由、价格判断或交易流程。</small>'
+                            '</section>',
+                            unsafe_allow_html=True,
+                        )
+                    elif preview_interpretations_error:
+                        st.warning(
+                            "内容解读暂时不可用；原始捕获仍可阅读，事件正式状态没有改变。"
+                        )
+            elif preview_sources_error:
+                st.warning(
+                    "采集来源记录暂时无法读取；这不表示原始输入为空，也不改变事件状态。"
+                )
+            if preview_knowledge.get("covered"):
+                with st.expander("金融专业规则与核验清单", expanded=False):
+                    st.markdown(
+                        f"**为什么重要：** {escape(str(preview_knowledge.get('why_it_matters') or ''))}"
+                    )
+                    facts = preview_knowledge.get("facts_to_confirm") or []
+                    if facts:
+                        st.markdown("**需要确认的事实**")
+                        for item in facts:
+                            st.markdown(f"- {escape(str(item))}")
+                    missing = preview_knowledge.get("still_missing_when") or []
+                    if missing:
+                        st.markdown("**出现以下情况时仍不能下结论**")
+                        for item in missing:
+                            st.markdown(f"- {escape(str(item))}")
+                    counterexamples = preview_knowledge.get("what_would_change_the_view") or []
+                    if counterexamples:
+                        st.markdown("**常见反例 / 会改变当前看法的情况**")
+                        for item in counterexamples:
+                            st.markdown(f"- {escape(str(item))}")
+                    st.caption("规则卡只帮助核验，不会自动改变事件状态，也不构成投资建议。")
             if UI_ROLE == "admin":
                 render_next_action_prompt(
                     next_action_guidance(preview_event, preview_evidence, preview_model)
@@ -1016,10 +1228,17 @@ if preview_event_id:
             else:
                 method_col, close_col = st.columns([1.25, 1], gap="small")
                 source_url = public_source_url(preview_evidence)
+                capture_url = public_capture_url(preview_sources)
                 if source_url:
                     method_col.link_button(
                         "直达本条原始来源（外部网站）",
                         source_url,
+                        width="stretch",
+                    )
+                elif capture_url:
+                    method_col.link_button(
+                        "查看这条发现来源（非核验证据）",
+                        capture_url,
                         width="stretch",
                     )
                 else:

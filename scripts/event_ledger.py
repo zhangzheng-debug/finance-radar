@@ -589,11 +589,28 @@ SELECT
     r.observation_id,
     r.source_id,
     r.external_id,
-    r.source_published_at,
+    CASE
+      WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+      THEN COALESCE(
+        NULLIF(TRIM(json_extract(sr.raw_json,'$.item.published_at')),''),
+        NULLIF(TRIM(json_extract(sr.raw_json,'$.item.created_at')),''),
+        NULLIF(TRIM(json_extract(sr.raw_json,'$.item.posted_at')),''),
+        r.source_published_at
+      )
+      ELSE r.source_published_at
+    END AS source_published_at,
     r.local_received_at,
     COALESCE(sr.title,r.title) AS title,
     COALESCE(sr.summary,r.summary) AS summary,
-    r.canonical_url,
+    CASE
+      WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+      THEN COALESCE(
+        NULLIF(TRIM(json_extract(sr.raw_json,'$.item.link')),''),
+        NULLIF(TRIM(json_extract(sr.raw_json,'$.item.url')),''),
+        r.canonical_url
+      )
+      ELSE r.canonical_url
+    END AS canonical_url,
     COALESCE(sr.content_sha256,r.content_sha256) AS content_sha256,
     COALESCE(sr.raw_json,r.raw_json) AS raw_json,
     CASE WHEN sr.revision_kind='delete' THEN 'deleted' ELSE r.observation_status END AS observation_status,
@@ -609,6 +626,10 @@ LEFT JOIN source_revisions sr
      WHERE sr2.observation_id=r.observation_id
  );
 """
+
+LATEST_SOURCE_CONTENT_VIEW_DDL = SCHEMA[
+    SCHEMA.rfind("CREATE VIEW IF NOT EXISTS latest_source_content") :
+].strip()
 
 
 @dataclass(frozen=True)
@@ -675,6 +696,27 @@ def open_ledger(path: Path) -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     register_sqlite_integrity_functions(connection)
     connection.executescript(SCHEMA)
+    view_row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='view' AND name='latest_source_content'"
+    ).fetchone()
+    view_sql = str(view_row["sql"] or "") if view_row is not None else ""
+    if "$.item.published_at" not in view_sql:
+        # Existing ledgers retain CREATE VIEW IF NOT EXISTS definitions.  Upgrade
+        # this projection once, under a writer lock, instead of churning schema
+        # on every API/worker connection.
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            locked_view = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='view' AND name='latest_source_content'"
+            ).fetchone()
+            locked_sql = str(locked_view["sql"] or "") if locked_view is not None else ""
+            if "$.item.published_at" not in locked_sql:
+                connection.execute("DROP VIEW IF EXISTS latest_source_content")
+                connection.execute(LATEST_SOURCE_CONTENT_VIEW_DDL)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
     connection.execute(
         "INSERT OR IGNORE INTO event_ledger_schema(version, applied_at) VALUES (?, ?)",
         (SCHEMA_VERSION, utc_now()),
@@ -930,6 +972,31 @@ def enqueue_observation_job(
     payload: dict[str, Any],
 ) -> bool:
     now = utc_now()
+    job_id = stable_id("OJOB", observation_id, job_type)
+    existing = connection.execute(
+        "SELECT status,payload_json FROM observation_jobs WHERE job_id=?",
+        (job_id,),
+    ).fetchone()
+    if existing is not None:
+        try:
+            previous_payload = json.loads(existing["payload_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            previous_payload = {}
+        previous_hash = str(previous_payload.get("source_content_sha256") or "")
+        current_hash = str(payload.get("source_content_sha256") or "")
+        # A semantic source revision must be extracted again.  Provider ranking
+        # metadata is intentionally absent from the semantic hash, so harmless
+        # score changes remain idempotent.
+        if current_hash and current_hash != previous_hash:
+            connection.execute(
+                """UPDATE observation_jobs
+                   SET status='PENDING',priority=?,attempts=0,available_at=?,
+                       last_error=NULL,payload_json=?,updated_at=?
+                   WHERE job_id=?""",
+                (priority, now, stable_json(payload), now, job_id),
+            )
+            return True
+        return False
     before = connection.total_changes
     connection.execute(
         """
@@ -939,7 +1006,7 @@ def enqueue_observation_job(
         ) VALUES (?,?,?,'PENDING',?,0,?,NULL,?,?,?)
         """,
         (
-            stable_id("OJOB", observation_id, job_type),
+            job_id,
             observation_id,
             job_type,
             priority,

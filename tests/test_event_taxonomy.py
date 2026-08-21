@@ -24,7 +24,9 @@ def test_playbook_and_price_anchor_consume_the_same_alias_mapping() -> None:
     }
     assert time_anchor_for_family("earnings", "operating_results") == "source_published"
     assert time_anchor_for_family("listing_compliance", "minimum_bid_price_deficiency") == "source_published"
-    assert cards_for_family("equity_dilution", "atm_offering") == ()
+    assert {card.event_family for card in cards_for_family("equity_dilution", "atm_offering")} == {
+        "capital_and_dilution"
+    }
     assert time_anchor_for_family("equity_dilution", "atm_offering") == "source_published"
 
 

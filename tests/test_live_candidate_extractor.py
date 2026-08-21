@@ -440,6 +440,98 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         self.assertEqual(result["candidates"], 2)
         self.assertEqual(result["scope_filtered"], 0)
 
+    def test_gold_market_commentary_is_not_a_monetary_policy_event(self) -> None:
+        title = (
+            "Middle East tensions lift risk aversion; Brent tops $91 and GOLD nears "
+            "4340 as markets await Federal Reserve meeting minutes for rate clues"
+        )
+        self.add_observation(
+            "gold-awaiting-fed-minutes",
+            title,
+            "https://x.com/FirstSquawk/status/2089870834508927268",
+            raw_json=json.dumps(
+                {
+                    "item": {
+                        "title": title,
+                        "coins": ["XAU", "XYZ-GOLD"],
+                        "company": "GOLD",
+                        "score": 90,
+                        "grade": "A+",
+                        "signal": "long",
+                    }
+                }
+            ),
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["candidates"], 0)
+        self.assertEqual(result["scope_filtered"], 1)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0],
+            0,
+        )
+        row = self.connection.execute("SELECT * FROM latest_source_content").fetchone()
+        self.assertEqual(
+            extractor.extract_canonical_subject(
+                row, extractor.RULE_BY_TYPE["monetary_policy"]
+            ),
+            ("Federal Reserve", None),
+        )
+
+    def test_macro_actor_is_subject_and_provider_coin_is_only_affected_asset(self) -> None:
+        title = "Federal Reserve released meeting minutes and kept policy rates unchanged"
+        self.add_observation(
+            "fed-released-minutes",
+            title,
+            "https://example.test/fed-minutes",
+            raw_json=json.dumps(
+                {"item": {"title": title, "coins": ["XYZ-GOLD"]}}
+            ),
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["candidates"], 1)
+        event = self.connection.execute(
+            "SELECT company_name,ticker_at_event FROM canonical_events"
+        ).fetchone()
+        self.assertEqual(event["company_name"], "Federal Reserve")
+        self.assertIsNone(event["ticker_at_event"])
+        facts = json.loads(
+            self.connection.execute("SELECT facts_json FROM event_versions").fetchone()[0]
+        )
+        self.assertEqual(facts["affected_assets"], ["GOLD"])
+        self.assertNotIn("signal", facts)
+        self.assertNotIn("grade", facts)
+
+    def test_opennews_provider_summary_can_supply_missing_action(self) -> None:
+        self.add_observation(
+            "summary-only-bankruptcy",
+            "Example Corp corporate update",
+            "https://example.test/example-update",
+            raw_json=json.dumps(
+                {
+                    "item": {
+                        "title": "Example Corp corporate update",
+                        "summary_en": (
+                            "Example Corp filed a voluntary Chapter 11 bankruptcy petition."
+                        ),
+                        "company": "Example Corp",
+                    }
+                }
+            ),
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["candidates"], 1)
+        event = self.connection.execute(
+            "SELECT event_type,company_name FROM canonical_events"
+        ).fetchone()
+        self.assertEqual(event["event_type"], "bankruptcy")
+        self.assertEqual(event["company_name"], "Example Corp")
+
     def test_provider_asset_tag_requires_story_level_identity(self) -> None:
         unrelated = "Coinbase reports a security breach affecting customer records"
         self.add_observation(

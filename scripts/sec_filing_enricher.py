@@ -661,6 +661,30 @@ def choose_documents(
     return selected[: max(1, max_documents)]
 
 
+def fetch_selected_documents(
+    client: SecFilingClient,
+    selected: list[FilingDocument],
+) -> tuple[list[tuple[FilingDocument, str]], dict[str, str]]:
+    """Fetch each selected document independently under the existing byte cap.
+
+    A large primary 10-Q/10-K must not prevent a smaller EX-99 or EX-10 from
+    being captured.  Partial coverage remains explicitly incomplete and can
+    never promote a formal event, but the successful source bytes and passage
+    candidates are preserved for the next recovery attempt.
+    """
+
+    fetched: list[tuple[FilingDocument, str]] = []
+    errors: dict[str, str] = {}
+    for document in selected:
+        try:
+            text = visible_text(client.get(document.url))
+        except (RuntimeError, urllib.error.URLError, TimeoutError, ValueError) as exc:
+            errors[document.url] = f"{type(exc).__name__}: {str(exc)[:400]}"
+            continue
+        fetched.append((document, text))
+    return fetched, errors
+
+
 def item_codes_from_raw(raw_json: str) -> tuple[str, ...]:
     try:
         payload = json.loads(raw_json)
@@ -1643,11 +1667,11 @@ def enrich_pending_discovery_leads(
                 )
                 result["needs_evidence"] += 1
                 continue
-            fetched_documents: list[tuple[FilingDocument, str]] = []
-            for document in selected:
-                text = visible_text(client.get(document.url))
+            fetched_documents, document_errors = fetch_selected_documents(client, selected)
+            for document, text in fetched_documents:
                 fetched_texts[document.url] = text
-                fetched_documents.append((document, text))
+            if not fetched_documents:
+                raise RuntimeError("all selected SEC documents failed bounded capture")
             combined_text = "\n".join(
                 f"[DOCUMENT {document.document_type} {document.description}]\n{text}"
                 for document, text in fetched_documents
@@ -1662,7 +1686,7 @@ def enrich_pending_discovery_leads(
                     selected,
                     fetched_texts,
                     item_codes=item_codes_from_raw(str(row["raw_json"] or "")),
-                    error=None,
+                    error=stable_json(document_errors) if document_errors else None,
                 )
             )
             coverage = manifest_coverage(manifest_json)
@@ -1768,6 +1792,7 @@ def enrich_pending(
         "parsed": 0,
         "no_document": 0,
         "errors": 0,
+        "partial_fetch": 0,
         "refined": 0,
         "by_type": {},
     }
@@ -1800,11 +1825,11 @@ def enrich_pending(
                 )
                 result["no_document"] += 1
                 continue
-            fetched_documents: list[tuple[FilingDocument, str]] = []
-            for document in selected:
-                text = visible_text(client.get(document.url))
+            fetched_documents, document_errors = fetch_selected_documents(client, selected)
+            for document, text in fetched_documents:
                 fetched_texts[document.url] = text
-                fetched_documents.append((document, text))
+            if not fetched_documents:
+                raise RuntimeError("all selected SEC documents failed bounded capture")
             combined_text = "\n".join(
                 f"[DOCUMENT {document.document_type} {document.description}]\n{text}"
                 for document, text in fetched_documents
@@ -1825,14 +1850,16 @@ def enrich_pending(
                 classification=classification,
                 status="PARSED",
                 attempts=attempts,
-                error=None,
+                error=stable_json(document_errors) if document_errors else None,
             )
             result["parsed"] += 1
+            result["partial_fetch"] += int(bool(document_errors))
             if classification.event_type:
                 result["by_type"][classification.event_type] = (
                     result["by_type"].get(classification.event_type, 0) + 1
                 )
-            result["refined"] += int(refine_event(connection, row, classification))
+            if not document_errors:
+                result["refined"] += int(refine_event(connection, row, classification))
         except (RuntimeError, urllib.error.URLError, ValueError) as exc:
             upsert_enrichment(
                 connection,

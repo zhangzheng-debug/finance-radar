@@ -134,6 +134,57 @@ class LiveMarketObserverTests(unittest.TestCase):
             0,
         )
 
+    def test_default_provider_path_uses_timestamped_minute_bar(self) -> None:
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+
+        def minute_bar(symbol, scheduled_at, timeout):
+            self.assertEqual(symbol, "ETHUSDT")
+            self.assertEqual(scheduled_at, self.ANCHOR.isoformat())
+            return {
+                "symbol": symbol,
+                "price": "2010.25",
+                "provider_as_of": self.ANCHOR.isoformat(),
+                "interval": "1min",
+                "price_kind": "bar_close",
+                "open": "2000",
+                "high": "2020",
+                "low": "1995",
+                "close": "2010.25",
+                "volume": "150",
+            }
+
+        result = observer.run_pending(
+            self.connection,
+            now=self.ANCHOR + dt.timedelta(minutes=1),
+            binance_bar_requester=minute_bar,
+        )
+        self.assertEqual(result["completed"], 1)
+        snapshot = self.connection.execute("SELECT * FROM market_snapshots").fetchone()
+        self.assertEqual(snapshot["provider_as_of"], self.ANCHOR.isoformat())
+        self.assertIn('"interval":"1min"', snapshot["raw_json"])
+        self.assertIn('"price_kind":"bar_close"', snapshot["raw_json"])
+
+    def test_binance_minute_bar_rejects_wrong_timestamp(self) -> None:
+        start_ms = int(self.ANCHOR.timestamp() * 1000)
+        payload = [[start_ms, "100", "102", "99", "101", "10", start_ms + 59_999]]
+        normalized = observer.normalize_binance_minute_bar(
+            payload, symbol="ETHUSDT", scheduled_at=self.ANCHOR.isoformat()
+        )
+        self.assertEqual(normalized["price"], "101")
+        self.assertEqual(normalized["volume"], "10")
+
+        with self.assertRaisesRegex(RuntimeError, "outside requested window"):
+            observer.normalize_binance_minute_bar(
+                payload,
+                symbol="ETHUSDT",
+                scheduled_at=(self.ANCHOR + dt.timedelta(minutes=1)).isoformat(),
+            )
+
     def test_evidence_ready_candidate_is_observed_before_formal_adjudication(self) -> None:
         self.connection.execute(
             "UPDATE canonical_events SET status='candidate',label_status='candidate' WHERE event_id='evt'"

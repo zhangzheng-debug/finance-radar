@@ -273,6 +273,132 @@
         "日程公告：预告不是决定"
       ],
       "reader_note": "修订被当成首发会造成重复计数，这是宏观族去重的主要难点。"
+    },
+    {
+      "id": "listing_compliance.confirm", "event_family": "listing_compliance", "kind": "confirm",
+      "title": "上市合规：区分缺陷通知、整改期与最终处置",
+      "authoritative_sources": ["sec_current_filings", "sec_trading_suspensions"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state", "risk_label_contract_v3:materiality"],
+      "required_language": ["交易所规则与缺陷项目", "通知日期、整改期限与当前阶段", "恢复合规或最终处置的明确表述"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["只有公司概括而没有规则或通知日期", "把收到缺陷通知写成已经退市", "整改期限或后续状态缺失"],
+      "reader_note": "缺陷通知、听证、整改和最终处置是不同事实节点。"
+    },
+    {
+      "id": "listing_compliance.impostor", "event_family": "listing_compliance", "kind": "impostor",
+      "title": "上市合规的常见误判：市场表现不是合规决定",
+      "authoritative_sources": ["sec_current_filings", "sec_trading_suspensions"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state"],
+      "required_language": ["区分市场表现、规则缺陷与交易所决定"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["没有交易所或发行人备案原文"],
+      "impostors": ["价格低于某水平但尚无缺陷通知", "公司计划整改但尚未恢复合规", "媒体推测可能被摘牌", "反向拆股授权但尚未生效"],
+      "reader_note": "合规状态不能从行情或计划倒推。"
+    },
+    {
+      "id": "capital_and_dilution.confirm", "event_family": "capital_and_dilution", "kind": "confirm",
+      "title": "融资与稀释：逐项复算证券数量与条款",
+      "authoritative_sources": ["sec_current_filings"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state", "risk_label_contract_v3:materiality", "risk_label_contract_v3:polarity"],
+      "required_language": ["已发行、可转换、可行权与授权证券分别列示", "发行价、转换价、行权价、重置条款与上限", "交易状态、交割条件和资金用途"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["只有募集规模没有证券数量或价格", "把注册容量写成已发行数量", "未区分已完成、已签约与可能发行"],
+      "reader_note": "完全稀释口径必须保留每项输入来源。"
+    },
+    {
+      "id": "capital_and_dilution.impostor", "event_family": "capital_and_dilution", "kind": "impostor",
+      "title": "融资的常见误判：授权与注册不等于发行完成",
+      "authoritative_sources": ["sec_current_filings"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state"],
+      "required_language": ["区分授权股本、注册容量、签约额度与实际交割"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["缺少交割或销售报告", "无法确定反稀释或重置机制"],
+      "impostors": ["S-3 生效但没有销售", "批准增加授权股本", "未提款的股权额度", "普通反向拆股且没有同时发行新证券"],
+      "reader_note": "稀释比例必须来自可复算的分子和分母。"
+    },
+    {
+      "id": "liquidity_and_credit.confirm", "event_family": "liquidity_and_credit", "kind": "confirm",
+      "title": "流动性与信用：现金、消耗、到期与契约同看",
+      "authoritative_sources": ["sec_current_filings", "fdic_press_releases"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state", "risk_label_contract_v3:materiality"],
+      "required_language": ["现金及受限现金的报告期与口径", "经营现金消耗的可复算期间", "债务到期、违约、豁免和持续经营表述"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["现金与消耗来自不同报告期", "把未使用额度全当作可用现金", "契约缺口只有概括没有条款"],
+      "reader_note": "现金跑道是情景计算，必须展示期间和不可用资金。"
+    },
+    {
+      "id": "liquidity_and_credit.impostor", "event_family": "liquidity_and_credit", "kind": "impostor",
+      "title": "流动性的常见误判：会计亏损不等于现金耗尽",
+      "authoritative_sources": ["sec_current_filings", "fdic_press_releases"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state"],
+      "required_language": ["区分净亏损、经营现金流、可用流动性与债务契约"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["没有现金流量表或债务附注"],
+      "impostors": ["单季净亏损", "附带条件的未提款额度", "常规债务再融资", "与流动性无关的审计强调事项"],
+      "reader_note": "结论必须能从报表和条款复算。"
+    },
+    {
+      "id": "corporate_transaction.confirm", "event_family": "corporate_transaction", "kind": "confirm",
+      "title": "公司交易：区分传闻、协议、批准、交割与终止",
+      "authoritative_sources": ["sec_current_filings", "ftc_press"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state", "risk_label_contract_v3:materiality", "risk_label_contract_v3:polarity"],
+      "required_language": ["交易双方、法律文件与签署日期", "对价、条件、终止权与外部批准", "当前阶段及后续变更"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["只有战略评估或接洽", "缺少正式协议或监管决定", "把签署写成交割完成"],
+      "reader_note": "后续终止不能覆盖历史上确实签署过的协议。"
+    },
+    {
+      "id": "corporate_transaction.impostor", "event_family": "corporate_transaction", "kind": "impostor",
+      "title": "公司交易的常见误判：探索方案不是达成协议",
+      "authoritative_sources": ["sec_current_filings", "ftc_press"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state"],
+      "required_language": ["区分意向、最终协议和实际交割"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["交易对方、对价或约束力不明确"],
+      "impostors": ["市场传闻", "评估战略选择", "不具约束力的意向书", "监管问询但尚无决定"],
+      "reader_note": "展示时必须写清所处阶段。"
+    },
+    {
+      "id": "governance_and_management.confirm", "event_family": "governance_and_management", "kind": "confirm",
+      "title": "治理与管理层：写清人、职务、生效日与继任安排",
+      "authoritative_sources": ["sec_current_filings"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state", "risk_label_contract_v3:materiality"],
+      "required_language": ["人员姓名和准确职务", "任命、辞任、解聘或休假动作", "生效日期、临时安排与已披露原因"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["只有组织架构概述", "职务或生效日不清楚", "把董事提名写成已经就任"],
+      "reader_note": "摘要必须直接回答谁发生了什么变化。"
+    },
+    {
+      "id": "governance_and_management.impostor", "event_family": "governance_and_management", "kind": "impostor",
+      "title": "治理的常见误判：提名、委任与就任不是同一步",
+      "authoritative_sources": ["sec_current_filings"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state"],
+      "required_language": ["区分提名、表决、委任和正式生效"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["动作阶段只能从标题猜测"],
+      "impostors": ["候选人提名", "例行董事改选", "职位名称调整但职责未变", "继任计划讨论"],
+      "reader_note": "人员与动作槽位缺一不可。"
+    },
+    {
+      "id": "operations_product_security.confirm", "event_family": "operations_product_security", "kind": "confirm",
+      "title": "运营、产品与安全：明确范围、影响与处置状态",
+      "authoritative_sources": ["sec_current_filings", "fda_medwatch", "nvidia_official_news"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state", "risk_label_contract_v3:materiality"],
+      "required_language": ["产品、系统或设施的明确对象", "中断、召回、漏洞或调查的范围与时间", "已确认影响、补救状态与未知事项"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["只有用户投诉或第三方扫描", "对象或时间范围不清楚", "把预防性调查写成已确认事故"],
+      "reader_note": "影响范围和当前处置要分开。"
+    },
+    {
+      "id": "operations_product_security.impostor", "event_family": "operations_product_security", "kind": "impostor",
+      "title": "运营与安全的常见误判：维护和调查不等于事故",
+      "authoritative_sources": ["sec_current_filings", "fda_medwatch", "nvidia_official_news"],
+      "gate_refs": ["risk_label_contract_v3:evidence_state"],
+      "required_language": ["区分维护、预防措施、调查线索与确认事件"],
+      "time_anchor": "source_published", "corroboration_min": 1,
+      "insufficient_when": ["没有责任方或监管机构原文"],
+      "impostors": ["计划内维护", "未验证的漏洞报告", "预防性产品更换", "未影响生产的局部故障"],
+      "reader_note": "先确认对象和已知影响，再讨论重大性。"
     }
   ]
 }

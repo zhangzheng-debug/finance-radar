@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import tempfile
 from contextlib import closing
@@ -573,6 +574,7 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
             "company_name",
             "discovery_source",
             "reviewed_at",
+            "captured_source_count",
             "citable_evidence_count",
             "public_fact_summary",
             "claim_subject",
@@ -720,6 +722,188 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
         )
         assert deleted["observation_status"] == "deleted"
         assert deleted["reader_eligible"] == 0
+
+
+def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        ledger_path = _populated_ledger(root)
+        captured_at = "2026-08-19T08:09:23+00:00"
+        connection = open_ledger(ledger_path)
+        connection.execute(
+            """INSERT INTO raw_observations(
+               observation_id,source_id,external_id,source_published_at,local_received_at,
+               title,summary,canonical_url,content_sha256,raw_json,observation_status
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "excluded-capture",
+                "src",
+                "provider-3637286",
+                "2026-08-19T00:23:30+00:00",
+                captured_at,
+                "Markets await central-bank minutes while gold rises",
+                "A source-provided discovery summary that has not been verified.",
+                "https://example.test/discovery",
+                "a" * 64,
+                json.dumps(
+                    {
+                        "item": {
+                            "score": 90,
+                            "grade": "A+",
+                            "signal": "long",
+                            "private_marker": "MUST_NOT_LEAK",
+                        }
+                    }
+                ),
+                "captured",
+            ),
+        )
+        connection.execute(
+            """INSERT INTO event_observations VALUES (
+               'excluded-0','excluded-capture','filtered_aggregated_noise',?)""",
+            (captured_at,),
+        )
+        connection.commit()
+        connection.close()
+
+        application = create_app(
+            replace(
+                _settings(root, ledger_path),
+                reviewer_token="review-secret",
+                operator_token="operator-secret",
+            )
+        )
+        with TestClient(application) as client:
+            default_feed = client.get("/api/v1/events")
+            archive_feed = client.get(
+                "/api/v1/events", params={"public_state": "excluded"}
+            )
+            detail = client.get("/api/v1/events/excluded-0")
+            evidence = client.get("/api/v1/events/excluded-0/evidence")
+            sources = client.get("/api/v1/events/excluded-0/sources")
+            interpretations = client.get(
+                "/api/v1/events/excluded-0/source-interpretations"
+            )
+            public_mutation = client.post(
+                "/api/v1/events/excluded-0/sources/excluded-capture/interpret",
+                json={"audit_write_confirmed": True},
+            )
+            persisted = client.post(
+                "/api/v1/events/excluded-0/sources/excluded-capture/interpret",
+                headers={"X-Operator-Token": "operator-secret"},
+                json={"audit_write_confirmed": True},
+            )
+            persisted_retry = client.post(
+                "/api/v1/events/excluded-0/sources/excluded-capture/interpret",
+                headers={"X-Operator-Token": "operator-secret"},
+                json={"audit_write_confirmed": True},
+            )
+            interpretations_after = client.get(
+                "/api/v1/events/excluded-0/source-interpretations"
+            )
+            hidden_without_capture = client.get("/api/v1/events/weak-0")
+            internal_sources = client.get(
+                "/api/v1/events/excluded-0/sources",
+                headers={"X-Reviewer-Token": "review-secret"},
+            )
+
+        assert default_feed.status_code == 200
+        assert all(
+            item["event_id"] != "excluded-0"
+            for item in default_feed.json()["data"]["items"]
+        )
+        assert archive_feed.status_code == 200
+        assert archive_feed.json()["data"]["reader_ready"] is None
+        assert archive_feed.json()["data"]["captured_source_required"] is True
+        assert [
+            item["event_id"] for item in archive_feed.json()["data"]["items"]
+        ] == ["excluded-0"]
+        assert archive_feed.json()["data"]["items"][0]["captured_source_count"] == 1
+        assert detail.status_code == 200
+        assert detail.json()["data"]["event"]["reader_ready"] == 0
+        assert evidence.status_code == 200
+        assert evidence.json()["data"]["items"] == []
+        assert sources.status_code == 200
+        public_sources = sources.json()["data"]
+        assert public_sources["contract"] == {
+            "captured_source_is_not_evidence": True,
+            "canonical_state_unchanged": True,
+            "no_trading": True,
+        }
+        assert len(public_sources["items"]) == 1
+        source = public_sources["items"][0]
+        assert set(source) == {
+            "source_name",
+            "source_type",
+            "authority_tier",
+            "source_title",
+            "source_excerpt",
+            "source_excerpt_original_length",
+            "source_excerpt_truncated",
+            "source_url",
+            "source_published_at",
+            "local_received_at",
+            "latest_revision_no",
+            "latest_revision_kind",
+            "capture_receipt_sha256",
+            "capture_status",
+            "is_citable_evidence",
+            "formal_verification",
+            "no_trading",
+        }
+        assert source["capture_status"] == "FILTERED_DISCOVERY"
+        assert source["is_citable_evidence"] is False
+        assert source["formal_verification"] is False
+        assert source["no_trading"] is True
+        assert source["source_excerpt_original_length"] == len(
+            "A source-provided discovery summary that has not been verified."
+        )
+        assert source["source_excerpt_truncated"] is False
+        assert source["source_url"] == "https://example.test/discovery"
+        public_payload = json.dumps(public_sources, ensure_ascii=False)
+        assert "MUST_NOT_LEAK" not in public_payload
+        assert '"score"' not in public_payload
+        assert '"signal"' not in public_payload
+        assert interpretations.status_code == 200
+        interpretation_data = interpretations.json()["data"]
+        assert interpretation_data["contract"] == {
+            "version": "api-capture-interpretation-v1",
+            "advisory_only": True,
+            "canonical_mutation_allowed": False,
+            "used_as_model_feature": False,
+            "public_requests_are_cached_or_deterministic": True,
+            "external_provider_configured": False,
+            "no_trading": True,
+        }
+        assert len(interpretation_data["items"]) == 1
+        preview = interpretation_data["items"][0]
+        assert preview["mode"] == "DETERMINISTIC"
+        assert preview["persisted"] is False
+        assert preview["external_generation_state"] == "NOT_CONFIGURED"
+        assert preview["safety"]["formal_status_mutated"] is False
+        assert preview["safety"]["used_as_model_feature"] is False
+        assert "confidence" not in preview
+        assert public_mutation.status_code in {403, 503}
+        assert persisted.status_code == 200
+        assert persisted.json()["data"]["created"] is True
+        assert persisted.json()["data"]["external_call"] is False
+        assert persisted.json()["data"]["estimated_usd"] == 0
+        assert persisted_retry.status_code == 200
+        assert persisted_retry.json()["data"]["created"] is False
+        cached = interpretations_after.json()["data"]["items"][0]
+        assert cached["persisted"] is True
+        assert cached["external_generation_state"] == "NOT_CONFIGURED"
+        with closing(sqlite3.connect(root / "operations.sqlite3")) as operations_connection:
+            operations_connection.row_factory = sqlite3.Row
+            rows = operations_connection.execute(
+                "SELECT * FROM capture_interpretation_runs"
+            ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["canonical_mutation_allowed"] == 0
+        assert rows[0]["no_trading"] == 1
+        assert hidden_without_capture.status_code == 404
+        assert internal_sources.status_code == 200
+        assert "raw_json" in internal_sources.json()["data"]["items"][0]
 
 
 def test_repository_public_filters_dates_sorting_and_legacy_status_compose_safely() -> None:

@@ -34,6 +34,20 @@ class FakeClient:
         return self.payloads[url]
 
 
+class PartialFailureClient(FakeClient):
+    def __init__(self, payloads: dict[str, bytes], failing_urls: set[str]) -> None:
+        super().__init__(payloads)
+        self.failing_urls = failing_urls
+
+    def get(self, url: str) -> bytes:
+        self.calls.append(url)
+        if url in self.failing_urls:
+            raise RuntimeError(
+                f"SEC document exceeds safe capture limit (5000000 bytes): {url}"
+            )
+        return self.payloads[url]
+
+
 class SecFilingEnricherTests(unittest.TestCase):
     def _seed_discovery_lead(self, connection, *, suffix: str = "lead") -> None:
         now = "2026-08-20T01:02:03+00:00"
@@ -131,6 +145,36 @@ class SecFilingEnricherTests(unittest.TestCase):
         self.assertNotIn("与“管理层任免或离职”有关", facts["public_fact_summary"])
         self.assertEqual(lead["claim_summary"], facts["public_fact_summary"])
         self.assertFalse(facts["formal_verification"])
+
+    def test_oversize_primary_does_not_block_smaller_exhibit_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            connection = open_ledger(Path(directory) / "db.sqlite3")
+            self._seed_discovery_lead(connection, suffix="oversize-primary")
+            client = PartialFailureClient(
+                {
+                    "https://www.sec.gov/Archives/a/index.htm": INDEX,
+                    "https://www.sec.gov/Archives/a/ex991.htm": (
+                        b"<html><body>Example Corp reported that its chief financial officer "
+                        b"resigned effective immediately on August 20, 2026.</body></html>"
+                    ),
+                },
+                {"https://www.sec.gov/Archives/a/main.htm"},
+            )
+
+            result = enricher.enrich_pending_discovery_leads(connection, client, limit=5)
+            lead = connection.execute("SELECT * FROM discovery_leads").fetchone()
+            event_count = connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0]
+            connection.close()
+
+        self.assertEqual(result["errors"], 0)
+        self.assertEqual(result["needs_evidence"], 1)
+        self.assertEqual(result["promoted"], 0)
+        self.assertEqual(lead["status"], "NEEDS_EVIDENCE")
+        self.assertEqual(lead["evidence_status"], "attachment_incomplete")
+        self.assertIn("resigned", lead["evidence_passage"])
+        self.assertEqual(event_count, 0)
+        self.assertIn("https://www.sec.gov/Archives/a/main.htm", client.calls)
+        self.assertIn("https://www.sec.gov/Archives/a/ex991.htm", client.calls)
 
     def test_specific_event_phrase_without_affirmed_action_stays_needs_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

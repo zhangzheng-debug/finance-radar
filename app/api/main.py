@@ -5,12 +5,14 @@ import hashlib
 import secrets
 import time
 import uuid
+from copy import deepcopy
 from collections import OrderedDict, deque
 from datetime import date, datetime, timezone
 from itertools import islice
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable, Literal
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -22,12 +24,20 @@ from app import __version__
 from app.config import Settings
 from app.models import RiskRouter, derive_evidence_context
 from app.services import (
+    CAPTURE_INTERPRETATION_CONTRACT,
+    CAPTURE_INTERPRETATION_PROMPT_SHA256,
     AdjudicationService,
     EvidenceAgent,
     LocalEvidenceModelProvider,
     ReplayService,
+    capture_source_text,
+    deterministic_interpretation,
     evidence_receipt_fingerprint,
+    knowledge_context,
+    normalized_capture_input,
+    validate_interpretation_result,
 )
+from app.services.capture_interpretation import CAPTURE_INTERPRETATION_PROMPT_VERSION
 from app.services.replay import ReplayCaseNotFound
 from app.storage import EvidenceObjectStore, LedgerRepository, OperationsRepository
 
@@ -97,6 +107,13 @@ class HumanOverrideRequest(BaseModel):
 class EvidenceAgentRunRequest(BaseModel):
     audit_write_confirmed: Literal[True]
     evidence_change_confirmed: bool = False
+
+
+class CaptureInterpretationRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    audit_write_confirmed: Literal[True]
+    mode: Literal["DETERMINISTIC"] = "DETERMINISTIC"
 
 
 class AdjudicationReviewRequest(BaseModel):
@@ -313,8 +330,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.adjudication = adjudication
     rate_buckets: OrderedDict[str, deque[float]] = OrderedDict()
     rate_lock = Lock()
+    read_cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
+    read_cache_lock = Lock()
     application.state.rate_buckets = rate_buckets
     application.state.rate_bucket_limit = settings.api_rate_limit_max_clients
+
+    def cached_read(key: str, ttl_seconds: float, factory: Callable[[], Any]) -> Any:
+        """Bound repeated public aggregate cost without persisting stale truth."""
+
+        now = time.monotonic()
+        with read_cache_lock:
+            cached = read_cache.get(key)
+            if cached and cached[0] > now:
+                read_cache.move_to_end(key)
+                return deepcopy(cached[1])
+        value = factory()
+        with read_cache_lock:
+            read_cache[key] = (now + max(1.0, float(ttl_seconds)), deepcopy(value))
+            read_cache.move_to_end(key)
+            while len(read_cache) > 32:
+                read_cache.popitem(last=False)
+        return value
 
     @application.middleware("http")
     async def trace_middleware(request: Request, call_next: Callable[..., Any]):
@@ -660,13 +696,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         event_id: str,
         *,
         require_reader_ready: bool = False,
+        allow_excluded_capture_archive: bool = False,
     ) -> dict[str, Any]:
         event = ledger.event_detail(event_id)
-        if event is None or (
-            require_reader_ready
-            and int((event.get("event") or {}).get("reader_ready") or 0) != 1
-        ):
+        if event is None:
             raise HTTPException(404, {"code": "EVENT_NOT_FOUND", "message": f"event not found: {event_id}"})
+        public_event = event.get("event") or {}
+        if require_reader_ready and int(public_event.get("reader_ready") or 0) != 1:
+            archive_allowed = (
+                allow_excluded_capture_archive
+                and str(public_event.get("public_state") or "") == "excluded"
+                and int(public_event.get("captured_source_count") or 0) > 0
+            )
+            if not archive_allowed:
+                raise HTTPException(
+                    404,
+                    {"code": "EVENT_NOT_FOUND", "message": f"event not found: {event_id}"},
+                )
         return event
 
     public_event_fields = (
@@ -683,6 +729,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "company_name",
         "discovery_source",
         "reviewed_at",
+        "captured_source_count",
         "citable_evidence_count",
         "public_fact_summary",
         "claim_subject",
@@ -717,6 +764,99 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def public_evidence_item(value: dict[str, Any]) -> dict[str, Any]:
         return {key: value.get(key) for key in public_evidence_fields}
+
+    def public_captured_source(value: dict[str, Any]) -> dict[str, Any]:
+        """Expose a bounded discovery receipt without calling it evidence."""
+
+        def normalized_text(raw: Any) -> str:
+            normalized = " ".join(str(raw or "").split())
+            return normalized
+
+        def bounded_text(raw: Any, limit: int) -> str | None:
+            normalized = normalized_text(raw)
+            if not normalized:
+                return None
+            return (
+                normalized
+                if len(normalized) <= limit
+                else normalized[: limit - 1].rstrip() + "…"
+            )
+
+        source_url = str(value.get("canonical_url") or "").strip()
+        try:
+            parsed_url = urlsplit(source_url)
+        except ValueError:
+            parsed_url = None
+        if (
+            parsed_url is None
+            or parsed_url.scheme.lower() not in {"http", "https"}
+            or not parsed_url.hostname
+            or parsed_url.username
+            or parsed_url.password
+        ):
+            source_url = ""
+        elif parsed_url.hostname.casefold() in {"localhost", "metadata.google.internal"}:
+            source_url = ""
+        else:
+            try:
+                source_address = ipaddress.ip_address(parsed_url.hostname)
+            except ValueError:
+                source_address = None
+            if source_address is not None and not source_address.is_global:
+                source_url = ""
+        excerpt_raw = normalized_text(value.get("summary"))
+        return {
+            "source_name": value.get("source_name"),
+            "source_type": value.get("source_type"),
+            "authority_tier": value.get("authority_tier"),
+            "source_title": bounded_text(value.get("title"), 500),
+            "source_excerpt": bounded_text(value.get("summary"), 1200),
+            "source_excerpt_original_length": len(excerpt_raw),
+            "source_excerpt_truncated": len(excerpt_raw) > 1200,
+            "source_url": source_url or None,
+            "source_published_at": value.get("source_published_at"),
+            "local_received_at": value.get("local_received_at"),
+            "latest_revision_no": value.get("latest_revision_no"),
+            "latest_revision_kind": value.get("latest_revision_kind"),
+            "capture_receipt_sha256": value.get("capture_receipt_sha256"),
+            "capture_status": (
+                "FILTERED_DISCOVERY"
+                if value.get("relation_type") == "filtered_aggregated_noise"
+                else "CAPTURED_DISCOVERY"
+            ),
+            "is_citable_evidence": False,
+            "formal_verification": False,
+            "no_trading": True,
+        }
+
+    public_capture_interpretation_fields = (
+        "contract_version",
+        "event_id",
+        "bound_event_version",
+        "capture_receipt_sha256",
+        "source_revision_no",
+        "bound_content_sha256",
+        "status",
+        "mode",
+        "generated_at",
+        "source_language",
+        "coverage",
+        "one_line_zh",
+        "what_source_says",
+        "what_source_does_not_prove_zh",
+        "actors",
+        "affected_assets",
+        "modality",
+        "why_current_state_zh",
+        "missing_to_change_state_zh",
+        "prompt_injection_suspected",
+        "persisted",
+        "external_generation_state",
+        "safety",
+    )
+
+    def public_capture_interpretation(value: dict[str, Any]) -> dict[str, Any]:
+        return {key: value.get(key) for key in public_capture_interpretation_fields}
 
     def public_worker_cycle(value: dict[str, Any] | None) -> dict[str, Any] | None:
         """Expose only the user-facing state and timing of one worker cycle."""
@@ -1034,8 +1174,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         internal_reader: bool = Depends(internal_reader_access),
     ):
         latest_backup = operations.latest_verified_backup()
+        overview_base = cached_read(
+            "ledger-overview-v1",
+            30.0,
+            lambda: ledger.overview(run_integrity_check=False),
+        )
         data = health_from_latest_verified_backup(
-            ledger.overview(run_integrity_check=False),
+            overview_base,
             latest_backup,
         )
         if not internal_reader:
@@ -1168,7 +1313,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "message": "date_from must not be after date_to",
                 },
             )
-        effective_reader_ready = reader_ready if internal_reader else True
+        public_excluded_archive = not internal_reader and public_state == "excluded"
+        effective_reader_ready = (
+            reader_ready
+            if internal_reader
+            else None
+            if public_excluded_archive
+            else True
+        )
         data = ledger.list_events(
             status=status,
             public_state=public_state,
@@ -1178,6 +1330,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             date_from=date_from.isoformat() if date_from else None,
             date_to=date_to.isoformat() if date_to else None,
             reader_ready=effective_reader_ready,
+            captured_source_required=public_excluded_archive,
             sort=sort,
             limit=limit,
             offset=offset,
@@ -1193,7 +1346,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         internal_reader: bool = Depends(internal_reader_access),
     ):
         effective_reader_ready = reader_ready if internal_reader else True
-        return envelope(request, ledger.event_facets(reader_ready=effective_reader_ready))
+        cache_key = f"event-facets-v1:{effective_reader_ready!r}"
+        data = cached_read(
+            cache_key,
+            60.0,
+            lambda: ledger.event_facets(reader_ready=effective_reader_ready),
+        )
+        return envelope(request, data)
 
     @application.get("/api/v1/events/{event_id}")
     def event_detail(
@@ -1201,7 +1360,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         event_id: str,
         internal_reader: bool = Depends(internal_reader_access),
     ):
-        data = event_or_404(event_id, require_reader_ready=not internal_reader)
+        data = event_or_404(
+            event_id,
+            require_reader_ready=not internal_reader,
+            allow_excluded_capture_archive=not internal_reader,
+        )
         evidence = reader_scoped_evidence(event_id, internal_reader=internal_reader)
         facts = data.get("current_version", {}).get("facts", {}) if data.get("current_version") else {}
         preferred_source = data.get("preferred_source") or {}
@@ -1236,6 +1399,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             data = public_event_detail(data, evidence=evidence)
         return envelope(request, data)
 
+    @application.get("/api/v1/events/{event_id}/knowledge")
+    def event_knowledge(event_id: str, request: Request):
+        data = event_or_404(
+            event_id,
+            require_reader_ready=True,
+            allow_excluded_capture_archive=True,
+        )
+        event = data.get("event") or {}
+        return envelope(
+            request,
+            knowledge_context(
+                str(event.get("event_family") or ""),
+                str(event.get("event_type") or ""),
+            ),
+        )
+
     @application.get(
         "/api/v1/events/{event_id}/timeline",
         dependencies=[Depends(require_reviewer)],
@@ -1250,10 +1429,168 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         event_id: str,
         internal_reader: bool = Depends(internal_reader_access),
     ):
-        event_or_404(event_id, require_reader_ready=not internal_reader)
+        event_or_404(
+            event_id,
+            require_reader_ready=not internal_reader,
+            allow_excluded_capture_archive=not internal_reader,
+        )
         return envelope(
             request,
             {"items": reader_scoped_evidence(event_id, internal_reader=internal_reader)},
+        )
+
+    @application.get("/api/v1/events/{event_id}/sources")
+    def event_captured_sources(
+        request: Request,
+        event_id: str,
+        internal_reader: bool = Depends(internal_reader_access),
+    ):
+        event_or_404(
+            event_id,
+            require_reader_ready=not internal_reader,
+            allow_excluded_capture_archive=not internal_reader,
+        )
+        items = ledger.captured_sources(event_id)
+        if not internal_reader:
+            items = [
+                public_captured_source(item)
+                for item in items
+                if item.get("observation_status") != "deleted"
+            ]
+        return envelope(
+            request,
+            {
+                "items": items,
+                "contract": {
+                    "captured_source_is_not_evidence": True,
+                    "canonical_state_unchanged": True,
+                    "no_trading": True,
+                },
+            },
+        )
+
+    @application.get("/api/v1/events/{event_id}/source-interpretations")
+    def event_source_interpretations(
+        request: Request,
+        event_id: str,
+        internal_reader: bool = Depends(internal_reader_access),
+    ):
+        event_data = event_or_404(
+            event_id,
+            require_reader_ready=not internal_reader,
+            allow_excluded_capture_archive=not internal_reader,
+        )
+        event = dict(event_data.get("event") or {})
+        items: list[dict[str, Any]] = []
+        for capture in ledger.captured_sources(event_id):
+            if not internal_reader and capture.get("observation_status") == "deleted":
+                continue
+            receipt = str(capture.get("capture_receipt_sha256") or "")
+            run = operations.latest_capture_interpretation(event_id, receipt) if receipt else None
+            output = dict((run or {}).get("output") or {})
+            try:
+                if output:
+                    validate_interpretation_result(output, capture_source_text(capture))
+                else:
+                    output = deterministic_interpretation(event, capture)
+            except Exception:
+                output = deterministic_interpretation(event, capture)
+                output["status"] = "FAILED"
+                output["one_line_zh"] = (
+                    "缓存解读未通过当前合同；原始捕获仍可阅读，正式状态保持不变。"
+                )
+                output["persisted"] = False
+                output["external_generation_state"] = "FAILED_VALIDATION"
+            items.append(public_capture_interpretation(output))
+        return envelope(
+            request,
+            {
+                "items": items,
+                "contract": {
+                    "version": CAPTURE_INTERPRETATION_CONTRACT,
+                    "advisory_only": True,
+                    "canonical_mutation_allowed": False,
+                    "used_as_model_feature": False,
+                    "public_requests_are_cached_or_deterministic": True,
+                    "external_provider_configured": False,
+                    "no_trading": True,
+                },
+            },
+        )
+
+    @application.post(
+        "/api/v1/events/{event_id}/sources/{observation_id}/interpret",
+        dependencies=[Depends(require_operator)],
+    )
+    def run_source_interpretation(
+        request: Request,
+        event_id: str,
+        observation_id: str,
+        payload: CaptureInterpretationRunRequest,
+    ):
+        event_data = event_or_404(event_id)
+        event = dict(event_data.get("event") or {})
+        capture = next(
+            (
+                item
+                for item in ledger.captured_sources(event_id)
+                if str(item.get("observation_id") or "") == observation_id
+            ),
+            None,
+        )
+        if capture is None:
+            raise HTTPException(
+                404,
+                {
+                    "code": "CAPTURE_NOT_FOUND",
+                    "message": "capture does not belong to this event",
+                },
+            )
+        normalized = normalized_capture_input(event, capture)
+        output = deterministic_interpretation(event, capture)
+        interpretation_id, inserted = operations.enqueue_capture_interpretation(
+            event_id,
+            observation_id,
+            normalized,
+            contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+            prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+            prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+            provider="deterministic",
+            model_snapshot="capture-rules-v1",
+            external_call=False,
+        )
+        existing = operations.latest_capture_interpretation(
+            event_id, str(capture.get("capture_receipt_sha256") or "")
+        )
+        if inserted or existing is None:
+            operations.complete_capture_interpretation(
+                interpretation_id,
+                output,
+                guardrails={
+                    "source_text_untrusted": True,
+                    "quote_substrings_validated": True,
+                    "tools_allowed": False,
+                    "canonical_mutation": False,
+                    "used_as_model_feature": False,
+                },
+                usage={"input_tokens": 0, "output_tokens": 0, "estimated_usd": 0},
+                latency_ms=0.0,
+            )
+        stored = operations.latest_capture_interpretation(
+            event_id, str(capture.get("capture_receipt_sha256") or "")
+        )
+        return envelope(
+            request,
+            {
+                "interpretation_id": interpretation_id,
+                "created": inserted,
+                "output": public_capture_interpretation(
+                    dict((stored or {}).get("output") or output)
+                ),
+                "external_call": False,
+                "estimated_usd": 0,
+                "canonical_state_unchanged": True,
+            },
         )
 
     @application.get("/api/v1/events/{event_id}/trace", dependencies=[Depends(require_reviewer)])

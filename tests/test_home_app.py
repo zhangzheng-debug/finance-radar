@@ -342,6 +342,114 @@ def test_public_inline_preview_bounds_long_source_text(monkeypatch) -> None:
     assert "…" in rendered
 
 
+def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatch) -> None:
+    def excluded_capture_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        parsed = urllib.parse.urlsplit(path)
+        if parsed.path == "/api/v1/events/event-a/evidence":
+            return {"items": []}
+        if parsed.path == "/api/v1/events/event-a/sources":
+            return {
+                "items": [
+                    {
+                        "source_name": "OpenNews",
+                        "source_type": "aggregated_discovery",
+                        "authority_tier": "P2_experimental",
+                        "source_title": "Markets await central-bank minutes while gold rises",
+                        "source_excerpt": "A provider discovery summary, not a verified policy action.",
+                        "source_url": "https://example.test/discovery",
+                        "capture_receipt_sha256": "capture-a",
+                        "capture_status": "FILTERED_DISCOVERY",
+                        "is_citable_evidence": False,
+                    }
+                ]
+            }
+        if parsed.path == "/api/v1/events/event-a/source-interpretations":
+            return {
+                "items": [
+                    {
+                        "contract_version": "api-capture-interpretation-v1",
+                        "event_id": "event-a",
+                        "bound_event_version": 1,
+                        "capture_receipt_sha256": "capture-a",
+                        "source_revision_no": 1,
+                        "bound_content_sha256": "a" * 64,
+                        "status": "READY",
+                        "mode": "DETERMINISTIC",
+                        "generated_at": "2026-08-21T00:00:00+00:00",
+                        "source_language": "en",
+                        "coverage": "TITLE_ONLY",
+                        "one_line_zh": "这是一条市场评论，不是一项已经发生的政策行动。",
+                        "what_source_says": [
+                            {
+                                "text_zh": "来源称市场正在等待央行会议纪要。",
+                                "quote": "Markets await central-bank minutes",
+                            }
+                        ],
+                        "what_source_does_not_prove_zh": [
+                            "没有证明央行已经发布会议纪要。"
+                        ],
+                        "actors": [],
+                        "affected_assets": ["GOLD"],
+                        "modality": "COMMENTARY",
+                        "why_current_state_zh": "当前线索已按账本规则排除。",
+                        "missing_to_change_state_zh": ["需要央行官方网站原文。"],
+                        "prompt_injection_suspected": False,
+                        "persisted": False,
+                        "external_generation_state": "NOT_CONFIGURED",
+                        "safety": {
+                            "formal_status_mutated": False,
+                            "used_as_event_truth": False,
+                            "used_as_model_feature": False,
+                            "price_used_as_truth": False,
+                            "no_trading": True,
+                        },
+                    }
+                ]
+            }
+        data = _fake_api(path, **kwargs)
+        if parsed.path == "/api/v1/events/event-a":
+            data["event"] = {
+                **data["event"],
+                "status": "rejected",
+                "public_state": "excluded",
+                "reader_ready": 0,
+                "citable_evidence_count": 0,
+                "captured_source_count": 1,
+                "ticker_at_event": "GOLD",
+                "company_name": None,
+            }
+            data["current_version"] = {"facts": {}}
+            data["verification_method"] = None
+        return data
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", excluded_capture_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_flow"] = "已排除"
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "0 条可引用支持证据" in rendered
+    assert "1 条采集来源记录" in rendered
+    assert any(
+        item.label == "查看采集到的原始线索与内容解读（未核验、非证据）"
+        for item in page.expander
+    )
+    assert "Markets await central-bank minutes while gold rises" in rendered
+    assert "API 发现载荷 · 不参与正式结论" in rendered
+    assert "这是一条市场评论，不是一项已经发生的政策行动" in rendered
+    assert "来源称市场正在等待央行会议纪要" in rendered
+    assert "没有证明央行已经发布会议纪要" in rendered
+    assert "确定性预览 · 外部模型待接入" in rendered
+    assert "保留排除结果，等待真正的新证据" in rendered
+    assert any(
+        link.label == "查看这条发现来源（非核验证据）"
+        for link in page.get("link_button")
+    )
+
+
 def test_public_event_feed_failure_never_substitutes_overview_events(monkeypatch) -> None:
     def failing_feed_api(path: str, **kwargs: Any) -> dict[str, Any]:
         if urllib.parse.urlsplit(path).path == "/api/v1/events":

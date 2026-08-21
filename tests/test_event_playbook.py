@@ -92,10 +92,10 @@ def _known_source_ids() -> set[str]:
 
 
 class EventPlaybookContractTests(unittest.TestCase):
-    def test_playbook_loads_and_covers_six_families_with_both_card_kinds(self) -> None:
+    def test_playbook_loads_and_covers_twelve_families_with_both_card_kinds(self) -> None:
         cards = load_playbook()
-        self.assertEqual(len(cards), 12)
-        self.assertEqual(len(covered_families()), 6)
+        self.assertEqual(len(cards), 24)
+        self.assertEqual(len(covered_families()), 12)
         for family in covered_families():
             kinds = {card.kind for card in cards_for_family(family)}
             self.assertEqual(kinds, set(CARD_KINDS), f"{family} must carry both a confirm and an impostor card")
