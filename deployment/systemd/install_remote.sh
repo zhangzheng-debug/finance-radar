@@ -556,7 +556,7 @@ run_predeploy_candidate_backup() {
         --property=TasksMax=128 \
         --property=OOMPolicy=stop \
         --property=OOMScoreAdjust=700 \
-        --property=TimeoutStartSec=45min \
+        --property=TimeoutStartSec=90min \
         --property=TimeoutStopSec=2min \
         --property=UMask=0077 \
         --property=NoNewPrivileges=true \

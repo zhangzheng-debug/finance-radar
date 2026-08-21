@@ -123,7 +123,7 @@ def test_long_running_units_restart_worker_disable_formal_auto_verify_and_keep_o
     assert "MemoryMax=460M" in backup
     assert "MemorySwapMax=128M" in backup
     assert "TasksMax=128" in backup
-    assert "TimeoutStartSec=45min" in backup
+    assert "TimeoutStartSec=90min" in backup
     assert "TimeoutStopSec=2min" in backup
     assert "UMask=0077" in backup
     assert "User=root" in backup
@@ -489,6 +489,12 @@ def test_in_place_installer_requires_a_fresh_verified_backup_before_cutover() ->
     assert '--property=MemoryHigh=340M' in receipt_runner
     assert '--property=MemoryMax=460M' in receipt_runner
     assert '--property=MemorySwapMax=128M' in receipt_runner
+    candidate_bridge = source[
+        source.index('run_predeploy_candidate_backup()') : source.index(
+            'require_predeploy_memory_headroom()'
+        )
+    ]
+    assert '--property=TimeoutStartSec=90min' in candidate_bridge
     assert '--setenv=TMPDIR="$receipt_tmpdir"' in receipt_runner
     assert 'MemoryHigh=160M' not in receipt_runner
     assert 'MemoryMax=220M' not in receipt_runner
