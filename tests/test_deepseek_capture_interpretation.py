@@ -240,3 +240,30 @@ def test_deepseek_provider_safely_downgrades_unknown_modality() -> None:
     validated, _ = provider.interpret(_normalized())
 
     assert validated["modality"] == "UNCLEAR"
+
+
+def test_deepseek_provider_drops_unsupported_actors_and_normalizes_role_case() -> None:
+    output = _model_output()
+    output["actors"] = [
+        {"text": "Fed", "role": "context", "quote": "Fed"},
+        {"text": "Invented Bank", "role": "ACTOR", "quote": "Invented Bank"},
+        {"text": "Gold", "role": "UNSUPPORTED", "quote": "gold"},
+    ]
+
+    def requester(url, headers, payload, timeout):
+        return {
+            "choices": [
+                {"message": {"content": json.dumps(output)}, "finish_reason": "stop"}
+            ],
+            "usage": {},
+        }
+
+    provider = DeepSeekCaptureInterpretationProvider(
+        api_key="unit-test-secret",
+        requester=requester,
+    )
+    validated, _ = provider.interpret(_normalized())
+
+    assert validated["actors"] == [
+        {"text": "Fed", "role": "CONTEXT", "quote": "Fed"}
+    ]

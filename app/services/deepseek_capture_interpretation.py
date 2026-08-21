@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .capture_interpretation import (
+    ALLOWED_ACTOR_ROLES,
     ALLOWED_MODALITIES,
     ASSET_PATTERNS,
     CAPTURE_INTERPRETATION_PROMPT,
@@ -216,6 +217,30 @@ def _narrow_model_output(output: Any, source_text: str) -> Any:
         return output
 
     repaired = {key: candidate[key] for key in MODEL_OUTPUT_FIELDS}
+    actors = repaired.get("actors")
+    if isinstance(actors, list):
+        grounded_actors: list[dict[str, str]] = []
+        for actor in actors:
+            if not isinstance(actor, dict) or set(actor) != {"text", "role", "quote"}:
+                continue
+            text = actor.get("text")
+            role = actor.get("role")
+            quote = actor.get("quote")
+            normalized_role = role.strip().upper() if isinstance(role, str) else ""
+            if (
+                isinstance(text, str)
+                and text.strip()
+                and len(text) <= 200
+                and normalized_role in ALLOWED_ACTOR_ROLES
+                and isinstance(quote, str)
+                and quote.strip()
+                and len(quote) <= 500
+                and quote in source_text
+            ):
+                grounded_actors.append(
+                    {"text": text, "role": normalized_role, "quote": quote}
+                )
+        repaired["actors"] = grounded_actors
     repaired["affected_assets"] = [
         name for name, pattern in ASSET_PATTERNS if pattern.search(source_text)
     ]
