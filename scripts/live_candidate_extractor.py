@@ -136,6 +136,22 @@ ENTITY_PATTERNS = (
     ("binance", re.compile(r"\bbinance\b", re.I)),
     ("coinbase", re.compile(r"\bcoinbase\b", re.I)),
 )
+ENTITY_DISPLAY_NAMES = {
+    "ostium": "Ostium",
+    "sk_hynix": "SK Hynix",
+    "openai": "OpenAI",
+    "hugging_face": "Hugging Face",
+    "iran": "Iran",
+    "russia": "Russia",
+    "ecb": "European Central Bank",
+    "federal_reserve": "Federal Reserve",
+    "binance": "Binance",
+    "coinbase": "Coinbase",
+}
+LEGAL_COMPANY_NAME = re.compile(
+    r"\b([A-Z][A-Za-z0-9&.'’/-]*(?:\s+[A-Z][A-Za-z0-9&.'’/-]*){0,7}\s+"
+    r"(?:Corporation|Corp\.?|Incorporated|Inc\.?|Limited|Ltd\.?|LLC|PLC|Holdings?|Group))\b"
+)
 CROSS_SOURCE_CLUSTER_ENTITIES = {"ostium", "binance", "coinbase"}
 CANDIDATE_CLUSTER_ENTITIES = {"ostium", "sk_hynix", "openai", "hugging_face"}
 
@@ -735,6 +751,31 @@ def extract_company(raw_json: str) -> str | None:
     return str(item.get("company") or "").strip() or None
 
 
+def extract_canonical_subject(row: Any) -> tuple[str | None, str | None]:
+    """Return a displayable subject only when the source text identifies it.
+
+    Provider metadata may omit a dedicated company field.  A conservative
+    legal-name pattern and the existing bounded entity dictionary recover
+    obvious subjects without turning arbitrary headline nouns into issuers.
+    If both values remain empty, the observation stays preserved but must not
+    enter the canonical event ledger.
+    """
+
+    source_text = (
+        opennews_discovery_text(row)
+        or f"{str(row['title'] or '')}\n{str(row['summary'] or '')}"
+    )
+    ticker = extract_symbol(str(row["raw_json"] or ""), source_text)
+    company = extract_company(str(row["raw_json"] or ""))
+    if not company:
+        legal_name = LEGAL_COMPANY_NAME.search(html.unescape(source_text))
+        company = legal_name.group(1).strip() if legal_name else None
+    if not company:
+        entity = recognized_entity(source_text)
+        company = ENTITY_DISPLAY_NAMES.get(str(entity or ""))
+    return company, ticker
+
+
 def provisional_grade_cap(authority_tier: str) -> str:
     if authority_tier.startswith("P0"):
         return "A_P0_official_candidate"
@@ -995,6 +1036,7 @@ def process_pending(
         "discovery_leads": 0,
         "no_candidate": 0,
         "scope_filtered": 0,
+        "subject_filtered": 0,
         "backpressure_filtered": 0,
         "new_events": 0,
         "linked_observations": 0,
@@ -1030,6 +1072,18 @@ def process_pending(
                 (now, row["job_id"]),
             )
             result["discovery_leads"] += 1
+            continue
+
+        company_name, ticker_at_event = extract_canonical_subject(row)
+        if not company_name and not ticker_at_event:
+            connection.execute(
+                """UPDATE observation_jobs
+                   SET status='COMPLETED_SUBJECT_FILTERED',attempts=attempts+1,
+                       last_error='subject_unresolved_not_canonical',updated_at=?
+                   WHERE job_id=?""",
+                (now, row["job_id"]),
+            )
+            result["subject_filtered"] += 1
             continue
 
         is_p2 = not str(row["authority_tier"]).startswith(("P0", "P1"))
@@ -1095,11 +1149,8 @@ def process_pending(
                 event_date,
                 row["local_received_at"],
                 now,
-                extract_symbol(
-                    row["raw_json"],
-                    opennews_discovery_text(row) or f"{row['title']}\n{row['summary']}",
-                ),
-                extract_company(row["raw_json"]),
+                ticker_at_event,
+                company_name,
                 grade_cap,
                 row["source_id"],
             ),
@@ -1174,6 +1225,7 @@ def write_report(path: Path, result: dict[str, Any], connection: Any) -> None:
         f"- Candidate observations: `{result['candidates']}`",
         f"- Unique candidate events this run: `{result['unique_events']}`",
         f"- No-rule observations: `{result['no_candidate']}`",
+        f"- Subject-unresolved observations kept outside canonical events: `{result.get('subject_filtered', 0)}`",
         f"- Retracted stale aggregated-discovery reviews: `{result.get('retracted_events', 0)}`",
         f"- Aggregated duplicates attached to verified events: `{result.get('duplicate_events_reconciled', 0)}`",
         "- Safety: every automatic output remains `candidate`; even P0 official discovery does not auto-verify severity.",
