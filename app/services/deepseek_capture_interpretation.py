@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .capture_interpretation import (
+    ALLOWED_MODALITIES,
     ASSET_PATTERNS,
     CAPTURE_INTERPRETATION_PROMPT,
     MODEL_OUTPUT_FIELDS,
@@ -218,6 +219,12 @@ def _narrow_model_output(output: Any, source_text: str) -> Any:
     repaired["affected_assets"] = [
         name for name, pattern in ASSET_PATTERNS if pattern.search(source_text)
     ]
+    # Modality is a closed, server-owned vocabulary.  A provider occasionally
+    # returns a near-synonym such as ASSERTED or FACTUAL.  Treating that as
+    # UNCLEAR is an information-reducing repair: it preserves the explanation
+    # while refusing to infer a stronger state from an unrecognised label.
+    if repaired.get("modality") not in ALLOWED_MODALITIES:
+        repaired["modality"] = "UNCLEAR"
 
     source_numbers = _numeric_tokens(source_text)
     if not _has_only_grounded_numbers(repaired.get("one_line_zh"), source_numbers):

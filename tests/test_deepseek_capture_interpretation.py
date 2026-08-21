@@ -219,3 +219,24 @@ def test_deepseek_provider_narrows_extra_fields_asset_objects_and_ungrounded_num
     assert validated["affected_assets"] == ["GOLD"]
     assert "20" not in validated["one_line_zh"]
     assert validated["what_source_says"][0]["text_zh"] == "来源表达了所引用的内容。"
+
+
+def test_deepseek_provider_safely_downgrades_unknown_modality() -> None:
+    output = _model_output()
+    output["modality"] = "ASSERTED"
+
+    def requester(url, headers, payload, timeout):
+        return {
+            "choices": [
+                {"message": {"content": json.dumps(output)}, "finish_reason": "stop"}
+            ],
+            "usage": {},
+        }
+
+    provider = DeepSeekCaptureInterpretationProvider(
+        api_key="unit-test-secret",
+        requester=requester,
+    )
+    validated, _ = provider.interpret(_normalized())
+
+    assert validated["modality"] == "UNCLEAR"
