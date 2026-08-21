@@ -7,6 +7,15 @@ Releases use the same version prefixed by `v`.
 
 - No unreleased changes.
 
+## 2026.08.21.1
+
+- Prevented observations with neither a company name nor an event-time ticker
+  from entering the canonical event ledger. The raw source observation remains
+  preserved and is marked `COMPLETED_SUBJECT_FILTERED` for operational audit.
+- Added a backup-first, integrity-checked maintenance command that removes
+  existing subjectless canonical projections without deleting raw observations
+  or source revisions.
+
 ## 2026.08.19.1
 
 - Closed the authentic-human review boundary: Reviewer and Arbiter identities
