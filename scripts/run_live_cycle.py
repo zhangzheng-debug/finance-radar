@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -64,6 +64,7 @@ DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
 DEFAULT_ENV = ROOT / ".env"
 DEFAULT_REPORT = ROOT / "reports" / "live_cycle_latest.json"
 CYCLE_LEASE_MIN_TTL_SECONDS = 900
+CONTINUOUS_EVIDENCE_AGENT_LIMIT = 1
 CYCLE_LEASE_RENEW_INTERVAL_SECONDS = 60.0
 
 
@@ -79,9 +80,12 @@ def acquire_cycle_lease(
     *,
     ttl_seconds: int = CYCLE_LEASE_MIN_TTL_SECONDS,
     now: dt.datetime | None = None,
+    token: str | None = None,
 ) -> str | None:
     now = now or dt.datetime.now(dt.timezone.utc)
-    token = str(uuid.uuid4())
+    token = str(token or uuid.uuid4())
+    if not 16 <= len(token) <= 128:
+        raise ValueError("live-cycle lease token length is invalid")
     connection.execute("BEGIN IMMEDIATE")
     try:
         connection.execute(
@@ -208,6 +212,18 @@ def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def write_progress_report(path: Path, payload: dict[str, Any]) -> None:
+    """Atomically expose the last completed stage without source payloads."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
 def decision_matches_current_evidence_receipt(
     decision: dict[str, Any],
     *,
@@ -270,7 +286,7 @@ def run_pending_evidence_agents(
 ) -> dict[str, Any]:
     """Run bounded internal evidence analysis after primary evidence enrichment."""
     rows = connection.execute(
-        """SELECT e.event_id,j.job_id,j.job_type,j.priority
+        """SELECT e.event_id,e.current_version,j.job_id,j.job_type,j.priority
            FROM canonical_events e
            JOIN pipeline_jobs j ON j.event_id=e.event_id
            WHERE (
@@ -294,9 +310,53 @@ def run_pending_evidence_agents(
         "by_job_type": {},
         "no_trading": True,
     }
-    now = utc_now()
+    def advance_fact_state(
+        *,
+        event_id: str,
+        event_version: int,
+        job_id: str,
+        job_type: str,
+        decision_status: str,
+        evidence_fingerprint: str | None,
+    ) -> None:
+        if decision_status == "INSUFFICIENT":
+            job_status = "COMPLETED_NEEDS_EVIDENCE"
+            workflow_state = "NEEDS_EVIDENCE"
+            reasons = ["EVIDENCE_AGENT_INSUFFICIENT"]
+        else:
+            job_status = "PENDING_HUMAN_REVIEW"
+            workflow_state = "NEEDS_HUMAN"
+            reasons = [f"EVIDENCE_AGENT_{decision_status}"]
+        connection.execute(
+            """UPDATE pipeline_jobs
+               SET status=?,last_error=NULL,updated_at=?
+               WHERE job_id=? AND job_type=? AND status='PENDING_EVIDENCE_REVIEW'""",
+            (job_status, utc_now(), job_id, job_type),
+        )
+        connection.execute(
+            """INSERT INTO event_fact_workflow(
+                   event_id,event_version,workflow_state,reason_codes_json,
+                   evidence_fingerprint,contract_version,updated_at
+               ) VALUES (?,?,?,?,?,'event-admission-v1',?)
+               ON CONFLICT(event_id,event_version) DO UPDATE SET
+                   workflow_state=excluded.workflow_state,
+                   reason_codes_json=excluded.reason_codes_json,
+                   evidence_fingerprint=excluded.evidence_fingerprint,
+                   contract_version=excluded.contract_version,
+                   updated_at=excluded.updated_at""",
+            (
+                event_id,
+                event_version,
+                workflow_state,
+                stable_json(reasons),
+                evidence_fingerprint,
+                utc_now(),
+            ),
+        )
+
     for row in rows:
         event_id = str(row["event_id"])
+        event_version = int(row["current_version"])
         job_id = str(row["job_id"])
         job_type = str(row["job_type"])
         result["by_job_type"][job_type] = result["by_job_type"].get(job_type, 0) + 1
@@ -307,24 +367,27 @@ def run_pending_evidence_agents(
                 event_id=event_id,
                 evidence_agent=evidence_agent,
             ):
-                connection.execute(
-                    """UPDATE pipeline_jobs
-                       SET status='PENDING_HUMAN_REVIEW',last_error=NULL,updated_at=?
-                       WHERE job_id=? AND job_type=?
-                         AND status='PENDING_EVIDENCE_REVIEW'""",
-                    (now, job_id, job_type),
+                prior_output = existing[0].get("output") or {}
+                advance_fact_state(
+                    event_id=event_id,
+                    event_version=event_version,
+                    job_id=job_id,
+                    job_type=job_type,
+                    decision_status=str(existing[0].get("status") or "INSUFFICIENT"),
+                    evidence_fingerprint=prior_output.get("evidence_receipt_fingerprint"),
                 )
                 result["already_run"] += 1
                 continue
             result["stale_or_legacy_rerun"] += 1
         try:
             decision = evidence_agent.run(event_id)
-            connection.execute(
-                """UPDATE pipeline_jobs
-                   SET status='PENDING_HUMAN_REVIEW',last_error=NULL,updated_at=?
-                   WHERE job_id=? AND job_type=?
-                     AND status='PENDING_EVIDENCE_REVIEW'""",
-                (utc_now(), job_id, job_type),
+            advance_fact_state(
+                event_id=event_id,
+                event_version=event_version,
+                job_id=job_id,
+                job_type=job_type,
+                decision_status=str(decision["status"]),
+                evidence_fingerprint=decision.get("evidence_receipt_fingerprint"),
             )
             result["run"] += 1
             result.setdefault("statuses", {}).setdefault(decision["status"], 0)
@@ -351,9 +414,21 @@ def run_cycle(
     ledger_repository: LedgerRepository | None = None,
     risk_router: RiskRouter | None = None,
     evidence_agent: EvidenceAgent | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     started_at = utc_now()
     result: dict[str, Any] = {"started_at": started_at, "errors": []}
+
+    def checkpoint(stage: str) -> None:
+        result["progress"] = {
+            "stage": stage,
+            "updated_at": utc_now(),
+            "complete": False,
+        }
+        if progress_callback is not None:
+            progress_callback(result)
+
+    checkpoint("collecting_sources")
     sec_user_agent = os.environ.get("SEC_USER_AGENT", "").strip()
     official = collect_official_sources(
         connection,
@@ -391,6 +466,7 @@ def run_cycle(
         error=None if collection["categories"] else "all OpenNews categories failed",
     )
     connection.commit()
+    checkpoint("extracting_candidates")
 
     candidates = process_pending(connection, limit=500)
     result["candidate_extraction"] = candidates
@@ -447,6 +523,8 @@ def run_cycle(
             "skipped_missing_user_agent": 1,
         }
 
+    checkpoint("building_review_inputs")
+
     triage_rows = build_review_triage(connection)
     write_triage_outputs(
         triage_rows,
@@ -502,6 +580,7 @@ def run_cycle(
             "errors": [],
         }
 
+    checkpoint("shadow_routing")
     if operations is not None and ledger_repository is not None and risk_router is not None:
         result["shadow_routing"] = run_shadow_batch(
             ledger_repository,
@@ -517,12 +596,18 @@ def run_cycle(
             "recorded": 0,
         }
 
+    checkpoint("evidence_agent")
     if evidence_agent is not None and operations is not None:
         result["evidence_agent"] = run_pending_evidence_agents(
             connection,
             evidence_agent,
             operations,
-            limit=4,
+            # Local evidence analysis is secondary to keeping source capture
+            # current.  Production measurements showed four serial decisions
+            # could consume the entire outer 10-minute cycle budget.  Drain
+            # one per cycle and let the independent capture-interpretation
+            # worker handle its own backlog concurrently.
+            limit=CONTINUOUS_EVIDENCE_AGENT_LIMIT,
         )
     else:
         result["evidence_agent"] = {
@@ -531,6 +616,7 @@ def run_cycle(
             "run": 0,
         }
 
+    checkpoint("linking_assets")
     asset_events = load_json(ROOT / "config" / "live_asset_relations.json")["events"]
     result["asset_relations"] = apply_relations(connection, asset_events)
     if sec_user_agent:
@@ -559,6 +645,7 @@ def run_cycle(
     market["followups_scheduled"] = followups_before + schedule_followup_jobs(connection)
     result["market"] = market
 
+    checkpoint("finalizing_outbox")
     result["outbox_expired_stale"] = expire_stale_pending(
         connection, max_age_hours=24
     )
@@ -572,6 +659,11 @@ def run_cycle(
     else:
         result["telegram"] = {"sent": 0, "errors": 0, "mode": "dry_run"}
     result["finished_at"] = utc_now()
+    result["progress"] = {
+        "stage": "complete",
+        "updated_at": result["finished_at"],
+        "complete": True,
+    }
     return result
 
 
@@ -581,13 +673,18 @@ def main() -> int:
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--lease-token")
     parser.add_argument("--send", action="store_true", help="deliver new eligible Telegram outbox rows")
     args = parser.parse_args()
     load_dotenv(args.env_file)
     settings = Settings.from_env()
     connection = open_ledger(args.db)
     lease_ttl = cycle_lease_ttl_seconds(args.timeout)
-    lease = acquire_cycle_lease(connection, ttl_seconds=lease_ttl)
+    lease = acquire_cycle_lease(
+        connection,
+        ttl_seconds=lease_ttl,
+        token=args.lease_token,
+    )
     if lease is None:
         connection.close()
         print("live_cycle=skipped reason=lease_held")
@@ -624,6 +721,7 @@ def main() -> int:
             ledger_repository=ledger_repository,
             risk_router=risk_router,
             evidence_agent=evidence_agent,
+            progress_callback=lambda payload: write_progress_report(args.report, payload),
         )
     finally:
         heartbeat.stop()
@@ -633,8 +731,7 @@ def main() -> int:
         result.setdefault("errors", []).append("live_cycle_lease_lost")
     elif heartbeat.last_error:
         result["lease_heartbeat_warning"] = heartbeat.last_error
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_progress_report(args.report, result)
     print(stable_json(result))
     print(f"REPORT={args.report}")
     return 1 if result["errors"] or result["market"].get("errors") else 0

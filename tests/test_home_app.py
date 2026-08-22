@@ -19,6 +19,9 @@ def _overview() -> dict[str, Any]:
         "counts": {"canonical_events": 12, "event_evidence": 9},
         "event_status": {"verified": 5, "candidate": 4, "weak": 2, "rejected": 1},
         "review_queue": 6,
+        "reader_review_queue": 1,
+        "reader_hidden_inventory": 5,
+        "discovery_backlog": 5,
         "rough_reviewed": 3,
         "public_funnel": {
             "total": 12,
@@ -27,6 +30,14 @@ def _overview() -> dict[str, Any]:
             "insufficient": 2,
             "rough_reviewed": 3,
             "pending_verification": 1,
+        },
+        "reader_funnel": {
+            "total": 7,
+            "verified": 5,
+            "excluded": 1,
+            "insufficient": 0,
+            "rough_reviewed": 1,
+            "pending_verification": 0,
         },
         "job_status": {"COMPLETED_AUTHORIZED_ROUGH_REVIEW": 3},
         "timing": {
@@ -68,7 +79,7 @@ def _overview() -> dict[str, Any]:
             },
         ],
         "audit": {"no_trading": 0, "no_auto_verify": 0, "no_leakage": 0},
-        "schema_version": 12,
+        "schema_version": 14,
         "quick_check": "ok",
     }
 
@@ -87,8 +98,15 @@ def _fake_api(path: str, **_kwargs: Any) -> dict[str, Any]:
                 {
                     "authority_tier": "P0",
                     "source_name": "Official source",
-                    "evidence_status": "confirmed",
-                    "evidence_passage": "Exact primary-source passage.",
+                    "evidence_status": "confirmed_primary",
+                    "relation_status": "HUMAN_CONFIRMED",
+                    "subject_match": 1,
+                    "event_claim_supported": 1,
+                    "date_coherent": 1,
+                    "reader_eligible": 1,
+                    "evidence_passage": (
+                        "Exact primary-source passage naming the issuer, action, and event stage."
+                    ),
                     "evidence_url": "https://example.test/source",
                 }
             ]
@@ -97,7 +115,15 @@ def _fake_api(path: str, **_kwargs: Any) -> dict[str, Any]:
         event = _overview()["recent_events"][0]
         return {
             "event": event,
-            "current_version": {"facts": {"evidence_summary": event["evidence_excerpt"]}},
+            "current_version": {
+                "facts": {
+                    "evidence_summary": event["evidence_excerpt"],
+                    "claim_subject": "Example Holdings",
+                    "claim_action": "sec_litigation_release",
+                    "claim_stage": "DISCLOSED",
+                    "known_at": "2026-08-03T20:00:00+00:00",
+                }
+            },
             "preferred_source": {"source_published_at": "2026-08-02T08:30:00+00:00"},
             "verification_method": {
                 "reviewed_at": "2026-08-03T23:00:00+00:00",
@@ -117,7 +143,8 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert not page.exception
     assert "事件浏览" in rendered
     assert "Example Holdings" in rendered
-    assert "优先核验队列" in rendered
+    assert "可核验事件队列" in rendered
+    assert "另有 5 条历史或发现记录未达到公开可读标准" in rendered
     assert "先看证据是否足够" in rendered
     assert "证据路径" not in rendered
     assert "UTC" in rendered
@@ -128,9 +155,10 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert "已粗审" in rendered
     assert "最近成功采集" in rendered
     assert "最近发现新事件" in rendered
-    assert "正式结论" in rendered
-    assert "核验 5 · 排除 1" in rendered
-    assert "待补证 / 复核" in rendered
+    assert "公开可读" in rendered
+    assert "7 / 12" in rendered
+    assert "待恢复 / 补证" in rendered
+    assert "历史标签、证据不足和待核验记录" in rendered
     assert "实时事件、原始证据与核验进度" not in rendered
     assert "正式处置状态" not in rendered
     assert "Schema" not in rendered
@@ -151,7 +179,7 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     rendered = "\n".join(str(item.value) for item in page.markdown)
     assert not page.exception
     assert "当前页事件预览" in rendered
-    assert "Exact primary-source passage." in rendered
+    assert "Exact primary-source passage naming the issuer, action, and event stage." in rendered
     assert "阅读提示" in rendered
     assert "粗审已完成，继续核对正式证据" in rendered
     assert "监管执法" in rendered
@@ -201,7 +229,13 @@ def test_public_preview_reports_changes_since_last_view(monkeypatch) -> None:
                     "evidence_id": "ev-primary-2",
                     "authority_tier": "P0",
                     "source_name": "Official source",
-                    "evidence_status": "confirmed",
+                        "evidence_status": "confirmed",
+                        "relation_event_version": 2,
+                        "relation_status": "HUMAN_CONFIRMED",
+                        "subject_match": 1,
+                        "event_claim_supported": 1,
+                        "date_coherent": 1,
+                        "reader_eligible": 1,
                     "evidence_passage": "A newly published exact passage.",
                     "evidence_url": "https://example.test/source-2",
                 }
@@ -309,6 +343,114 @@ def test_public_inline_preview_bounds_long_source_text(monkeypatch) -> None:
     assert "…" in rendered
 
 
+def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatch) -> None:
+    def excluded_capture_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        parsed = urllib.parse.urlsplit(path)
+        if parsed.path == "/api/v1/events/event-a/evidence":
+            return {"items": []}
+        if parsed.path == "/api/v1/events/event-a/sources":
+            return {
+                "items": [
+                    {
+                        "source_name": "OpenNews",
+                        "source_type": "aggregated_discovery",
+                        "authority_tier": "P2_experimental",
+                        "source_title": "Markets await central-bank minutes while gold rises",
+                        "source_excerpt": "A provider discovery summary, not a verified policy action.",
+                        "source_url": "https://example.test/discovery",
+                        "capture_receipt_sha256": "capture-a",
+                        "capture_status": "FILTERED_DISCOVERY",
+                        "is_citable_evidence": False,
+                    }
+                ]
+            }
+        if parsed.path == "/api/v1/events/event-a/source-interpretations":
+            return {
+                "items": [
+                    {
+                        "contract_version": "api-capture-interpretation-v1",
+                        "event_id": "event-a",
+                        "bound_event_version": 1,
+                        "capture_receipt_sha256": "capture-a",
+                        "source_revision_no": 1,
+                        "bound_content_sha256": "a" * 64,
+                        "status": "READY",
+                        "mode": "DETERMINISTIC",
+                        "generated_at": "2026-08-21T00:00:00+00:00",
+                        "source_language": "en",
+                        "coverage": "TITLE_ONLY",
+                        "one_line_zh": "这是一条市场评论，不是一项已经发生的政策行动。",
+                        "what_source_says": [
+                            {
+                                "text_zh": "来源称市场正在等待央行会议纪要。",
+                                "quote": "Markets await central-bank minutes",
+                            }
+                        ],
+                        "what_source_does_not_prove_zh": [
+                            "没有证明央行已经发布会议纪要。"
+                        ],
+                        "actors": [],
+                        "affected_assets": ["GOLD"],
+                        "modality": "COMMENTARY",
+                        "why_current_state_zh": "当前线索已按账本规则排除。",
+                        "missing_to_change_state_zh": ["需要央行官方网站原文。"],
+                        "prompt_injection_suspected": False,
+                        "persisted": False,
+                        "external_generation_state": "NOT_CONFIGURED",
+                        "safety": {
+                            "formal_status_mutated": False,
+                            "used_as_event_truth": False,
+                            "used_as_model_feature": False,
+                            "price_used_as_truth": False,
+                            "no_trading": True,
+                        },
+                    }
+                ]
+            }
+        data = _fake_api(path, **kwargs)
+        if parsed.path == "/api/v1/events/event-a":
+            data["event"] = {
+                **data["event"],
+                "status": "rejected",
+                "public_state": "excluded",
+                "reader_ready": 0,
+                "citable_evidence_count": 0,
+                "captured_source_count": 1,
+                "ticker_at_event": "GOLD",
+                "company_name": None,
+            }
+            data["current_version"] = {"facts": {}}
+            data["verification_method"] = None
+        return data
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", excluded_capture_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_flow"] = "已排除"
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "0 条可引用支持证据" in rendered
+    assert "1 条采集来源记录" in rendered
+    assert any(
+        item.label == "查看采集到的原始线索与内容解读（未核验、非证据）"
+        for item in page.expander
+    )
+    assert "Markets await central-bank minutes while gold rises" in rendered
+    assert "API 发现载荷 · 不参与正式结论" in rendered
+    assert "这是一条市场评论，不是一项已经发生的政策行动" in rendered
+    assert "来源称市场正在等待央行会议纪要" in rendered
+    assert "没有证明央行已经发布会议纪要" in rendered
+    assert "确定性预览 · 外部模型待接入" in rendered
+    assert "保留排除结果，等待真正的新证据" in rendered
+    assert any(
+        link.label == "查看这条发现来源（非核验证据）"
+        for link in page.get("link_button")
+    )
+
+
 def test_public_event_feed_failure_never_substitutes_overview_events(monkeypatch) -> None:
     def failing_feed_api(path: str, **kwargs: Any) -> dict[str, Any]:
         if urllib.parse.urlsplit(path).path == "/api/v1/events":
@@ -370,6 +512,7 @@ def test_public_collector_marks_overdue_worker_as_stale_not_realtime(monkeypatch
     )
 
     assert not page.exception
-    assert "数据更新已中断" in rendered
+    assert "完整数据处理周期已中断" in rendered
+    assert "部分来源可能仍已采集" in rendered
     assert "不是实时信息" in rendered
     assert "更新已中断" in rendered

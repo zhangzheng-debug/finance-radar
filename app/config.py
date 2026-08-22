@@ -10,6 +10,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _reviewer_principals_payload() -> str:
     """Load reviewer principals from one unambiguous secret source.
 
@@ -89,6 +96,17 @@ class Settings:
     evidence_llm_model: str = "qwen2.5-0.5b-instruct-q4_k_m"
     evidence_llm_timeout_seconds: float = 30.0
     evidence_llm_max_tokens: int = 900
+    capture_llm_enabled: bool = False
+    capture_llm_provider: str = "disabled"
+    capture_llm_model: str = ""
+    capture_llm_base_url: str = ""
+    capture_llm_timeout_seconds: float = 45.0
+    capture_llm_max_tokens: int = 700
+    capture_llm_daily_usd_cap: float = 0.0
+    capture_llm_daily_cny_cap: float = 0.0
+    # A zero daily cap means unlimited. The worker still has bounded batches,
+    # leases, retry counts, timeouts and output tokens.
+    capture_llm_daily_request_cap: int = 0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -135,6 +153,37 @@ class Settings:
             evidence_llm_max_tokens=max(
                 128,
                 int(os.getenv("FINANCE_RADAR_EVIDENCE_LLM_MAX_TOKENS", "900")),
+            ),
+            capture_llm_enabled=_env_flag("FINANCE_RADAR_CAPTURE_LLM_ENABLED", False),
+            capture_llm_provider=os.getenv(
+                "FINANCE_RADAR_CAPTURE_LLM_PROVIDER", "disabled"
+            ).strip().lower(),
+            capture_llm_model=os.getenv("FINANCE_RADAR_CAPTURE_LLM_MODEL", "").strip(),
+            capture_llm_base_url=os.getenv(
+                "FINANCE_RADAR_CAPTURE_LLM_BASE_URL", ""
+            ).strip(),
+            capture_llm_timeout_seconds=max(
+                1.0,
+                float(os.getenv("FINANCE_RADAR_CAPTURE_LLM_TIMEOUT_SECONDS", "45")),
+            ),
+            capture_llm_max_tokens=max(
+                128,
+                min(
+                    1200,
+                    int(os.getenv("FINANCE_RADAR_CAPTURE_LLM_MAX_TOKENS", "700")),
+                ),
+            ),
+            capture_llm_daily_usd_cap=max(
+                0.0,
+                float(os.getenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_USD_CAP", "0")),
+            ),
+            capture_llm_daily_cny_cap=max(
+                0.0,
+                float(os.getenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_CNY_CAP", "0")),
+            ),
+            capture_llm_daily_request_cap=max(
+                0,
+                int(os.getenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_REQUEST_CAP", "0")),
             ),
         )
 

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "taxonomy_version": "event-taxonomy-v1",
+  "default_category": "OTHER_UNMAPPED",
+  "categories": {
+    "MARKET_OUTCOME_AUDIT_ONLY": {"time_anchor": null, "playbook_family": null, "fact_event": false},
+    "CONTROL_OR_ADMINISTRATIVE": {"time_anchor": "source_published", "playbook_family": null, "fact_event": false},
+    "BANKRUPTCY_INSOLVENCY": {"time_anchor": "event_occurred", "playbook_family": "bankruptcy_reorganization", "fact_event": true},
+    "DELISTING_OR_SUSPENSION": {"time_anchor": "filing_effective", "playbook_family": "delisting_or_suspension", "fact_event": true},
+    "LISTING_COMPLIANCE": {"time_anchor": "source_published", "playbook_family": "listing_compliance", "fact_event": true},
+    "CAPITAL_AND_DILUTION": {"time_anchor": "source_published", "playbook_family": "capital_and_dilution", "fact_event": true},
+    "LIQUIDITY_AND_CREDIT": {"time_anchor": "source_published", "playbook_family": "liquidity_and_credit", "fact_event": true},
+    "EARNINGS_AND_GUIDANCE": {"time_anchor": "source_published", "playbook_family": "earnings_or_guidance", "fact_event": true},
+    "REGULATORY_ENFORCEMENT": {"time_anchor": "source_published", "playbook_family": "regulatory_enforcement", "fact_event": true},
+    "CORPORATE_TRANSACTION": {"time_anchor": "source_published", "playbook_family": "corporate_transaction", "fact_event": true},
+    "GOVERNANCE_AND_MANAGEMENT": {"time_anchor": "source_published", "playbook_family": "governance_and_management", "fact_event": true},
+    "OPERATIONS_PRODUCT_SECURITY": {"time_anchor": "source_published", "playbook_family": "operations_product_security", "fact_event": true},
+    "MACRO_POLICY_AND_DATA": {"time_anchor": "source_published", "playbook_family": "macro_policy", "fact_event": true},
+    "OTHER_UNMAPPED": {"time_anchor": null, "playbook_family": null, "fact_event": false}
+  },
+  "rules": [
+    {"id": "market-outcome", "priority": 10, "pattern": "(?:price_(?:crash|dislocation|only|consequence|proxy|gainer|loser)|temporal_price|market_return|return_outcome|duplicate_price)", "category": "MARKET_OUTCOME_AUDIT_ONLY"},
+    {"id": "control-admin", "priority": 20, "pattern": "(?:control|administration|administrative|metadata|identity|boundary|source_mismatch|date_control|ratio_noise|formula|fund_reporting|routine_nav)", "category": "CONTROL_OR_ADMINISTRATIVE"},
+    {"id": "bankruptcy", "priority": 30, "pattern": "(?:bankrupt|insolven|liquidat|receivership|equity_death|wind_down)", "category": "BANKRUPTCY_INSOLVENCY"},
+    {"id": "delisting", "priority": 40, "pattern": "(?:delist|listing_exit|trading_suspension|listing_halt)", "category": "DELISTING_OR_SUSPENSION"},
+    {"id": "listing-compliance", "priority": 50, "pattern": "(?:listing|minimum_bid|compliance|remediation)", "category": "LISTING_COMPLIANCE"},
+    {"id": "capital-dilution", "priority": 60, "pattern": "(?:dilut|recapital|capital_structure|equity_structure|reverse_split|split|warrant|convertible|equity_financ|capital_return|repurchase)", "category": "CAPITAL_AND_DILUTION"},
+    {"id": "liquidity-credit", "priority": 70, "pattern": "(?:distress|going_concern|liquidity|credit|debt|financing_dependency|cash_runway|impairment)", "category": "LIQUIDITY_AND_CREDIT"},
+    {"id": "earnings-guidance", "priority": 80, "pattern": "(?:earning|guidance|operating_result|fundamental|revenue|financial_result)", "category": "EARNINGS_AND_GUIDANCE"},
+    {"id": "regulatory", "priority": 90, "pattern": "(?:regulat|enforcement|sanction|aml|market_integrity)", "category": "REGULATORY_ENFORCEMENT"},
+    {"id": "transaction", "priority": 100, "pattern": "(?:merger|acquisition|corporate_action|transaction|spac|redemption|going_private|reorganization)", "category": "CORPORATE_TRANSACTION"},
+    {"id": "governance", "priority": 110, "pattern": "(?:governance|management|auditor|compensation|shareholder)", "category": "GOVERNANCE_AND_MANAGEMENT"},
+    {"id": "operations", "priority": 120, "pattern": "(?:operat|product|security_incident|clinical_program|commercialization|mineral|workforce|geopolitical|external_demand)", "category": "OPERATIONS_PRODUCT_SECURITY"},
+    {"id": "macro", "priority": 130, "pattern": "(?:macro|policy|economic|financial_stability|bank_supervision|bank_reporting|community_reinvestment)", "category": "MACRO_POLICY_AND_DATA"}
+  ]
+}

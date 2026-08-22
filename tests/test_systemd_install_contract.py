@@ -19,6 +19,12 @@ OPERATOR_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-
 ACTIVATOR = Path(__file__).parents[1] / "deployment" / "systemd" / "activate_prepared_restore.sh"
 SLICE_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar.slice"
 LLM_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-evidence-llm.service"
+CAPTURE_INTERPRETATION_UNIT = (
+    Path(__file__).parents[1]
+    / "deployment"
+    / "systemd"
+    / "finance-radar-capture-interpretation.service"
+)
 RECEIPT_VALIDATOR = Path(__file__).parents[1] / "deployment" / "systemd" / "verify_backup_receipt.py"
 LOCAL_LLM_INSTALLER = Path(__file__).parents[1] / "deployment" / "systemd" / "install_local_evidence_model.sh"
 MIGRATION_BACKUP = Path(__file__).parents[1] / "deployment" / "systemd" / "create_migration_backup.sh"
@@ -58,6 +64,16 @@ def test_remote_installer_keeps_venv_readable_by_service_account() -> None:
     assert "runuser -u finance-radar" in source
     assert "import sklearn, sklearn.pipeline" in source
     assert 'sklearn.__version__ == "1.8.0"' in source
+
+
+def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() -> None:
+    source = CAPTURE_INTERPRETATION_UNIT.read_text(encoding="utf-8")
+
+    assert (
+        "scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 100000 --workers 3"
+        in source
+    )
+    assert "--env-file /dev/null" not in source
 
 
 def test_remote_installer_uses_explicit_current_public_url() -> None:
@@ -110,7 +126,7 @@ def test_long_running_units_restart_worker_disable_formal_auto_verify_and_keep_o
     assert "MemoryMax=460M" in backup
     assert "MemorySwapMax=128M" in backup
     assert "TasksMax=128" in backup
-    assert "TimeoutStartSec=45min" in backup
+    assert "TimeoutStartSec=90min" in backup
     assert "TimeoutStopSec=2min" in backup
     assert "UMask=0077" in backup
     assert "User=root" in backup
@@ -406,6 +422,11 @@ def test_in_place_installer_rolls_back_services_and_edge_on_any_cutover_failure(
         "# The only point at which the running release changes."
     )
     assert "worker unexpectedly restarted during protected cutover" in cutover
+    assert "local attempts=${2:-90}" in cutover
+    assert "local attempts=${2:-30}" not in cutover
+    restore_source = ACTIVATOR.read_text(encoding="utf-8")
+    assert "for _ in $(seq 1 90)" in restore_source
+    assert "for _ in $(seq 1 30)" not in restore_source
     assert "ROLLBACK_ENABLED_UNITS" in source
     assert "ROLLBACK_ACTIVE_UNITS" in source
     assert "restore_service_runtime()" in source
@@ -476,6 +497,12 @@ def test_in_place_installer_requires_a_fresh_verified_backup_before_cutover() ->
     assert '--property=MemoryHigh=340M' in receipt_runner
     assert '--property=MemoryMax=460M' in receipt_runner
     assert '--property=MemorySwapMax=128M' in receipt_runner
+    candidate_bridge = source[
+        source.index('run_predeploy_candidate_backup()') : source.index(
+            'require_predeploy_memory_headroom()'
+        )
+    ]
+    assert '--property=TimeoutStartSec=90min' in candidate_bridge
     assert '--setenv=TMPDIR="$receipt_tmpdir"' in receipt_runner
     assert 'MemoryHigh=160M' not in receipt_runner
     assert 'MemoryMax=220M' not in receipt_runner

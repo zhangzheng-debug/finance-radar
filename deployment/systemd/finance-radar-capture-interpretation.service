@@ -1,0 +1,32 @@
+[Unit]
+Description=Finance Radar advisory capture interpretation worker
+After=network-online.target finance-radar-worker.service
+Wants=network-online.target
+ConditionPathExists=/etc/finance-radar/deepseek-api-key
+
+[Service]
+Type=oneshot
+User=finance-radar
+Group=finance-radar
+WorkingDirectory=/opt/finance-radar/current
+EnvironmentFile=/etc/finance-radar.env
+LoadCredential=deepseek_api_key:/etc/finance-radar/deepseek-api-key
+ExecStart=/opt/finance-radar/venv/bin/python -B scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 100000 --workers 3
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryHigh=220M
+MemoryMax=320M
+TasksMax=32
+ReadWritePaths=/opt/finance-radar/shared
+
+[Install]
+WantedBy=multi-user.target

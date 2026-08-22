@@ -10,6 +10,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any
 
+from app.evidence_policy import is_primary_authority_tier
 from app.models.risk_label_contract import (
     EVIDENCE_STATES,
     MATERIALITY,
@@ -61,11 +62,11 @@ def _authority_rank(value: str) -> tuple[int, str]:
 
 def _authority_class(value: str) -> str:
     tier = str(value or "").upper()
-    if tier.startswith("P0"):
+    if not is_primary_authority_tier(tier):
+        return "DISCOVERY_OR_CONTEXT"
+    if tier.split("_", 1)[0] == "P0":
         return "PRIMARY_OFFICIAL"
-    if tier.startswith("P1"):
-        return "ISSUER_OFFICIAL"
-    return "DISCOVERY_OR_CONTEXT"
+    return "ISSUER_OFFICIAL"
 
 
 def _as_utc(value: Any) -> datetime | None:

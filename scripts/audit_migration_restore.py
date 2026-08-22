@@ -72,6 +72,15 @@ LEDGER_TABLES = (
     "pipeline_jobs",
     "alert_outbox",
 )
+LEDGER_V13_TABLES = (
+    "discovery_leads",
+    "event_evidence_relations",
+    "event_fact_workflow",
+)
+LEDGER_V14_TABLES = (
+    "market_event_anchors",
+    "market_job_anchor_links",
+)
 OPERATIONS_TABLES = (
     "replay_runs",
     "model_runs",
@@ -92,10 +101,16 @@ OPERATIONS_V6_TABLES = (
 OPERATIONS_V7_TABLES = (
     "adjudication_freezes",
 )
+OPERATIONS_V8_TABLES = (
+    "capture_interpretation_runs",
+)
+OPERATIONS_V9_TABLES = (
+    "capture_interpretation_attempts",
+)
 # Versions 2--4 are historical recovery points.  Version 6 is the currently
 # deployed operations store.  There was no released schema 5 migration, so do
 # not silently accept an unknown intermediate shape.
-SUPPORTED_OPERATIONS_SCHEMA_VERSIONS = frozenset({2, 3, 4, 6, 7})
+SUPPORTED_OPERATIONS_SCHEMA_VERSIONS = frozenset({2, 3, 4, 6, 7, 8, 9})
 
 
 def utc_now() -> str:
@@ -440,12 +455,20 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
             connection.execute(f"SELECT MAX(version) FROM {schema_table}").fetchone()[0] or 0
         )
         tables = LEDGER_TABLES if ledger else OPERATIONS_TABLES
+        if ledger and schema_version >= 13:
+            tables += LEDGER_V13_TABLES
+        if ledger and schema_version >= 14:
+            tables += LEDGER_V14_TABLES
         if not ledger and schema_version >= 3:
             tables += OPERATIONS_V3_TABLES
         if not ledger and schema_version >= 6:
             tables += OPERATIONS_V6_TABLES
         if not ledger and schema_version >= 7:
             tables += OPERATIONS_V7_TABLES
+        if not ledger and schema_version >= 8:
+            tables += OPERATIONS_V8_TABLES
+        if not ledger and schema_version >= 9:
+            tables += OPERATIONS_V9_TABLES
         counts: dict[str, int] = {}
         for table in tables:
             try:
@@ -479,7 +502,7 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
             }
     if quick_check != "ok" or integrity_check != "ok":
         raise ValueError(f"SQLite integrity failure: quick={quick_check} integrity={integrity_check}")
-    if ledger and (schema_version != 12 or any(audit.values())):
+    if ledger and (schema_version != 14 or any(audit.values())):
         raise ValueError(f"ledger safety/schema failure: schema={schema_version} audit={audit}")
     if not ledger and schema_version not in SUPPORTED_OPERATIONS_SCHEMA_VERSIONS:
         expected_versions = ", ".join(str(version) for version in sorted(SUPPORTED_OPERATIONS_SCHEMA_VERSIONS))

@@ -127,7 +127,7 @@ def collect(base_url: str, web_url: str, timeout: float) -> dict[str, Any]:
         "https_certificate_valid": True,
         "web_health_ok": web_status == 200 and web_body == "ok",
         "api_health_ok": health["status"] == "ok",
-        "ledger_schema_12": health["ledger"]["schema_version"] == 12,
+        "ledger_schema_14": health["ledger"]["schema_version"] == 14,
         "ledger_quick_check_ok": health["ledger"]["quick_check"] == "ok",
         "operations_quick_check_ok": operations["quick_check"] == "ok",
         "worker_success": latest_worker.get("status") == "SUCCESS",

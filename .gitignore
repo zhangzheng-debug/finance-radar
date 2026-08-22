@@ -33,3 +33,6 @@ reports/light_verification_dryrun_local*.md
 # named generated HTML out of Git without hiding hand-authored team HTML source.
 docs/team_role_readiness_*.html
 docs/Finance_Radar_*_*.pdf
+# Codex may materialize user-provided images here for local inspection. They
+# are conversation attachments, never product source or release inventory.
+.codex-remote-attachments/

@@ -10,8 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from app.evidence_policy import register_sqlite_integrity_functions
 
-SCHEMA_VERSION = 12
+
+SCHEMA_VERSION = 14
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -48,6 +50,39 @@ CREATE TABLE IF NOT EXISTS raw_observations (
     observation_status TEXT NOT NULL,
     FOREIGN KEY (source_id) REFERENCES sources(source_id),
     UNIQUE (source_id, external_id)
+);
+
+CREATE TABLE IF NOT EXISTS discovery_leads (
+    lead_id TEXT PRIMARY KEY,
+    observation_id TEXT NOT NULL UNIQUE,
+    source_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN (
+        'PENDING_ENRICHMENT','NEEDS_EVIDENCE','LEAD_NO_SCOPED_EVENT',
+        'READY_FOR_CANONICAL','PROMOTED','DUPLICATE','EXCLUDED'
+    )),
+    proposed_event_family TEXT,
+    proposed_event_type TEXT,
+    company_name TEXT,
+    ticker_at_event TEXT,
+    event_date TEXT NOT NULL,
+    known_at TEXT NOT NULL,
+    claim_action TEXT,
+    claim_stage TEXT,
+    claim_summary TEXT,
+    evidence_url TEXT,
+    evidence_passage TEXT,
+    evidence_status TEXT,
+    source_content_sha256 TEXT NOT NULL,
+    matched_keywords_json TEXT NOT NULL,
+    admission_reasons_json TEXT NOT NULL,
+    admission_contract_version TEXT NOT NULL,
+    canonical_event_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+    FOREIGN KEY (observation_id) REFERENCES raw_observations(observation_id),
+    FOREIGN KEY (source_id) REFERENCES sources(source_id),
+    FOREIGN KEY (canonical_event_id) REFERENCES canonical_events(event_id)
 );
 
 CREATE TABLE IF NOT EXISTS source_revisions (
@@ -156,6 +191,40 @@ CREATE TABLE IF NOT EXISTS event_evidence (
     UNIQUE (event_id, observation_id)
 );
 
+CREATE TABLE IF NOT EXISTS event_evidence_relations (
+    event_id TEXT NOT NULL,
+    evidence_id TEXT NOT NULL,
+    event_version INTEGER NOT NULL,
+    relation_status TEXT NOT NULL CHECK (relation_status IN (
+        'SCOPED_MATCH','HUMAN_CONFIRMED','CONFLICTED','INSUFFICIENT'
+    )),
+    subject_match INTEGER NOT NULL CHECK (subject_match IN (0,1)),
+    event_claim_supported INTEGER NOT NULL CHECK (event_claim_supported IN (0,1)),
+    date_coherent INTEGER NOT NULL CHECK (date_coherent IN (0,1)),
+    modality TEXT NOT NULL,
+    evidence_fingerprint TEXT NOT NULL,
+    contract_version TEXT NOT NULL,
+    assessed_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (event_id,evidence_id,event_version),
+    FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
+    FOREIGN KEY (evidence_id) REFERENCES event_evidence(evidence_id)
+);
+
+CREATE TABLE IF NOT EXISTS event_fact_workflow (
+    event_id TEXT NOT NULL,
+    event_version INTEGER NOT NULL,
+    workflow_state TEXT NOT NULL CHECK (workflow_state IN (
+        'NEEDS_EVIDENCE','EVIDENCE_READY','NEEDS_HUMAN','DUPLICATE','EXCLUDED'
+    )),
+    reason_codes_json TEXT NOT NULL,
+    evidence_fingerprint TEXT,
+    contract_version TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (event_id,event_version),
+    FOREIGN KEY (event_id) REFERENCES canonical_events(event_id)
+);
+
 CREATE TABLE IF NOT EXISTS event_assessments (
     assessment_id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL,
@@ -245,6 +314,43 @@ CREATE TABLE IF NOT EXISTS market_jobs (
     UNIQUE (event_id, asset_id, provider, observation_window)
 );
 
+CREATE TABLE IF NOT EXISTS market_event_anchors (
+    anchor_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    event_version INTEGER NOT NULL,
+    asset_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    declared_anchor_kind TEXT,
+    reaction_anchor_at TEXT,
+    source_published_at TEXT,
+    local_received_at TEXT,
+    known_at TEXT,
+    timestamp_precision TEXT NOT NULL CHECK (timestamp_precision IN (
+        'EXACT_TIMESTAMP','DATE_ONLY','MISSING','INVALID'
+    )),
+    anchor_status TEXT NOT NULL CHECK (anchor_status IN ('EXACT','UNAVAILABLE')),
+    anchor_lag_seconds INTEGER,
+    unsupported_windows_json TEXT NOT NULL,
+    reason_code TEXT,
+    contract_version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+    FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
+    FOREIGN KEY (asset_id) REFERENCES assets(asset_id),
+    UNIQUE (event_id,event_version,asset_id,provider)
+);
+
+CREATE TABLE IF NOT EXISTS market_job_anchor_links (
+    market_job_id TEXT PRIMARY KEY,
+    anchor_id TEXT NOT NULL,
+    offset_seconds INTEGER NOT NULL,
+    window_contract_version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (market_job_id) REFERENCES market_jobs(market_job_id),
+    FOREIGN KEY (anchor_id) REFERENCES market_event_anchors(anchor_id)
+);
+
 CREATE TABLE IF NOT EXISTS market_snapshots (
     snapshot_id TEXT PRIMARY KEY,
     market_job_id TEXT NOT NULL,
@@ -298,6 +404,13 @@ CREATE TABLE IF NOT EXISTS observation_jobs (
     FOREIGN KEY (observation_id) REFERENCES raw_observations(observation_id),
     UNIQUE (observation_id, job_type)
 );
+
+CREATE INDEX IF NOT EXISTS idx_discovery_leads_status
+ON discovery_leads(status,source_id,updated_at);
+CREATE INDEX IF NOT EXISTS idx_event_evidence_relations_current
+ON event_evidence_relations(event_id,event_version,relation_status);
+CREATE INDEX IF NOT EXISTS idx_event_fact_workflow_state
+ON event_fact_workflow(workflow_state,updated_at);
 
 CREATE TABLE IF NOT EXISTS event_market_metrics (
     metric_id TEXT PRIMARY KEY,
@@ -450,6 +563,8 @@ CREATE INDEX IF NOT EXISTS idx_event_asset_impacts_event
     ON event_asset_impacts(event_id, market_observation_allowed);
 CREATE INDEX IF NOT EXISTS idx_market_jobs_status
     ON market_jobs(status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_market_event_anchors_status
+    ON market_event_anchors(anchor_status,event_id,event_version);
 CREATE INDEX IF NOT EXISTS idx_market_snapshots_event
     ON market_snapshots(event_id, captured_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_status_priority
@@ -474,11 +589,28 @@ SELECT
     r.observation_id,
     r.source_id,
     r.external_id,
-    r.source_published_at,
+    CASE
+      WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+      THEN COALESCE(
+        NULLIF(TRIM(json_extract(sr.raw_json,'$.item.published_at')),''),
+        NULLIF(TRIM(json_extract(sr.raw_json,'$.item.created_at')),''),
+        NULLIF(TRIM(json_extract(sr.raw_json,'$.item.posted_at')),''),
+        r.source_published_at
+      )
+      ELSE r.source_published_at
+    END AS source_published_at,
     r.local_received_at,
     COALESCE(sr.title,r.title) AS title,
     COALESCE(sr.summary,r.summary) AS summary,
-    r.canonical_url,
+    CASE
+      WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+      THEN COALESCE(
+        NULLIF(TRIM(json_extract(sr.raw_json,'$.item.link')),''),
+        NULLIF(TRIM(json_extract(sr.raw_json,'$.item.url')),''),
+        r.canonical_url
+      )
+      ELSE r.canonical_url
+    END AS canonical_url,
     COALESCE(sr.content_sha256,r.content_sha256) AS content_sha256,
     COALESCE(sr.raw_json,r.raw_json) AS raw_json,
     CASE WHEN sr.revision_kind='delete' THEN 'deleted' ELSE r.observation_status END AS observation_status,
@@ -494,6 +626,10 @@ LEFT JOIN source_revisions sr
      WHERE sr2.observation_id=r.observation_id
  );
 """
+
+LATEST_SOURCE_CONTENT_VIEW_DDL = SCHEMA[
+    SCHEMA.rfind("CREATE VIEW IF NOT EXISTS latest_source_content") :
+].strip()
 
 
 @dataclass(frozen=True)
@@ -558,7 +694,29 @@ def open_ledger(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
     connection.row_factory = sqlite3.Row
+    register_sqlite_integrity_functions(connection)
     connection.executescript(SCHEMA)
+    view_row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='view' AND name='latest_source_content'"
+    ).fetchone()
+    view_sql = str(view_row["sql"] or "") if view_row is not None else ""
+    if "$.item.published_at" not in view_sql:
+        # Existing ledgers retain CREATE VIEW IF NOT EXISTS definitions.  Upgrade
+        # this projection once, under a writer lock, instead of churning schema
+        # on every API/worker connection.
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            locked_view = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='view' AND name='latest_source_content'"
+            ).fetchone()
+            locked_sql = str(locked_view["sql"] or "") if locked_view is not None else ""
+            if "$.item.published_at" not in locked_sql:
+                connection.execute("DROP VIEW IF EXISTS latest_source_content")
+                connection.execute(LATEST_SOURCE_CONTENT_VIEW_DDL)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
     connection.execute(
         "INSERT OR IGNORE INTO event_ledger_schema(version, applied_at) VALUES (?, ?)",
         (SCHEMA_VERSION, utc_now()),
@@ -814,6 +972,31 @@ def enqueue_observation_job(
     payload: dict[str, Any],
 ) -> bool:
     now = utc_now()
+    job_id = stable_id("OJOB", observation_id, job_type)
+    existing = connection.execute(
+        "SELECT status,payload_json FROM observation_jobs WHERE job_id=?",
+        (job_id,),
+    ).fetchone()
+    if existing is not None:
+        try:
+            previous_payload = json.loads(existing["payload_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            previous_payload = {}
+        previous_hash = str(previous_payload.get("source_content_sha256") or "")
+        current_hash = str(payload.get("source_content_sha256") or "")
+        # A semantic source revision must be extracted again.  Provider ranking
+        # metadata is intentionally absent from the semantic hash, so harmless
+        # score changes remain idempotent.
+        if current_hash and current_hash != previous_hash:
+            connection.execute(
+                """UPDATE observation_jobs
+                   SET status='PENDING',priority=?,attempts=0,available_at=?,
+                       last_error=NULL,payload_json=?,updated_at=?
+                   WHERE job_id=?""",
+                (priority, now, stable_json(payload), now, job_id),
+            )
+            return True
+        return False
     before = connection.total_changes
     connection.execute(
         """
@@ -823,7 +1006,7 @@ def enqueue_observation_job(
         ) VALUES (?,?,?,'PENDING',?,0,?,NULL,?,?,?)
         """,
         (
-            stable_id("OJOB", observation_id, job_type),
+            job_id,
             observation_id,
             job_type,
             priority,
@@ -1293,12 +1476,17 @@ def ledger_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         "event_versions",
         "event_observations",
         "event_evidence",
+        "discovery_leads",
+        "event_evidence_relations",
+        "event_fact_workflow",
         "event_assessments",
         "entities",
         "assets",
         "event_entities",
         "event_asset_impacts",
         "market_jobs",
+        "market_event_anchors",
+        "market_job_anchor_links",
         "market_snapshots",
         "event_market_metrics",
         "observation_jobs",

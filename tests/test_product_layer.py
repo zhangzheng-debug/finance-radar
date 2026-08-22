@@ -4,6 +4,7 @@ import json
 import inspect
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -96,7 +97,7 @@ class ProductLayerTests(unittest.TestCase):
     def test_repository_exposes_evidence_linked_event(self) -> None:
         repository = LedgerRepository(self.ledger_path)
         health = repository.health()
-        self.assertEqual(health["schema_version"], 12)
+        self.assertEqual(health["schema_version"], 14)
         self.assertEqual(health["audit"]["trading_boundary_violations"], 0)
         detail = repository.event_detail("evt-1")
         self.assertEqual(detail["event"]["no_trading"], 1)
@@ -239,7 +240,18 @@ class ProductLayerTests(unittest.TestCase):
         self.assertTrue(all(not item["order_endpoints_present"] for item in providers.values()))
         self.assertEqual(
             capabilities["horizon_policy"]["windows"],
-            ["t_plus_5m", "t_plus_30m", "t_plus_1d"],
+            [
+                "t_plus_5m",
+                "t_plus_30m",
+                "t_plus_2h",
+                "next_close",
+                "t_plus_1d",
+                "t_plus_5d",
+            ],
+        )
+        self.assertEqual(
+            capabilities["horizon_policy"]["baseline"],
+            "version_bound_exact_event_anchor",
         )
         self.assertFalse(capabilities["horizon_policy"]["continuous_quote_feed"])
 
@@ -281,10 +293,17 @@ class ProductLayerTests(unittest.TestCase):
             facets = client.get("/api/v1/events/facets")
             self.assertEqual(facets.status_code, 200)
             self.assertTrue(facets.json()["data"]["read_only"])
-            filtered = client.get("/api/v1/events", params={"source": "test"})
+            filtered = client.get(
+                "/api/v1/events",
+                params={"source": "test"},
+                headers={"X-Admin-Token": "test-secret"},
+            )
             self.assertEqual(filtered.status_code, 200)
             self.assertEqual(filtered.json()["data"]["total"], 1)
-            detail = client.get("/api/v1/events/evt-1")
+            detail = client.get(
+                "/api/v1/events/evt-1",
+                headers={"X-Admin-Token": "test-secret"},
+            )
             self.assertEqual(detail.status_code, 200)
             self.assertTrue(detail.json()["data"]["model_shadow_output"]["no_trading"])
             self.assertTrue(
@@ -891,6 +910,72 @@ class ProductLayerTests(unittest.TestCase):
             self.assertEqual(status, "FAILED")
             self.assertNotIn("finished_at", result)
             self.assertFalse(report_path.exists())
+        finally:
+            if prior is None:
+                report_path.unlink(missing_ok=True)
+            else:
+                report_path.write_bytes(prior)
+
+    @patch("app.workers.continuous.subprocess.run")
+    def test_worker_timeout_preserves_stage_and_releases_only_owned_lease(self, run_mock) -> None:
+        report_path = ROOT / "reports" / "live_cycle_latest.json"
+        prior = report_path.read_bytes() if report_path.exists() else None
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def timed_out(command, **kwargs):
+            token = command[command.index("--lease-token") + 1]
+            with closing(sqlite3.connect(self.settings.ledger_db)) as connection:
+                connection.execute(
+                    """INSERT INTO runtime_leases(
+                           lease_name,lease_token,acquired_at,expires_at
+                       ) VALUES ('live_cycle',?,?,?)""",
+                    (
+                        token,
+                        "2026-08-22T00:00:00+00:00",
+                        "2099-08-22T00:00:00+00:00",
+                    ),
+                )
+                connection.commit()
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "started_at": "2026-08-22T00:00:00+00:00",
+                        "official_sources": {"sec_current_filings": {"items": 10}},
+                        "progress": {
+                            "stage": "shadow_routing",
+                            "updated_at": "2026-08-22T00:09:00+00:00",
+                            "complete": False,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            raise subprocess.TimeoutExpired(
+                command,
+                kwargs["timeout"],
+                output="partial stdout",
+                stderr="",
+            )
+
+        run_mock.side_effect = timed_out
+        try:
+            operations = OperationsRepository(self.settings.operations_db)
+            status, result = execute_cycle(
+                self.settings,
+                operations,
+                send=False,
+                timeout=1,
+                health_only=False,
+            )
+            self.assertEqual(status, "DEGRADED")
+            self.assertEqual(result["progress"]["stage"], "shadow_routing")
+            self.assertTrue(result["process"]["timed_out"])
+            self.assertTrue(result["process"]["owned_lease_released"])
+            with closing(sqlite3.connect(self.settings.ledger_db)) as connection:
+                remaining = connection.execute(
+                    "SELECT COUNT(*) FROM runtime_leases WHERE lease_name='live_cycle'"
+                ).fetchone()[0]
+            self.assertEqual(remaining, 0)
         finally:
             if prior is None:
                 report_path.unlink(missing_ok=True)

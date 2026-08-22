@@ -39,8 +39,10 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         *,
         source_id: str = "opennews_free",
         published_at: str = "2026-07-15T10:00:00Z",
-        raw_json: str = "{}",
+        raw_json: str | None = None,
     ) -> None:
+        if raw_json is None:
+            raw_json = json.dumps({"item": {"company": "Fixture Subject"}})
         now = utc_now()
         observation_id = stable_id("OBS", source_id, external_id)
         self.connection.execute(
@@ -86,6 +88,40 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         self.assertEqual(event["no_trading"], 1)
         job = self.connection.execute("SELECT * FROM pipeline_jobs").fetchone()
         self.assertEqual(job["status"], "PENDING_PRIMARY_EVIDENCE")
+
+    def test_subject_unresolved_observation_never_enters_canonical_ledger(self) -> None:
+        self.add_observation(
+            "unknown-subject",
+            "Unnamed issuer files for Chapter 11 bankruptcy",
+            "https://example.test/unknown-subject",
+            raw_json="{}",
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["subject_filtered"], 1)
+        self.assertEqual(result["candidates"], 0)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0],
+            0,
+        )
+        job = self.connection.execute("SELECT status,last_error FROM observation_jobs").fetchone()
+        self.assertEqual(job["status"], "COMPLETED_SUBJECT_FILTERED")
+        self.assertEqual(job["last_error"], "subject_unresolved_not_canonical")
+
+    def test_legal_company_name_in_headline_satisfies_subject_gate(self) -> None:
+        self.add_observation(
+            "named-subject",
+            "Example Corp files for Chapter 11 bankruptcy",
+            "https://example.test/named-subject",
+            raw_json="{}",
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["candidates"], 1)
+        event = self.connection.execute("SELECT company_name FROM canonical_events").fetchone()
+        self.assertEqual(event["company_name"], "Example Corp")
 
     def test_same_canonical_url_clusters_and_no_rule_completes(self) -> None:
         self.add_observation("a", "Firm announces a cross-border merger", "https://x.com/a/1")
@@ -396,11 +432,105 @@ class LiveCandidateExtractorTests(unittest.TestCase):
                 external_id,
                 title,
                 url,
-                raw_json=json.dumps({"item": {"title": title, "coins": []}}),
+                raw_json=json.dumps(
+                    {"item": {"title": title, "coins": [], "company": "Fixture Subject"}}
+                ),
             )
         result = extractor.process_pending(self.connection, limit=10)
         self.assertEqual(result["candidates"], 2)
         self.assertEqual(result["scope_filtered"], 0)
+
+    def test_gold_market_commentary_is_not_a_monetary_policy_event(self) -> None:
+        title = (
+            "Middle East tensions lift risk aversion; Brent tops $91 and GOLD nears "
+            "4340 as markets await Federal Reserve meeting minutes for rate clues"
+        )
+        self.add_observation(
+            "gold-awaiting-fed-minutes",
+            title,
+            "https://x.com/FirstSquawk/status/2089870834508927268",
+            raw_json=json.dumps(
+                {
+                    "item": {
+                        "title": title,
+                        "coins": ["XAU", "XYZ-GOLD"],
+                        "company": "GOLD",
+                        "score": 90,
+                        "grade": "A+",
+                        "signal": "long",
+                    }
+                }
+            ),
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["candidates"], 0)
+        self.assertEqual(result["scope_filtered"], 1)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0],
+            0,
+        )
+        row = self.connection.execute("SELECT * FROM latest_source_content").fetchone()
+        self.assertEqual(
+            extractor.extract_canonical_subject(
+                row, extractor.RULE_BY_TYPE["monetary_policy"]
+            ),
+            ("Federal Reserve", None),
+        )
+
+    def test_macro_actor_is_subject_and_provider_coin_is_only_affected_asset(self) -> None:
+        title = "Federal Reserve released meeting minutes and kept policy rates unchanged"
+        self.add_observation(
+            "fed-released-minutes",
+            title,
+            "https://example.test/fed-minutes",
+            raw_json=json.dumps(
+                {"item": {"title": title, "coins": ["XYZ-GOLD"]}}
+            ),
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["candidates"], 1)
+        event = self.connection.execute(
+            "SELECT company_name,ticker_at_event FROM canonical_events"
+        ).fetchone()
+        self.assertEqual(event["company_name"], "Federal Reserve")
+        self.assertIsNone(event["ticker_at_event"])
+        facts = json.loads(
+            self.connection.execute("SELECT facts_json FROM event_versions").fetchone()[0]
+        )
+        self.assertEqual(facts["affected_assets"], ["GOLD"])
+        self.assertNotIn("signal", facts)
+        self.assertNotIn("grade", facts)
+
+    def test_opennews_provider_summary_can_supply_missing_action(self) -> None:
+        self.add_observation(
+            "summary-only-bankruptcy",
+            "Example Corp corporate update",
+            "https://example.test/example-update",
+            raw_json=json.dumps(
+                {
+                    "item": {
+                        "title": "Example Corp corporate update",
+                        "summary_en": (
+                            "Example Corp filed a voluntary Chapter 11 bankruptcy petition."
+                        ),
+                        "company": "Example Corp",
+                    }
+                }
+            ),
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["candidates"], 1)
+        event = self.connection.execute(
+            "SELECT event_type,company_name FROM canonical_events"
+        ).fetchone()
+        self.assertEqual(event["event_type"], "bankruptcy")
+        self.assertEqual(event["company_name"], "Example Corp")
 
     def test_provider_asset_tag_requires_story_level_identity(self) -> None:
         unrelated = "Coinbase reports a security breach affecting customer records"
@@ -628,7 +758,7 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         self.assertEqual(result["candidates"], 2)
         self.assertEqual(result["unique_events"], 2)
 
-    def test_sec_official_filing_maps_item_and_stays_candidate(self) -> None:
+    def test_sec_official_filing_stays_a_discovery_lead_until_document_admission(self) -> None:
         upsert_source(
             self.connection,
             source_id="sec_current_filings",
@@ -653,14 +783,25 @@ class LiveCandidateExtractorTests(unittest.TestCase):
             raw_json=raw_json,
         )
         result = extractor.process_pending(self.connection, limit=10)
-        self.assertEqual(result["candidates"], 1)
-        event = self.connection.execute("SELECT * FROM canonical_events").fetchone()
-        self.assertEqual(event["event_type"], "earnings_or_guidance")
-        self.assertEqual(event["company_name"], "Example Corp")
-        self.assertEqual(event["provisional_grade_cap"], "A_P0_official_candidate")
-        self.assertEqual(event["status"], "candidate")
-        relation = self.connection.execute("SELECT relation_type FROM event_observations").fetchone()
-        self.assertEqual(relation["relation_type"], "official_primary_candidate")
+        self.assertEqual(result["candidates"], 0)
+        self.assertEqual(result["discovery_leads"], 1)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0],
+            0,
+        )
+        lead = self.connection.execute("SELECT * FROM discovery_leads").fetchone()
+        self.assertEqual(lead["status"], "PENDING_ENRICHMENT")
+        self.assertEqual(lead["company_name"], "Example Corp")
+        self.assertEqual(lead["proposed_event_type"], "earnings_or_guidance")
+        self.assertIsNone(lead["canonical_event_id"])
+        observation_job = self.connection.execute(
+            """SELECT j.status,j.last_error
+               FROM observation_jobs j
+               JOIN raw_observations r ON r.observation_id=j.observation_id
+               WHERE r.external_id='sec-one'"""
+        ).fetchone()
+        self.assertEqual(observation_job["status"], "COMPLETED_DISCOVERY_LEAD")
+        self.assertEqual(observation_job["last_error"], "sec_parse_before_canonical")
 
     def test_same_day_official_releases_with_distinct_urls_do_not_cluster(self) -> None:
         upsert_source(
@@ -675,12 +816,14 @@ class LiveCandidateExtractorTests(unittest.TestCase):
             "Federal Reserve announces first monetary policy action",
             "https://www.federalreserve.gov/release-one.htm",
             source_id="federal_reserve_press",
+            raw_json="{}",
         )
         self.add_observation(
             "fed-two",
             "Federal Reserve announces second monetary policy action",
             "https://www.federalreserve.gov/release-two.htm",
             source_id="federal_reserve_press",
+            raw_json="{}",
         )
         result = extractor.process_pending(self.connection, limit=10)
         self.assertEqual(result["candidates"], 2)

@@ -36,7 +36,7 @@ def _ledger(path: Path) -> None:
         connection.executescript(
             """
             CREATE TABLE event_ledger_schema(version INTEGER);
-            INSERT INTO event_ledger_schema VALUES (12);
+            INSERT INTO event_ledger_schema VALUES (14);
             CREATE TABLE sources(id INTEGER);
             INSERT INTO sources VALUES (1);
             CREATE TABLE raw_observations(id INTEGER);
@@ -52,6 +52,11 @@ def _ledger(path: Path) -> None:
             CREATE TABLE pipeline_jobs(id INTEGER);
             INSERT INTO pipeline_jobs VALUES (1);
             CREATE TABLE alert_outbox(id INTEGER);
+            CREATE TABLE discovery_leads(id INTEGER);
+            CREATE TABLE event_evidence_relations(id INTEGER);
+            CREATE TABLE event_fact_workflow(id INTEGER);
+            CREATE TABLE market_event_anchors(id INTEGER);
+            CREATE TABLE market_job_anchor_links(id INTEGER);
             """
         )
 
@@ -77,6 +82,10 @@ def _operations(path: Path, *, schema_version: int = 4) -> None:
             connection.execute("CREATE TABLE formal_mutation_audits(id INTEGER)")
         if schema_version >= 7:
             connection.execute("CREATE TABLE adjudication_freezes(id INTEGER)")
+        if schema_version >= 8:
+            connection.execute("CREATE TABLE capture_interpretation_runs(id INTEGER)")
+        if schema_version >= 9:
+            connection.execute("CREATE TABLE capture_interpretation_attempts(id INTEGER)")
         connection.execute("INSERT INTO worker_cycles VALUES (1)")
         connection.commit()
 
@@ -243,7 +252,7 @@ def test_full_encrypted_migration_restore_audit(tmp_path: Path) -> None:
     )
     assert result["status"] == "PASS"
     assert result["archive"]["manifest_all_match"] is True
-    assert result["ledger_restore"]["schema_version"] == 12
+    assert result["ledger_restore"]["schema_version"] == 14
     assert result["ledger_restore"]["audit"] == {
         "trading_boundary_violations": 0,
         "auto_verification_violations": 0,
@@ -329,6 +338,40 @@ def test_restore_audit_accepts_current_operations_schema_seven(tmp_path: Path) -
 
     assert result["operations_restore"]["schema_version"] == 7
     assert result["operations_restore"]["counts"]["adjudication_freezes"] == 0
+
+
+def test_restore_audit_accepts_current_operations_schema_eight(tmp_path: Path) -> None:
+    encrypted, passphrase, expected_sha256 = _fixture(
+        tmp_path, operations_schema_version=8
+    )
+
+    result = audit_archive(
+        encrypted,
+        passphrase,
+        expected_release=RELEASE,
+        expected_sha256=expected_sha256,
+    )
+
+    assert result["operations_restore"]["schema_version"] == 8
+    assert result["operations_restore"]["counts"]["adjudication_freezes"] == 0
+    assert result["operations_restore"]["counts"]["capture_interpretation_runs"] == 0
+
+
+def test_restore_audit_accepts_operations_schema_nine(tmp_path: Path) -> None:
+    encrypted, passphrase, expected_sha256 = _fixture(
+        tmp_path, operations_schema_version=9
+    )
+
+    result = audit_archive(
+        encrypted,
+        passphrase,
+        expected_release=RELEASE,
+        expected_sha256=expected_sha256,
+    )
+
+    assert result["operations_restore"]["schema_version"] == 9
+    assert result["operations_restore"]["counts"]["capture_interpretation_runs"] == 0
+    assert result["operations_restore"]["counts"]["capture_interpretation_attempts"] == 0
 
 
 def test_restore_audit_binds_new_archive_to_verified_recovery_bundle(tmp_path: Path) -> None:

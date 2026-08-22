@@ -5,7 +5,96 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
-- No unreleased changes.
+## 2026.08.22.12
+
+- Align deployment and prepared-restore API health gates with the measured
+  cold-start cost of the precomputed overview snapshot. Both paths now wait up
+  to 90 seconds, preventing a healthy roughly 45-second startup from being
+  rolled back while keeping the snapshot ready before public reads begin.
+
+## 2026.08.22.11
+
+- Overlap up to three independently claimed capture-interpretation requests so
+  the historical receipt backlog can be drained promptly. Provider usage
+  reservations, immutable receipt idempotency, retry state and the prohibition
+  on canonical mutation remain enforced per job.
+- Keep five-minute source collection ahead of slower local evidence analysis:
+  one evidence decision is drained per cycle, and a hard timeout after durable
+  source collection is reported as degraded rather than as total interruption.
+
+## 2026.08.22.10
+
+- Made live asset-relation reconciliation tolerate canonical quality deletion:
+  obsolete relation definitions are skipped and reported instead of failing the
+  entire collection cycle. Removed the currently stale ECB relation entry that
+  referenced an event already deleted from the production ledger.
+
+## 2026.08.22.9
+
+- Made capture interpretation a durable historical-to-incremental data layer:
+  the worker exhausts every eligible retained receipt once, persists its model
+  generation and source watermark, and performs no provider call until a new
+  or revised receipt appears. Historical terminal keys are loaded in bulk and
+  the bounded service batch was raised to 20.
+- Replaced the production shadow router's public-reader/N+1 query path with two
+  bounded bulk queries. Live cycles now publish stage checkpoints and use an
+  exact child-owned lease token, so a hard timeout preserves the failing stage
+  and cannot strand the next five-minute cycle behind an orphan lease.
+- Public status now separates completed processing cycles, public-readable
+  events and reader-hidden recovery inventory instead of presenting an empty
+  reader queue as a completed historical review.
+
+## 2026.08.22.8
+
+- Moved the expensive public overview projection out of the request path. The
+  API now computes it before serving traffic, refreshes it every 30 seconds in
+  the background, and preserves the last good generation after a refresh
+  failure. The public UI first-read timeout is now 20 seconds, preventing a
+  healthy cold process from being presented as a full-page outage.
+
+## 2026.08.22.3
+
+- Fixed the five-minute capture-interpretation queue so recovery-plan receipts
+  match canonical captured-source receipts. Immutable cache hits no longer
+  consume the per-run completion limit, preventing new candidates from being
+  starved while preserving cache reuse and zero canonical mutation.
+
+## 2026.08.22.2
+
+- Fixed the production capture-interpretation systemd entry point and hardened
+  DeepSeek JSON adaptation with information-reducing normalization for extra
+  fields, malformed asset lists and ungrounded numeric prose. The strict quote,
+  schema and canonical no-mutation gates remain authoritative; transient model
+  contract failures are bounded and retryable.
+
+## 2026.08.22.1
+
+- Closed the captured-source interpretation path with grounded Chinese summaries,
+  immutable source references, DeepSeek JSON-contract validation, retry leases,
+  failure accounting and an optional bounded systemd worker. Daily request and
+  CNY ceilings are intentionally unlimited by owner decision while usage,
+  per-batch, timeout, retry and output-token controls remain enforced.
+- Added source-observation recovery for API payloads without a usable original
+  URL, preserving raw content as reviewable P2 captures without promoting it to
+  citable evidence or changing canonical event status.
+- Added minute-bar market observations with provider timestamps, a 24-card
+  financial knowledge layer with FTS5 retrieval and traceable calculators, and
+  a leak-resistant dual-human-gold preparation/training bridge that remains
+  shadow-only until authentic labels return.
+- Hardened the public overview and event dossier with bounded aggregation caches,
+  supported-source selection, financial context, explicit degraded states and
+  historical Schema 14 compatibility. Full local regression passed with
+  `981 passed, 5 skipped`.
+
+- Added a read-only public-reader quality gate: a canonical record enters the
+  public event feed only when it has a named subject, a structured fact summary,
+  and a citable URL plus exact source passage. Incomplete candidates remain in
+  the canonical ledger and internal review path as a separately counted
+  discovery backlog; no canonical status or evidence row is rewritten.
+- Replaced the generic subject-plus-category fallback (for example, a ticker
+  followed only by “listing status”) with an explicit discovery-only explanation
+  that states the missing subject/action/stage or source evidence instead of
+  implying that a specific event occurred.
 
 ## 2026.08.19.1
 

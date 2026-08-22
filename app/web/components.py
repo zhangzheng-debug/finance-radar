@@ -9,6 +9,8 @@ from urllib.parse import quote, urlencode
 
 import streamlit as st
 
+from app.evidence_policy import is_reader_supporting_evidence
+
 
 FLOW_PRESETS: dict[str, dict[str, str]] = {
     "待复核": {"status": "candidate"},
@@ -733,6 +735,56 @@ def public_event_fact_summary(item: dict[str, Any]) -> tuple[str, str]:
     return "", ""
 
 
+def public_event_quality(
+    item: dict[str, Any], evidence: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Explain whether a record is complete enough for the public event feed."""
+
+    has_subject = public_event_subject(item) != "主体待确认"
+    fact_summary, _ = public_event_fact_summary(item)
+    facts = item.get("facts") if isinstance(item.get("facts"), dict) else {}
+    claim_subject = _bounded_public_text(
+        item.get("claim_subject") or facts.get("claim_subject"), limit=256
+    )
+    claim_action = _bounded_public_text(
+        item.get("claim_action") or facts.get("claim_action"), limit=128
+    )
+    claim_stage = _bounded_public_text(
+        item.get("claim_stage") or facts.get("claim_stage"), limit=32
+    ).upper()
+    known_at = _bounded_public_text(item.get("known_at") or facts.get("known_at"), limit=64)
+    has_fact_summary = (
+        len(fact_summary) >= 20
+        and len(claim_subject) >= 2
+        and len(claim_action) >= 3
+        and claim_stage in {"PROPOSED", "FILED", "DISCLOSED", "EFFECTIVE", "ONGOING", "COMPLETED"}
+        and len(known_at) >= 20
+    )
+    if evidence is None:
+        try:
+            citable_evidence_count = max(0, int(item.get("citable_evidence_count") or 0))
+        except (TypeError, ValueError):
+            citable_evidence_count = 0
+    else:
+        citable_evidence_count = sum(
+            is_reader_supporting_evidence(row) for row in evidence
+        )
+    gaps: list[str] = []
+    if not has_subject:
+        gaps.append("主体未明确")
+    if not has_fact_summary:
+        gaps.append("缺少主体—动作—阶段事实摘要")
+    if citable_evidence_count == 0:
+        gaps.append("缺少可定位的原文段落")
+    return {
+        "reader_ready": not gaps,
+        "has_subject": has_subject,
+        "has_fact_summary": has_fact_summary,
+        "citable_evidence_count": citable_evidence_count,
+        "gaps": gaps,
+    }
+
+
 def public_event_timing(item: dict[str, Any]) -> list[tuple[str, str]]:
     """Expose time semantics instead of presenting every timestamp as "latest"."""
     event_date = _bounded_public_text(item.get("event_date"), limit=32)
@@ -773,12 +825,12 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
     authority = str(item.get("credibility_tier") or "P?")
     authority_label = PUBLIC_AUTHORITY_LABELS.get(authority, "来源待核实")
     fact_summary, fact_provenance = public_event_fact_summary(item)
-    summary_templates = {
-        "verified": f"{subject}出现一项与{family}相关的公开记录，当前已有证据支持。",
-        "excluded": f"{subject}相关的{family}线索已被排除，不作为有效事件结论。",
-        "insufficient": f"{subject}相关的{family}线索目前证据不足，系统不形成确定结论。",
-        "rough_reviewed": f"{subject}相关的{family}线索已完成粗审，仍需正式证据核验。",
-        "pending_verification": f"{subject}出现一项与{family}相关的公开线索，仍需核对原始文件。",
+    state_suffixes = {
+        "verified": "账本状态为已核验，但当前缺少可公开复述的结构化事实摘要。",
+        "excluded": "当前线索已排除，不作为有效事实结论。",
+        "insufficient": "当前证据不足，不将这条线索作为确定事实。",
+        "rough_reviewed": "当前仅完成粗审，仍需正式证据核验。",
+        "pending_verification": "当前仍需核对原始文件与上下文。",
     }
     if fact_summary:
         state_suffix = {
@@ -791,7 +843,10 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
         separator = " " if fact_summary[-1:] in {"。", "！", "？", ".", "!", "?"} else "。"
         summary = f"{fact_provenance}：{fact_summary}{separator}{state_suffix}"
     else:
-        summary = summary_templates[state]
+        summary = (
+            f"目前只记录到{subject}的一条“{family}”分类线索；"
+            f"尚没有可公开复述的主体—动作—阶段事实。{state_suffixes[state]}"
+        )
     return {
         "subject": subject,
         "family": family,
@@ -800,10 +855,14 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
         "state": state,
         "state_label": PUBLIC_STATE_LABELS[state],
         "summary": summary,
-        "summary_provenance": fact_provenance or "状态说明",
-        "relevance": EVENT_FAMILY_RELEVANCE.get(
-            family_key,
-            "请结合原始来源、主体、日期与上下文判断其实际意义。",
+        "summary_provenance": fact_provenance or "发现线索说明",
+        "relevance": (
+            EVENT_FAMILY_RELEVANCE.get(
+                family_key,
+                "请结合原始来源、主体、日期与上下文判断其实际意义。",
+            )
+            if fact_summary
+            else f"先确认具体动作、阶段和原始来源，再判断这条{family}线索是否值得关注。"
         ),
     }
 
@@ -1142,12 +1201,15 @@ def terminal_search_state(query: str, *, limit: int = 50) -> dict[str, str]:
 MARKET_HORIZONS = (
     ("t_plus_5m", "T+5M"),
     ("t_plus_30m", "T+30M"),
+    ("t_plus_2h", "T+2H"),
+    ("next_close", "下个收盘"),
     ("t_plus_1d", "T+1D"),
+    ("t_plus_5d", "T+5D"),
 )
 
 
 def market_horizon_items(detail: dict[str, Any], asset_id: str) -> list[dict[str, str]]:
-    """Return honest observer-relative window states for one reviewed asset."""
+    """Return honest reaction-anchor-relative window states for one reviewed asset."""
     jobs = {
         str(item.get("observation_window")): item
         for item in detail.get("market_jobs") or []
@@ -1159,7 +1221,9 @@ def market_horizon_items(detail: dict[str, Any], asset_id: str) -> list[dict[str
             continue
         name = str(metric.get("metric_name") or "")
         for window, _label in MARKET_HORIZONS:
-            if name.startswith(f"observer_return_{window}_pct__"):
+            if name.startswith(
+                (f"reaction_return_{window}_pct__", f"observer_return_{window}_pct__")
+            ):
                 metrics[window] = metric
     items = []
     for window, label in MARKET_HORIZONS:
@@ -1220,6 +1284,7 @@ def market_context_items(
             )
             continue
         captured_at = str(snapshot.get("captured_at") or "")
+        provider_as_of = str(snapshot.get("provider_as_of") or "")
         parsed = parse_datetime(captured_at)
         seconds = max(0, int((now - parsed).total_seconds())) if parsed else None
         state = "ok" if seconds is not None and seconds <= 900 else "watch"
@@ -1237,7 +1302,9 @@ def market_context_items(
                 "freshness": f"CAPTURED {age_label(captured_at, now=now).upper()}",
                 "state": state,
                 "detail": (
-                    "只读事件后观察 · 提供商未返回源时间戳"
+                    f"只读分钟行情 · 提供商时间 {provider_as_of} · 系统采集 {captured_at}"
+                    if safe_boundary and provider_as_of
+                    else "只读事件后观察 · 提供商未返回源时间戳"
                     if safe_boundary
                     else "BOUNDARY VIOLATION · 快照未声明只读/禁止交易"
                 ),

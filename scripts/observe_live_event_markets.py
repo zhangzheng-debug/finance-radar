@@ -18,10 +18,13 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.models.event_playbook import time_anchor_for_family
 from event_ledger import open_ledger, stable_id, stable_json, utc_now
 from telegram_mtproto_listener import load_dotenv
 
@@ -30,13 +33,36 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
 DEFAULT_ENV = ROOT / ".env"
 DEFAULT_REPORT = ROOT / "reports" / "live_market_observation_latest.md"
-BINANCE_MARKET_DATA_URL = "https://data-api.binance.vision/api/v3/ticker/price"
+BINANCE_MARKET_DATA_URL = "https://data-api.binance.vision/api/v3/klines"
 BINANCE_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]{5,24}$")
+ANCHOR_CONTRACT_VERSION = "market-anchor-v1"
+WINDOW_CONTRACT_VERSION = "market-windows-v2"
+INITIAL_GRACE = dt.timedelta(minutes=2)
 HORIZON_WINDOWS: dict[str, tuple[dt.timedelta, dt.timedelta]] = {
     "t_plus_5m": (dt.timedelta(minutes=5), dt.timedelta(minutes=2)),
     "t_plus_30m": (dt.timedelta(minutes=30), dt.timedelta(minutes=5)),
+    "t_plus_2h": (dt.timedelta(hours=2), dt.timedelta(minutes=15)),
     "t_plus_1d": (dt.timedelta(days=1), dt.timedelta(minutes=30)),
+    "t_plus_5d": (dt.timedelta(days=5), dt.timedelta(hours=2)),
 }
+
+
+@dataclass(frozen=True)
+class MarketAnchorDecision:
+    event_id: str
+    event_version: int
+    asset_id: str
+    provider: str
+    declared_anchor_kind: str | None
+    reaction_anchor_at: str | None
+    source_published_at: str | None
+    local_received_at: str | None
+    known_at: str | None
+    timestamp_precision: str
+    anchor_status: str
+    anchor_lag_seconds: int | None
+    unsupported_windows: tuple[str, ...]
+    reason_code: str | None
 
 
 def _as_utc(value: str | dt.datetime) -> dt.datetime:
@@ -45,6 +71,176 @@ def _as_utc(value: str | dt.datetime) -> dt.datetime:
     else:
         parsed = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     return parsed.astimezone(dt.timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=dt.timezone.utc)
+
+
+def _precise_timestamp(value: Any) -> tuple[dt.datetime | None, str]:
+    text = str(value or "").strip()
+    if not text:
+        return None, "MISSING"
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return None, "DATE_ONLY"
+    try:
+        return _as_utc(text), "EXACT_TIMESTAMP"
+    except (TypeError, ValueError):
+        return None, "INVALID"
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    try:
+        parsed = json.loads(str(value or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _latest_known_at(*values: dt.datetime | None) -> dt.datetime | None:
+    exact = [value for value in values if value is not None]
+    return max(exact) if exact else None
+
+
+def _next_regular_close(
+    anchor: dt.datetime, *, asset_type: str, metadata: dict[str, Any]
+) -> dt.datetime | None:
+    if asset_type.lower() == "crypto":
+        return None
+    timezone_name = str(metadata.get("session_timezone") or "").strip()
+    close_text = str(metadata.get("regular_close_local") or "").strip()
+    if not timezone_name or not re.fullmatch(r"\d{2}:\d{2}", close_text):
+        return None
+    try:
+        zone = ZoneInfo(timezone_name)
+        close_hour, close_minute = (int(part) for part in close_text.split(":"))
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    weekdays = metadata.get("trading_weekdays", [0, 1, 2, 3, 4])
+    holidays = {str(value) for value in metadata.get("holidays", [])}
+    if not isinstance(weekdays, list) or not all(isinstance(value, int) for value in weekdays):
+        return None
+    local_anchor = anchor.astimezone(zone)
+    for day_offset in range(0, 15):
+        date = local_anchor.date() + dt.timedelta(days=day_offset)
+        if date.weekday() not in weekdays or date.isoformat() in holidays:
+            continue
+        close_local = dt.datetime.combine(
+            date, dt.time(close_hour, close_minute), tzinfo=zone
+        )
+        if close_local > local_anchor:
+            return close_local.astimezone(dt.timezone.utc)
+    return None
+
+
+def _anchor_from_row(row: Any) -> MarketAnchorDecision:
+    declared = time_anchor_for_family(row["event_family"], row["event_type"])
+    facts = _json_object(row["facts_json"])
+    published, published_precision = _precise_timestamp(row["source_published_at"])
+    received, received_precision = _precise_timestamp(row["local_received_at"])
+    known = _latest_known_at(published, received)
+
+    raw_anchor: Any = None
+    precision = "MISSING"
+    reason: str | None = None
+    if declared == "source_published":
+        raw_anchor = row["source_published_at"]
+        precision = published_precision
+    elif declared == "filing_effective":
+        raw_anchor = facts.get("filing_effective_at") or facts.get("effective_at")
+        _unused, precision = _precise_timestamp(raw_anchor)
+    elif declared == "event_occurred":
+        raw_anchor = facts.get("event_occurred_at") or facts.get("occurred_at")
+        _unused, precision = _precise_timestamp(raw_anchor)
+    else:
+        reason = "ANCHOR_KIND_UNDECLARED"
+
+    anchor, parsed_precision = _precise_timestamp(raw_anchor)
+    if precision == "MISSING":
+        precision = parsed_precision
+    if reason is None and anchor is None:
+        reason = f"{declared or 'anchor'}_{precision.lower()}"
+    if reason is None and received is None:
+        reason = f"local_received_{received_precision.lower()}"
+    if reason is None and known is None:
+        reason = "known_at_missing"
+
+    metadata = _json_object(row["metadata_json"])
+    unsupported: list[str] = []
+    if str(row["asset_type"]).lower() != "crypto" and anchor is not None:
+        if _next_regular_close(
+            anchor, asset_type=str(row["asset_type"]), metadata=metadata
+        ) is None:
+            unsupported.append("next_close")
+
+    lag = None
+    if anchor is not None and known is not None:
+        lag = int((known - anchor).total_seconds())
+    return MarketAnchorDecision(
+        event_id=str(row["event_id"]),
+        event_version=int(row["event_version"]),
+        asset_id=str(row["asset_id"]),
+        provider=str(row["provider"]),
+        declared_anchor_kind=declared,
+        reaction_anchor_at=anchor.isoformat() if anchor else None,
+        source_published_at=published.isoformat() if published else None,
+        local_received_at=received.isoformat() if received else None,
+        known_at=known.isoformat() if known else None,
+        timestamp_precision=precision,
+        anchor_status="EXACT" if reason is None else "UNAVAILABLE",
+        anchor_lag_seconds=lag,
+        unsupported_windows=tuple(unsupported),
+        reason_code=reason,
+    )
+
+
+def _upsert_anchor(connection: Any, decision: MarketAnchorDecision, *, now: str) -> str:
+    anchor_id = stable_id(
+        "MKTANCHOR",
+        decision.event_id,
+        str(decision.event_version),
+        decision.asset_id,
+        decision.provider,
+    )
+    connection.execute(
+        """INSERT INTO market_event_anchors(
+               anchor_id,event_id,event_version,asset_id,provider,declared_anchor_kind,
+               reaction_anchor_at,source_published_at,local_received_at,known_at,
+               timestamp_precision,anchor_status,anchor_lag_seconds,
+               unsupported_windows_json,reason_code,contract_version,
+               created_at,updated_at,no_trading
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+           ON CONFLICT(event_id,event_version,asset_id,provider) DO UPDATE SET
+               declared_anchor_kind=excluded.declared_anchor_kind,
+               reaction_anchor_at=excluded.reaction_anchor_at,
+               source_published_at=excluded.source_published_at,
+               local_received_at=excluded.local_received_at,
+               known_at=excluded.known_at,
+               timestamp_precision=excluded.timestamp_precision,
+               anchor_status=excluded.anchor_status,
+               anchor_lag_seconds=excluded.anchor_lag_seconds,
+               unsupported_windows_json=excluded.unsupported_windows_json,
+               reason_code=excluded.reason_code,
+               contract_version=excluded.contract_version,
+               updated_at=excluded.updated_at,no_trading=1""",
+        (
+            anchor_id,
+            decision.event_id,
+            decision.event_version,
+            decision.asset_id,
+            decision.provider,
+            decision.declared_anchor_kind,
+            decision.reaction_anchor_at,
+            decision.source_published_at,
+            decision.local_received_at,
+            decision.known_at,
+            decision.timestamp_precision,
+            decision.anchor_status,
+            decision.anchor_lag_seconds,
+            stable_json(list(decision.unsupported_windows)),
+            decision.reason_code,
+            ANCHOR_CONTRACT_VERSION,
+            now,
+            now,
+        ),
+    )
+    return anchor_id
 
 
 def provider_for_asset(asset_type: str) -> str:
@@ -71,11 +267,40 @@ def schedule_jobs(
     cutoff = today - dt.timedelta(days=freshness_days)
     rows = connection.execute(
         """
-        SELECT e.event_id,a.asset_id,a.asset_type
+        WITH ranked_evidence AS (
+            SELECT er.event_id,er.event_version,ee.evidence_id,
+                   r.source_published_at,r.local_received_at,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY er.event_id,er.event_version
+                       ORDER BY CASE er.relation_status
+                                  WHEN 'HUMAN_CONFIRMED' THEN 0 ELSE 1 END,
+                                COALESCE(r.source_published_at,r.local_received_at) DESC,
+                                ee.evidence_id
+                   ) AS rank_no
+            FROM event_evidence_relations er
+            JOIN event_evidence ee ON ee.evidence_id=er.evidence_id
+            JOIN raw_observations r ON r.observation_id=ee.observation_id
+            WHERE er.relation_status IN ('SCOPED_MATCH','HUMAN_CONFIRMED')
+              AND er.subject_match=1 AND er.event_claim_supported=1
+              AND er.date_coherent=1
+        )
+        SELECT e.event_id,e.current_version AS event_version,
+               e.event_family,e.event_type,ev.facts_json,
+               a.asset_id,a.asset_type,a.metadata_json,
+               ranked.source_published_at,ranked.local_received_at
         FROM canonical_events e
+        JOIN event_versions ev
+          ON ev.event_id=e.event_id AND ev.version=e.current_version
+        JOIN event_fact_workflow workflow
+          ON workflow.event_id=e.event_id
+         AND workflow.event_version=e.current_version
+         AND workflow.workflow_state='EVIDENCE_READY'
+        JOIN ranked_evidence ranked
+          ON ranked.event_id=e.event_id
+         AND ranked.event_version=e.current_version AND ranked.rank_no=1
         JOIN event_asset_impacts i ON i.event_id=e.event_id
         JOIN assets a ON a.asset_id=i.asset_id
-        WHERE e.status='verified' AND e.label_status='verified' AND e.no_trading=1
+        WHERE e.status IN ('candidate','weak','verified') AND e.no_trading=1
           AND i.market_observation_allowed=1 AND i.no_trading=1
           AND date(e.event_date) BETWEEN date(?) AND date(?)
         ORDER BY e.event_id,a.asset_id
@@ -83,65 +308,95 @@ def schedule_jobs(
         (cutoff.isoformat(), today.isoformat()),
     ).fetchall()
     inserted = 0
-    scheduled_at = (now or dt.datetime.now(dt.timezone.utc)).isoformat()
+    now_utc = _as_utc(now or dt.datetime.now(dt.timezone.utc))
+    persisted_at = now_utc.isoformat()
     for row in rows:
         provider = provider_for_asset(row["asset_type"])
-        before = connection.total_changes
-        connection.execute(
-            """INSERT OR IGNORE INTO market_jobs(
-               market_job_id,event_id,asset_id,provider,observation_window,status,
-               scheduled_at,completed_at,attempts,last_error,no_trading
-               ) VALUES (?,?,?,?,'initial','PENDING',?,NULL,0,NULL,1)""",
-            (
-                stable_id("MJOB", row["event_id"], row["asset_id"], provider, "initial"),
+        row_payload = dict(row)
+        row_payload["provider"] = provider
+        decision = _anchor_from_row(row_payload)
+        anchor_id = _upsert_anchor(connection, decision, now=persisted_at)
+        if decision.anchor_status != "EXACT" or not decision.reaction_anchor_at:
+            continue
+        anchor = _as_utc(decision.reaction_anchor_at)
+        windows: list[tuple[str, dt.datetime, dt.timedelta]] = [
+            ("initial", anchor, INITIAL_GRACE),
+            *[
+                (window, anchor + offset, grace)
+                for window, (offset, grace) in HORIZON_WINDOWS.items()
+            ],
+        ]
+        close = _next_regular_close(
+            anchor,
+            asset_type=str(row["asset_type"]),
+            metadata=_json_object(row["metadata_json"]),
+        )
+        if close is not None:
+            windows.append(("next_close", close, dt.timedelta(minutes=30)))
+
+        for window, scheduled, grace in windows:
+            status = "PENDING"
+            completed_at = None
+            last_error = None
+            if now_utc > scheduled + grace:
+                status = "MISSED_WINDOW"
+                completed_at = persisted_at
+                lateness = int((now_utc - scheduled).total_seconds())
+                last_error = (
+                    f"capture_window_missed_by_{lateness}s; "
+                    "no historical quote substituted"
+                )
+            market_job_id = stable_id(
+                "MJOB",
                 row["event_id"],
+                str(row["event_version"]),
                 row["asset_id"],
                 provider,
-                scheduled_at,
-            ),
-        )
-        inserted += connection.total_changes - before
-    connection.commit()
-    return inserted
-
-
-def schedule_followup_jobs(connection: Any) -> int:
-    """Schedule observer-relative horizons from the first real baseline capture."""
-    baselines = connection.execute(
-        """
-        SELECT j.event_id,j.asset_id,j.provider,MIN(s.captured_at) AS baseline_at
-        FROM market_jobs j
-        JOIN market_snapshots s ON s.market_job_id=j.market_job_id
-        JOIN canonical_events e ON e.event_id=j.event_id
-        JOIN event_asset_impacts i ON i.event_id=j.event_id AND i.asset_id=j.asset_id
-        WHERE j.observation_window='initial' AND j.status='COMPLETED'
-          AND e.status='verified' AND e.label_status='verified' AND e.no_trading=1
-          AND i.market_observation_allowed=1 AND i.no_trading=1
-        GROUP BY j.event_id,j.asset_id,j.provider
-        """
-    ).fetchall()
-    inserted = 0
-    for row in baselines:
-        baseline = _as_utc(row["baseline_at"])
-        for window, (offset, _grace) in HORIZON_WINDOWS.items():
+                window,
+            )
             before = connection.total_changes
             connection.execute(
                 """INSERT OR IGNORE INTO market_jobs(
                    market_job_id,event_id,asset_id,provider,observation_window,status,
                    scheduled_at,completed_at,attempts,last_error,no_trading
-                   ) VALUES (?,?,?,?,?,'PENDING',?,NULL,0,NULL,1)""",
+                   ) VALUES (?,?,?,?,?,?,?,?,0,?,1)""",
                 (
-                    stable_id("MJOB", row["event_id"], row["asset_id"], row["provider"], window),
+                    market_job_id,
                     row["event_id"],
                     row["asset_id"],
-                    row["provider"],
+                    provider,
                     window,
-                    (baseline + offset).isoformat(),
+                    status,
+                    scheduled.isoformat(),
+                    completed_at,
+                    last_error,
                 ),
             )
-            inserted += connection.total_changes - before
+            was_inserted = connection.total_changes > before
+            if not was_inserted:
+                continue
+            connection.execute(
+                """INSERT INTO market_job_anchor_links(
+                       market_job_id,anchor_id,offset_seconds,
+                       window_contract_version,created_at
+                   ) VALUES (?,?,?,?,?)""",
+                (
+                    market_job_id,
+                    anchor_id,
+                    int((scheduled - anchor).total_seconds()),
+                    WINDOW_CONTRACT_VERSION,
+                    persisted_at,
+                ),
+            )
+            inserted += 1
     connection.commit()
     return inserted
+
+
+def schedule_followup_jobs(connection: Any) -> int:
+    """Compatibility no-op: v2 schedules every window from the frozen event anchor."""
+    del connection
+    return 0
 
 
 def expire_missed_windows(connection: Any, *, now: dt.datetime) -> int:
@@ -150,18 +405,22 @@ def expire_missed_windows(connection: Any, *, now: dt.datetime) -> int:
     rows = connection.execute(
         """SELECT market_job_id,observation_window,scheduled_at
            FROM market_jobs
-           WHERE status IN ('PENDING','RETRY') AND observation_window!='initial'
+           WHERE status IN ('PENDING','RETRY')
              AND no_trading=1 AND datetime(scheduled_at)<=datetime(?)""",
         (now.isoformat(),),
     ).fetchall()
     missed = 0
     for row in rows:
         window = str(row["observation_window"])
-        definition = HORIZON_WINDOWS.get(window)
-        if definition is None:
+        if window == "initial":
+            grace = INITIAL_GRACE
+        elif window == "next_close":
+            grace = dt.timedelta(minutes=30)
+        elif window in HORIZON_WINDOWS:
+            grace = HORIZON_WINDOWS[window][1]
+        else:
             continue
         scheduled_at = _as_utc(row["scheduled_at"])
-        grace = definition[1]
         if now <= scheduled_at + grace:
             continue
         lateness = int((now - scheduled_at).total_seconds())
@@ -204,6 +463,76 @@ def fetch_twelve_prices(
     return payload
 
 
+def _minute_bounds(value: str | dt.datetime) -> tuple[dt.datetime, dt.datetime]:
+    minute = _as_utc(value).replace(second=0, microsecond=0)
+    return minute, minute + dt.timedelta(minutes=1)
+
+
+def normalize_twelve_minute_bar(
+    payload: dict[str, Any], *, symbol: str, scheduled_at: str
+) -> dict[str, Any]:
+    if payload.get("status") == "error":
+        raise RuntimeError(f"Twelve Data error: {payload.get('message', 'unknown')}")
+    values = payload.get("values")
+    if not isinstance(values, list) or not values or not isinstance(values[0], dict):
+        raise RuntimeError("Twelve Data minute bar missing")
+    bar = values[0]
+    start, end = _minute_bounds(scheduled_at)
+    try:
+        provider_at = _as_utc(str(bar["datetime"]) + ("+00:00" if "+" not in str(bar["datetime"]) and not str(bar["datetime"]).endswith("Z") else ""))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("Twelve Data minute bar timestamp missing") from exc
+    if not start <= provider_at < end:
+        raise RuntimeError("Twelve Data minute bar timestamp outside requested window")
+    close = bar.get("close")
+    if close in (None, ""):
+        raise RuntimeError("Twelve Data minute close missing")
+    return {
+        "symbol": symbol,
+        "price": str(close),
+        "provider_as_of": provider_at.isoformat(),
+        "interval": "1min",
+        "price_kind": "bar_close",
+        "open": bar.get("open"),
+        "high": bar.get("high"),
+        "low": bar.get("low"),
+        "close": close,
+        "volume": bar.get("volume"),
+    }
+
+
+def fetch_twelve_minute_bar(
+    symbol: str, scheduled_at: str, api_key: str, timeout: float = 20.0
+) -> dict[str, Any]:
+    start, end = _minute_bounds(scheduled_at)
+    params = urllib.parse.urlencode(
+        {
+            "symbol": symbol,
+            "interval": "1min",
+            "start_date": start.strftime("%Y-%m-%d %H:%M:%S"),
+            "end_date": end.strftime("%Y-%m-%d %H:%M:%S"),
+            "timezone": "UTC",
+            "order": "ASC",
+            "outputsize": 1,
+            "apikey": api_key,
+        }
+    )
+    request = urllib.request.Request(
+        f"https://api.twelvedata.com/time_series?{params}",
+        headers={"User-Agent": "FinanceRadar/1.0", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Twelve Data minute bars HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Twelve Data minute bars request failed") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("Twelve Data minute bars returned a non-object response")
+    return normalize_twelve_minute_bar(payload, symbol=symbol, scheduled_at=scheduled_at)
+
+
 def fetch_binance_prices(symbols: list[str], timeout: float = 20.0) -> dict[str, Any]:
     """Fetch public spot price tickers without an API key or signed request."""
     invalid = [symbol for symbol in symbols if not BINANCE_SYMBOL_PATTERN.fullmatch(symbol)]
@@ -235,6 +564,65 @@ def fetch_binance_prices(symbols: list[str], timeout: float = 20.0) -> dict[str,
     if missing:
         raise RuntimeError(f"Binance public market data missing: {', '.join(missing)}")
     return quotes
+
+
+def normalize_binance_minute_bar(
+    payload: Any, *, symbol: str, scheduled_at: str
+) -> dict[str, Any]:
+    if not isinstance(payload, list) or not payload or not isinstance(payload[0], list):
+        raise RuntimeError("Binance public minute bar missing")
+    bar = payload[0]
+    if len(bar) < 7:
+        raise RuntimeError("Binance public minute bar shape invalid")
+    start, end = _minute_bounds(scheduled_at)
+    try:
+        provider_at = dt.datetime.fromtimestamp(int(bar[0]) / 1000, tz=dt.timezone.utc)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError("Binance public minute timestamp invalid") from exc
+    if not start <= provider_at < end:
+        raise RuntimeError("Binance public minute bar timestamp outside requested window")
+    return {
+        "symbol": symbol,
+        "price": str(bar[4]),
+        "provider_as_of": provider_at.isoformat(),
+        "interval": "1min",
+        "price_kind": "bar_close",
+        "open": str(bar[1]),
+        "high": str(bar[2]),
+        "low": str(bar[3]),
+        "close": str(bar[4]),
+        "volume": str(bar[5]),
+        "close_time_ms": int(bar[6]),
+    }
+
+
+def fetch_binance_minute_bar(
+    symbol: str, scheduled_at: str, timeout: float = 20.0
+) -> dict[str, Any]:
+    if not BINANCE_SYMBOL_PATTERN.fullmatch(symbol):
+        raise ValueError(f"Invalid Binance symbol: {symbol}")
+    start, end = _minute_bounds(scheduled_at)
+    params = urllib.parse.urlencode(
+        {
+            "symbol": symbol,
+            "interval": "1m",
+            "startTime": int(start.timestamp() * 1000),
+            "endTime": int(end.timestamp() * 1000) - 1,
+            "limit": 1,
+        }
+    )
+    request = urllib.request.Request(
+        f"{BINANCE_MARKET_DATA_URL}?{params}",
+        headers={"User-Agent": "FinanceRadar/1.0", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Binance public minute bars HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Binance public minute bars request failed") from exc
+    return normalize_binance_minute_bar(payload, symbol=symbol, scheduled_at=scheduled_at)
 
 
 def _mark_retry(connection: Any, rows: list[Any], error: str) -> None:
@@ -272,6 +660,7 @@ def _persist_quotes(
             errors += 1
             continue
         currency = "USDT" if provider == "binance_public" else row["currency"]
+        provider_as_of = str(quote.get("provider_as_of") or captured_at)
         raw_json = stable_json(
             {
                 "provider": provider,
@@ -282,6 +671,11 @@ def _persist_quotes(
                 "order_endpoint_called": False,
                 "observation_window": row["observation_window"],
                 "scheduled_for": row["scheduled_at"],
+                "reaction_anchor_at": row["reaction_anchor_at"],
+                "declared_anchor_kind": row["declared_anchor_kind"],
+                "known_at": row["known_at"],
+                "anchor_contract_version": row["anchor_contract_version"],
+                "window_contract_version": row["window_contract_version"],
                 "capture_lag_seconds": max(
                     0,
                     int(
@@ -290,32 +684,24 @@ def _persist_quotes(
                         ).total_seconds()
                     ),
                 ),
+                "provider_as_of": provider_as_of,
+                "interval": quote.get("interval") or "legacy_point",
+                "price_kind": quote.get("price_kind") or "point_in_time",
             }
         )
         snapshot_id = stable_id("SNAP", row["market_job_id"], captured_at)
-        if row["observation_window"] == "initial":
-            data_scope = (
-                "latest_public_spot_price"
-                if provider == "binance_public"
-                else "latest_provider_price"
-            )
-        else:
-            data_scope = f"observer_relative_{row['observation_window']}"
+        data_scope = f"reaction_anchor_relative_{row['observation_window']}"
         lag_seconds = max(
             0,
             int((_as_utc(captured_at) - _as_utc(row["scheduled_at"])).total_seconds()),
         )
-        freshness_status = (
-            "provider_timestamp_unavailable"
-            if row["observation_window"] == "initial"
-            else f"window_capture_lag_{lag_seconds}s"
-        )
+        freshness_status = f"window_capture_lag_{lag_seconds}s"
         connection.execute(
             """INSERT INTO market_snapshots(
                snapshot_id,market_job_id,event_id,asset_id,provider,provider_symbol,
                data_scope,price,currency,provider_as_of,captured_at,freshness_status,
                raw_json,read_only,no_trading
-               ) VALUES (?,?,?,?,?,?,?,?,?,NULL,?,?,?,1,1)""",
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)""",
             (
                 snapshot_id,
                 row["market_job_id"],
@@ -326,6 +712,7 @@ def _persist_quotes(
                 data_scope,
                 str(quote["price"]),
                 currency,
+                provider_as_of,
                 captured_at,
                 freshness_status,
                 raw_json,
@@ -352,12 +739,22 @@ def upsert_horizon_metrics(connection: Any, *, updated_at: str | None = None) ->
                e.event_date,a.symbol
         FROM market_jobs h
         JOIN market_snapshots hs ON hs.market_job_id=h.market_job_id
+        JOIN market_job_anchor_links horizon_link
+          ON horizon_link.market_job_id=h.market_job_id
         JOIN market_jobs b ON b.event_id=h.event_id AND b.asset_id=h.asset_id
                           AND b.provider=h.provider AND b.observation_window='initial'
         JOIN market_snapshots bs ON bs.market_job_id=b.market_job_id
+        JOIN market_job_anchor_links baseline_link
+          ON baseline_link.market_job_id=b.market_job_id
+         AND baseline_link.anchor_id=horizon_link.anchor_id
+        JOIN market_event_anchors anchor
+          ON anchor.anchor_id=horizon_link.anchor_id
+         AND anchor.anchor_status='EXACT'
         JOIN canonical_events e ON e.event_id=h.event_id
         JOIN assets a ON a.asset_id=h.asset_id
-        WHERE h.status='COMPLETED' AND h.observation_window IN ('t_plus_5m','t_plus_30m','t_plus_1d')
+        WHERE h.status='COMPLETED' AND h.observation_window IN (
+              't_plus_5m','t_plus_30m','t_plus_2h','t_plus_1d','t_plus_5d','next_close'
+        )
           AND h.no_trading=1 AND hs.read_only=1 AND hs.no_trading=1
           AND bs.read_only=1 AND bs.no_trading=1
         """
@@ -373,7 +770,7 @@ def upsert_horizon_metrics(connection: Any, *, updated_at: str | None = None) ->
         except (InvalidOperation, ValueError, ZeroDivisionError):
             continue
         metric_name = (
-            f"observer_return_{row['observation_window']}_pct__"
+            f"reaction_return_{row['observation_window']}_pct__"
             f"{str(row['provider_symbol']).upper()}"
         )
         metric_value = format(value.quantize(Decimal("0.000001")), "f")
@@ -420,6 +817,8 @@ def run_pending(
     api_key: str = "",
     requester: Callable[[list[str], str, float], dict[str, Any]] = fetch_twelve_prices,
     binance_requester: Callable[[list[str], float], dict[str, Any]] = fetch_binance_prices,
+    twelve_bar_requester: Callable[[str, str, str, float], dict[str, Any]] = fetch_twelve_minute_bar,
+    binance_bar_requester: Callable[[str, str, float], dict[str, Any]] = fetch_binance_minute_bar,
     timeout: float = 20.0,
     now: dt.datetime | None = None,
 ) -> dict[str, Any]:
@@ -427,15 +826,22 @@ def run_pending(
     missed_windows = expire_missed_windows(connection, now=now)
     rows = connection.execute(
         """
-        SELECT j.*,a.provider_symbol,a.currency,a.asset_type,a.symbol
-        FROM market_jobs j JOIN assets a ON a.asset_id=j.asset_id
+        SELECT j.*,a.provider_symbol,a.currency,a.asset_type,a.symbol,
+               anchor.reaction_anchor_at,anchor.declared_anchor_kind,
+               anchor.known_at,anchor.contract_version AS anchor_contract_version,
+               link.window_contract_version
+        FROM market_jobs j
+        JOIN assets a ON a.asset_id=j.asset_id
+        JOIN market_job_anchor_links link ON link.market_job_id=j.market_job_id
+        JOIN market_event_anchors anchor ON anchor.anchor_id=link.anchor_id
         WHERE j.status IN ('PENDING','RETRY')
           AND j.provider IN ('twelve_data','binance_public')
           AND j.no_trading=1
           AND datetime(j.scheduled_at)<=datetime(?)
+          AND datetime(anchor.known_at)<=datetime(?)
         ORDER BY j.scheduled_at,j.market_job_id
         """,
-        (now.isoformat(),),
+        (now.isoformat(), now.isoformat()),
     ).fetchall()
     result: dict[str, Any] = {
         "requested": len(rows),
@@ -470,7 +876,17 @@ def run_pending(
         try:
             if provider == "binance_public":
                 symbols = sorted({binance_symbol(row["symbol"]) for row in provider_rows})
-                payload = binance_requester(symbols, timeout)
+                if binance_requester is fetch_binance_prices:
+                    payload = {
+                        binance_symbol(str(row["symbol"])): binance_bar_requester(
+                            binance_symbol(str(row["symbol"])),
+                            str(row["scheduled_at"]),
+                            timeout,
+                        )
+                        for row in provider_rows
+                    }
+                else:
+                    payload = binance_requester(symbols, timeout)
                 completed, errors = _persist_quotes(
                     connection,
                     provider_rows,
@@ -481,7 +897,18 @@ def run_pending(
                 )
             else:
                 symbols = sorted({row["provider_symbol"] for row in provider_rows})
-                payload = requester(symbols, api_key, timeout)
+                if requester is fetch_twelve_prices:
+                    payload = {
+                        str(row["provider_symbol"]): twelve_bar_requester(
+                            str(row["provider_symbol"]),
+                            str(row["scheduled_at"]),
+                            api_key,
+                            timeout,
+                        )
+                        for row in provider_rows
+                    }
+                else:
+                    payload = requester(symbols, api_key, timeout)
                 completed, errors = _persist_quotes(
                     connection,
                     provider_rows,
@@ -533,9 +960,9 @@ def write_report(path: Path, connection: Any, scheduled: int, result: dict[str, 
         f"- Errors: `{result['errors']}`",
         f"- Missed windows: `{result.get('missed_windows', 0)}` (never backfilled with a latest quote)",
         f"- Horizon metrics written: `{result.get('metrics_upserted', 0)}`",
-        "- Scope: latest provider price only; no order, position, balance, or account endpoint exists.",
+        "- Scope: event-anchor-relative audit windows; no order, position, balance, or account endpoint exists.",
         "- Provider policy: crypto -> Binance public spot market data; other assets -> Twelve Data.",
-        "- Neither selected price endpoint provides a source timestamp, so snapshots are explicitly marked `provider_timestamp_unavailable`.",
+        "- A job is scheduled only from an exact, version-bound event timestamp and current supported evidence relation.",
         "",
         "",
         "## Job windows",

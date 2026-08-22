@@ -5,12 +5,12 @@ import hashlib
 import sqlite3
 import uuid
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 
-OPS_SCHEMA_VERSION = 7
+OPS_SCHEMA_VERSION = 9
 DEMO_MODES = {"LIVE", "RECENT_CAPTURE", "REPLAY"}
 FORMAL_MUTATION_KIND_LIGHT_VERIFICATION = "LIGHT_VERIFICATION"
 FORMAL_MUTATION_STATES = {
@@ -106,6 +106,62 @@ class OperationsRepository:
                     evidence_ids_json TEXT NOT NULL, latency_ms REAL NOT NULL, created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_event ON agent_decisions(event_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS capture_interpretation_runs(
+                    interpretation_id TEXT PRIMARY KEY,
+                    event_id TEXT NOT NULL,
+                    observation_id TEXT NOT NULL,
+                    capture_receipt_sha256 TEXT NOT NULL,
+                    semantic_content_sha256 TEXT NOT NULL,
+                    input_sha256 TEXT NOT NULL,
+                    contract_version TEXT NOT NULL,
+                    prompt_version TEXT NOT NULL,
+                    prompt_sha256 TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    model_snapshot TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'PENDING','RUNNING','COMPLETED','FAILED','BUDGET_BLOCKED'
+                    )),
+                    output_json TEXT NOT NULL,
+                    guardrails_json TEXT NOT NULL,
+                    usage_json TEXT NOT NULL,
+                    latency_ms REAL,
+                    external_call INTEGER NOT NULL CHECK(external_call IN (0,1)),
+                    canonical_mutation_allowed INTEGER NOT NULL DEFAULT 0
+                        CHECK(canonical_mutation_allowed=0),
+                    no_trading INTEGER NOT NULL DEFAULT 1 CHECK(no_trading=1),
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    error TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    available_at TEXT NOT NULL DEFAULT '',
+                    lease_token TEXT,
+                    lease_expires_at TEXT,
+                    claimed_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_capture_interpretation_event
+                    ON capture_interpretation_runs(event_id, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_capture_interpretation_receipt
+                    ON capture_interpretation_runs(capture_receipt_sha256, updated_at DESC);
+                CREATE TABLE IF NOT EXISTS capture_interpretation_attempts(
+                    attempt_id TEXT PRIMARY KEY,
+                    interpretation_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('RUNNING','COMPLETED','FAILED')),
+                    lease_token TEXT NOT NULL,
+                    reserved_cny REAL NOT NULL DEFAULT 0 CHECK(reserved_cny >= 0),
+                    usage_json TEXT NOT NULL,
+                    error_class TEXT,
+                    error TEXT,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    FOREIGN KEY(interpretation_id)
+                        REFERENCES capture_interpretation_runs(interpretation_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_capture_attempt_day
+                    ON capture_interpretation_attempts(provider, started_at);
+                CREATE INDEX IF NOT EXISTS idx_capture_attempt_job
+                    ON capture_interpretation_attempts(interpretation_id, started_at DESC);
                 CREATE TABLE IF NOT EXISTS light_verification_runs(
                     run_id TEXT PRIMARY KEY,
                     batch_id TEXT NOT NULL,
@@ -256,6 +312,30 @@ class OperationsRepository:
             ):
                 if column not in backup_columns:
                     connection.execute(f"ALTER TABLE backup_runs ADD COLUMN {column} {definition}")
+            capture_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(capture_interpretation_runs)")
+            }
+            for column, definition in (
+                ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+                ("available_at", "TEXT NOT NULL DEFAULT ''"),
+                ("lease_token", "TEXT"),
+                ("lease_expires_at", "TEXT"),
+                ("claimed_at", "TEXT"),
+            ):
+                if column not in capture_columns:
+                    connection.execute(
+                        f"ALTER TABLE capture_interpretation_runs ADD COLUMN {column} {definition}"
+                    )
+            connection.execute(
+                """UPDATE capture_interpretation_runs
+                   SET available_at=created_at WHERE available_at=''"""
+            )
+            connection.execute("DROP INDEX IF EXISTS idx_capture_interpretation_queue")
+            connection.execute(
+                """CREATE INDEX idx_capture_interpretation_queue
+                   ON capture_interpretation_runs(status, available_at, created_at)"""
+            )
             connection.execute(
                 "INSERT OR IGNORE INTO operations_schema(version,applied_at) VALUES (?,?)",
                 (OPS_SCHEMA_VERSION, utc_now()),
@@ -439,6 +519,591 @@ class OperationsRepository:
         for row in rows:
             row["output"] = json.loads(row.pop("output_json"))
         return rows
+
+    @staticmethod
+    def _capture_interpretation_idempotency_key(
+        event_id: str,
+        observation_id: str,
+        input_payload: dict[str, Any],
+        *,
+        contract_version: str,
+        prompt_version: str,
+        prompt_sha256: str,
+        provider: str,
+        model_snapshot: str,
+    ) -> str:
+        return "capture-int-" + _stable_sha256(
+            {
+                "event_id": event_id,
+                "observation_id": observation_id,
+                "capture_receipt_sha256": input_payload["capture_receipt_sha256"],
+                "semantic_content_sha256": input_payload["semantic_content_sha256"],
+                "input_sha256": input_payload["input_sha256"],
+                "contract_version": contract_version,
+                "prompt_version": prompt_version,
+                "prompt_sha256": prompt_sha256,
+                "provider": provider,
+                "model_snapshot": model_snapshot,
+            }
+        )[:40]
+
+    def enqueue_capture_interpretation(
+        self,
+        event_id: str,
+        observation_id: str,
+        input_payload: dict[str, Any],
+        *,
+        contract_version: str,
+        prompt_version: str,
+        prompt_sha256: str,
+        provider: str,
+        model_snapshot: str,
+        external_call: bool,
+    ) -> tuple[str, bool]:
+        """Create one bounded interpretation job per immutable capture/config."""
+
+        idempotency_key = self._capture_interpretation_idempotency_key(
+            event_id,
+            observation_id,
+            input_payload,
+            contract_version=contract_version,
+            prompt_version=prompt_version,
+            prompt_sha256=prompt_sha256,
+            provider=provider,
+            model_snapshot=model_snapshot,
+        )
+        interpretation_id = idempotency_key
+        now = utc_now()
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                """INSERT OR IGNORE INTO capture_interpretation_runs(
+                       interpretation_id,event_id,observation_id,capture_receipt_sha256,
+                       semantic_content_sha256,input_sha256,contract_version,prompt_version,
+                       prompt_sha256,provider,model_snapshot,status,output_json,guardrails_json,
+                       usage_json,latency_ms,external_call,canonical_mutation_allowed,no_trading,
+                       idempotency_key,created_at,updated_at,error
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,'PENDING','{}','{}','{}',NULL,?,0,1,?,?,?,NULL)""",
+                (
+                    interpretation_id,
+                    event_id,
+                    observation_id,
+                    str(input_payload["capture_receipt_sha256"]),
+                    str(input_payload["semantic_content_sha256"]),
+                    str(input_payload["input_sha256"]),
+                    contract_version,
+                    prompt_version,
+                    prompt_sha256,
+                    provider,
+                    model_snapshot,
+                    int(external_call),
+                    idempotency_key,
+                    now,
+                    now,
+                ),
+            )
+            connection.commit()
+        return interpretation_id, bool(cursor.rowcount)
+
+    def complete_capture_interpretation(
+        self,
+        interpretation_id: str,
+        output: dict[str, Any],
+        *,
+        guardrails: dict[str, Any],
+        usage: dict[str, Any] | None = None,
+        latency_ms: float = 0.0,
+    ) -> None:
+        """Persist advisory output without any canonical mutation capability."""
+
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT status,capture_receipt_sha256,contract_version,prompt_sha256
+                   FROM capture_interpretation_runs WHERE interpretation_id=?""",
+                (interpretation_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"capture interpretation not found: {interpretation_id}")
+            if str(output.get("capture_receipt_sha256") or "") != str(
+                row["capture_receipt_sha256"]
+            ):
+                raise ValueError("capture interpretation receipt changed before completion")
+            if str(output.get("contract_version") or "") != str(row["contract_version"]):
+                raise ValueError("capture interpretation contract changed before completion")
+            if str(output.get("prompt_sha256") or "") != str(row["prompt_sha256"]):
+                raise ValueError("capture interpretation prompt changed before completion")
+            persisted_output = dict(output)
+            persisted_output["persisted"] = True
+            connection.execute(
+                """UPDATE capture_interpretation_runs
+                   SET status='COMPLETED',output_json=?,guardrails_json=?,usage_json=?,
+                       latency_ms=?,updated_at=?,error=NULL
+                   WHERE interpretation_id=?""",
+                (
+                    _stable_json(persisted_output),
+                    _stable_json(guardrails),
+                    _stable_json(usage or {}),
+                    float(latency_ms),
+                    utc_now(),
+                    interpretation_id,
+                ),
+            )
+            connection.commit()
+
+    def fail_capture_interpretation(self, interpretation_id: str, error: str) -> None:
+        with closing(self.connect()) as connection:
+            cursor = connection.execute(
+                """UPDATE capture_interpretation_runs
+                   SET status='FAILED',updated_at=?,error=? WHERE interpretation_id=?""",
+                (utc_now(), str(error)[:2000], interpretation_id),
+            )
+            if not cursor.rowcount:
+                raise KeyError(f"capture interpretation not found: {interpretation_id}")
+            connection.commit()
+
+    @staticmethod
+    def _capture_attempt_usage_rows(rows: list[sqlite3.Row]) -> dict[str, Any]:
+        estimated_cny = 0.0
+        reserved_cny = 0.0
+        by_status: dict[str, int] = {}
+        for row in rows:
+            status = str(row["status"])
+            by_status[status] = by_status.get(status, 0) + 1
+            reservation = max(0.0, float(row["reserved_cny"] or 0.0))
+            usage = _safe_json(row["usage_json"], {})
+            actual = max(0.0, float(usage.get("estimated_cny") or 0.0))
+            estimated_cny += actual
+            # A provider may bill a request even when transport or contract
+            # validation fails before usage counters are returned. Charge its
+            # reservation until an actual estimate is available.
+            reserved_cny += actual if actual > 0 else reservation
+        return {
+            "requests": len(rows),
+            "estimated_cny": round(estimated_cny, 8),
+            "chargeable_cny": round(reserved_cny, 8),
+            "by_status": dict(sorted(by_status.items())),
+        }
+
+    @staticmethod
+    def _utc_day_bounds(day_utc: str | None = None) -> tuple[str, str, str]:
+        if day_utc:
+            day = datetime.strptime(day_utc, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        else:
+            now = datetime.now(timezone.utc)
+            day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        next_day = day + timedelta(days=1)
+        return day.date().isoformat(), day.isoformat(), next_day.isoformat()
+
+    def capture_interpretation_daily_usage(
+        self, provider: str, *, day_utc: str | None = None
+    ) -> dict[str, Any]:
+        day, start, end = self._utc_day_bounds(day_utc)
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                """SELECT status,reserved_cny,usage_json
+                   FROM capture_interpretation_attempts
+                   WHERE provider=? AND started_at>=? AND started_at<?
+                   ORDER BY started_at""",
+                (provider, start, end),
+            ).fetchall()
+        return {"date_utc": day, **self._capture_attempt_usage_rows(list(rows))}
+
+    def claim_capture_interpretation(
+        self,
+        *,
+        provider: str,
+        daily_request_cap: int,
+        daily_cny_cap: float,
+        reserve_cny: float,
+        lease_seconds: int = 180,
+        max_attempts: int = 4,
+        interpretation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically account for usage and lease one external interpretation job.
+
+        A non-positive daily cap explicitly means unlimited. Reservations are
+        still mandatory so usage remains auditable even when no ceiling is set.
+        """
+
+        if reserve_cny <= 0:
+            return {"claimed": False, "reason": "INVALID_COST_RESERVATION"}
+        lease_seconds = max(30, min(int(lease_seconds), 3600))
+        max_attempts = max(1, min(int(max_attempts), 20))
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        lease_expires = (now_dt + timedelta(seconds=lease_seconds)).isoformat()
+        day, day_start, day_end = self._utc_day_bounds()
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            stale = connection.execute(
+                """SELECT interpretation_id,attempts,lease_token
+                   FROM capture_interpretation_runs
+                   WHERE status='RUNNING' AND lease_expires_at IS NOT NULL
+                     AND lease_expires_at<=?""",
+                (now,),
+            ).fetchall()
+            for row in stale:
+                token = str(row["lease_token"] or "")
+                if token:
+                    connection.execute(
+                        """UPDATE capture_interpretation_attempts
+                           SET status='FAILED',finished_at=?,error_class='LEASE_EXPIRED',
+                               error='worker lease expired before completion'
+                           WHERE interpretation_id=? AND lease_token=? AND status='RUNNING'""",
+                        (now, row["interpretation_id"], token),
+                    )
+                next_status = "PENDING" if int(row["attempts"] or 0) < max_attempts else "FAILED"
+                connection.execute(
+                    """UPDATE capture_interpretation_runs
+                       SET status=?,available_at=?,lease_token=NULL,lease_expires_at=NULL,
+                           claimed_at=NULL,updated_at=?,error='LEASE_EXPIRED'
+                       WHERE interpretation_id=?""",
+                    (next_status, now, now, row["interpretation_id"]),
+                )
+
+            attempt_rows = connection.execute(
+                """SELECT status,reserved_cny,usage_json
+                   FROM capture_interpretation_attempts
+                   WHERE provider=? AND started_at>=? AND started_at<?""",
+                (provider, day_start, day_end),
+            ).fetchall()
+            usage = self._capture_attempt_usage_rows(list(attempt_rows))
+            if daily_request_cap > 0 and usage["requests"] >= int(daily_request_cap):
+                connection.commit()
+                return {"claimed": False, "reason": "DAILY_REQUEST_CAP_REACHED", "usage": {"date_utc": day, **usage}}
+            if (
+                daily_cny_cap > 0
+                and usage["chargeable_cny"] + float(reserve_cny) > float(daily_cny_cap)
+            ):
+                connection.commit()
+                return {"claimed": False, "reason": "DAILY_CNY_CAP_REACHED", "usage": {"date_utc": day, **usage}}
+
+            params: list[Any] = [provider, now, max_attempts]
+            exact = ""
+            if interpretation_id:
+                exact = " AND interpretation_id=?"
+                params.append(interpretation_id)
+            row = connection.execute(
+                """SELECT * FROM capture_interpretation_runs
+                   WHERE provider=? AND external_call=1
+                     AND status IN ('PENDING','BUDGET_BLOCKED')
+                     AND (available_at='' OR available_at<=?) AND attempts<?"""
+                + exact
+                + " ORDER BY created_at,interpretation_id LIMIT 1",
+                params,
+            ).fetchone()
+            if row is None:
+                connection.commit()
+                return {"claimed": False, "reason": "NO_ELIGIBLE_JOB", "usage": {"date_utc": day, **usage}}
+
+            attempt_id = "capture-attempt-" + uuid.uuid4().hex
+            lease_token = uuid.uuid4().hex
+            connection.execute(
+                """INSERT INTO capture_interpretation_attempts(
+                       attempt_id,interpretation_id,provider,status,lease_token,reserved_cny,
+                       usage_json,error_class,error,started_at,finished_at
+                   ) VALUES (?,?,?,'RUNNING',?,?,'{}',NULL,NULL,?,NULL)""",
+                (
+                    attempt_id,
+                    row["interpretation_id"],
+                    provider,
+                    lease_token,
+                    float(reserve_cny),
+                    now,
+                ),
+            )
+            cursor = connection.execute(
+                """UPDATE capture_interpretation_runs
+                   SET status='RUNNING',attempts=attempts+1,lease_token=?,
+                       lease_expires_at=?,claimed_at=?,updated_at=?,error=NULL
+                   WHERE interpretation_id=? AND status IN ('PENDING','BUDGET_BLOCKED')""",
+                (lease_token, lease_expires, now, now, row["interpretation_id"]),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                return {"claimed": False, "reason": "CLAIM_RACE_LOST"}
+            connection.commit()
+            result = dict(row)
+            result.update(
+                {
+                    "claimed": True,
+                    "attempt_id": attempt_id,
+                    "lease_token": lease_token,
+                    "lease_expires_at": lease_expires,
+                    "usage_before_claim": {"date_utc": day, **usage},
+                }
+            )
+            for field in ("output_json", "guardrails_json", "usage_json"):
+                result[field.removesuffix("_json")] = _safe_json(result.pop(field), {})
+            return result
+
+    def complete_claimed_capture_interpretation(
+        self,
+        interpretation_id: str,
+        attempt_id: str,
+        lease_token: str,
+        output: dict[str, Any],
+        *,
+        guardrails: dict[str, Any],
+        usage: dict[str, Any],
+        latency_ms: float,
+    ) -> None:
+        now = utc_now()
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT status,lease_token,capture_receipt_sha256,contract_version,prompt_sha256
+                   FROM capture_interpretation_runs WHERE interpretation_id=?""",
+                (interpretation_id,),
+            ).fetchone()
+            attempt = connection.execute(
+                """SELECT status,lease_token FROM capture_interpretation_attempts
+                   WHERE attempt_id=? AND interpretation_id=?""",
+                (attempt_id, interpretation_id),
+            ).fetchone()
+            if row is None or attempt is None:
+                raise KeyError("capture interpretation lease not found")
+            if row["status"] != "RUNNING" or attempt["status"] != "RUNNING":
+                raise ValueError("capture interpretation lease is not running")
+            if row["lease_token"] != lease_token or attempt["lease_token"] != lease_token:
+                raise ValueError("capture interpretation lease token mismatch")
+            if str(output.get("capture_receipt_sha256") or "") != str(row["capture_receipt_sha256"]):
+                raise ValueError("capture interpretation receipt changed before completion")
+            if str(output.get("contract_version") or "") != str(row["contract_version"]):
+                raise ValueError("capture interpretation contract changed before completion")
+            if str(output.get("prompt_sha256") or "") != str(row["prompt_sha256"]):
+                raise ValueError("capture interpretation prompt changed before completion")
+            persisted = dict(output)
+            persisted["persisted"] = True
+            connection.execute(
+                """UPDATE capture_interpretation_attempts
+                   SET status='COMPLETED',usage_json=?,finished_at=?,error_class=NULL,error=NULL
+                   WHERE attempt_id=?""",
+                (_stable_json(usage), now, attempt_id),
+            )
+            connection.execute(
+                """UPDATE capture_interpretation_runs
+                   SET status='COMPLETED',output_json=?,guardrails_json=?,usage_json=?,
+                       latency_ms=?,lease_token=NULL,lease_expires_at=NULL,claimed_at=NULL,
+                       updated_at=?,error=NULL WHERE interpretation_id=?""",
+                (
+                    _stable_json(persisted),
+                    _stable_json(guardrails),
+                    _stable_json(usage),
+                    float(latency_ms),
+                    now,
+                    interpretation_id,
+                ),
+            )
+            connection.commit()
+
+    def fail_claimed_capture_interpretation(
+        self,
+        interpretation_id: str,
+        attempt_id: str,
+        lease_token: str,
+        *,
+        error: str,
+        error_class: str,
+        usage: dict[str, Any] | None = None,
+        retryable: bool,
+        max_attempts: int = 4,
+        backoff_seconds: int = 60,
+    ) -> str:
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT status,attempts,lease_token FROM capture_interpretation_runs
+                   WHERE interpretation_id=?""",
+                (interpretation_id,),
+            ).fetchone()
+            attempt = connection.execute(
+                """SELECT status,lease_token FROM capture_interpretation_attempts
+                   WHERE attempt_id=? AND interpretation_id=?""",
+                (attempt_id, interpretation_id),
+            ).fetchone()
+            if row is None or attempt is None:
+                raise KeyError("capture interpretation lease not found")
+            if row["lease_token"] != lease_token or attempt["lease_token"] != lease_token:
+                raise ValueError("capture interpretation lease token mismatch")
+            should_retry = retryable and int(row["attempts"] or 0) < max(1, int(max_attempts))
+            next_status = "PENDING" if should_retry else "FAILED"
+            available_at = (
+                now_dt + timedelta(seconds=max(1, min(int(backoff_seconds), 86400)))
+            ).isoformat()
+            connection.execute(
+                """UPDATE capture_interpretation_attempts
+                   SET status='FAILED',usage_json=?,finished_at=?,error_class=?,error=?
+                   WHERE attempt_id=?""",
+                (
+                    _stable_json(usage or {}),
+                    now,
+                    str(error_class)[:120],
+                    str(error)[:2000],
+                    attempt_id,
+                ),
+            )
+            connection.execute(
+                """UPDATE capture_interpretation_runs
+                   SET status=?,usage_json=?,available_at=?,lease_token=NULL,
+                       lease_expires_at=NULL,claimed_at=NULL,updated_at=?,error=?
+                   WHERE interpretation_id=?""",
+                (
+                    next_status,
+                    _stable_json(usage or {}),
+                    available_at if should_retry else now,
+                    now,
+                    str(error)[:2000],
+                    interpretation_id,
+                ),
+            )
+            connection.commit()
+        return next_status
+
+    def capture_interpretation_queue_health(
+        self,
+        provider: str,
+        *,
+        contract_version: str | None = None,
+        prompt_version: str | None = None,
+        prompt_sha256: str | None = None,
+        model_snapshot: str | None = None,
+    ) -> dict[str, Any]:
+        where = ["provider=?"]
+        params: list[Any] = [provider]
+        for column, value in (
+            ("contract_version", contract_version),
+            ("prompt_version", prompt_version),
+            ("prompt_sha256", prompt_sha256),
+            ("model_snapshot", model_snapshot),
+        ):
+            if value is not None:
+                where.append(f"{column}=?")
+                params.append(value)
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                """SELECT status,COUNT(*) AS count,MIN(created_at) AS oldest
+                   FROM capture_interpretation_runs WHERE """
+                + " AND ".join(where)
+                + " GROUP BY status ORDER BY status",
+                params,
+            ).fetchall()
+        by_status = {str(row["status"]): int(row["count"]) for row in rows}
+        oldest_pending = next(
+            (str(row["oldest"]) for row in rows if row["status"] in {"PENDING", "BUDGET_BLOCKED"}),
+            None,
+        )
+        return {
+            "provider": provider,
+            "by_status": by_status,
+            "oldest_pending_at": oldest_pending,
+            "daily": self.capture_interpretation_daily_usage(provider),
+        }
+
+    def capture_interpretation_runs(
+        self,
+        event_id: str | None = None,
+        *,
+        capture_receipt_sha256: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        where: list[str] = []
+        params: list[Any] = []
+        if event_id:
+            where.append("event_id=?")
+            params.append(event_id)
+        if capture_receipt_sha256:
+            where.append("capture_receipt_sha256=?")
+            params.append(capture_receipt_sha256)
+        sql = "SELECT * FROM capture_interpretation_runs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(max(1, min(int(limit), 500)))
+        with closing(self.connect()) as connection:
+            rows = [dict(row) for row in connection.execute(sql, params)]
+        for row in rows:
+            row["output"] = _safe_json(row.pop("output_json"), {})
+            row["guardrails"] = _safe_json(row.pop("guardrails_json"), {})
+            row["usage"] = _safe_json(row.pop("usage_json"), {})
+        return rows
+
+    def latest_capture_interpretation(
+        self,
+        event_id: str,
+        capture_receipt_sha256: str,
+    ) -> dict[str, Any] | None:
+        rows = self.capture_interpretation_runs(
+            event_id,
+            capture_receipt_sha256=capture_receipt_sha256,
+            limit=20,
+        )
+        completed = [row for row in rows if row["status"] == "COMPLETED"]
+        if not completed:
+            return None
+        completed.sort(
+            key=lambda row: (
+                int(row.get("external_call") or 0),
+                str(row.get("updated_at") or ""),
+            ),
+            reverse=True,
+        )
+        return completed[0]
+
+    def latest_capture_interpretation_run(
+        self,
+        event_id: str,
+        capture_receipt_sha256: str,
+    ) -> dict[str, Any] | None:
+        """Return the newest run regardless of outcome for scheduler decisions."""
+
+        rows = self.capture_interpretation_runs(
+            event_id,
+            capture_receipt_sha256=capture_receipt_sha256,
+            limit=1,
+        )
+        return rows[0] if rows else None
+
+    def capture_interpretation_terminal_keys(
+        self,
+        *,
+        provider: str,
+        contract_version: str,
+        prompt_version: str,
+        prompt_sha256: str,
+        model_snapshot: str,
+    ) -> dict[tuple[str, str], str]:
+        """Bulk-load immutable terminal receipts for one model generation.
+
+        The scheduler previously opened a new SQLite connection for every
+        historical capture.  Loading the complete terminal key set once keeps
+        backlog discovery linear and makes completed history a zero-call cache.
+        """
+
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                """SELECT event_id,capture_receipt_sha256,status,updated_at
+                   FROM capture_interpretation_runs
+                   WHERE provider=? AND contract_version=? AND prompt_version=?
+                     AND prompt_sha256=? AND model_snapshot=?
+                     AND status IN ('COMPLETED','FAILED')
+                   ORDER BY updated_at DESC""",
+                (
+                    provider,
+                    contract_version,
+                    prompt_version,
+                    prompt_sha256,
+                    model_snapshot,
+                ),
+            ).fetchall()
+        result: dict[tuple[str, str], str] = {}
+        for row in rows:
+            key = (str(row["event_id"]), str(row["capture_receipt_sha256"]))
+            result.setdefault(key, str(row["status"]))
+        return result
 
     def record_evidence_object(
         self,
@@ -1771,6 +2436,8 @@ class OperationsRepository:
                     "worker_cycles",
                     "backup_runs",
                     "agent_decisions",
+                    "capture_interpretation_runs",
+                    "capture_interpretation_attempts",
                     "light_verification_runs",
                     "formal_mutation_audits",
                     "evidence_objects",

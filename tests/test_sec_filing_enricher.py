@@ -34,7 +34,351 @@ class FakeClient:
         return self.payloads[url]
 
 
+class PartialFailureClient(FakeClient):
+    def __init__(self, payloads: dict[str, bytes], failing_urls: set[str]) -> None:
+        super().__init__(payloads)
+        self.failing_urls = failing_urls
+
+    def get(self, url: str) -> bytes:
+        self.calls.append(url)
+        if url in self.failing_urls:
+            raise RuntimeError(
+                f"SEC document exceeds safe capture limit (5000000 bytes): {url}"
+            )
+        return self.payloads[url]
+
+
 class SecFilingEnricherTests(unittest.TestCase):
+    def _seed_discovery_lead(self, connection, *, suffix: str = "lead") -> None:
+        now = "2026-08-20T01:02:03+00:00"
+        raw_json = json.dumps(
+            {"item": {"form": "8-K", "items": ["5.02"], "company": "Example Corp"}}
+        )
+        connection.execute(
+            """INSERT INTO sources VALUES (
+               'sec_current_filings','SEC','official_primary_feed','P0_official',1,1,?,?)""",
+            (now, now),
+        )
+        connection.execute(
+            """INSERT INTO raw_observations VALUES (
+               ?,'sec_current_filings',?,'2026-08-20T00:30:00+00:00',?,
+               '8-K - Example Corp','Item 5.02','https://www.sec.gov/Archives/a/index.htm',
+               ?,?,'completed_discovery_lead')""",
+            (
+                f"obs-{suffix}",
+                suffix,
+                now,
+                hashlib.sha256(raw_json.encode()).hexdigest(),
+                raw_json,
+            ),
+        )
+        connection.execute(
+            """INSERT INTO discovery_leads VALUES (
+               ?,?,'sec_current_filings','PENDING_ENRICHMENT','governance','management_change',
+               'Example Corp','EXM','2026-08-20',?,NULL,NULL,NULL,
+               'https://www.sec.gov/Archives/a/index.htm',NULL,
+               'link_only_no_relevant_passage',?,'[]','["SEC_REQUIRES_DOCUMENT_SEMANTIC_MATCH"]',
+               'event-admission-v1',NULL,?,?,1)""",
+            (
+                f"lead-{suffix}",
+                f"obs-{suffix}",
+                now,
+                hashlib.sha256(raw_json.encode()).hexdigest(),
+                now,
+                now,
+            ),
+        )
+        connection.commit()
+
+    def test_discovery_lead_is_promoted_only_after_scoped_document_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            connection = open_ledger(Path(directory) / "db.sqlite3")
+            self._seed_discovery_lead(connection)
+            client = FakeClient(
+                {
+                    "https://www.sec.gov/Archives/a/index.htm": INDEX,
+                    "https://www.sec.gov/Archives/a/main.htm": (
+                        b"<html><body>Item 5.02. Example Corp reported that its chief "
+                        b"financial officer resigned effective immediately on August 20, 2026.</body></html>"
+                    ),
+                    "https://www.sec.gov/Archives/a/ex991.htm": (
+                        b"<html><body>Example Corp announces the executive transition and "
+                        b"names the interim chief financial officer.</body></html>"
+                    ),
+                }
+            )
+
+            result = enricher.enrich_pending_discovery_leads(connection, client, limit=5)
+            lead = connection.execute("SELECT * FROM discovery_leads").fetchone()
+            event = connection.execute("SELECT * FROM canonical_events").fetchone()
+            relation = connection.execute("SELECT * FROM event_evidence_relations").fetchone()
+            workflow = connection.execute("SELECT * FROM event_fact_workflow").fetchone()
+            job = connection.execute("SELECT * FROM pipeline_jobs").fetchone()
+            facts = json.loads(
+                connection.execute("SELECT facts_json FROM event_versions").fetchone()[0]
+            )
+            connection.close()
+
+        self.assertEqual(result["promoted"], 1)
+        self.assertEqual(lead["status"], "PROMOTED")
+        self.assertEqual(lead["canonical_event_id"], event["event_id"])
+        self.assertEqual(event["status"], "candidate")
+        self.assertEqual(event["event_type"], "management_change")
+        self.assertEqual(relation["relation_status"], "SCOPED_MATCH")
+        self.assertEqual(relation["subject_match"], 1)
+        self.assertEqual(relation["event_claim_supported"], 1)
+        self.assertEqual(workflow["workflow_state"], "EVIDENCE_READY")
+        self.assertEqual(job["status"], "PENDING_EVIDENCE_REVIEW")
+        self.assertEqual(facts["claim_subject"], "Example Corp")
+        self.assertEqual(facts["claim_stage"], "DISCLOSED")
+        self.assertEqual(
+            facts["claim_fact_slots"]["contract_version"],
+            "deterministic-evidence-fact-slots-v2",
+        )
+        self.assertEqual(
+            facts["claim_fact_slots"]["facts"][0]["predicate"],
+            "OFFICER_DEPARTURE",
+        )
+        self.assertEqual(facts["claim_fact_slots"]["facts"][0]["action_text"], "resigned")
+        self.assertIn("chief financial officer", facts["public_fact_summary"])
+        self.assertIn("resigned", facts["public_fact_summary"])
+        self.assertNotIn("与“管理层任免或离职”有关", facts["public_fact_summary"])
+        self.assertEqual(lead["claim_summary"], facts["public_fact_summary"])
+        self.assertFalse(facts["formal_verification"])
+
+    def test_oversize_primary_does_not_block_smaller_exhibit_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            connection = open_ledger(Path(directory) / "db.sqlite3")
+            self._seed_discovery_lead(connection, suffix="oversize-primary")
+            client = PartialFailureClient(
+                {
+                    "https://www.sec.gov/Archives/a/index.htm": INDEX,
+                    "https://www.sec.gov/Archives/a/ex991.htm": (
+                        b"<html><body>Example Corp reported that its chief financial officer "
+                        b"resigned effective immediately on August 20, 2026.</body></html>"
+                    ),
+                },
+                {"https://www.sec.gov/Archives/a/main.htm"},
+            )
+
+            result = enricher.enrich_pending_discovery_leads(connection, client, limit=5)
+            lead = connection.execute("SELECT * FROM discovery_leads").fetchone()
+            event_count = connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0]
+            connection.close()
+
+        self.assertEqual(result["errors"], 0)
+        self.assertEqual(result["needs_evidence"], 1)
+        self.assertEqual(result["promoted"], 0)
+        self.assertEqual(lead["status"], "NEEDS_EVIDENCE")
+        self.assertEqual(lead["evidence_status"], "attachment_incomplete")
+        self.assertIn("resigned", lead["evidence_passage"])
+        self.assertEqual(event_count, 0)
+        self.assertIn("https://www.sec.gov/Archives/a/main.htm", client.calls)
+        self.assertIn("https://www.sec.gov/Archives/a/ex991.htm", client.calls)
+
+    def test_specific_event_phrase_without_affirmed_action_stays_needs_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            connection = open_ledger(Path(directory) / "db.sqlite3")
+            self._seed_discovery_lead(connection, suffix="unsupported-merger")
+            client = FakeClient(
+                {
+                    "https://www.sec.gov/Archives/a/index.htm": INDEX,
+                    "https://www.sec.gov/Archives/a/main.htm": (
+                        b"<html><body>Example Corp attached a merger agreement for reference, "
+                        b"but the filing does not state that it was signed or completed.</body></html>"
+                    ),
+                    "https://www.sec.gov/Archives/a/ex991.htm": (
+                        b"<html><body>The merger agreement is included only as background; "
+                        b"it was not signed or completed.</body></html>"
+                    ),
+                }
+            )
+
+            result = enricher.enrich_pending_discovery_leads(connection, client, limit=5)
+            lead = connection.execute("SELECT * FROM discovery_leads").fetchone()
+            event_count = connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0]
+            connection.close()
+
+        self.assertEqual(result["needs_evidence"], 1)
+        self.assertEqual(result["promoted"], 0)
+        self.assertEqual(lead["status"], "NEEDS_EVIDENCE")
+        self.assertIn("EVENT_PREDICATE_NOT_SUPPORTED", lead["admission_reasons_json"])
+        self.assertIn("尚不能通过确定性规则回答", lead["claim_summary"])
+        self.assertEqual(event_count, 0)
+
+    def test_unimplemented_fact_extractors_fail_closed_after_sec_classification(self) -> None:
+        cases = {
+            "bankruptcy": (
+                "Example Corp filed a bankruptcy petition under chapter 11 and began proceedings."
+            ),
+            "earnings_or_guidance": (
+                "Example Corp reported results of operations and financial condition and "
+                "financial results for the quarter."
+            ),
+        }
+        for expected_type, passage in cases.items():
+            with self.subTest(expected_type=expected_type), tempfile.TemporaryDirectory() as directory:
+                connection = open_ledger(Path(directory) / "db.sqlite3")
+                self._seed_discovery_lead(connection, suffix=expected_type)
+                payload = f"<html><body>{passage}</body></html>".encode()
+                client = FakeClient(
+                    {
+                        "https://www.sec.gov/Archives/a/index.htm": INDEX,
+                        "https://www.sec.gov/Archives/a/main.htm": payload,
+                        "https://www.sec.gov/Archives/a/ex991.htm": payload,
+                    }
+                )
+
+                result = enricher.enrich_pending_discovery_leads(connection, client, limit=5)
+                lead = connection.execute("SELECT * FROM discovery_leads").fetchone()
+                event_count = connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0]
+                relation_count = connection.execute(
+                    "SELECT COUNT(*) FROM event_evidence_relations"
+                ).fetchone()[0]
+                connection.close()
+
+            self.assertEqual(result["needs_evidence"], 1)
+            self.assertEqual(result["promoted"], 0)
+            self.assertEqual(lead["status"], "NEEDS_EVIDENCE")
+            self.assertEqual(lead["claim_action"], expected_type)
+            self.assertIn("EVENT_PREDICATE_NOT_SUPPORTED", lead["admission_reasons_json"])
+            self.assertIn("候选分类，不能当作已发生事实", lead["claim_summary"])
+            self.assertEqual(event_count, 0)
+            self.assertEqual(relation_count, 0)
+
+    def test_fact_slot_gate_rejects_cross_entity_and_denied_actions_end_to_end(self) -> None:
+        cases = {
+            "other-company-management": (
+                "Example Corp disclosed that Customer Finance Inc. chief financial "
+                "officer resigned effective immediately."
+            ),
+            "other-company-listing": (
+                "Example Corp reported that Target Corp received a notice of "
+                "delisting from Nasdaq."
+            ),
+            "subsidiary-offering": (
+                "Target Corp, a subsidiary of Example Corp, issued $25 million of "
+                "common stock in a public offering."
+            ),
+            "other-company-pronoun": (
+                "Target Corp stated that the company issued $25 million of common "
+                "stock in a public offering."
+            ),
+            "cross-sentence-other-company-pronoun": (
+                "Target Corp is a customer mentioned in the filing. The company "
+                "issued $25 million of common stock in a public offering."
+            ),
+            "declined-appointment": (
+                "Item 5.02. Example Corp declined to appoint Jane Doe as chief "
+                "financial officer."
+            ),
+            "denied-merger-completion": (
+                "Example Corp denied the merger agreement statement; it is false "
+                "that Example Corp completed the acquisition."
+            ),
+            "postposed-denial": (
+                "Example Corp issued $25 million of common stock in a public offering. "
+                "Example Corp later denied that it had issued common stock."
+            ),
+            "separated-postposed-denial": (
+                "Example Corp disclosed that its chief financial officer resigned. "
+                "The report described an executive transition. Example Corp denied "
+                "that the resignation occurred."
+            ),
+            "relative-rejection": (
+                "Example Corp issued $25 million of common stock in a public offering, "
+                "which Example Corp later rejected as inaccurate."
+            ),
+        }
+        for suffix, passage in cases.items():
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as directory:
+                connection = open_ledger(Path(directory) / "db.sqlite3")
+                self._seed_discovery_lead(connection, suffix=suffix)
+                payload = f"<html><body>{passage}</body></html>".encode()
+                client = FakeClient(
+                    {
+                        "https://www.sec.gov/Archives/a/index.htm": INDEX,
+                        "https://www.sec.gov/Archives/a/main.htm": payload,
+                        "https://www.sec.gov/Archives/a/ex991.htm": payload,
+                    }
+                )
+
+                result = enricher.enrich_pending_discovery_leads(connection, client, limit=5)
+                lead = connection.execute("SELECT * FROM discovery_leads").fetchone()
+                event_count = connection.execute(
+                    "SELECT COUNT(*) FROM canonical_events"
+                ).fetchone()[0]
+                relation_count = connection.execute(
+                    "SELECT COUNT(*) FROM event_evidence_relations"
+                ).fetchone()[0]
+                connection.close()
+
+            self.assertEqual(result["promoted"], 0, suffix)
+            self.assertEqual(result["needs_evidence"], 1, suffix)
+            self.assertEqual(lead["status"], "NEEDS_EVIDENCE")
+            self.assertIn("EVENT_PREDICATE_NOT_SUPPORTED", lead["admission_reasons_json"])
+            self.assertEqual(event_count, 0)
+            self.assertEqual(relation_count, 0)
+
+    def test_management_roles_are_bound_to_their_nearest_action_end_to_end(self) -> None:
+        passage = (
+            "Item 5.02. Example Corp appointed Jane Doe as interim chief financial "
+            "officer after its director resigned."
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            connection = open_ledger(Path(directory) / "db.sqlite3")
+            self._seed_discovery_lead(connection, suffix="nearest-role")
+            payload = f"<html><body>{passage}</body></html>".encode()
+            client = FakeClient(
+                {
+                    "https://www.sec.gov/Archives/a/index.htm": INDEX,
+                    "https://www.sec.gov/Archives/a/main.htm": payload,
+                    "https://www.sec.gov/Archives/a/ex991.htm": payload,
+                }
+            )
+
+            result = enricher.enrich_pending_discovery_leads(connection, client, limit=5)
+            lead = connection.execute("SELECT * FROM discovery_leads").fetchone()
+            facts = json.loads(
+                connection.execute("SELECT facts_json FROM event_versions").fetchone()[0]
+            )
+            connection.close()
+
+        self.assertEqual(result["promoted"], 1)
+        self.assertEqual(lead["status"], "PROMOTED")
+        extracted = facts["claim_fact_slots"]["facts"]
+        departure = next(row for row in extracted if row["predicate"] == "OFFICER_DEPARTURE")
+        self.assertEqual(departure["role"], "director")
+        self.assertIn("director", facts["public_fact_summary"])
+        self.assertNotIn("interim chief financial officer”辞任", facts["public_fact_summary"])
+
+    def test_unscoped_filing_remains_a_lead_and_never_creates_a_canonical_event(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            connection = open_ledger(Path(directory) / "db.sqlite3")
+            self._seed_discovery_lead(connection, suffix="ordinary")
+            client = FakeClient(
+                {
+                    "https://www.sec.gov/Archives/a/index.htm": INDEX,
+                    "https://www.sec.gov/Archives/a/main.htm": (
+                        b"<html><body>Example Corp filed an ordinary administrative update "
+                        b"and incorporated prior disclosures by reference.</body></html>"
+                    ),
+                    "https://www.sec.gov/Archives/a/ex991.htm": (
+                        b"<html><body>This exhibit contains only routine administrative "
+                        b"information and no described corporate action.</body></html>"
+                    ),
+                }
+            )
+
+            result = enricher.enrich_pending_discovery_leads(connection, client, limit=5)
+            lead = connection.execute("SELECT * FROM discovery_leads").fetchone()
+            event_count = connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0]
+            connection.close()
+
+        self.assertEqual(result["no_scoped_event"], 1)
+        self.assertEqual(lead["status"], "LEAD_NO_SCOPED_EVENT")
+        self.assertEqual(event_count, 0)
+
     def test_index_parser_canonicalizes_ix_and_keeps_exhibit(self) -> None:
         rows = enricher.parse_filing_index(INDEX)
         self.assertEqual(len(rows), 2)

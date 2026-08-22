@@ -480,7 +480,10 @@ if systemctl is-active --quiet finance-radar-evidence-llm.service || \
 fi
 systemctl enable --now finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer
 
-for _ in $(seq 1 30); do
+# A restored production ledger performs the same synchronous overview
+# precomputation as an ordinary deployment. Match the installer's measured
+# cold-start allowance so restore activation does not reject a healthy API.
+for _ in $(seq 1 90); do
     curl -fsS http://127.0.0.1:18000/api/v1/health >/dev/null && break
     sleep 1
 done

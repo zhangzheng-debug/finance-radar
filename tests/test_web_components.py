@@ -23,6 +23,7 @@ from app.web.components import (
     market_context_markup,
     market_horizon_items,
     public_event_copy,
+    public_event_quality,
     public_event_state,
     score_dimensions,
     source_health_state,
@@ -178,6 +179,96 @@ def test_public_event_copy_prefers_structured_fact_and_keeps_state_boundary() ->
     assert "交易所公告称该公司收到上市合规通知" in copy["summary"]
     assert "当前证据不足" in copy["summary"]
     assert "UNRELATED RAW ENGLISH EXCERPT" not in copy["summary"]
+
+
+def test_public_event_copy_does_not_invent_an_event_from_subject_and_family() -> None:
+    event = {
+        "status": "candidate",
+        "public_state": "pending_verification",
+        "event_family": "listing_status",
+        "ticker_at_event": "ICX",
+        "event_type": "listing_status",
+    }
+
+    copy = public_event_copy(event)
+    quality = public_event_quality(event, [])
+
+    assert "ICX" in copy["summary"]
+    assert "上市状态" in copy["summary"]
+    assert "尚没有可公开复述的主体—动作—阶段事实" in copy["summary"]
+    assert "出现一项" not in copy["summary"]
+    assert copy["summary_provenance"] == "发现线索说明"
+    assert quality["reader_ready"] is False
+    assert quality["gaps"] == [
+        "缺少主体—动作—阶段事实摘要",
+        "缺少可定位的原文段落",
+    ]
+
+
+def test_public_event_quality_requires_subject_fact_and_citable_passage() -> None:
+    event = {
+        "company_name": "Example Ltd.",
+        "facts": {
+            "evidence_summary": "交易所公告称该公司收到上市合规通知并说明了整改期限。",
+            "claim_subject": "Example Ltd.",
+            "claim_action": "listing_compliance_notice",
+            "claim_stage": "DISCLOSED",
+            "known_at": "2026-08-20T01:02:03+00:00",
+        },
+    }
+    evidence = [
+        {
+            "evidence_url": "https://example.test/original",
+            "evidence_passage": "The exchange notice names Example Ltd. and states the exact compliance deadline.",
+            "evidence_status": "machine_extracted_unreviewed",
+            "relation_status": "SCOPED_MATCH",
+            "subject_match": 1,
+            "event_claim_supported": 1,
+            "date_coherent": 1,
+            "authority_tier": "P0_official",
+            "reader_eligible": 1,
+        }
+    ]
+
+    quality = public_event_quality(event, evidence)
+
+    assert quality["reader_ready"] is True
+    assert quality["gaps"] == []
+    assert quality["citable_evidence_count"] == 1
+
+
+def test_public_event_quality_requires_strict_dual_human_receipt() -> None:
+    event = {
+        "company_name": "Example Ltd.",
+        "facts": {
+            "public_fact_summary": "Example Ltd. disclosed that its chief financial officer resigned.",
+            "claim_subject": "Example Ltd.",
+            "claim_action": "chief financial officer resigned",
+            "claim_stage": "DISCLOSED",
+            "known_at": "2026-08-20T01:02:03+00:00",
+        },
+    }
+    evidence = {
+        "evidence_url": "https://www.sec.gov/example",
+        "evidence_passage": (
+            "Example Ltd. disclosed that its chief financial officer resigned "
+            "effective immediately."
+        ),
+        "evidence_status": "accepted_dual_human_primary_evidence",
+        "relation_status": "HUMAN_CONFIRMED",
+        "subject_match": 1,
+        "event_claim_supported": 1,
+        "date_coherent": 1,
+        "authority_tier": "P0",
+        "dual_human_receipt_consistent": 1,
+        "reader_eligible": 1,
+    }
+
+    assert public_event_quality(event, [evidence])["reader_ready"] is True
+    evidence["dual_human_receipt_consistent"] = 0
+    quality = public_event_quality(event, [evidence])
+    assert quality["reader_ready"] is False
+    assert quality["citable_evidence_count"] == 0
 
 
 def test_public_event_row_labels_its_distinct_time_clocks() -> None:
@@ -384,7 +475,7 @@ def test_market_horizons_distinguish_observed_pending_and_missed() -> None:
         "market_metrics": [
             {
                 "stable_id": "asset-1",
-                "metric_name": "observer_return_t_plus_5m_pct__ETHUSDT",
+                "metric_name": "reaction_return_t_plus_5m_pct__ETHUSDT",
                 "metric_value": "5.123456",
             }
         ],
@@ -393,10 +484,13 @@ def test_market_horizons_distinguish_observed_pending_and_missed() -> None:
     assert [(item["label"], item["value"]) for item in items] == [
         ("T+5M", "+5.12%"),
         ("T+30M", "PENDING"),
+        ("T+2H", "NOT SCHEDULED"),
+        ("下个收盘", "NOT SCHEDULED"),
         ("T+1D", "MISSED"),
+        ("T+5D", "NOT SCHEDULED"),
     ]
     assert items[0]["state"] == "evidence"
-    assert items[2]["state"] == "risk"
+    assert items[4]["state"] == "risk"
 
 
 def test_adjacent_event_navigation_is_bounded_and_recovers_unknown_current() -> None:
