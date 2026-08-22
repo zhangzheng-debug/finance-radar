@@ -394,10 +394,9 @@ try:
         "/api/v1/overview",
         ttl_seconds=15,
         stale_if_error_seconds=120,
-        # Large migrated ledgers can need several seconds for the first public
-        # funnel projection.  A five-second client cutoff produced a false
-        # outage even while /overview was healthy and completed at ~9 seconds.
-        timeout_seconds=15,
+        # The API serves a precomputed projection.  Keep a generous first-read
+        # ceiling for process restarts and transient proxy scheduling delays.
+        timeout_seconds=20,
     )
 except Exception as exc:
     overview_loading.empty()

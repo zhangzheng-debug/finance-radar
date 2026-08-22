@@ -7,6 +7,7 @@ import time
 import uuid
 from copy import deepcopy
 from collections import OrderedDict, deque
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from itertools import islice
 from pathlib import Path
@@ -21,6 +22,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import __version__
+from app.api.snapshot import PrecomputedSnapshot, SnapshotUnavailable
 from app.config import Settings
 from app.models import RiskRouter, derive_evidence_context
 from app.services import (
@@ -44,6 +46,7 @@ from app.storage import EvidenceObjectStore, LedgerRepository, OperationsReposit
 
 API_SCHEMA_VERSION = "1.1"
 BACKUP_SNAPSHOT_MAX_AGE_SECONDS = 36 * 60 * 60
+OVERVIEW_SNAPSHOT_REFRESH_SECONDS = 30.0
 GENERIC_REVIEWER_IDENTITIES = frozenset(
     {"reviewer", "defense-reviewer", "审核者", "审查员", "unknown", "test"}
 )
@@ -308,11 +311,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         evidence_model_provider,
     )
     adjudication = AdjudicationService(ledger, operations)
+    overview_snapshot = PrecomputedSnapshot(
+        lambda: ledger.overview(run_integrity_check=False),
+        refresh_interval_seconds=OVERVIEW_SNAPSHOT_REFRESH_SECONDS,
+        name="overview",
+    )
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        overview_snapshot.start()
+        try:
+            yield
+        finally:
+            overview_snapshot.stop()
 
     application = FastAPI(
         title="Finance Radar Read-Mostly API",
         version=__version__,
         description="Evidence-linked financial event intelligence. No trading endpoints exist.",
+        lifespan=lifespan,
     )
     application.add_middleware(
         CORSMiddleware,
@@ -328,6 +345,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.evidence_agent = evidence_agent
     application.state.evidence_object_store = evidence_object_store
     application.state.adjudication = adjudication
+    application.state.overview_snapshot = overview_snapshot
+
     rate_buckets: OrderedDict[str, deque[float]] = OrderedDict()
     rate_lock = Lock()
     read_cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
@@ -1174,11 +1193,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         internal_reader: bool = Depends(internal_reader_access),
     ):
         latest_backup = operations.latest_verified_backup()
-        overview_base = cached_read(
-            "ledger-overview-v1",
-            30.0,
-            lambda: ledger.overview(run_integrity_check=False),
-        )
+        try:
+            overview_base, overview_snapshot_status = overview_snapshot.read()
+        except SnapshotUnavailable as exc:
+            raise HTTPException(
+                503,
+                {
+                    "code": "OVERVIEW_SNAPSHOT_UNAVAILABLE",
+                    "message": "overview snapshot has not completed successfully yet",
+                },
+            ) from exc
         data = health_from_latest_verified_backup(
             overview_base,
             latest_backup,
@@ -1198,6 +1222,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         data["latest_backup"] = public_backup_status(latest_backup)
         data["latest_backup_attempt"] = public_backup_status(operations.latest_backup())
+        data["overview_snapshot"] = overview_snapshot_status
         # Keep the legacy alias and the explicit update clock exactly aligned.
         # Computing elapsed time twice makes an otherwise identical API fact
         # differ by milliseconds and turns deterministic contract tests flaky.

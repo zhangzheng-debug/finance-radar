@@ -154,7 +154,8 @@ def test_overview_uses_timestamped_verified_backup_integrity() -> None:
             counts={},
         )
 
-        response = TestClient(application).get("/api/v1/overview")
+        with TestClient(application) as client:
+            response = client.get("/api/v1/overview")
 
     assert response.status_code == 200
     health = response.json()["data"]

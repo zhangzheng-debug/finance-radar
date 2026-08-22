@@ -5,6 +5,14 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.22.8
+
+- Moved the expensive public overview projection out of the request path. The
+  API now computes it before serving traffic, refreshes it every 30 seconds in
+  the background, and preserves the last good generation after a refresh
+  failure. The public UI first-read timeout is now 20 seconds, preventing a
+  healthy cold process from being presented as a full-page outage.
+
 ## 2026.08.22.3
 
 - Fixed the five-minute capture-interpretation queue so recovery-plan receipts
