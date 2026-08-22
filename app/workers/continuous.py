@@ -4,9 +4,11 @@ import argparse
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,29 @@ def request_stop(signum: int, frame: Any) -> None:
     del signum, frame
     global STOP_REQUESTED
     STOP_REQUESTED = True
+
+
+def release_owned_cycle_lease(db_path: Path, token: str) -> bool:
+    """Release only the lease token assigned to a timed-out child process."""
+
+    connection = sqlite3.connect(db_path, timeout=5)
+    try:
+        cursor = connection.execute(
+            "DELETE FROM runtime_leases WHERE lease_name='live_cycle' AND lease_token=?",
+            (token,),
+        )
+        connection.commit()
+        return cursor.rowcount == 1
+    finally:
+        connection.close()
+
+
+def process_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 def execute_cycle(
@@ -52,6 +77,7 @@ def execute_cycle(
             status = "SUCCESS"
         else:
             report_path = ROOT / "reports" / "live_cycle_latest.json"
+            lease_token = uuid.uuid4().hex
             command = [
                 sys.executable,
                 str(ROOT / "scripts" / "run_live_cycle.py"),
@@ -61,31 +87,58 @@ def execute_cycle(
                 str(report_path),
                 "--timeout",
                 str(timeout),
+                "--lease-token",
+                lease_token,
             ]
             if send:
                 command.append("--send")
             # A failed child must never inherit the previous cycle's JSON and
             # be misclassified as a current partial success.
             report_path.unlink(missing_ok=True)
-            completed = subprocess.run(
-                command,
-                cwd=ROOT,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=max(120, int(timeout * 20)),
-                check=False,
-            )
+            child_timeout = max(120, int(timeout * 20))
+            timed_out = False
+            lease_released_after_timeout = False
+            lease_release_error: str | None = None
+            try:
+                completed = subprocess.run(
+                    command,
+                    cwd=ROOT,
+                    env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=child_timeout,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                timed_out = True
+                try:
+                    lease_released_after_timeout = release_owned_cycle_lease(
+                        Path(settings.ledger_db), lease_token
+                    )
+                except Exception as release_exc:
+                    lease_release_error = type(release_exc).__name__
+                completed = subprocess.CompletedProcess(
+                    command,
+                    124,
+                    stdout=process_text(exc.stdout),
+                    stderr=process_text(exc.stderr),
+                )
             result = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else {}
             result["process"] = {
                 "returncode": completed.returncode,
-                "stdout_tail": completed.stdout[-2000:],
-                "stderr_tail": completed.stderr[-2000:],
+                "stdout_tail": process_text(completed.stdout)[-2000:],
+                "stderr_tail": process_text(completed.stderr)[-2000:],
                 "telegram_send_enabled": send,
+                "timed_out": timed_out,
+                "timeout_seconds": child_timeout,
+                "owned_lease_released": lease_released_after_timeout,
+                "lease_release_error_class": lease_release_error,
             }
-            if completed.returncode == 0:
+            if timed_out:
+                status = "FAILED"
+            elif completed.returncode == 0:
                 status = "SUCCESS"
             elif completed.returncode == 3:
                 status = "SKIPPED"

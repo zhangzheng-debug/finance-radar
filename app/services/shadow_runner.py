@@ -42,19 +42,35 @@ def run_shadow_batch(
     run_limit: int = 100,
 ) -> dict[str, Any]:
     """Persist bounded, idempotent shadow outcomes for recent ledger events."""
-    page = ledger.list_events(limit=max(1, min(scan_limit, 200)))
+    bounded_scan = max(1, min(scan_limit, 200))
+    fast_loader = getattr(ledger, "shadow_batch", None)
+    if callable(fast_loader):
+        batch = fast_loader(limit=bounded_scan)
+    else:
+        # Compatibility path for small adapters.  The production repository
+        # always exposes shadow_batch() and avoids this public-reader/N+1 path.
+        page = ledger.list_events(limit=bounded_scan)
+        batch = []
+        for row in page["items"]:
+            event_id = str(row["event_id"])
+            detail = ledger.event_detail(event_id)
+            if detail is not None:
+                batch.append(
+                    {"detail": detail, "evidence": ledger.event_evidence(event_id)}
+                )
     counters: Counter[str] = Counter()
     errors: list[str] = []
-    for row in page["items"]:
+    for item in batch:
         if counters["recorded"] >= max(1, run_limit):
             break
-        event_id = str(row["event_id"])
+        detail = item.get("detail") or {}
+        evidence = item.get("evidence") or []
+        event = detail.get("event") or {}
+        event_id = str(event.get("event_id") or "")
+        if not event_id:
+            counters["missing"] += 1
+            continue
         try:
-            detail = ledger.event_detail(event_id)
-            if detail is None:
-                counters["missing"] += 1
-                continue
-            evidence = ledger.event_evidence(event_id)
             text = event_model_text(detail, evidence)
             result = router.predict(text, evidence_context=derive_evidence_context(evidence))
             result.update(
@@ -78,7 +94,7 @@ def run_shadow_batch(
             counters["errors"] += 1
             errors.append(f"{event_id}:{type(exc).__name__}:{str(exc)[:240]}")
     return {
-        "scanned": len(page["items"]),
+        "scanned": len(batch),
         "recorded": counters["recorded"],
         "already_current": counters["already_current"],
         "missing": counters["missing"],
@@ -95,4 +111,5 @@ def run_shadow_batch(
         },
         "shadow_only": True,
         "no_trading": True,
+        "input_loader": "bounded_bulk_v2" if callable(fast_loader) else "compatibility_v1",
     }

@@ -829,6 +829,188 @@ class LedgerRepository:
             "audit": audit,
         }
 
+    def capture_source_generation(self) -> dict[str, Any]:
+        """Return a cheap watermark for receipt-bound capture interpretation.
+
+        The interpretation worker uses this only after it has exhausted the
+        historical backlog.  An unchanged watermark means no observation was
+        added or revised, so rebuilding the much heavier recovery plan would
+        be wasted work.
+        """
+
+        with closing(self.connect()) as connection:
+            observations = connection.execute(
+                "SELECT COUNT(*) AS n,MAX(local_received_at) AS latest FROM raw_observations"
+            ).fetchone()
+            revisions = connection.execute(
+                "SELECT COUNT(*) AS n,MAX(revision_at) AS latest FROM source_revisions"
+            ).fetchone()
+        return {
+            "observation_count": int(observations["n"] or 0),
+            "latest_observation_at": observations["latest"],
+            "revision_count": int(revisions["n"] or 0),
+            "latest_revision_at": revisions["latest"],
+        }
+
+    def capture_interpretation_context(
+        self,
+        event_id: str,
+        observation_id: str,
+    ) -> dict[str, Any] | None:
+        """Load only the fields admitted to the receipt-bound LLM contract.
+
+        This deliberately bypasses the public-reader CTE.  A retained capture
+        is discovery data, not a public conclusion, and interpreting it should
+        not require recomputing reader eligibility for the entire ledger.
+        """
+
+        with closing(self.connect()) as connection:
+            event_row = connection.execute(
+                "SELECT * FROM canonical_events WHERE event_id=?",
+                (event_id,),
+            ).fetchone()
+            if event_row is None:
+                return None
+            capture_row = connection.execute(
+                f"""WITH {_CURRENT_SOURCE_CONTENT_CTES}
+                    SELECT eo.relation_type,eo.linked_at,
+                           r.observation_id,r.source_id,r.external_id,
+                           r.source_published_at,r.local_received_at,
+                           r.title,r.summary,r.canonical_url,r.content_sha256,
+                           r.raw_json,
+                           r.observation_status,r.latest_revision_no,
+                           r.latest_revision_kind,r.latest_revision_at,
+                           s.name AS source_name,s.source_type,s.authority_tier
+                    FROM event_observations eo
+                    JOIN current_source_content r
+                      ON r.observation_id=eo.observation_id
+                    JOIN sources s ON s.source_id=r.source_id
+                    WHERE eo.event_id=? AND r.observation_id=?
+                    LIMIT 1""",
+                (event_id, observation_id),
+            ).fetchone()
+        if capture_row is None:
+            return None
+        capture = dict(capture_row)
+        raw_payload = str(capture.pop("raw_json", "") or "")
+        raw_payload_sha256 = hashlib.sha256(raw_payload.encode("utf-8")).hexdigest()
+        receipt_payload = {
+            "source_id": capture.get("source_id"),
+            "external_id": capture.get("external_id"),
+            "semantic_content_sha256": capture.get("content_sha256"),
+            "canonical_url": capture.get("canonical_url"),
+            "source_published_at": capture.get("source_published_at"),
+            "local_received_at": capture.get("local_received_at"),
+            "latest_revision_no": capture.get("latest_revision_no"),
+            "latest_revision_kind": capture.get("latest_revision_kind"),
+            "raw_payload_sha256": raw_payload_sha256,
+        }
+        capture["raw_payload_sha256"] = raw_payload_sha256
+        capture["capture_receipt_sha256"] = hashlib.sha256(
+            json.dumps(
+                receipt_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        capture["semantic_content_sha256"] = capture.pop("content_sha256", None)
+        return {"event": dict(event_row), "capture": capture}
+
+    def shadow_batch(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        """Load recent shadow-router inputs with two bounded SQL queries.
+
+        The old implementation called the full public-reader CTE once for the
+        page and again for every event.  On the production ledger that made a
+        bounded shadow batch take longer than the whole worker deadline.
+        """
+
+        limit = max(1, min(int(limit), 200))
+        with closing(self.connect()) as connection:
+            event_rows = connection.execute(
+                f"""WITH {_CURRENT_SOURCE_CONTENT_CTES},
+                    ranked_source AS (
+                      SELECT eo.event_id,r.title,r.summary,r.source_id,
+                             r.source_published_at,r.local_received_at,
+                             ROW_NUMBER() OVER (
+                               PARTITION BY eo.event_id
+                               ORDER BY r.local_received_at DESC,r.observation_id DESC
+                             ) AS source_rank
+                      FROM event_observations eo
+                      JOIN current_source_content r
+                        ON r.observation_id=eo.observation_id
+                      WHERE eo.relation_type!='filtered_aggregated_noise'
+                        AND r.observation_status!='deleted'
+                    )
+                    SELECT ce.*,v.facts_json,
+                           rs.title AS source_title,rs.summary AS source_summary,
+                           rs.source_id AS preferred_source_id,
+                           rs.source_published_at,rs.local_received_at
+                    FROM canonical_events ce
+                    JOIN event_versions v
+                      ON v.event_id=ce.event_id AND v.version=ce.current_version
+                    LEFT JOIN ranked_source rs
+                      ON rs.event_id=ce.event_id AND rs.source_rank=1
+                    ORDER BY ce.last_updated_at DESC,ce.event_id DESC
+                    LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            event_ids = [str(row["event_id"]) for row in event_rows]
+            evidence_by_event: dict[str, list[dict[str, Any]]] = {
+                event_id: [] for event_id in event_ids
+            }
+            if event_ids:
+                placeholders = ",".join("?" for _ in event_ids)
+                evidence_rows = connection.execute(
+                    f"""WITH {_CURRENT_SOURCE_CONTENT_CTES},
+                        ranked_evidence AS (
+                          SELECT ev.*,r.source_id,src.authority_tier,
+                                 ROW_NUMBER() OVER (
+                                   PARTITION BY ev.event_id
+                                   ORDER BY ev.passage_score DESC,
+                                            ev.updated_at DESC,ev.evidence_id
+                                 ) AS evidence_rank
+                          FROM event_evidence ev
+                          JOIN current_source_content r
+                            ON r.observation_id=ev.observation_id
+                          JOIN sources src ON src.source_id=r.source_id
+                          WHERE ev.event_id IN ({placeholders})
+                            AND r.observation_status!='deleted'
+                        )
+                        SELECT * FROM ranked_evidence
+                        WHERE evidence_rank<=5
+                        ORDER BY event_id,evidence_rank""",
+                    event_ids,
+                ).fetchall()
+                for row in evidence_rows:
+                    item = dict(row)
+                    item.pop("evidence_rank", None)
+                    evidence_by_event[str(item["event_id"])].append(item)
+
+        result: list[dict[str, Any]] = []
+        for row in event_rows:
+            item = dict(row)
+            facts = _json(item.pop("facts_json"), {})
+            event_id = str(item["event_id"])
+            preferred_source = {
+                "title": item.pop("source_title", None),
+                "summary": item.pop("source_summary", None),
+                "source_id": item.pop("preferred_source_id", None),
+                "source_published_at": item.pop("source_published_at", None),
+                "local_received_at": item.pop("local_received_at", None),
+            }
+            result.append(
+                {
+                    "detail": {
+                        "event": item,
+                        "current_version": {"facts": facts},
+                        "preferred_source": preferred_source,
+                    },
+                    "evidence": evidence_by_event[event_id],
+                }
+            )
+        return result
+
     def overview(self, recent_limit: int = 12, *, run_integrity_check: bool = True) -> dict[str, Any]:
         health = self.health(run_integrity_check=run_integrity_check)
         with closing(self.connect()) as connection:

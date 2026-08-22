@@ -31,7 +31,7 @@ from app.services.deepseek_capture_interpretation import (  # noqa: E402
 from app.services.source_observation_recovery import (  # noqa: E402
     build_source_observation_recovery_plan,
 )
-from app.storage import OperationsRepository  # noqa: E402
+from app.storage import LedgerRepository, OperationsRepository  # noqa: E402
 from scripts.run_capture_interpretation_deepseek import (  # noqa: E402
     RUN_CACHED,
     RUN_COMPLETED,
@@ -41,6 +41,7 @@ from scripts.run_capture_interpretation_deepseek import (  # noqa: E402
 
 
 PRIORITY = {"NO_URL_RAW_ONLY": 0, "P2_CAPTURE_ONLY": 1}
+INVENTORY_STATE_KEY = "capture_interpretation_inventory_v1"
 
 
 def is_current_terminal(run: dict[str, Any] | None) -> bool:
@@ -71,6 +72,7 @@ def classify_run_code(code: int) -> str:
 
 def candidates(plan: dict[str, Any]) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     records = sorted(
         plan.get("records") or [],
         key=lambda item: (
@@ -90,7 +92,9 @@ def candidates(plan: dict[str, Any]) -> list[dict[str, str]]:
                 continue
             observation_id = str(capture.get("observation_id") or "")
             receipt = str(capture.get("capture_receipt_sha256") or "")
-            if observation_id and receipt:
+            key = (event_id, receipt)
+            if observation_id and receipt and key not in seen:
+                seen.add(key)
                 result.append(
                     {
                         "event_id": event_id,
@@ -105,24 +109,61 @@ def candidates(plan: dict[str, Any]) -> list[dict[str, str]]:
 def run(args: argparse.Namespace) -> int:
     load_local_env(args.env_file.resolve())
     settings = Settings.from_env()
-    plan = build_source_observation_recovery_plan(Path(settings.ledger_db))
+    ledger = LedgerRepository(settings.ledger_db)
     operations = OperationsRepository(settings.operations_db)
+    generation = ledger.capture_source_generation()
+    prior_inventory = operations.get_state(INVENTORY_STATE_KEY, {})
+    health = operations.capture_interpretation_queue_health(
+        "deepseek",
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+    )
+    if (
+        isinstance(prior_inventory, dict)
+        and prior_inventory.get("backlog_complete") is True
+        and prior_inventory.get("source_generation") == generation
+    ):
+        _safe_json(
+            status="IDLE",
+            reason="SOURCE_GENERATION_UNCHANGED",
+            examined=0,
+            completed=0,
+            remaining=0,
+            source_generation=generation,
+            queue=health.get("by_status") or {},
+            daily=health.get("daily") or {},
+            only_new_or_changed=True,
+            canonical_state_unchanged=True,
+            no_trading=True,
+        )
+        return 0
+
+    plan = build_source_observation_recovery_plan(Path(settings.ledger_db))
+    inventory = candidates(plan)
+    terminal_before = operations.capture_interpretation_terminal_keys(
+        provider="deepseek",
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+    )
+    pending = [
+        item
+        for item in inventory
+        if (item["event_id"], item["capture_receipt_sha256"]) not in terminal_before
+    ]
     completed = 0
-    skipped_terminal = 0
+    skipped_terminal = len(inventory) - len(pending)
     deferred = 0
     failed = 0
     examined = 0
 
-    for item in candidates(plan):
-        if completed >= args.limit or examined >= args.scan_limit:
+    for item in pending[: args.scan_limit]:
+        if examined >= args.limit:
             break
         examined += 1
-        latest = operations.latest_capture_interpretation_run(
-            item["event_id"], item["capture_receipt_sha256"]
-        )
-        if is_current_terminal(latest):
-            skipped_terminal += 1
-            continue
         try:
             code = run_single(
                 SimpleNamespace(
@@ -152,6 +193,32 @@ def run(args: argparse.Namespace) -> int:
             # usage accounting.  Do not echo source text or provider bodies.
             failed += 1
 
+    terminal_after = operations.capture_interpretation_terminal_keys(
+        provider="deepseek",
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+    )
+    remaining = sum(
+        (item["event_id"], item["capture_receipt_sha256"]) not in terminal_after
+        for item in inventory
+    )
+    operations.set_state(
+        INVENTORY_STATE_KEY,
+        {
+            "source_generation": generation,
+            "candidate_count": len(inventory),
+            "remaining": remaining,
+            "backlog_complete": remaining == 0,
+            "contract_version": CAPTURE_INTERPRETATION_CONTRACT,
+            "prompt_version": CAPTURE_INTERPRETATION_PROMPT_VERSION,
+            "prompt_sha256": CAPTURE_INTERPRETATION_PROMPT_SHA256,
+            "provider": "deepseek",
+            "model_snapshot": DEEPSEEK_CHEAP_TEXT_MODEL,
+            "only_new_or_changed": True,
+        },
+    )
     health = operations.capture_interpretation_queue_health(
         "deepseek",
         contract_version=CAPTURE_INTERPRETATION_CONTRACT,
@@ -162,12 +229,17 @@ def run(args: argparse.Namespace) -> int:
     _safe_json(
         status="COMPLETED" if failed == 0 else "PARTIAL",
         examined=examined,
+        candidates=len(inventory),
         completed=completed,
         skipped_terminal=skipped_terminal,
+        remaining=remaining,
+        backlog_complete=remaining == 0,
         deferred=deferred,
         failed=failed,
         queue=health.get("by_status") or {},
         daily=health.get("daily") or {},
+        source_generation=generation,
+        only_new_or_changed=True,
         canonical_state_unchanged=True,
         no_trading=True,
     )
@@ -177,7 +249,7 @@ def run(args: argparse.Namespace) -> int:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--limit", type=int, default=3)
-    result.add_argument("--scan-limit", type=int, default=500)
+    result.add_argument("--scan-limit", type=int, default=100_000)
     result.add_argument("--env-file", type=Path, default=ROOT / ".env.local")
     return result
 
@@ -185,7 +257,7 @@ def parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = parser().parse_args()
     args.limit = max(1, min(int(args.limit), 20))
-    args.scan_limit = max(args.limit, min(int(args.scan_limit), 10_000))
+    args.scan_limit = max(args.limit, min(int(args.scan_limit), 250_000))
     try:
         return run(args)
     except Exception as exc:

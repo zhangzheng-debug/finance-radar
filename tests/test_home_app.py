@@ -155,9 +155,10 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert "已粗审" in rendered
     assert "最近成功采集" in rendered
     assert "最近发现新事件" in rendered
-    assert "正式结论" in rendered
-    assert "核验 5 · 排除 1" in rendered
-    assert "待补证 / 复核" in rendered
+    assert "公开可读" in rendered
+    assert "7 / 12" in rendered
+    assert "待恢复 / 补证" in rendered
+    assert "历史标签、证据不足和待核验记录" in rendered
     assert "实时事件、原始证据与核验进度" not in rendered
     assert "正式处置状态" not in rendered
     assert "Schema" not in rendered
@@ -511,6 +512,7 @@ def test_public_collector_marks_overdue_worker_as_stale_not_realtime(monkeypatch
     )
 
     assert not page.exception
-    assert "数据更新已中断" in rendered
+    assert "完整数据处理周期已中断" in rendered
+    assert "部分来源可能仍已采集" in rendered
     assert "不是实时信息" in rendered
     assert "更新已中断" in rendered

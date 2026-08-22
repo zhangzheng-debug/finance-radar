@@ -1067,6 +1067,44 @@ class OperationsRepository:
         )
         return rows[0] if rows else None
 
+    def capture_interpretation_terminal_keys(
+        self,
+        *,
+        provider: str,
+        contract_version: str,
+        prompt_version: str,
+        prompt_sha256: str,
+        model_snapshot: str,
+    ) -> dict[tuple[str, str], str]:
+        """Bulk-load immutable terminal receipts for one model generation.
+
+        The scheduler previously opened a new SQLite connection for every
+        historical capture.  Loading the complete terminal key set once keeps
+        backlog discovery linear and makes completed history a zero-call cache.
+        """
+
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                """SELECT event_id,capture_receipt_sha256,status,updated_at
+                   FROM capture_interpretation_runs
+                   WHERE provider=? AND contract_version=? AND prompt_version=?
+                     AND prompt_sha256=? AND model_snapshot=?
+                     AND status IN ('COMPLETED','FAILED')
+                   ORDER BY updated_at DESC""",
+                (
+                    provider,
+                    contract_version,
+                    prompt_version,
+                    prompt_sha256,
+                    model_snapshot,
+                ),
+            ).fetchall()
+        result: dict[tuple[str, str], str] = {}
+        for row in rows:
+            key = (str(row["event_id"]), str(row["capture_receipt_sha256"]))
+            result.setdefault(key, str(row["status"]))
+        return result
+
     def record_evidence_object(
         self,
         event_id: str,

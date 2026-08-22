@@ -106,20 +106,14 @@ def run(args: argparse.Namespace) -> int:
     ledger = LedgerRepository(settings.ledger_db)
     operations = OperationsRepository(settings.operations_db)
 
-    event_data = ledger.event_detail(args.event_id)
-    if event_data is None:
-        raise RuntimeError("EVENT_NOT_FOUND")
-    event = dict(event_data.get("event") or {})
-    capture = next(
-        (
-            dict(item)
-            for item in ledger.captured_sources(args.event_id)
-            if str(item.get("observation_id") or "") == args.observation_id
-        ),
-        None,
+    context = ledger.capture_interpretation_context(
+        args.event_id,
+        args.observation_id,
     )
-    if capture is None:
-        raise RuntimeError("CAPTURE_NOT_FOUND")
+    if context is None:
+        raise RuntimeError("EVENT_NOT_FOUND")
+    event = dict(context.get("event") or {})
+    capture = dict(context.get("capture") or {})
     normalized = normalized_capture_input(event, capture)
     provider = DeepSeekCaptureInterpretationProvider(
         api_key=api_key,

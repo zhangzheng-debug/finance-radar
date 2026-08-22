@@ -424,8 +424,9 @@ public_worker_unknown = UI_ROLE != "admin" and public_worker_age_seconds is None
 
 if public_worker_stale:
     st.error(
-        "数据更新已中断：最近一次成功采集为 "
-        f"{format_elapsed(public_worker_age)} 前。以下内容是历史事件记录，不是实时信息。"
+        "完整数据处理周期已中断：最近一次完整成功为 "
+        f"{format_elapsed(public_worker_age)} 前。部分来源可能仍已采集，"
+        "但尚未完成核验、路由与索引；以下只展示已经持久化的历史记录，不是实时信息。"
     )
 elif public_worker_unknown:
     st.warning(
@@ -494,6 +495,11 @@ canonical_public_funnel = overview.get("public_funnel") or {
     ),
 }
 public_funnel = overview.get("reader_funnel") or canonical_public_funnel
+reader_ready_count = max(0, int(public_funnel.get("total") or 0))
+canonical_inventory_count = max(
+    reader_ready_count,
+    int(canonical_public_funnel.get("total") or counts.get("canonical_events") or 0),
+)
 reader_hidden_inventory = max(
     0,
     int(
@@ -548,9 +554,17 @@ situation_brief(
     focus_value=(
         f"{review_queue:,} {'待复核' if UI_ROLE == 'admin' else '待核验'}"
         if review_queue
-        else "队列已清"
+        else (
+            f"公开可读 {reader_ready_count:,}"
+            if UI_ROLE != "admin" and reader_hidden_inventory
+            else "队列已清"
+        )
     ),
-    focus_state="watch" if review_queue else "ok",
+    focus_state=(
+        "watch"
+        if review_queue or (UI_ROLE != "admin" and reader_hidden_inventory)
+        else "ok"
+    ),
 )
 if UI_ROLE != "admin":
     st.markdown(
@@ -628,28 +642,27 @@ else:
         )
     )
     collector_state = "ok" if collector_ok else ("risk" if public_worker_stale or public_worker_unknown else "watch")
-    formally_verified = max(0, int(public_funnel.get("verified") or 0))
-    formally_excluded = max(0, int(public_funnel.get("excluded") or 0))
-    review_needed = sum(
-        max(0, int(public_funnel.get(key) or 0))
-        for key in ("pending_verification", "rough_reviewed", "insufficient")
-    )
     status_items = [
         ("采集状态", collector_label, collector_state),
         ("最近成功采集", format_elapsed(worker_age), collector_state),
         (
-            "正式结论",
-            f"核验 {formally_verified:,} · 排除 {formally_excluded:,}",
-            "ok" if not review_needed else "watch",
+            "公开可读",
+            f"{reader_ready_count:,} / {canonical_inventory_count:,}",
+            "ok" if reader_ready_count else "watch",
         ),
-        ("待补证 / 复核", f"{review_needed:,} 条", "watch" if review_needed else "ok"),
+        (
+            "待恢复 / 补证",
+            f"{reader_hidden_inventory:,} 条",
+            "watch" if reader_hidden_inventory else "ok",
+        ),
     ]
 status_strip(status_items)
 if UI_ROLE != "admin":
     st.markdown(
         '<p class="public-health-explainer">'
         f'采集与核验是两条独立时间线（最近发现新事件：{escape(format_elapsed(event_age))} 前）。'
-        '正式结论只统计已核验和已排除；证据不足、待核验和已粗审仍需要补证或人工复核。'
+        '“公开可读”只统计通过当前证据门槛的记录；历史标签、证据不足和待核验记录'
+        '都留在待恢复库存，不会伪装成正式结论。'
         '</p>',
         unsafe_allow_html=True,
     )

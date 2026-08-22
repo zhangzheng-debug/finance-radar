@@ -5,6 +5,21 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.22.9
+
+- Made capture interpretation a durable historical-to-incremental data layer:
+  the worker exhausts every eligible retained receipt once, persists its model
+  generation and source watermark, and performs no provider call until a new
+  or revised receipt appears. Historical terminal keys are loaded in bulk and
+  the bounded service batch was raised to 20.
+- Replaced the production shadow router's public-reader/N+1 query path with two
+  bounded bulk queries. Live cycles now publish stage checkpoints and use an
+  exact child-owned lease token, so a hard timeout preserves the failing stage
+  and cannot strand the next five-minute cycle behind an orphan lease.
+- Public status now separates completed processing cycles, public-readable
+  events and reader-hidden recovery inventory instead of presenting an empty
+  reader queue as a completed historical review.
+
 ## 2026.08.22.8
 
 - Moved the expensive public overview projection out of the request path. The

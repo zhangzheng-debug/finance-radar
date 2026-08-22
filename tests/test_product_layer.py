@@ -4,6 +4,7 @@ import json
 import inspect
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -909,6 +910,71 @@ class ProductLayerTests(unittest.TestCase):
             self.assertEqual(status, "FAILED")
             self.assertNotIn("finished_at", result)
             self.assertFalse(report_path.exists())
+        finally:
+            if prior is None:
+                report_path.unlink(missing_ok=True)
+            else:
+                report_path.write_bytes(prior)
+
+    @patch("app.workers.continuous.subprocess.run")
+    def test_worker_timeout_preserves_stage_and_releases_only_owned_lease(self, run_mock) -> None:
+        report_path = ROOT / "reports" / "live_cycle_latest.json"
+        prior = report_path.read_bytes() if report_path.exists() else None
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def timed_out(command, **kwargs):
+            token = command[command.index("--lease-token") + 1]
+            with closing(sqlite3.connect(self.settings.ledger_db)) as connection:
+                connection.execute(
+                    """INSERT INTO runtime_leases(
+                           lease_name,lease_token,acquired_at,expires_at
+                       ) VALUES ('live_cycle',?,?,?)""",
+                    (
+                        token,
+                        "2026-08-22T00:00:00+00:00",
+                        "2099-08-22T00:00:00+00:00",
+                    ),
+                )
+                connection.commit()
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "started_at": "2026-08-22T00:00:00+00:00",
+                        "progress": {
+                            "stage": "shadow_routing",
+                            "updated_at": "2026-08-22T00:09:00+00:00",
+                            "complete": False,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            raise subprocess.TimeoutExpired(
+                command,
+                kwargs["timeout"],
+                output="partial stdout",
+                stderr="",
+            )
+
+        run_mock.side_effect = timed_out
+        try:
+            operations = OperationsRepository(self.settings.operations_db)
+            status, result = execute_cycle(
+                self.settings,
+                operations,
+                send=False,
+                timeout=1,
+                health_only=False,
+            )
+            self.assertEqual(status, "FAILED")
+            self.assertEqual(result["progress"]["stage"], "shadow_routing")
+            self.assertTrue(result["process"]["timed_out"])
+            self.assertTrue(result["process"]["owned_lease_released"])
+            with closing(sqlite3.connect(self.settings.ledger_db)) as connection:
+                remaining = connection.execute(
+                    "SELECT COUNT(*) FROM runtime_leases WHERE lease_name='live_cycle'"
+                ).fetchone()[0]
+            self.assertEqual(remaining, 0)
         finally:
             if prior is None:
                 report_path.unlink(missing_ok=True)

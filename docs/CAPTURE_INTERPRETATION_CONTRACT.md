@@ -18,6 +18,8 @@
 - 并发 Worker 通过 `BEGIN IMMEDIATE` 在同一事务中完成“记录用量预留、取得租约”；若将来重新设置日上限，也不能由并发任务分别越过该上限。
 - 供应商返回了 token 用量但随后合同校验失败时，用量仍会落账；完全拿不到用量时按每次 0.02 元人民币预留值记录估算费用。
 - 可重试故障最多 4 次并带退避；过期租约会回收。合同拒绝和不可恢复错误进入失败终态，不会无限烧费。
+- 首次启用时，Worker 会遍历全部符合条件的历史采集收据，并把当前模型代际、来源水位、候选数和剩余数持久化到 Operations 数据库。历史收据达到终态后不再逐条查库或调用供应商。
+- 历史回填完成后，每次定时运行先比较 `raw_observations/source_revisions` 水位；水位不变时直接返回 `SOURCE_GENERATION_UNCHANGED`。只有新增或修订后产生新 `capture_receipt_sha256` 的内容才会进入新调用。
 
 ## DeepSeek 供应商合同（2026-08-21 核验）
 
@@ -88,14 +90,12 @@ python scripts/run_capture_interpretation_deepseek.py `
 
 运行器只输出安全元数据与费用估算，不输出密钥、完整上游响应或来源原文。
 
-有界批处理（默认最多处理 3 条；用量仍逐次记录，但当前不设每日金额或请求数上限）：
+有界批处理（生产单轮最多处理 20 条；用量仍逐次记录，但当前不设每日金额或请求数上限）：
 
 ```powershell
-python scripts/run_capture_interpretation_worker.py --limit 3
+python scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 100000
 ```
 
 仓库同时提供 `finance-radar-capture-interpretation.service/.timer`，部署安装器只安装、不启用。生产启用前必须把服务专用密钥放入 root-only 的 `/etc/finance-radar/deepseek-api-key`，由 systemd `LoadCredential=` 注入；不得把通用密钥复制进 `/etc/finance-radar.env`。
 
-正式生产仍需完成 20–50 条 fixture 验收和小批量 shadow 运行；不得直接批量覆盖确定性结果。仓库测试证明的是合同与失败路径，不是生产供应商的长期可用性。
-
-在产生并通过合同校验的 DeepSeek 缓存前，页面仍明确显示“外部模型待接入”。
+历史回填只创建独立、可追踪的解读数据，不会批量覆盖确定性结果。仓库测试证明的是合同与失败路径，不是生产供应商的长期可用性；页面在没有与当前收据精确匹配的合格缓存时，仍明确显示“外部模型待接入”。
