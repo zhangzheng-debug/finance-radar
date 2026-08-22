@@ -5,6 +5,13 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.22.10
+
+- Made live asset-relation reconciliation tolerate canonical quality deletion:
+  obsolete relation definitions are skipped and reported instead of failing the
+  entire collection cycle. Removed the currently stale ECB relation entry that
+  referenced an event already deleted from the production ledger.
+
 ## 2026.08.22.9
 
 - Made capture interpretation a durable historical-to-incremental data layer:

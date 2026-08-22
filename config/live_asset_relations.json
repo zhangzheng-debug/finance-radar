@@ -91,27 +91,6 @@
           "market_observation_allowed": false
         }
       ]
-    },
-    {
-      "event_id": "FR-LIVE-a8b94684ba13a7e2317cd943f20cf841",
-      "entities": [
-        {"type": "central_bank", "name": "European Central Bank", "role": "SUBJECT", "confidence": 0.8}
-      ],
-      "assets": [
-        {
-          "asset_type": "fx",
-          "symbol": "EUR/USD",
-          "provider_symbol": "EUR/USD",
-          "venue": "TwelveData",
-          "currency": "USD",
-          "relation_type": "MACRO_PROXY",
-          "direction": "ABSTAIN",
-          "impact_score": 45,
-          "confidence": 0.4,
-          "reason_codes": ["ECB_POLICY_EXPECTATIONS", "CURRENT_QUOTE_NOT_PRIMARY_VERIFIED"],
-          "market_observation_allowed": false
-        }
-      ]
     }
   ]
 }
