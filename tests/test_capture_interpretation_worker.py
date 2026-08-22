@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import threading
+import time
+
+import scripts.run_capture_interpretation_worker as worker
 from app.services.capture_interpretation import (
     CAPTURE_INTERPRETATION_CONTRACT,
     CAPTURE_INTERPRETATION_PROMPT_SHA256,
@@ -11,6 +15,7 @@ from scripts.run_capture_interpretation_worker import (
     candidates,
     classify_run_code,
     is_current_terminal,
+    process_pending_items,
 )
 
 
@@ -64,3 +69,38 @@ def test_worker_only_skips_terminal_result_for_current_generation() -> None:
     assert is_current_terminal({**current, "status": "PENDING"}) is False
     assert is_current_terminal({**current, "prompt_version": "stale-prompt"}) is False
     assert is_current_terminal({**current, "prompt_sha256": "0" * 64}) is False
+
+
+def test_worker_overlaps_only_a_bounded_number_of_independent_receipts(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    lock = threading.Lock()
+    active = 0
+    peak = 0
+
+    def fake_process(item, env_file):
+        nonlocal active, peak
+        assert env_file == tmp_path / "capture.env"
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.03)
+        with lock:
+            active -= 1
+        return "COMPLETED"
+
+    monkeypatch.setattr(worker, "process_pending_item", fake_process)
+    items = [
+        {"event_id": f"event-{index}", "observation_id": f"obs-{index}"}
+        for index in range(6)
+    ]
+
+    outcomes = process_pending_items(
+        items,
+        tmp_path / "capture.env",
+        workers=3,
+    )
+
+    assert outcomes == ["COMPLETED"] * 6
+    assert 2 <= peak <= 3

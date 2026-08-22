@@ -53,6 +53,19 @@ def process_text(value: Any) -> str:
     return str(value)
 
 
+def timed_out_cycle_status(result: dict[str, Any]) -> str:
+    """Distinguish a partial post-collection timeout from total collection loss."""
+
+    progress = result.get("progress") or {}
+    stage = str(progress.get("stage") or "")
+    if result.get("official_sources") is not None and stage not in {
+        "",
+        "collecting_sources",
+    }:
+        return "DEGRADED"
+    return "FAILED"
+
+
 def execute_cycle(
     settings: Settings,
     operations: OperationsRepository,
@@ -137,7 +150,7 @@ def execute_cycle(
                 "lease_release_error_class": lease_release_error,
             }
             if timed_out:
-                status = "FAILED"
+                status = timed_out_cycle_status(result)
             elif completed.returncode == 0:
                 status = "SUCCESS"
             elif completed.returncode == 3:

@@ -940,6 +940,7 @@ class ProductLayerTests(unittest.TestCase):
                 json.dumps(
                     {
                         "started_at": "2026-08-22T00:00:00+00:00",
+                        "official_sources": {"sec_current_filings": {"items": 10}},
                         "progress": {
                             "stage": "shadow_routing",
                             "updated_at": "2026-08-22T00:09:00+00:00",
@@ -966,7 +967,7 @@ class ProductLayerTests(unittest.TestCase):
                 timeout=1,
                 health_only=False,
             )
-            self.assertEqual(status, "FAILED")
+            self.assertEqual(status, "DEGRADED")
             self.assertEqual(result["progress"]["stage"], "shadow_routing")
             self.assertTrue(result["process"]["timed_out"])
             self.assertTrue(result["process"]["owned_lease_released"])

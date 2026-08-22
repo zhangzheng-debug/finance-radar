@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -106,6 +107,60 @@ def candidates(plan: dict[str, Any]) -> list[dict[str, str]]:
     return result
 
 
+def process_pending_item(item: dict[str, str], env_file: Path) -> str:
+    """Run one independently claimed receipt without leaking provider details."""
+
+    try:
+        code = run_single(
+            SimpleNamespace(
+                event_id=item["event_id"],
+                observation_id=item["observation_id"],
+                env_file=env_file,
+            )
+        )
+        return classify_run_code(code)
+    except RuntimeError as exc:
+        code = str(exc)
+        if "DAILY_REQUEST_CAP_REACHED" in code or "DAILY_CNY_CAP_REACHED" in code:
+            return "BUDGET_DEFERRED"
+        if "NO_ELIGIBLE_JOB" in code:
+            return "DEFERRED"
+        return "FAILED"
+    except Exception:
+        # The single-job runner already stores a redacted failure class and
+        # usage accounting.  Do not echo source text or provider bodies.
+        return "FAILED"
+
+
+def process_pending_items(
+    items: list[dict[str, str]],
+    env_file: Path,
+    *,
+    workers: int,
+) -> list[str]:
+    """Process a bounded receipt set with independent atomic claims.
+
+    SQLite claims and provider usage reservations remain transactional.  The
+    small thread pool only overlaps network waits; it does not share a ledger
+    connection or permit a canonical mutation.
+    """
+
+    if not items:
+        return []
+    if workers <= 1:
+        return [process_pending_item(item, env_file) for item in items]
+    with ThreadPoolExecutor(
+        max_workers=min(workers, len(items)),
+        thread_name_prefix="capture-interpretation",
+    ) as executor:
+        return list(
+            executor.map(
+                lambda item: process_pending_item(item, env_file),
+                items,
+            )
+        )
+
+
 def run(args: argparse.Namespace) -> int:
     load_local_env(args.env_file.resolve())
     settings = Settings.from_env()
@@ -160,37 +215,21 @@ def run(args: argparse.Namespace) -> int:
     failed = 0
     examined = 0
 
-    for item in pending[: args.scan_limit]:
-        if examined >= args.limit:
-            break
-        examined += 1
-        try:
-            code = run_single(
-                SimpleNamespace(
-                    event_id=item["event_id"],
-                    observation_id=item["observation_id"],
-                    env_file=args.env_file,
-                )
-            )
-            outcome = classify_run_code(code)
-            if outcome == "COMPLETED":
-                completed += 1
-            elif outcome == "CACHED":
-                skipped_terminal += 1
-            else:
-                failed += 1
-        except RuntimeError as exc:
-            code = str(exc)
-            if "DAILY_REQUEST_CAP_REACHED" in code or "DAILY_CNY_CAP_REACHED" in code:
-                deferred += 1
-                break
-            if "NO_ELIGIBLE_JOB" in code:
-                deferred += 1
-                continue
-            failed += 1
-        except Exception:
-            # The single-job runner already stores a redacted failure class and
-            # usage accounting.  Do not echo source text or provider bodies.
+    work_items = pending[: min(args.scan_limit, args.limit)]
+    outcomes = process_pending_items(
+        work_items,
+        args.env_file,
+        workers=args.workers,
+    )
+    examined = len(outcomes)
+    for outcome in outcomes:
+        if outcome == "COMPLETED":
+            completed += 1
+        elif outcome == "CACHED":
+            skipped_terminal += 1
+        elif outcome in {"DEFERRED", "BUDGET_DEFERRED"}:
+            deferred += 1
+        else:
             failed += 1
 
     terminal_after = operations.capture_interpretation_terminal_keys(
@@ -250,6 +289,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--limit", type=int, default=3)
     result.add_argument("--scan-limit", type=int, default=100_000)
+    result.add_argument("--workers", type=int, default=1)
     result.add_argument("--env-file", type=Path, default=ROOT / ".env.local")
     return result
 
@@ -258,6 +298,7 @@ def main() -> int:
     args = parser().parse_args()
     args.limit = max(1, min(int(args.limit), 20))
     args.scan_limit = max(args.limit, min(int(args.scan_limit), 250_000))
+    args.workers = max(1, min(int(args.workers), 4, args.limit))
     try:
         return run(args)
     except Exception as exc:

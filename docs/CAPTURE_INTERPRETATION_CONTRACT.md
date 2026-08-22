@@ -93,7 +93,7 @@ python scripts/run_capture_interpretation_deepseek.py `
 有界批处理（生产单轮最多处理 20 条；用量仍逐次记录，但当前不设每日金额或请求数上限）：
 
 ```powershell
-python scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 100000
+python scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 100000 --workers 3
 ```
 
 仓库同时提供 `finance-radar-capture-interpretation.service/.timer`，部署安装器只安装、不启用。生产启用前必须把服务专用密钥放入 root-only 的 `/etc/finance-radar/deepseek-api-key`，由 systemd `LoadCredential=` 注入；不得把通用密钥复制进 `/etc/finance-radar.env`。

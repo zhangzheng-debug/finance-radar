@@ -64,6 +64,7 @@ DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
 DEFAULT_ENV = ROOT / ".env"
 DEFAULT_REPORT = ROOT / "reports" / "live_cycle_latest.json"
 CYCLE_LEASE_MIN_TTL_SECONDS = 900
+CONTINUOUS_EVIDENCE_AGENT_LIMIT = 1
 CYCLE_LEASE_RENEW_INTERVAL_SECONDS = 60.0
 
 
@@ -601,7 +602,12 @@ def run_cycle(
             connection,
             evidence_agent,
             operations,
-            limit=4,
+            # Local evidence analysis is secondary to keeping source capture
+            # current.  Production measurements showed four serial decisions
+            # could consume the entire outer 10-minute cycle budget.  Drain
+            # one per cycle and let the independent capture-interpretation
+            # worker handle its own backlog concurrently.
+            limit=CONTINUOUS_EVIDENCE_AGENT_LIMIT,
         )
     else:
         result["evidence_agent"] = {

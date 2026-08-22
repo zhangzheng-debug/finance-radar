@@ -5,6 +5,16 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.22.11
+
+- Overlap up to three independently claimed capture-interpretation requests so
+  the historical receipt backlog can be drained promptly. Provider usage
+  reservations, immutable receipt idempotency, retry state and the prohibition
+  on canonical mutation remain enforced per job.
+- Keep five-minute source collection ahead of slower local evidence analysis:
+  one evidence decision is drained per cycle, and a hard timeout after durable
+  source collection is reported as degraded rather than as total interruption.
+
 ## 2026.08.22.10
 
 - Made live asset-relation reconciliation tolerate canonical quality deletion:
