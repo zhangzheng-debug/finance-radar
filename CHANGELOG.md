@@ -5,6 +5,13 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.22.12
+
+- Align deployment and prepared-restore API health gates with the measured
+  cold-start cost of the precomputed overview snapshot. Both paths now wait up
+  to 90 seconds, preventing a healthy roughly 45-second startup from being
+  rolled back while keeping the snapshot ready before public reads begin.
+
 ## 2026.08.22.11
 
 - Overlap up to three independently claimed capture-interpretation requests so

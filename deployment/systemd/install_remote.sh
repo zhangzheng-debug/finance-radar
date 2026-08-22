@@ -1972,7 +1972,13 @@ systemctl start finance-radar-backup.timer
 
 wait_for_url() {
     local url="$1"
-    local attempts=${2:-30}
+    # The overview projection is intentionally precomputed before FastAPI
+    # declares startup complete. Production ledgers can take around 45
+    # seconds to build after a cold restart, so a 30-second activation probe
+    # creates a false rollback even though Uvicorn becomes healthy moments
+    # later. Keep the cutover fail-closed, but allow the measured cold-start
+    # envelope plus headroom.
+    local attempts=${2:-90}
     local _
     for _ in $(seq 1 "$attempts"); do
         if curl -fsS --max-time 5 "$url" >/dev/null; then

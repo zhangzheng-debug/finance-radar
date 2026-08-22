@@ -422,6 +422,11 @@ def test_in_place_installer_rolls_back_services_and_edge_on_any_cutover_failure(
         "# The only point at which the running release changes."
     )
     assert "worker unexpectedly restarted during protected cutover" in cutover
+    assert "local attempts=${2:-90}" in cutover
+    assert "local attempts=${2:-30}" not in cutover
+    restore_source = ACTIVATOR.read_text(encoding="utf-8")
+    assert "for _ in $(seq 1 90)" in restore_source
+    assert "for _ in $(seq 1 30)" not in restore_source
     assert "ROLLBACK_ENABLED_UNITS" in source
     assert "ROLLBACK_ACTIVE_UNITS" in source
     assert "restore_service_runtime()" in source
