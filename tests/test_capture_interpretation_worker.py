@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+from app.services.capture_interpretation import (
+    CAPTURE_INTERPRETATION_CONTRACT,
+    CAPTURE_INTERPRETATION_PROMPT_SHA256,
+    CAPTURE_INTERPRETATION_PROMPT_VERSION,
+)
+from app.services.deepseek_capture_interpretation import DEEPSEEK_CHEAP_TEXT_MODEL
 from scripts.run_capture_interpretation_deepseek import RUN_CACHED, RUN_COMPLETED
-from scripts.run_capture_interpretation_worker import candidates, classify_run_code
+from scripts.run_capture_interpretation_worker import (
+    candidates,
+    classify_run_code,
+    is_current_terminal,
+)
 
 
 def test_worker_only_selects_nonempty_live_zero_evidence_capture_buckets() -> None:
@@ -38,3 +48,19 @@ def test_cached_single_job_does_not_consume_batch_completion_limit() -> None:
     assert classify_run_code(RUN_COMPLETED) == "COMPLETED"
     assert classify_run_code(RUN_CACHED) == "CACHED"
     assert classify_run_code(99) == "FAILED"
+
+
+def test_worker_only_skips_terminal_result_for_current_generation() -> None:
+    current = {
+        "status": "COMPLETED",
+        "contract_version": CAPTURE_INTERPRETATION_CONTRACT,
+        "prompt_version": CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        "prompt_sha256": CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        "provider": "deepseek",
+        "model_snapshot": DEEPSEEK_CHEAP_TEXT_MODEL,
+    }
+    assert is_current_terminal(current) is True
+    assert is_current_terminal({**current, "status": "FAILED"}) is True
+    assert is_current_terminal({**current, "status": "PENDING"}) is False
+    assert is_current_terminal({**current, "prompt_version": "stale-prompt"}) is False
+    assert is_current_terminal({**current, "prompt_sha256": "0" * 64}) is False

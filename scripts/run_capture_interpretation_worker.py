@@ -20,6 +20,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.config import Settings  # noqa: E402
+from app.services.capture_interpretation import (  # noqa: E402
+    CAPTURE_INTERPRETATION_CONTRACT,
+    CAPTURE_INTERPRETATION_PROMPT_SHA256,
+    CAPTURE_INTERPRETATION_PROMPT_VERSION,
+)
+from app.services.deepseek_capture_interpretation import (  # noqa: E402
+    DEEPSEEK_CHEAP_TEXT_MODEL,
+)
 from app.services.source_observation_recovery import (  # noqa: E402
     build_source_observation_recovery_plan,
 )
@@ -33,6 +41,20 @@ from scripts.run_capture_interpretation_deepseek import (  # noqa: E402
 
 
 PRIORITY = {"NO_URL_RAW_ONLY": 0, "P2_CAPTURE_ONLY": 1}
+
+
+def is_current_terminal(run: dict[str, Any] | None) -> bool:
+    if not run or str(run.get("status") or "") not in {"COMPLETED", "FAILED"}:
+        return False
+    return (
+        str(run.get("contract_version") or "") == CAPTURE_INTERPRETATION_CONTRACT
+        and str(run.get("prompt_version") or "")
+        == CAPTURE_INTERPRETATION_PROMPT_VERSION
+        and str(run.get("prompt_sha256") or "")
+        == CAPTURE_INTERPRETATION_PROMPT_SHA256
+        and str(run.get("provider") or "") == "deepseek"
+        and str(run.get("model_snapshot") or "") == DEEPSEEK_CHEAP_TEXT_MODEL
+    )
 
 
 def _safe_json(**values: Any) -> None:
@@ -95,10 +117,10 @@ def run(args: argparse.Namespace) -> int:
         if completed >= args.limit or examined >= args.scan_limit:
             break
         examined += 1
-        latest = operations.latest_capture_interpretation(
+        latest = operations.latest_capture_interpretation_run(
             item["event_id"], item["capture_receipt_sha256"]
         )
-        if latest and latest.get("status") in {"COMPLETED", "FAILED"}:
+        if is_current_terminal(latest):
             skipped_terminal += 1
             continue
         try:
@@ -130,7 +152,13 @@ def run(args: argparse.Namespace) -> int:
             # usage accounting.  Do not echo source text or provider bodies.
             failed += 1
 
-    health = operations.capture_interpretation_queue_health("deepseek")
+    health = operations.capture_interpretation_queue_health(
+        "deepseek",
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+    )
     _safe_json(
         status="COMPLETED" if failed == 0 else "PARTIAL",
         examined=examined,

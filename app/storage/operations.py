@@ -963,13 +963,33 @@ class OperationsRepository:
             connection.commit()
         return next_status
 
-    def capture_interpretation_queue_health(self, provider: str) -> dict[str, Any]:
+    def capture_interpretation_queue_health(
+        self,
+        provider: str,
+        *,
+        contract_version: str | None = None,
+        prompt_version: str | None = None,
+        prompt_sha256: str | None = None,
+        model_snapshot: str | None = None,
+    ) -> dict[str, Any]:
+        where = ["provider=?"]
+        params: list[Any] = [provider]
+        for column, value in (
+            ("contract_version", contract_version),
+            ("prompt_version", prompt_version),
+            ("prompt_sha256", prompt_sha256),
+            ("model_snapshot", model_snapshot),
+        ):
+            if value is not None:
+                where.append(f"{column}=?")
+                params.append(value)
         with closing(self.connect()) as connection:
             rows = connection.execute(
                 """SELECT status,COUNT(*) AS count,MIN(created_at) AS oldest
-                   FROM capture_interpretation_runs
-                   WHERE provider=? GROUP BY status ORDER BY status""",
-                (provider,),
+                   FROM capture_interpretation_runs WHERE """
+                + " AND ".join(where)
+                + " GROUP BY status ORDER BY status",
+                params,
             ).fetchall()
         by_status = {str(row["status"]): int(row["count"]) for row in rows}
         oldest_pending = next(
@@ -1032,6 +1052,20 @@ class OperationsRepository:
             reverse=True,
         )
         return completed[0]
+
+    def latest_capture_interpretation_run(
+        self,
+        event_id: str,
+        capture_receipt_sha256: str,
+    ) -> dict[str, Any] | None:
+        """Return the newest run regardless of outcome for scheduler decisions."""
+
+        rows = self.capture_interpretation_runs(
+            event_id,
+            capture_receipt_sha256=capture_receipt_sha256,
+            limit=1,
+        )
+        return rows[0] if rows else None
 
     def record_evidence_object(
         self,

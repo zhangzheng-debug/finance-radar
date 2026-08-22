@@ -405,3 +405,35 @@ def test_failed_external_attempt_preserves_usage_and_retries_with_backoff(tmp_pa
     assert usage["chargeable_cny"] == pytest.approx(0.0042)
     health = operations.capture_interpretation_queue_health("deepseek")
     assert health["by_status"]["PENDING"] == 1
+
+
+def test_queue_health_can_exclude_stale_interpretation_generations(tmp_path: Path) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    _enqueue_external(operations, "stale")
+    event = _event(event_id="FR-LIVE-current")
+    capture = _capture(
+        observation_id="obs-current",
+        capture_receipt_sha256="c" * 64,
+    )
+    normalized = normalized_capture_input(event, capture)
+    _, inserted = operations.enqueue_capture_interpretation(
+        str(event["event_id"]),
+        str(capture["observation_id"]),
+        normalized,
+        contract_version="contract-current",
+        prompt_version="prompt-current",
+        prompt_sha256="f" * 64,
+        provider="deepseek",
+        model_snapshot="model-current",
+        external_call=True,
+    )
+    assert inserted is True
+
+    health = operations.capture_interpretation_queue_health(
+        "deepseek",
+        contract_version="contract-current",
+        prompt_version="prompt-current",
+        prompt_sha256="f" * 64,
+        model_snapshot="model-current",
+    )
+    assert health["by_status"] == {"PENDING": 1}
