@@ -775,6 +775,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "known_at",
         "reader_ready",
         "no_trading",
+        "unverified_capture_excerpt",
+        "summary_basis",
     )
     public_evidence_fields = (
         "evidence_id",
@@ -796,8 +798,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "reader_eligible",
     )
 
-    def public_event_item(value: dict[str, Any]) -> dict[str, Any]:
-        return {key: value.get(key) for key in public_event_fields}
+    def public_event_item(
+        value: dict[str, Any],
+        *,
+        captured_source: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return the public event fields without promoting private review prose.
+
+        ``fact_summary`` and ``evidence_summary`` are historical reviewer fields;
+        neither is a public fact contract.  When the explicit
+        ``public_fact_summary`` is absent, the public surface may show only a
+        bounded title/summary captured from the source, clearly labelled as an
+        unverified excerpt.
+        """
+
+        result = {key: value.get(key) for key in public_event_fields}
+        if str(result.get("public_fact_summary") or "").strip():
+            result["unverified_capture_excerpt"] = None
+            result["summary_basis"] = "EXPLICIT_PUBLIC_FACT_SUMMARY"
+            return result
+
+        source = captured_source if isinstance(captured_source, dict) else value
+        raw_excerpt = (
+            source.get("source_summary")
+            or source.get("summary")
+            or source.get("source_title")
+            or source.get("title")
+        )
+        printable = "".join(
+            character if character.isprintable() else " "
+            for character in str(raw_excerpt or "")
+        )
+        excerpt = " ".join(printable.split())
+        if len(excerpt) > 360:
+            excerpt = excerpt[:359].rstrip() + "…"
+        result["public_fact_summary"] = None
+        result["unverified_capture_excerpt"] = excerpt or None
+        result["summary_basis"] = (
+            "UNVERIFIED_CAPTURE_EXCERPT" if excerpt else "NO_PUBLIC_SUMMARY"
+        )
+        return result
 
     def public_evidence_item(value: dict[str, Any]) -> dict[str, Any]:
         return {key: value.get(key) for key in public_evidence_fields}
@@ -1081,7 +1121,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "known_at",
         )
         result: dict[str, Any] = {
-            "event": public_event_item(raw_event),
+            "event": public_event_item(
+                raw_event,
+                captured_source=(
+                    value.get("preferred_source")
+                    if isinstance(value.get("preferred_source"), dict)
+                    else None
+                ),
+            ),
             "current_version": {
                 "version": version.get("version"),
                 "facts": {
@@ -1125,6 +1172,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ]
             result["verification_method"] = public_verification
         return result
+
+    def public_source_interpretation_items(
+        event: dict[str, Any],
+        captures: list[dict[str, Any]],
+        *,
+        include_deleted: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Build advisory interpretations from one already-loaded capture set."""
+
+        items: list[dict[str, Any]] = []
+        for capture in captures:
+            if not include_deleted and capture.get("observation_status") == "deleted":
+                continue
+            receipt = str(capture.get("capture_receipt_sha256") or "")
+            run = operations.latest_capture_interpretation(event.get("event_id"), receipt) if receipt else None
+            output = dict((run or {}).get("output") or {})
+            try:
+                if output:
+                    validate_interpretation_result(output, capture_source_text(capture))
+                else:
+                    output = deterministic_interpretation(event, capture)
+            except Exception:
+                output = deterministic_interpretation(event, capture)
+                output["status"] = "FAILED"
+                output["one_line_zh"] = (
+                    "缓存解读未通过当前合同；原始捕获仍可阅读，正式状态保持不变。"
+                )
+                output["persisted"] = False
+                output["external_generation_state"] = "FAILED_VALIDATION"
+            items.append(public_capture_interpretation(output))
+        return items
 
     @application.get("/")
     def root(request: Request):
@@ -1361,28 +1439,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "message": "date_from must not be after date_to",
                 },
             )
-        public_excluded_archive = not internal_reader and public_state == "excluded"
-        effective_reader_ready = (
-            reader_ready
-            if internal_reader
-            else None
-            if public_excluded_archive
-            else True
-        )
-        data = ledger.list_events(
-            status=status,
-            public_state=public_state,
-            family=family,
-            source=source,
-            query=q,
-            date_from=date_from.isoformat() if date_from else None,
-            date_to=date_to.isoformat() if date_to else None,
-            reader_ready=effective_reader_ready,
-            captured_source_required=public_excluded_archive,
-            sort=sort,
-            limit=limit,
-            offset=offset,
-        )
+        # Public visibility and evidentiary readiness are different concepts.
+        # Every canonical event is browsable; ``reader_ready`` remains a strict
+        # per-item quality flag and an authenticated review filter.  Silently
+        # forcing the public feed to ``reader_ready=true`` previously made a
+        # healthy 14k-event ledger look empty whenever the evidence gate was
+        # tightened or historical relations still needed recovery.
+        effective_reader_ready = reader_ready if internal_reader else None
+
+        def read_events() -> dict[str, Any]:
+            return ledger.list_events(
+                status=status,
+                public_state=public_state,
+                family=family,
+                source=source,
+                query=q,
+                date_from=date_from.isoformat() if date_from else None,
+                date_to=date_to.isoformat() if date_to else None,
+                reader_ready=effective_reader_ready,
+                captured_source_required=False,
+                sort=sort,
+                limit=limit,
+                offset=offset,
+            )
+
+        if internal_reader:
+            data = read_events()
+        else:
+            cache_key = "public-event-feed-v2:" + repr(
+                (
+                    status,
+                    public_state,
+                    family,
+                    source,
+                    q,
+                    date_from.isoformat() if date_from else None,
+                    date_to.isoformat() if date_to else None,
+                    sort,
+                    limit,
+                    offset,
+                )
+            )
+            data = cached_read(cache_key, 20.0, read_events)
         if not internal_reader:
             data["items"] = [public_event_item(item) for item in data["items"]]
         return envelope(request, data)
@@ -1393,14 +1491,83 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         reader_ready: bool | None = None,
         internal_reader: bool = Depends(internal_reader_access),
     ):
-        effective_reader_ready = reader_ready if internal_reader else True
-        cache_key = f"event-facets-v1:{effective_reader_ready!r}"
+        effective_reader_ready = reader_ready if internal_reader else None
+        cache_key = f"event-facets-v2:{effective_reader_ready!r}"
         data = cached_read(
             cache_key,
             60.0,
             lambda: ledger.event_facets(reader_ready=effective_reader_ready),
         )
         return envelope(request, data)
+
+    @application.get("/api/v1/events/{event_id}/dossier")
+    def public_event_dossier(request: Request, event_id: str):
+        """Return the complete public event dossier with one bounded API read.
+
+        The previous page made five sequential loopback requests and reopened
+        the same event/evidence/source rows repeatedly.  This projection loads
+        each repository object once and keeps the exact same public redaction
+        boundary as the individual endpoints.
+        """
+
+        def read_dossier() -> dict[str, Any]:
+            data = event_or_404(event_id, require_reader_ready=False)
+            evidence = reader_scoped_evidence(event_id, internal_reader=False)
+            facts = (
+                data.get("current_version", {}).get("facts", {})
+                if data.get("current_version")
+                else {}
+            )
+            verification_method = public_verification_method(facts, evidence)
+            if verification_method is not None:
+                data["verification_method"] = verification_method
+            data["no_trading_banner"] = (
+                "Intelligence and review only. No execution capability is present."
+            )
+            captures = [
+                item
+                for item in ledger.captured_sources(event_id)
+                if item.get("observation_status") != "deleted"
+            ]
+            event = dict(data.get("event") or {})
+            return {
+                "detail": public_event_detail(data, evidence=evidence),
+                "evidence": {"items": evidence},
+                "knowledge": knowledge_context(
+                    str(event.get("event_family") or ""),
+                    str(event.get("event_type") or ""),
+                ),
+                "sources": {
+                    "items": [public_captured_source(item) for item in captures],
+                    "contract": {
+                        "captured_source_is_not_evidence": True,
+                        "canonical_state_unchanged": True,
+                        "no_trading": True,
+                    },
+                },
+                "source_interpretations": {
+                    "items": public_source_interpretation_items(event, captures),
+                    "contract": {
+                        "version": CAPTURE_INTERPRETATION_CONTRACT,
+                        "advisory_only": True,
+                        "canonical_mutation_allowed": False,
+                        "used_as_model_feature": False,
+                        "public_requests_are_cached_or_deterministic": True,
+                        "external_provider_configured": False,
+                        "no_trading": True,
+                    },
+                },
+                "contract": {
+                    "public_projection": True,
+                    "consistency_scope": "bounded_multi_read_best_effort",
+                    "no_trading": True,
+                },
+            }
+
+        return envelope(
+            request,
+            cached_read(f"public-event-dossier-v1:{event_id}", 20.0, read_dossier),
+        )
 
     @application.get("/api/v1/events/{event_id}")
     def event_detail(
@@ -1410,8 +1577,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         data = event_or_404(
             event_id,
-            require_reader_ready=not internal_reader,
-            allow_excluded_capture_archive=not internal_reader,
+            require_reader_ready=False,
         )
         evidence = reader_scoped_evidence(event_id, internal_reader=internal_reader)
         facts = data.get("current_version", {}).get("facts", {}) if data.get("current_version") else {}
@@ -1451,8 +1617,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def event_knowledge(event_id: str, request: Request):
         data = event_or_404(
             event_id,
-            require_reader_ready=True,
-            allow_excluded_capture_archive=True,
+            require_reader_ready=False,
         )
         event = data.get("event") or {}
         return envelope(
@@ -1479,8 +1644,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         event_or_404(
             event_id,
-            require_reader_ready=not internal_reader,
-            allow_excluded_capture_archive=not internal_reader,
+            require_reader_ready=False,
         )
         return envelope(
             request,
@@ -1495,8 +1659,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         event_or_404(
             event_id,
-            require_reader_ready=not internal_reader,
-            allow_excluded_capture_archive=not internal_reader,
+            require_reader_ready=False,
         )
         items = ledger.captured_sources(event_id)
         if not internal_reader:
@@ -1525,31 +1688,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         event_data = event_or_404(
             event_id,
-            require_reader_ready=not internal_reader,
-            allow_excluded_capture_archive=not internal_reader,
+            require_reader_ready=False,
         )
         event = dict(event_data.get("event") or {})
-        items: list[dict[str, Any]] = []
-        for capture in ledger.captured_sources(event_id):
-            if not internal_reader and capture.get("observation_status") == "deleted":
-                continue
-            receipt = str(capture.get("capture_receipt_sha256") or "")
-            run = operations.latest_capture_interpretation(event_id, receipt) if receipt else None
-            output = dict((run or {}).get("output") or {})
-            try:
-                if output:
-                    validate_interpretation_result(output, capture_source_text(capture))
-                else:
-                    output = deterministic_interpretation(event, capture)
-            except Exception:
-                output = deterministic_interpretation(event, capture)
-                output["status"] = "FAILED"
-                output["one_line_zh"] = (
-                    "缓存解读未通过当前合同；原始捕获仍可阅读，正式状态保持不变。"
-                )
-                output["persisted"] = False
-                output["external_generation_state"] = "FAILED_VALIDATION"
-            items.append(public_capture_interpretation(output))
+        captures = ledger.captured_sources(event_id)
+        items = public_source_interpretation_items(
+            event,
+            captures,
+            include_deleted=internal_reader,
+        )
         return envelope(
             request,
             {

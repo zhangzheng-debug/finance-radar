@@ -643,12 +643,10 @@ event_public AS (
            ) AS reviewed_at,
            COALESCE(reader_evidence.citable_evidence_count,0) AS citable_evidence_count,
            CASE WHEN json_valid(current_version.facts_json)
-             THEN COALESCE(
-               NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
-               NULLIF(TRIM(json_extract(current_version.facts_json,'$.fact_summary')),''),
-               NULLIF(TRIM(json_extract(current_version.facts_json,'$.evidence_summary')),'')
-              )
-            END AS public_fact_summary,
+             THEN NULLIF(TRIM(json_extract(
+               current_version.facts_json,'$.public_fact_summary'
+             )),'')
+           END AS public_fact_summary,
             CASE WHEN json_valid(current_version.facts_json)
               THEN json_extract(current_version.facts_json,'$.claim_subject')
             END AS claim_subject,
@@ -670,9 +668,7 @@ event_public AS (
            END AS reader_has_subject,
            CASE WHEN json_valid(current_version.facts_json) AND LENGTH(COALESCE(
              NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
-             NULLIF(TRIM(json_extract(current_version.facts_json,'$.fact_summary')),''),
-             NULLIF(TRIM(json_extract(current_version.facts_json,'$.evidence_summary')),''),
-              ''
+             ''
             ))>=20
               AND LENGTH(TRIM(COALESCE(
                   json_extract(current_version.facts_json,'$.claim_subject'),''
@@ -697,8 +693,6 @@ event_public AS (
              AND json_valid(current_version.facts_json)
               AND LENGTH(COALESCE(
                NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
-               NULLIF(TRIM(json_extract(current_version.facts_json,'$.fact_summary')),''),
-               NULLIF(TRIM(json_extract(current_version.facts_json,'$.evidence_summary')),''),
                ''
               ))>=20
               AND LENGTH(TRIM(COALESCE(
@@ -716,6 +710,311 @@ event_public AS (
               THEN 1 ELSE 0
            END AS reader_ready
     FROM canonical_events canonical
+    LEFT JOIN ranked_rough_reviews rough
+      ON rough.event_id=canonical.event_id AND rough.rough_rank=1
+    LEFT JOIN ranked_light_followups light
+      ON light.event_id=canonical.event_id AND light.followup_rank=1
+    LEFT JOIN event_reader_evidence reader_evidence
+      ON reader_evidence.event_id=canonical.event_id
+    LEFT JOIN event_versions current_version
+      ON current_version.event_id=canonical.event_id
+     AND current_version.version=canonical.current_version
+)
+""".strip()
+
+
+def _page_scoped_public_event_state_cte(*, where_sql: str, sort_sql: str) -> str:
+    """Build the public event projection after bounding work to one page.
+
+    ``PUBLIC_EVENT_STATE_CTE`` intentionally remains the authoritative full-ledger
+    query for reviewer-only ``reader_ready`` filtering.  Public browsing does not
+    filter on that derived field, so evaluating its evidence-integrity contract for
+    every canonical event before ``LIMIT`` is wasted work.  This equivalent
+    projection first selects the canonical page and then evaluates source revisions,
+    fact slots and citable evidence only for those bounded event ids.
+    """
+
+    return f"""
+WITH paged_canonical AS (
+    SELECT e.*
+    FROM canonical_events e
+    {where_sql}
+    ORDER BY {sort_sql}
+    LIMIT ? OFFSET ?
+),
+page_evidence_observations AS (
+    SELECT DISTINCT ev.observation_id
+    FROM paged_canonical page
+    JOIN event_evidence ev ON ev.event_id=page.event_id
+),
+ranked_source_revisions AS (
+    SELECT sr.*,
+           ROW_NUMBER() OVER (
+               PARTITION BY sr.observation_id
+               ORDER BY sr.revision_no DESC
+           ) AS source_revision_rank
+    FROM page_evidence_observations page_observation
+    CROSS JOIN source_revisions sr
+    WHERE sr.observation_id=page_observation.observation_id
+),
+current_source_content AS (
+    SELECT r.observation_id,
+           r.source_id,
+           r.external_id,
+           CASE
+             WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.published_at')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.created_at')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.posted_at')),''),
+               r.source_published_at
+             )
+             ELSE r.source_published_at
+           END AS source_published_at,
+           r.local_received_at,
+           COALESCE(sr.title,r.title) AS title,
+           COALESCE(sr.summary,r.summary) AS summary,
+           CASE
+             WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.link')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.url')),''),
+               r.canonical_url
+             )
+             ELSE r.canonical_url
+           END AS canonical_url,
+           COALESCE(sr.content_sha256,r.content_sha256) AS content_sha256,
+           COALESCE(sr.raw_json,r.raw_json) AS raw_json,
+           CASE WHEN sr.revision_kind='delete'
+                THEN 'deleted' ELSE r.observation_status END AS observation_status,
+           COALESCE(sr.revision_no,0) AS latest_revision_no,
+           COALESCE(sr.revision_kind,'new') AS latest_revision_kind,
+           COALESCE(sr.revision_at,r.local_received_at) AS latest_revision_at
+    FROM page_evidence_observations page_observation
+    CROSS JOIN raw_observations r
+    LEFT JOIN ranked_source_revisions sr
+      ON sr.observation_id=r.observation_id
+     AND sr.source_revision_rank=1
+    WHERE r.observation_id=page_observation.observation_id
+),
+sec_current_supported_fact_slots AS (
+    SELECT current_version.event_id,current_version.version
+    FROM paged_canonical slot_event
+    JOIN event_versions current_version
+      ON current_version.event_id=slot_event.event_id
+     AND current_version.version=slot_event.current_version
+    JOIN event_evidence slot_evidence
+      ON slot_evidence.event_id=current_version.event_id
+     AND slot_evidence.evidence_id=json_extract(
+           current_version.facts_json,'$.evidence_id'
+         )
+    JOIN json_each(
+      CASE WHEN json_valid(current_version.facts_json)
+           THEN current_version.facts_json ELSE '{{}}' END,
+      '$.claim_fact_slots.facts'
+    ) slot
+    WHERE LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.predicate'),'')))>0
+      AND CAST(json_extract(slot.value,'$.event_type_compatible') AS INTEGER)=1
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.action_text'),'')))>0
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.object'),'')))>0
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.evidence_sentence'),'')))>=20
+      AND LOWER(json_extract(
+            current_version.facts_json,'$.claim_fact_slots.event_type'
+          ))=LOWER(TRIM(slot_event.event_type))
+      AND INSTR(slot_evidence.evidence_passage,json_extract(
+            slot.value,'$.evidence_sentence'
+          ))>0
+      AND INSTR(json_extract(
+            current_version.facts_json,'$.public_fact_summary'
+          ),json_extract(slot.value,'$.action_text'))>0
+      AND INSTR(json_extract(
+            current_version.facts_json,'$.public_fact_summary'
+          ),json_extract(slot.value,'$.object'))>0
+      AND (
+        json_extract(slot.value,'$.subject_binding') IN (
+          'EXPLICIT_ISSUER','EXPLICIT_ISSUER_CONTEXT'
+        )
+        AND CAST(json_extract(
+              slot.value,'$.issuer_name_explicit_in_passage'
+            ) AS INTEGER)=1
+        AND LOWER(TRIM(json_extract(slot.value,'$.subject')))=LOWER(TRIM(
+              json_extract(current_version.facts_json,'$.claim_subject')
+            ))
+      )
+    GROUP BY current_version.event_id,current_version.version
+),
+ranked_rough_reviews AS (
+    SELECT job.job_id,job.event_id,job.payload_json,job.updated_at,
+           ROW_NUMBER() OVER (
+               PARTITION BY job.event_id
+               ORDER BY job.updated_at DESC,job.job_id DESC
+           ) AS rough_rank
+    FROM paged_canonical page
+    CROSS JOIN pipeline_jobs job
+    WHERE job.event_id=page.event_id
+      AND job.status='COMPLETED_AUTHORIZED_ROUGH_REVIEW'
+),
+ranked_light_followups AS (
+    SELECT job.job_id,job.event_id,job.status,job.payload_json,job.updated_at,
+           ROW_NUMBER() OVER (
+               PARTITION BY job.event_id
+               ORDER BY job.updated_at DESC,job.job_id DESC
+           ) AS followup_rank
+    FROM paged_canonical page
+    CROSS JOIN pipeline_jobs job
+    WHERE job.event_id=page.event_id
+      AND job.job_type='light_verification_followup'
+      AND job.status IN ('PENDING_EVIDENCE_REVIEW','PENDING_HUMAN_REVIEW')
+),
+event_reader_evidence AS (
+    SELECT ev.event_id,
+           COUNT(*) AS citable_evidence_count
+    FROM paged_canonical ce
+    JOIN event_evidence ev ON ev.event_id=ce.event_id
+    JOIN event_evidence_relations rel
+      ON rel.event_id=ev.event_id
+     AND rel.evidence_id=ev.evidence_id
+     AND rel.event_version=ce.current_version
+    JOIN current_source_content ro ON ro.observation_id=ev.observation_id
+    JOIN sources src ON src.source_id=ro.source_id
+    JOIN event_versions current_version
+      ON current_version.event_id=ce.event_id
+     AND current_version.version=ce.current_version
+    LEFT JOIN sec_current_supported_fact_slots sec_slot
+      ON sec_slot.event_id=ce.event_id
+     AND sec_slot.version=ce.current_version
+    WHERE TRIM(COALESCE(ev.evidence_url,''))!=''
+      AND LENGTH(TRIM(COALESCE(ev.evidence_passage,'')))>=40
+      AND (
+        (
+          ev.evidence_status IN (
+            'machine_extracted_unreviewed','candidate_passage',
+            'confirmed_primary','accepted_manual_primary_evidence',
+            'accepted_light_primary_evidence'
+          )
+          AND rel.relation_status IN ('SCOPED_MATCH','HUMAN_CONFIRMED')
+          AND {_SEC_CURRENT_FACT_SLOT_MATCH_SQL}
+          AND rel.contract_version='event-admission-v3'
+          AND rel.evidence_fingerprint=json_extract(
+                current_version.facts_json,'$.evidence_fingerprint'
+              )
+        ) OR (
+          ev.evidence_status='accepted_dual_human_primary_evidence'
+          AND rel.relation_status='HUMAN_CONFIRMED'
+          AND {_DUAL_HUMAN_RECEIPT_MATCH_SQL}
+        )
+      )
+      AND rel.subject_match=1
+      AND rel.event_claim_supported=1
+      AND rel.date_coherent=1
+      AND {_CURRENT_EVIDENCE_PASSAGE_MATCH_SQL}
+      AND (
+        UPPER(src.authority_tier) IN ('P0','P1')
+        OR UPPER(src.authority_tier) GLOB 'P0_*'
+        OR UPPER(src.authority_tier) GLOB 'P1_*'
+      )
+    GROUP BY ev.event_id
+),
+event_public AS (
+    SELECT canonical.*,
+           light.status AS light_followup_status,
+           light.updated_at AS light_followup_updated_at,
+           CASE WHEN json_valid(light.payload_json)
+             THEN json_extract(light.payload_json,'$.light_verification_followup.expected_next_action')
+           END AS light_followup_next_action,
+           CASE
+             WHEN canonical.status='rejected' THEN 'excluded'
+             WHEN light.job_id IS NOT NULL AND canonical.status!='weak' THEN 'pending_verification'
+             WHEN canonical.status='verified' THEN 'verified'
+             WHEN canonical.status='weak' OR (
+               rough.job_id IS NOT NULL
+               AND CASE WHEN json_valid(rough.payload_json)
+                 THEN COALESCE(
+                   json_extract(rough.payload_json,'$.rough_review.outcome'),
+                   CASE WHEN UPPER(COALESCE(
+                     json_extract(rough.payload_json,'$.rough_review.decision_status'),''
+                   ))='INSUFFICIENT' THEN 'ROUGH_INSUFFICIENT' END
+                 )
+               END='ROUGH_INSUFFICIENT'
+             ) THEN 'insufficient'
+             WHEN canonical.status='candidate' AND rough.job_id IS NOT NULL THEN 'rough_reviewed'
+             ELSE 'pending_verification'
+           END AS public_state,
+           COALESCE(
+             CASE WHEN json_valid(rough.payload_json)
+               THEN json_extract(rough.payload_json,'$.rough_review.reviewed_at')
+             END,
+              rough.updated_at
+           ) AS reviewed_at,
+           COALESCE(reader_evidence.citable_evidence_count,0) AS citable_evidence_count,
+           CASE WHEN json_valid(current_version.facts_json)
+             THEN NULLIF(TRIM(json_extract(
+               current_version.facts_json,'$.public_fact_summary'
+             )),'')
+           END AS public_fact_summary,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_subject')
+            END AS claim_subject,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_action')
+            END AS claim_action,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_stage')
+            END AS claim_stage,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.known_at')
+            END AS known_at,
+           CASE WHEN COALESCE(
+             NULLIF(TRIM(canonical.company_name),''),
+             NULLIF(TRIM(canonical.ticker_at_event),''),
+             ''
+           )!=''
+             THEN 1 ELSE 0
+           END AS reader_has_subject,
+           CASE WHEN json_valid(current_version.facts_json) AND LENGTH(COALESCE(
+             NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
+             ''
+            ))>=20
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_subject'),''
+              )))>=2
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_action'),''
+              )))>=3
+              AND UPPER(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_stage'),''
+              ))) IN ('PROPOSED','FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED')
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.known_at'),''
+              )))>=20
+              THEN 1 ELSE 0 END AS reader_has_fact_summary,
+           CASE WHEN
+             COALESCE(
+               NULLIF(TRIM(canonical.company_name),''),
+               NULLIF(TRIM(canonical.ticker_at_event),''),
+               ''
+             )!=''
+             AND COALESCE(reader_evidence.citable_evidence_count,0)>0
+             AND json_valid(current_version.facts_json)
+              AND LENGTH(COALESCE(
+               NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
+               ''
+              ))>=20
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_subject'),''
+              )))>=2
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_action'),''
+              )))>=3
+              AND UPPER(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_stage'),''
+              ))) IN ('PROPOSED','FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED')
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.known_at'),''
+              )))>=20
+              THEN 1 ELSE 0
+           END AS reader_ready
+    FROM paged_canonical canonical
     LEFT JOIN ranked_rough_reviews rough
       ON rough.event_id=canonical.event_id AND rough.rough_rank=1
     LEFT JOIN ranked_light_followups light
@@ -1624,6 +1923,70 @@ class LedgerRepository:
             )
             params.extend([f"%{query.lower()}%", f"%{query.lower()}%"])
         where_sql = " WHERE " + " AND ".join(where) if where else ""
+
+        if public_state is None and reader_ready is None:
+            page_state_cte = _page_scoped_public_event_state_cte(
+                where_sql=where_sql,
+                sort_sql=sort_orders[sort],
+            )
+            page_query = (
+                page_state_cte
+                + f"""
+                SELECT e.*,
+                       (SELECT COUNT(*) FROM event_evidence x WHERE x.event_id=e.event_id) AS evidence_count,
+                       (SELECT COUNT(*) FROM event_observations xeo
+                        JOIN latest_source_content xr ON xr.observation_id=xeo.observation_id
+                        WHERE xeo.event_id=e.event_id AND xr.observation_status!='deleted')
+                         AS captured_source_count,
+                       (SELECT severity_grade FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS severity_grade,
+                       (SELECT credibility_tier FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS credibility_tier,
+                       (SELECT evidence_passage FROM event_evidence x WHERE x.event_id=e.event_id AND evidence_passage IS NOT NULL ORDER BY passage_score DESC, updated_at DESC LIMIT 1) AS evidence_excerpt,
+                       (SELECT r.title FROM event_observations eo
+                        JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                        WHERE eo.event_id=e.event_id
+                          AND eo.relation_type!='filtered_aggregated_noise'
+                        ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_title,
+                       (SELECT r.summary FROM event_observations eo
+                        JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                        WHERE eo.event_id=e.event_id
+                          AND eo.relation_type!='filtered_aggregated_noise'
+                        ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_summary
+                FROM event_public e
+                ORDER BY {sort_orders[sort]}
+                """
+            )
+            with closing(self.connect()) as connection:
+                # Keep count and items on one SQLite read snapshot.  The worker may
+                # append events concurrently while the public page is loading.
+                connection.execute("BEGIN")
+                try:
+                    total = int(
+                        connection.execute(
+                            f"SELECT COUNT(*) FROM canonical_events e {where_sql}",
+                            params,
+                        ).fetchone()[0]
+                    )
+                    rows = connection.execute(
+                        page_query,
+                        [*params, limit, offset],
+                    ).fetchall()
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+            return {
+                "items": [dict(row) for row in rows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "public_state": public_state,
+                "date_from": date_from,
+                "date_to": date_to,
+                "reader_ready": reader_ready,
+                "captured_source_required": captured_source_required,
+                "sort": sort,
+            }
+
         paged_query = (
             PUBLIC_EVENT_STATE_CTE
             + f"""

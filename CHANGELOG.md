@@ -5,6 +5,25 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.23.4
+
+- Decouple event visibility from formal citation readiness. Every canonical
+  event is now publicly browsable, while the strict subject/fact/P0-P1/current-
+  version evidence contract remains visible as a separate `reader_ready`
+  quality label rather than an all-or-nothing display gate.
+- Page canonical events before evaluating evidence integrity for public browse
+  requests. On a 15,080-event synthetic ledger, the first-page repository query
+  fell from roughly 315-340 ms to 19-25 ms without changing authenticated
+  `reader_ready` or public-state filter semantics.
+- Add a single public event-dossier projection so event detail, formal evidence,
+  captured sources, source interpretation and knowledge context load in one API
+  request instead of five sequential loopback requests.
+- Add a fail-closed `code-only` deployment mode for future public-Web-only
+  releases. It reuses a root-attested verified daily recovery bundle, refuses
+  API/persistence/worker/dependency/service/model changes, and keeps full deployment
+  as the default. This release itself must use the full path to bootstrap that
+  attestation.
+
 ## 2026.08.23.1
 
 - Move the expensive `/api/v1/overview` aggregation into a bounded external

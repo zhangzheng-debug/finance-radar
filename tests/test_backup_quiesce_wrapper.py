@@ -49,6 +49,7 @@ def _run_wrapper(
     backup_rc: int = 0,
     start_rc: int = 0,
     inhibit: bool = False,
+    backup_start_inhibit: bool = False,
     candidate_source: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     fake_bin = tmp_path / "fake-bin"
@@ -146,6 +147,9 @@ exec /usr/bin/readlink -f "$target"
     inhibit_path = tmp_path / "worker-resume.inhibit"
     if inhibit:
         inhibit_path.write_text("protected cutover", encoding="utf-8")
+    backup_start_inhibit_path = tmp_path / "backup-start.inhibit"
+    if backup_start_inhibit:
+        backup_start_inhibit_path.write_text("deployment stabilization", encoding="utf-8")
     driver = tmp_path / "run-wrapper.sh"
     driver.write_text(
         "#!/usr/bin/env bash\n"
@@ -180,6 +184,12 @@ exec /usr/bin/readlink -f "$target"
             "FINANCE_RADAR_CURRENT_RELEASE_ROOT": current_release.as_posix(),
             "FINANCE_RADAR_RELEASES_ROOT": releases.as_posix(),
             "FINANCE_RADAR_WORKER_RESUME_INHIBIT": str(inhibit_path),
+            "FINANCE_RADAR_BACKUP_START_INHIBIT": str(backup_start_inhibit_path),
+            "FINANCE_RADAR_OPS_DB": "/tmp/finance-radar-operations-test.sqlite3",
+            # These unit tests exercise quiesce/resume on Windows Git Bash,
+            # where there is no root account or production backup database.
+            # Root-attestation behavior has its own deployment contract tests.
+            "FINANCE_RADAR_SKIP_ROOT_BACKUP_ATTESTATION": "1",
             **(
                 {
                     "FINANCE_RADAR_BACKUP_SOURCE_ROOT": candidate_release.as_posix(),
@@ -235,6 +245,29 @@ def test_wrapper_honors_the_protected_cutover_resume_inhibit(tmp_path: Path) -> 
     assert "systemctl stop finance-radar-worker.service" in calls
     assert "systemctl start finance-radar-worker.service" not in calls
     assert "backup_worker_resume=INHIBITED" in result.stderr
+
+
+def test_wrapper_refuses_scheduled_start_while_deployment_stabilizes(tmp_path: Path) -> None:
+    result = _run_wrapper(
+        tmp_path,
+        worker_state="inactive",
+        backup_start_inhibit=True,
+    )
+
+    assert result.returncode == 3
+    assert "scheduled backup start is inhibited" in result.stderr
+
+
+def test_candidate_bridge_may_run_behind_backup_start_inhibit(tmp_path: Path) -> None:
+    result = _run_wrapper(
+        tmp_path,
+        worker_state="inactive",
+        backup_start_inhibit=True,
+        candidate_source=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert any("--predeploy-bridge" in call for call in _calls(tmp_path))
 
 
 def test_wrapper_explicitly_uses_the_candidate_source_for_a_predeploy_bridge(tmp_path: Path) -> None:

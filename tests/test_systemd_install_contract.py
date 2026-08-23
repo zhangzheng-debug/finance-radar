@@ -38,6 +38,12 @@ OVERVIEW_SNAPSHOT_TIMER = (
     / "finance-radar-overview-snapshot.timer"
 )
 RECEIPT_VALIDATOR = Path(__file__).parents[1] / "deployment" / "systemd" / "verify_backup_receipt.py"
+CODE_ONLY_VALIDATOR = (
+    Path(__file__).parents[1]
+    / "deployment"
+    / "systemd"
+    / "verify_code_only_release.py"
+)
 LOCAL_LLM_INSTALLER = Path(__file__).parents[1] / "deployment" / "systemd" / "install_local_evidence_model.sh"
 MIGRATION_BACKUP = Path(__file__).parents[1] / "deployment" / "systemd" / "create_migration_backup.sh"
 
@@ -76,6 +82,91 @@ def test_remote_installer_keeps_venv_readable_by_service_account() -> None:
     assert "runuser -u finance-radar" in source
     assert "import sklearn, sklearn.pipeline" in source
     assert 'sklearn.__version__ == "1.8.0"' in source
+
+
+def test_code_only_mode_skips_expensive_recovery_and_dependency_work_fail_closed() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+    backup_unit = BACKUP_UNIT.read_text(encoding="utf-8")
+    backup_wrapper = BACKUP_QUIESCE_WRAPPER.read_text(encoding="utf-8")
+    validator = CODE_ONLY_VALIDATOR.read_text(encoding="utf-8")
+
+    assert 'DEPLOY_MODE=${FINANCE_RADAR_DEPLOY_MODE:-full}' in source
+    assert 'full|code-only' in source
+    assert "code-only deployment must be launched with the active release installer" in source
+    assert 'if [ "$DEPLOY_MODE" = full ]; then' in source
+    assert "verify_code_only_candidate_before_candidate_execution" in source
+    assert "require_recent_verified_backup_record" in source
+    assert 'trusted_validator="$PREVIOUS_RELEASE/deployment/systemd/verify_code_only_release.py"' in source
+    assert 'python3 "$trusted_validator" contract' in source
+    assert 'python3 "$trusted_validator" backup' in source
+    assert "FINANCE_RADAR_CODE_ONLY_BACKUP_MAX_AGE_SECONDS:-93600" in source
+    assert "<= 93600" in source
+    assert "reused_verified_daily" in source
+    assert "immutable=1" not in validator
+    assert "MAX_BACKUP_AGE_SECONDS = 93_600" in validator
+    assert 'ALLOWED_CHANGE_PREFIXES = ("app/web/", ".streamlit/")' in validator
+    assert 'ALLOWED_CHANGE_FILES = {"VERSION"}' in validator
+    assert "candidate contains generated Python bytecode" in validator
+    assert "release content outside the public-Web whitelist changed" in validator
+    assert 'inventory[relative] = ("directory", 0, "")' in validator
+    assert "current_sha = _sha256(candidate)" in validator
+    assert 'expected_bundle_files = set(manifest_paths) | {"manifest.json"}' in validator
+    assert "actual_sha = digest.hexdigest()" in backup_wrapper
+    assert 'expected_bundle_files = set(manifest_paths) | {"manifest.json"}' in backup_wrapper
+    assert "latest-verified-backup.json" in source
+    assert "/var/lib/finance-radar" in backup_unit
+    assert 'PREDEPLOY_BACKUP_RUN_ID=""' in source
+    assert "predeploy_backup_run_id=%s" in source
+    assert 'ACTIVATION_PENDING="$RELEASE_RECORDS/.ACTIVATION.pending.$$"' in source
+    assert "candidate archive must not contain release-records" in source
+    assert "activation record target already exists or is unsafe" in source
+    assert 'mv -f -- "$ACTIVATION_PENDING" "$RELEASE_RECORDS/ACTIVATION.txt"' in source
+    assert "committed activation record failed validation" in source
+    assert source.index('mv -f -- "$ACTIVATION_PENDING"') < source.index("trap - ERR", source.index('mv -f -- "$ACTIVATION_PENDING"'))
+    assert "activation_warning=predeploy_hold_cleanup_failed" in source
+    assert 'operations_db="$(operations_database_path)"' in source
+    assert "require_code_only_shared_state" in source
+    assert "code-only deployment requires the active release shared-data link" in source
+    assert "code-only deployment requires the existing operations database" in source
+    assert "code-only candidate must not contain a data path" in source
+    assert 'rm -rf -- "$RELEASE/reports"' in source
+    assert source.index("require_code_only_shared_state ||") < source.index(
+        'if [ ! -f "$SHARED/data/finance_radar.sqlite3" ]'
+    )
+    assert "daily backup is already active; retry deployment after it finishes" in source
+    assert 'if [ "$BACKUP_SERVICE_OWNED" -eq 1 ]; then' in source
+    assert "rollback_preserved_unowned_backup_service=1" in source
+    service_units = source.split("ROLLBACK_SERVICE_UNITS=(", 1)[1].split("\n)", 1)[0]
+    assert "finance-radar-backup.service" not in service_units
+    assert "finance-radar-backup.timer" in service_units
+    assert "inhibit_scheduled_backup_start" in source
+    assert "assert_backup_service_quiescent" in source
+    assert "systemctl list-jobs --no-legend --plain" in source
+    assert "scheduled backup start is inhibited during deployment stabilization" in backup_wrapper
+    assert source.index("systemctl stop finance-radar-backup.timer") < source.index(
+        "require_recent_verified_backup_record ||",
+        source.index("SERVICES_TOUCHED=1"),
+    )
+    postcutover_marker = source.index("require_postcutover_verified_backup ||")
+    assert postcutover_marker < source.index(
+        "systemctl start finance-radar-backup.timer", postcutover_marker
+    )
+    assert 'OPERATIONS_DB="${FINANCE_RADAR_OPS_DB:-$BASE/shared/data/finance_radar_operations.sqlite3}"' in backup_wrapper
+    assert 'python3 - "$OPERATIONS_DB"' in backup_wrapper
+
+
+def test_prepared_restore_creates_root_backup_attestation_directory() -> None:
+    source = (
+        Path(__file__).parents[1]
+        / "deployment"
+        / "systemd"
+        / "activate_prepared_restore.sh"
+    ).read_text(encoding="utf-8")
+
+    create_marker = "install -d -m 0700 -o root -g root /var/lib/finance-radar"
+    start_marker = "systemctl enable --now finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer"
+    assert create_marker in source
+    assert source.index(create_marker) < source.index(start_marker)
 
 
 def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() -> None:
@@ -480,7 +571,8 @@ def test_in_place_installer_rolls_back_services_and_edge_on_any_cutover_failure(
         "systemctl daemon-reload", source.index("remove_legacy_managed_property_dropins ||")
     )
     assert source.index("remove_legacy_managed_property_dropins ||") < cutover_reload
-    assert "systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer" in source
+    assert "systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker ||" in source
+    assert "systemctl is-active --quiet finance-radar-backup.timer ||" in source
     assert 'bash "$DIRECT_ENDPOINT_INSTALLER" "$DIRECT_ENDPOINT_CANDIDATE" "$DIRECT_ENDPOINT_HOOK"' in source
     assert "retire_known_predecessor_vhost" in source
     edge_touch = source.index("EDGE_TOUCHED=1", source.index("# Treat the public edge"))
@@ -581,7 +673,8 @@ def test_in_place_installer_requires_a_fresh_verified_backup_before_cutover() ->
     assert 'legacy_sqlite' not in source
     assert 'PREDEPLOY_BACKUP_RECEIPT_SHA256' in source
     assert 'require_postcutover_verified_backup' in source
-    assert 'postdeploy_full_bundle=VERIFIED' in source
+    assert 'POSTDEPLOY_FULL_BUNDLE_STATUS=VERIFIED' in source
+    assert 'POSTDEPLOY_FULL_BUNDLE_STATUS=REUSED_VERIFIED_DAILY' in source
     assert 'predeploy_backup_snapshot_id=%s' in source
     assert 'BACKUP_QUIESCE_WRAPPER_SOURCE="$RELEASE/deployment/systemd/run_backup_quiesced.sh"' in source
     assert "install_backup_quiesce_wrapper" in source
@@ -690,10 +783,11 @@ def test_installer_atomically_transfers_a_root_only_predeploy_hold_until_postcut
     assert "root-owned atomic custody transfer" in hold_transfer
     assert source.index("create_predeploy_backup_hold ||") < source.index(cutover_marker)
     post_gate = source.index("require_postcutover_verified_backup ||")
-    assert source.index("clear_predeploy_backup_hold ||", post_gate) > post_gate
-    assert source.index("clear_predeploy_backup_hold ||", post_gate) > source.index(
-        "systemctl start finance-radar-worker", post_gate
-    )
+    cleanup = source.index("if ! clear_predeploy_backup_hold; then", post_gate)
+    commit = source.index('mv -f -- "$ACTIVATION_PENDING"', post_gate)
+    assert post_gate < commit < cleanup
+    assert source.index("trap - ERR", commit) < cleanup
+    assert cleanup > source.index("systemctl start finance-radar-worker", post_gate)
     assert "$SHARED/recovery_holds" not in source
     assert "RECOVERY_HOLD_PARENT=/var/lib/finance-radar" in source
     assert "RECOVERY_HOLD_ROOT=\"$RECOVERY_HOLD_PARENT/recovery-holds\"" in source

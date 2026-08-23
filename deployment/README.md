@@ -207,6 +207,23 @@ The manual loopback Reviewer, Operator and Admin services are neither enabled no
 during this cutover; an existing internal session makes the installer stop
 before the symlink change rather than terminating that session.
 
+For a later release that changes only `app/web/**`, public
+Streamlit configuration or `VERSION`, the operator may explicitly set
+`FINANCE_RADAR_DEPLOY_MODE=code-only` when invoking `install_remote.sh`. This
+fast path is never selected automatically and must be invoked through the
+currently active release's root-owned `install_remote.sh`, not the candidate's
+copy. It refuses the cutover unless the
+active and candidate releases have byte-identical API, persistence, worker, script,
+deployment, dependency, replay and runtime-model trees and a root-owned
+attestation proves that a complete daily recovery bundle passed an isolated
+restore drill within the previous 26 hours. It skips new multi-gigabyte backup
+copies, venv copying and package installation, but retains the atomic release
+symlink, service/Nginx rollback and all public health/deny checks. Any failed
+precondition requires the ordinary `full` transaction; it must not be bypassed
+or silently downgraded. A release that introduces or changes this fast-path
+machinery itself must use `full` once so the new backup unit can create the
+first trusted attestation.
+
 The Evidence Agent also has an optional, independent loopback service on port
 18601. `install_local_evidence_model.sh` pins both llama.cpp and the GGUF model
 by SHA-256, enforces a resource gate, and requires explicit `--activate`.

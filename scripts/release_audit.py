@@ -105,6 +105,7 @@ DEFAULT_CRITICAL_FILES: tuple[str, ...] = (
     "deployment/systemd/run_backup_quiesced.sh",
     "deployment/systemd/install_remote.sh",
     "deployment/systemd/verify_backup_receipt.py",
+    "deployment/systemd/verify_code_only_release.py",
     "deployment/systemd/transfer_verified_backup_hold.py",
     "deployment/systemd/activate_prepared_restore.sh",
     "deployment/systemd/create_migration_backup.sh",

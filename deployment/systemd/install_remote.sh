@@ -8,6 +8,7 @@ EXPECTED_SHA256=${3:?archive sha256 required}
 SOURCE_ENV=${4:-/tmp/finance-radar-source.env}
 RELEASE_MANIFEST=${5:-}
 PUBLIC_WEB_URL=${6:-${FINANCE_RADAR_PUBLIC_WEB_URL:-}}
+DEPLOY_MODE=${FINANCE_RADAR_DEPLOY_MODE:-full}
 BASE=/opt/finance-radar
 RELEASE="$BASE/releases/$RELEASE_ID"
 SHARED="$BASE/shared"
@@ -17,8 +18,24 @@ PUBLIC_RELEASE_MARKER="$PUBLIC_STATUS_DIR/release.json"
 LEGACY_STATIC_NGINX=/etc/nginx/conf.d/finance-radar-aws.conf
 LEGACY_STATIC_INDEX="$PUBLIC_STATUS_DIR/index.html"
 LEGACY_STATIC_RETIRE_DIR=/etc/nginx/finance-radar-retired
+INSTALLER_SOURCE="$(readlink -f -- "${BASH_SOURCE[0]}")"
 
 [ "$(id -u)" -eq 0 ] || { printf 'run as root\n' >&2; exit 2; }
+case "$DEPLOY_MODE" in
+    full|code-only) ;;
+    *)
+        printf 'invalid FINANCE_RADAR_DEPLOY_MODE: %s (expected full or code-only)\n' \
+            "$DEPLOY_MODE" >&2
+        exit 2
+        ;;
+esac
+if [ "$DEPLOY_MODE" = code-only ]; then
+    ACTIVE_INSTALLER="$(readlink -f -- "$BASE/current/deployment/systemd/install_remote.sh" 2>/dev/null || true)"
+    [ -n "$ACTIVE_INSTALLER" ] && [ "$INSTALLER_SOURCE" = "$ACTIVE_INSTALLER" ] || {
+        printf 'code-only deployment must be launched with the active release installer\n' >&2
+        exit 2
+    }
+fi
 [[ "$RELEASE_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$ ]] || {
     printf 'invalid release id\n' >&2
     exit 2
@@ -205,9 +222,15 @@ grant_public_web_runtime_access() {
             return 1
         }
     fi
-    find "$BASE/venv" -type d -exec chmod 0755 {} +
-    find "$BASE/venv" -type f -exec chmod a+r {} +
-    find "$BASE/venv" -type f -perm /111 -exec chmod a+rx {} +
+    # The full installer may have created or changed the environment. A
+    # code-only release proves its lock is byte-identical to the active one and
+    # deliberately leaves the venv untouched, avoiding a recursive chmod over
+    # thousands of files on every UI/API edit.
+    if [ "$DEPLOY_MODE" = full ]; then
+        find "$BASE/venv" -type d -exec chmod 0755 {} +
+        find "$BASE/venv" -type f -exec chmod a+r {} +
+        find "$BASE/venv" -type f -perm /111 -exec chmod a+rx {} +
+    fi
 }
 
 assert_private_runtime_import_boundary() {
@@ -233,6 +256,29 @@ assert_public_runtime_import_boundary() {
     ' _ "$RELEASE" "$BASE/venv/bin/python"
 }
 
+verify_code_only_candidate_before_candidate_execution() {
+    local trusted_validator
+    [ -n "$PREVIOUS_RELEASE" ] && [ -d "$PREVIOUS_RELEASE" ] || {
+        printf 'code-only deployment requires an existing active release\n' >&2
+        return 1
+    }
+    trusted_validator="$PREVIOUS_RELEASE/deployment/systemd/verify_code_only_release.py"
+    [ -f "$trusted_validator" ] && [ ! -L "$trusted_validator" ] || {
+        printf 'active release has no trusted code-only verifier; bootstrap with a full deployment\n' >&2
+        return 1
+    }
+    # This is deliberately the previous release's root-owned verifier.  It
+    # proves the candidate's scripts and deployment tree are unchanged before
+    # any Python file extracted from the candidate is executed as root.
+    python3 "$trusted_validator" contract \
+        --previous "$PREVIOUS_RELEASE" \
+        --candidate "$RELEASE" || return 1
+    [ -x "$BASE/venv/bin/python" ] || {
+        printf 'code-only deployment requires the active virtual environment\n' >&2
+        return 1
+    }
+}
+
 if ! getent passwd finance-radar >/dev/null; then
     useradd --system --home-dir "$BASE" --shell /usr/sbin/nologin finance-radar
 fi
@@ -254,6 +300,29 @@ tar -xzf "$ARCHIVE" -C "$RELEASE"
 chown -R root:finance-radar "$RELEASE"
 find "$RELEASE" -type d -exec chmod 0750 {} +
 find "$RELEASE" -type f -exec chmod 0640 {} +
+[ ! -e "$RELEASE_RECORDS" ] && [ ! -L "$RELEASE_RECORDS" ] || {
+    printf 'candidate archive must not contain release-records\n' >&2
+    exit 2
+}
+
+# Resolve and validate the active release before invoking any helper shipped by
+# the candidate.  In full mode the candidate is allowed to change those
+# helpers; in code-only mode it must first prove they are byte-identical to the
+# already installed, trusted release.
+PREVIOUS_RELEASE=""
+if [ -e "$BASE/current" ] || [ -L "$BASE/current" ]; then
+    PREVIOUS_RELEASE="$(readlink -f -- "$BASE/current")"
+    [[ "$PREVIOUS_RELEASE" == "$BASE/releases/"* ]] && [ -d "$PREVIOUS_RELEASE" ] || {
+        printf 'current release is not a complete release directory: %s\n' "$PREVIOUS_RELEASE" >&2
+        exit 3
+    }
+fi
+if [ "$DEPLOY_MODE" = code-only ]; then
+    verify_code_only_candidate_before_candidate_execution || {
+        printf 'code-only candidate is not eligible; rerun with FINANCE_RADAR_DEPLOY_MODE=full\n' >&2
+        exit 4
+    }
+fi
 
 # Optional, backward-compatible release gate. It verifies the explicit release
 # id, manifest sidecar, archive hash/member safety and every critical file
@@ -294,12 +363,16 @@ printf 'dependency_lock=verified\n'
 # by producing and independently validating the new complete recovery bundle
 # before activation is recorded as a success.
 PREDEPLOY_BACKUP_ID=""
+PREDEPLOY_BACKUP_RUN_ID=""
 PREDEPLOY_BACKUP_KIND=""
 PREDEPLOY_BACKUP_RECEIPT_SHA256=""
 PREDEPLOY_BACKUP_PATH=""
 POSTDEPLOY_BACKUP_ID=""
+POSTDEPLOY_BACKUP_RUN_ID=""
 POSTDEPLOY_BACKUP_MANIFEST_SHA256=""
 POSTDEPLOY_BACKUP_PATH=""
+RECOVERY_BASIS=""
+POSTDEPLOY_FULL_BUNDLE_STATUS=""
 PREDEPLOY_HOLD_ROOT=""
 PREDEPLOY_HOLD_PATH=""
 RECOVERY_HOLD_PARENT=/var/lib/finance-radar
@@ -321,7 +394,10 @@ BACKUP_HOLD_TRANSFER="$RELEASE/deployment/systemd/transfer_verified_backup_hold.
 BACKUP_QUIESCE_WRAPPER_SOURCE="$RELEASE/deployment/systemd/run_backup_quiesced.sh"
 BACKUP_QUIESCE_WRAPPER_TARGET=/usr/local/libexec/finance-radar/run_backup_quiesced.sh
 WORKER_RESUME_INHIBIT=/run/finance-radar/worker-resume.inhibit
+BACKUP_START_INHIBIT=/run/finance-radar/backup-start.inhibit
 BACKUP_RESTORE_TMPDIR="$SHARED/data/.backup-restore-tmp"
+BACKUP_START_INHIBIT_CREATED=0
+BACKUP_SERVICE_OWNED=0
 
 write_backup_inventory() {
     local backup_root="$1"
@@ -636,21 +712,26 @@ run_and_capture_fresh_backup() {
             fi
             ;;
         installed_service)
+            BACKUP_SERVICE_OWNED=1
             if ! systemctl start finance-radar-backup.service; then
+                BACKUP_SERVICE_OWNED=0
                 rm -f -- "$inventory_path"
                 printf 'backup service failed\n' >&2
                 return 1
             fi
             if [ "$(systemctl show finance-radar-backup.service --property=Result --value)" != "success" ]; then
+                BACKUP_SERVICE_OWNED=0
                 rm -f -- "$inventory_path"
                 printf 'backup service did not report success\n' >&2
                 return 1
             fi
             if systemctl is-active --quiet finance-radar-backup.service; then
+                BACKUP_SERVICE_OWNED=0
                 rm -f -- "$inventory_path"
                 printf 'backup service is still active after start returned\n' >&2
                 return 1
             fi
+            BACKUP_SERVICE_OWNED=0
             ;;
         *)
             rm -f -- "$inventory_path"
@@ -772,17 +853,110 @@ require_postcutover_verified_backup() {
         "$POSTDEPLOY_BACKUP_ID" "$POSTDEPLOY_BACKUP_MANIFEST_SHA256"
 }
 
-# Preserve the previous release intact so a failed upgrade can be rolled back.
-# The first shared-data migration is a copy, never a move, and runs only after
-# the optional candidate release gate has succeeded.
-PREVIOUS_RELEASE=""
-if [ -e "$BASE/current" ] || [ -L "$BASE/current" ]; then
-    PREVIOUS_RELEASE="$(readlink -f -- "$BASE/current")"
-    [[ "$PREVIOUS_RELEASE" == "$BASE/releases/"* ]] && [ -d "$PREVIOUS_RELEASE" ] || {
-        printf 'current release is not a complete release directory: %s\n' "$PREVIOUS_RELEASE" >&2
-        exit 3
+# Code-only releases reuse the already verified daily recovery point instead of
+# manufacturing two more multi-gigabyte bundles.  Candidate trust was already
+# established above, before any candidate helper could execute as root.
+require_recent_verified_backup_record() {
+    local max_age_seconds receipt operations_db trusted_validator
+    max_age_seconds=${FINANCE_RADAR_CODE_ONLY_BACKUP_MAX_AGE_SECONDS:-93600}
+    [[ "$max_age_seconds" =~ ^[0-9]+$ ]] && \
+        (( max_age_seconds >= 3600 && max_age_seconds <= 93600 )) || {
+        printf 'invalid FINANCE_RADAR_CODE_ONLY_BACKUP_MAX_AGE_SECONDS\n' >&2
+        return 1
     }
-fi
+    trusted_validator="$PREVIOUS_RELEASE/deployment/systemd/verify_code_only_release.py"
+    [ -f "$trusted_validator" ] || return 1
+    operations_db="$(operations_database_path)" || return 1
+    receipt="$(python3 "$trusted_validator" backup \
+        --operations "$operations_db" \
+        --backup-root "$SHARED/data/operational_backups" \
+        --attestation "$RECOVERY_HOLD_PARENT/latest-verified-backup.json" \
+        --max-age-seconds "$max_age_seconds")" || return 1
+    IFS=$'\t' read -r PREDEPLOY_BACKUP_RUN_ID PREDEPLOY_BACKUP_ID \
+        PREDEPLOY_BACKUP_RECEIPT_SHA256 CODE_ONLY_BACKUP_AGE_SECONDS \
+        <<< "$(python3 - "$receipt" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+print(
+    "\t".join(
+        str(payload[key])
+        for key in ("backup_id", "snapshot_id", "manifest_sha256", "age_seconds")
+    )
+)
+PY
+)" || return 1
+    [[ "$PREDEPLOY_BACKUP_RUN_ID" =~ ^backup-[A-Za-z0-9_-]+$ ]] || return 1
+    [[ "$PREDEPLOY_BACKUP_ID" =~ ^finance_radar_[A-Za-z0-9_-]+$ ]] || return 1
+    [[ "$PREDEPLOY_BACKUP_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]] || return 1
+    PREDEPLOY_BACKUP_KIND=recovery_bundle
+    PREDEPLOY_BACKUP_PATH="$SHARED/data/operational_backups/$PREDEPLOY_BACKUP_ID"
+    POSTDEPLOY_BACKUP_RUN_ID="$PREDEPLOY_BACKUP_RUN_ID"
+    POSTDEPLOY_BACKUP_ID="$PREDEPLOY_BACKUP_ID"
+    POSTDEPLOY_BACKUP_MANIFEST_SHA256="$PREDEPLOY_BACKUP_RECEIPT_SHA256"
+    printf 'code_only_recovery_basis=PASS backup_id=%s snapshot_id=%s age_seconds=%s manifest_sha256=%s\n' \
+        "$PREDEPLOY_BACKUP_RUN_ID" "$PREDEPLOY_BACKUP_ID" \
+        "$CODE_ONLY_BACKUP_AGE_SECONDS" "$PREDEPLOY_BACKUP_RECEIPT_SHA256"
+}
+
+require_code_only_shared_state() {
+    local ledger_db operations_db
+    [ "$DEPLOY_MODE" = code-only ] || return 0
+    [ -d "$SHARED/data" ] && [ ! -L "$SHARED/data" ] || {
+        printf 'code-only deployment requires the existing shared data directory\n' >&2
+        return 1
+    }
+    [ -d "$SHARED/reports" ] && [ ! -L "$SHARED/reports" ] || {
+        printf 'code-only deployment requires the existing shared reports directory\n' >&2
+        return 1
+    }
+    [ -L "$PREVIOUS_RELEASE/data" ] && \
+        [ "$(readlink -f -- "$PREVIOUS_RELEASE/data")" = "$(readlink -f -- "$SHARED/data")" ] || {
+        printf 'code-only deployment requires the active release shared-data link\n' >&2
+        return 1
+    }
+    [ -L "$PREVIOUS_RELEASE/reports" ] && \
+        [ "$(readlink -f -- "$PREVIOUS_RELEASE/reports")" = "$(readlink -f -- "$SHARED/reports")" ] || {
+        printf 'code-only deployment requires the active release shared-reports link\n' >&2
+        return 1
+    }
+    ledger_db="$(ledger_database_path)" || return 1
+    operations_db="$(operations_database_path)" || return 1
+    [ -s "$ledger_db" ] && [ ! -L "$ledger_db" ] || {
+        printf 'code-only deployment requires the existing ledger database\n' >&2
+        return 1
+    }
+    [ -s "$operations_db" ] && [ ! -L "$operations_db" ] || {
+        printf 'code-only deployment requires the existing operations database\n' >&2
+        return 1
+    }
+    [ ! -e "$RELEASE/data" ] && [ ! -L "$RELEASE/data" ] || {
+        printf 'code-only candidate must not contain a data path\n' >&2
+        return 1
+    }
+    # Tracked reports are normal archive input but never persistence. Discard
+    # them before the common linking code attaches the verified shared root.
+    if [ -e "$RELEASE/reports" ] || [ -L "$RELEASE/reports" ]; then
+        [ -d "$RELEASE/reports" ] && [ ! -L "$RELEASE/reports" ] || {
+            printf 'code-only candidate reports path is unsafe\n' >&2
+            return 1
+        }
+        rm -rf -- "$RELEASE/reports" || return 1
+    fi
+    printf 'code_only_shared_state=PASS ledger=%s operations=%s\n' "$ledger_db" "$operations_db"
+}
+
+# Preserve the previous release intact so a failed upgrade can be rolled back.
+# The release was resolved before candidate helpers ran; shared-data migration
+# below remains a copy/move into the managed shared roots, never an in-place
+# rewrite of the active release.
+# Preserve the previously resolved release intact so a failed upgrade can be
+# rolled back.  The first shared-data migration is a copy, never a move.
+require_code_only_shared_state || {
+    printf 'code-only shared-state precondition failed; use full deployment\n' >&2
+    exit 4
+}
 if [ ! -f "$SHARED/data/finance_radar.sqlite3" ] && [ -f "$BASE/current/data/finance_radar.sqlite3" ]; then
     install -d -o finance-radar -g finance-radar "$SHARED/data"
     cp -a "$BASE/current/data/." "$SHARED/data/"
@@ -863,7 +1037,10 @@ ROLLBACK_SERVICE_UNITS=(
     finance-radar-overview-snapshot.timer
     finance-radar-web
     finance-radar-worker
-    finance-radar-backup.service
+    # The backup oneshot is externally scheduled and may run for 90 minutes.
+    # Its unit file is snapshotted in ROLLBACK_PATHS, but its active state is
+    # never owned/restored by deployment; doing so could kill or duplicate an
+    # unrelated daily recovery drill.
     finance-radar-backup.timer
     finance-radar-evidence-llm.service
     finance-radar-capture-interpretation.service
@@ -940,7 +1117,8 @@ snapshot_rollback_state() {
     for path in "${ROLLBACK_PATHS[@]}"; do
         backup_path "$path" || return
     done
-    if [ -e "$BASE/venv" ] || [ -L "$BASE/venv" ]; then
+    if [ "$DEPLOY_MODE" = full ] && \
+       { [ -e "$BASE/venv" ] || [ -L "$BASE/venv" ]; }; then
         cp -a -- "$BASE/venv" "$ROLLBACK_DIR/venv" || return
         VENV_SNAPSHOT=1
     fi
@@ -965,6 +1143,12 @@ restore_service_runtime() {
         fi
     done
     for unit in "${ROLLBACK_SERVICE_UNITS[@]}"; do
+        if [ "$unit" = finance-radar-backup.service ] && \
+           [ "$BACKUP_SERVICE_OWNED" -eq 0 ] && \
+           systemctl is-active --quiet finance-radar-backup.service; then
+            printf 'rollback_preserved_unowned_backup_service=1\n' >&2
+            continue
+        fi
         if grep -Fqx -- "$unit" "$ROLLBACK_ACTIVE_UNITS"; then
             systemctl start "$unit" || printf 'rollback_warning=active_restore_failed unit=%s\n' "$unit" >&2
         else
@@ -1659,6 +1843,60 @@ clear_worker_resume_inhibit() {
     printf 'worker_resume_inhibit=CLEARED path=%s\n' "$WORKER_RESUME_INHIBIT"
 }
 
+inhibit_scheduled_backup_start() {
+    local runtime_dir
+    runtime_dir="$(dirname "$BACKUP_START_INHIBIT")"
+    [ ! -e "$BACKUP_START_INHIBIT" ] && [ ! -L "$BACKUP_START_INHIBIT" ] || {
+        printf 'backup start inhibit marker already exists: %s\n' "$BACKUP_START_INHIBIT" >&2
+        return 1
+    }
+    install -d -m 0750 -o root -g root "$runtime_dir" || return 1
+    install -m 0600 -o root -g root /dev/null "$BACKUP_START_INHIBIT" || return 1
+    printf 'release=%s\npid=%s\npurpose=timer-stop-stabilization\n' "$RELEASE_ID" "$$" \
+        > "$BACKUP_START_INHIBIT" || return 1
+    BACKUP_START_INHIBIT_CREATED=1
+    printf 'backup_start_inhibit=READY path=%s\n' "$BACKUP_START_INHIBIT"
+}
+
+clear_scheduled_backup_start_inhibit() {
+    [ "$BACKUP_START_INHIBIT_CREATED" -eq 1 ] || return 0
+    [ -f "$BACKUP_START_INHIBIT" ] && [ ! -L "$BACKUP_START_INHIBIT" ] || {
+        printf 'backup start inhibit marker is missing or unsafe\n' >&2
+        return 1
+    }
+    rm -f -- "$BACKUP_START_INHIBIT" || return 1
+    BACKUP_START_INHIBIT_CREATED=0
+    printf 'backup_start_inhibit=CLEARED path=%s\n' "$BACKUP_START_INHIBIT"
+}
+
+assert_backup_service_quiescent() {
+    local attempt state jobs
+    for attempt in 1 2; do
+        state="$(systemctl show finance-radar-backup.service --property=ActiveState --value)" || return 1
+        jobs="$(systemctl list-jobs --no-legend --plain 2>/dev/null | \
+            awk '$2 == "finance-radar-backup.service" { print $0 }')" || return 1
+        case "$state" in
+            inactive|failed) ;;
+            *)
+                printf 'backup service is not quiescent: state=%s\n' "$state" >&2
+                return 1
+                ;;
+        esac
+        [ -z "$jobs" ] || {
+            printf 'backup service still has a queued systemd job: %s\n' "$jobs" >&2
+            return 1
+        }
+        [ "$attempt" -eq 2 ] || sleep 1
+    done
+    systemctl reset-failed finance-radar-backup.service 2>/dev/null || true
+    state="$(systemctl show finance-radar-backup.service --property=ActiveState --value)" || return 1
+    [ "$state" = inactive ] || {
+        printf 'backup service did not settle inactive: state=%s\n' "$state" >&2
+        return 1
+    }
+    printf 'backup_service_quiescent=PASS\n'
+}
+
 preserve_failed_predeploy_backup_hold() {
     local failed_root failure_phase
     [ -n "$PREDEPLOY_HOLD_ROOT" ] && [ -d "$PREDEPLOY_HOLD_ROOT" ] || return 0
@@ -1688,10 +1926,15 @@ rollback() {
     set +e
     printf 'cutover_failed=1; restoring previous release and configuration\n' >&2
     if [ "$SERVICES_TOUCHED" -eq 1 ]; then
-        systemctl stop finance-radar-evidence-llm finance-radar-backup.service \
+        systemctl stop finance-radar-evidence-llm \
             finance-radar-worker finance-radar-api finance-radar-web finance-radar-backup.timer \
             2>/dev/null || true
+        if [ "$BACKUP_SERVICE_OWNED" -eq 1 ]; then
+            systemctl stop finance-radar-backup.service 2>/dev/null || true
+        fi
     fi
+    clear_scheduled_backup_start_inhibit || \
+        printf 'rollback_warning=backup_start_inhibit_cleanup_failed\n' >&2
     clear_worker_resume_inhibit || \
         printf 'rollback_warning=worker_resume_inhibit_cleanup_failed\n' >&2
     if [ "$CUTOVER_STARTED" -eq 1 ]; then
@@ -1739,6 +1982,10 @@ abort_cutover() {
     rollback "$status"
 }
 
+if systemctl is-active --quiet finance-radar-backup.service; then
+    printf 'daily backup is already active; retry deployment after it finishes\n' >&2
+    exit 4
+fi
 snapshot_rollback_state || {
     snapshot_status=$?
     if [[ "$ROLLBACK_DIR" == /var/tmp/finance-radar-install-* ]]; then
@@ -1754,21 +2001,47 @@ SERVICES_TOUCHED=1
 # timer before it can race the inventory, then retain that stopped state until
 # the new complete bundle has passed its outer receipt. The rollback snapshot
 # above restores the exact previous active/enabled state on failure.
+inhibit_scheduled_backup_start || \
+    abort_cutover 'unable to inhibit scheduled backup start during timer stop' 4
+systemctl stop finance-radar-backup.timer || \
+    abort_cutover 'backup timer failed to stop before protected bridge backup' 4
+if ! assert_backup_service_quiescent; then
+    # The timer raced our stop. Do not terminate a valid 90-minute restore
+    # drill: no workload or release state has changed yet, so restore the timer
+    # and leave the candidate staged for a later retry.
+    clear_scheduled_backup_start_inhibit || \
+        abort_cutover 'daily backup raced cutover and its start inhibit could not be cleared' 4
+    systemctl start finance-radar-backup.timer || \
+        abort_cutover 'daily backup raced cutover and its timer could not be restored' 4
+    systemctl is-active --quiet finance-radar-backup.timer || \
+        abort_cutover 'daily backup raced cutover and its timer remains inactive' 4
+    [[ "$ROLLBACK_DIR" == /var/tmp/finance-radar-install-* ]] && rm -rf -- "$ROLLBACK_DIR"
+    printf 'daily backup raced the timer stop; retry deployment after it finishes\n' >&2
+    exit 4
+fi
+clear_scheduled_backup_start_inhibit || \
+    abort_cutover 'backup timer stopped but its start inhibit could not be cleared' 4
 inhibit_worker_resume || \
     abort_cutover 'unable to inhibit worker resume during protected bridge backup' 4
 systemctl stop finance-radar-worker || \
     abort_cutover 'worker failed to stop before protected bridge backup' 4
 systemctl is-active --quiet finance-radar-worker && \
     abort_cutover 'worker remains active before protected bridge backup' 4
-systemctl stop finance-radar-backup.timer || \
-    abort_cutover 'backup timer failed to stop before protected bridge backup' 4
 systemctl stop finance-radar-evidence-llm.service 2>/dev/null || true
-require_predeploy_memory_headroom || \
-    abort_cutover 'insufficient host memory for protected bridge backup' 4
-require_predeploy_verified_backup || \
-    abort_cutover 'predeploy backup service or receipt validation failed' 4
-create_predeploy_backup_hold || \
-    abort_cutover 'unable to create an independent predeploy recovery hold before cutover' 4
+if [ "$DEPLOY_MODE" = full ]; then
+    require_predeploy_memory_headroom || \
+        abort_cutover 'insufficient host memory for protected bridge backup' 4
+    require_predeploy_verified_backup || \
+        abort_cutover 'predeploy backup service or receipt validation failed' 4
+    create_predeploy_backup_hold || \
+        abort_cutover 'unable to create an independent predeploy recovery hold before cutover' 4
+else
+    # Validate only after both the timer and any in-flight backup service are
+    # stopped.  Retention=1 can otherwise replace the attested bundle between
+    # the early preflight and the actual cutover.
+    require_recent_verified_backup_record || \
+        abort_cutover 'code-only recovery precondition failed; rerun the verified daily backup or use full deployment' 4
+fi
 
 if [ -f "$BASE/current/.env" ]; then
     install -m 0640 -o root -g finance-radar "$BASE/current/.env" "$RELEASE/.env"
@@ -1799,16 +2072,20 @@ if ! grep -Eq "^[[:space:]]*listen[[:space:]]+$PUBLIC_EDGE_PORT[[:space:]]+ssl;"
     abort_cutover "public Web port does not match the versioned Nginx candidate" 4
 fi
 
-if [ ! -x "$BASE/venv/bin/python" ]; then
-    VENV_CREATED=1
-    python3 -m venv "$BASE/venv"
+if [ "$DEPLOY_MODE" = full ]; then
+    if [ ! -x "$BASE/venv/bin/python" ]; then
+        VENV_CREATED=1
+        python3 -m venv "$BASE/venv"
+    fi
+    "$BASE/venv/bin/python" -m pip install --upgrade pip
+    "$BASE/venv/bin/python" -m pip install --require-hashes -r "$RELEASE/requirements.lock"
+    # pip runs as root during installation. With the deployment umask, newly
+    # installed packages would otherwise be unreadable to the unprivileged
+    # service account and could silently force the model into its fallback.
+    chown -R finance-radar:finance-radar "$BASE/venv"
+else
+    "$BASE/venv/bin/python" -m pip check
 fi
-"$BASE/venv/bin/python" -m pip install --upgrade pip
-"$BASE/venv/bin/python" -m pip install --require-hashes -r "$RELEASE/requirements.lock"
-# pip runs as root during installation. With the deployment umask, newly
-# installed packages would otherwise be unreadable to the unprivileged service
-# account and could silently force the model into its fallback path.
-chown -R finance-radar:finance-radar "$BASE/venv"
 runuser -u finance-radar -- "$BASE/venv/bin/python" -c \
     'import sklearn, sklearn.pipeline; assert sklearn.__version__ == "1.8.0"'
 grant_public_web_runtime_access || \
@@ -1933,6 +2210,8 @@ if [ -f /etc/systemd/system/finance-radar-worker.service.d/telegram-send.conf ];
 fi
 install_backup_quiesce_wrapper || \
     abort_cutover 'candidate backup quiesce wrapper could not be installed' 4
+install -d -m 0700 -o root -g root "$RECOVERY_HOLD_PARENT" || \
+    abort_cutover 'root backup attestation directory could not be prepared' 4
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-backup.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-backup.timer" /etc/systemd/system/
 if [ -f "$RELEASE/deployment/systemd/finance-radar-evidence-llm.service" ]; then
@@ -1984,7 +2263,7 @@ systemctl enable finance-radar-api finance-radar-overview-snapshot.service \
     finance-radar-overview-snapshot.timer finance-radar-web finance-radar-worker \
     finance-radar-backup.timer
 systemctl restart finance-radar-api finance-radar-web
-systemctl start finance-radar-overview-snapshot.timer finance-radar-backup.timer
+systemctl start finance-radar-overview-snapshot.timer
 
 wait_for_url() {
     local url="$1"
@@ -2120,7 +2399,7 @@ wait_for_url http://127.0.0.1:18000/api/v1/overview || \
     abort_cutover 'published overview is unavailable after activation' 6
 wait_for_url http://127.0.0.1:18501/radar/_stcore/health || \
     abort_cutover 'public Web loopback health check failed after activation' 6
-systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-backup.timer
+systemctl is-active --quiet finance-radar-api finance-radar-web
 systemctl is-active --quiet finance-radar-overview-snapshot.timer
 test "$(systemctl show finance-radar-overview-snapshot.service -p Result --value)" = success || \
     abort_cutover 'overview snapshot service did not finish successfully' 6
@@ -2171,11 +2450,18 @@ done
 # Do not mark this release active until the newly installed backup service has
 # emitted a complete, two-database recovery bundle and that bundle has passed
 # its independent manifest, restore and audit-consistency checks.
-require_postcutover_verified_backup || \
-    abort_cutover 'postcutover full recovery backup validation failed after activation' 6
+if [ "$DEPLOY_MODE" = full ]; then
+    require_postcutover_verified_backup || \
+        abort_cutover 'postcutover full recovery backup validation failed after activation' 6
+    RECOVERY_BASIS=new_verified_full
+    POSTDEPLOY_FULL_BUNDLE_STATUS=VERIFIED
+else
+    RECOVERY_BASIS=reused_verified_daily
+    POSTDEPLOY_FULL_BUNDLE_STATUS=REUSED_VERIFIED_DAILY
+fi
 systemctl start finance-radar-worker || \
     abort_cutover 'worker failed to start after the protected postcutover backup' 6
-systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer || \
+systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker || \
     abort_cutover 'required services are not active after protected postcutover backup' 6
 systemctl is-active --quiet finance-radar-overview-snapshot.timer || \
     abort_cutover 'overview snapshot timer is not active after protected postcutover backup' 6
@@ -2187,21 +2473,60 @@ if systemctl is-active --quiet finance-radar-evidence-llm.service || \
 fi
 clear_worker_resume_inhibit || \
     abort_cutover 'worker resumed but protected-cutover inhibit marker could not be cleared' 6
-clear_predeploy_backup_hold || \
-    abort_cutover 'final service checks passed but predeploy hold cleanup failed' 6
+
+# Keep the persistent daily timer stopped throughout validation and the
+# explicit post-cutover backup.  Starting it only after the recovery point,
+# public edge and worker are settled prevents retention=1 from racing the
+# activation transaction.  If a scheduled run became due while stopped,
+# systemd may launch it asynchronously now as the normal daily job.
+systemctl start finance-radar-backup.timer || \
+    abort_cutover 'daily backup timer failed to resume after activation checks' 6
+systemctl is-active --quiet finance-radar-backup.timer || \
+    abort_cutover 'daily backup timer is not active after activation checks' 6
 
 install -d -m 0750 -o root -g finance-radar "$RELEASE_RECORDS"
-install -m 0640 -o root -g finance-radar /dev/null "$RELEASE_RECORDS/ACTIVATION.txt"
-printf 'release=%s\nprevious_release=%s\npublic_web=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_format=%s\npredeploy_backup_receipt_sha256=%s\npostdeploy_backup_snapshot_id=%s\npostdeploy_backup_manifest_sha256=%s\npostdeploy_full_bundle=VERIFIED\nservices=active\nnginx_edge=PASS\n' \
+ACTIVATION_PENDING="$RELEASE_RECORDS/.ACTIVATION.pending.$$"
+[ ! -e "$RELEASE_RECORDS/ACTIVATION.txt" ] && \
+    [ ! -L "$RELEASE_RECORDS/ACTIVATION.txt" ] || \
+    abort_cutover 'activation record target already exists or is unsafe' 6
+[ ! -e "$ACTIVATION_PENDING" ] && [ ! -L "$ACTIVATION_PENDING" ] || \
+    abort_cutover 'activation pending record path is unsafe' 6
+install -m 0640 -o root -g finance-radar /dev/null "$ACTIVATION_PENDING"
+printf 'release=%s\nprevious_release=%s\npublic_web=%s\ndeploy_mode=%s\nrecovery_basis=%s\npredeploy_backup_run_id=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_format=%s\npredeploy_backup_receipt_sha256=%s\npostdeploy_backup_run_id=%s\npostdeploy_backup_snapshot_id=%s\npostdeploy_backup_manifest_sha256=%s\npostdeploy_full_bundle=%s\nservices=active\nnginx_edge=PASS\n' \
     "$RELEASE_ID" "${PREVIOUS_RELEASE:-none}" "$PUBLIC_WEB_URL" \
+    "$DEPLOY_MODE" "$RECOVERY_BASIS" \
+    "${PREDEPLOY_BACKUP_RUN_ID:-not-recorded}" \
     "$PREDEPLOY_BACKUP_ID" "$PREDEPLOY_BACKUP_KIND" "$PREDEPLOY_BACKUP_RECEIPT_SHA256" \
-    "$POSTDEPLOY_BACKUP_ID" "$POSTDEPLOY_BACKUP_MANIFEST_SHA256" \
-    > "$RELEASE_RECORDS/ACTIVATION.txt"
+    "${POSTDEPLOY_BACKUP_RUN_ID:-not-recorded}" \
+    "$POSTDEPLOY_BACKUP_ID" "$POSTDEPLOY_BACKUP_MANIFEST_SHA256" "$POSTDEPLOY_FULL_BUNDLE_STATUS" \
+    > "$ACTIVATION_PENDING"
+# The atomic rename is the deployment commit point. Before it, every failure
+# rolls back and the protected hold remains. Afterwards, failure to delete the
+# now-redundant hold is safe housekeeping: retain the extra recovery copy and
+# report it, but never leave a rolled-back release carrying activation=PASS.
+mv -f -- "$ACTIVATION_PENDING" "$RELEASE_RECORDS/ACTIVATION.txt" || \
+    abort_cutover 'atomic activation record commit failed' 6
+[ -f "$RELEASE_RECORDS/ACTIVATION.txt" ] && \
+    [ ! -L "$RELEASE_RECORDS/ACTIVATION.txt" ] && \
+    grep -Fx "release=$RELEASE_ID" "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null && \
+    grep -Fx 'services=active' "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null || {
+        rm -f -- "$RELEASE_RECORDS/ACTIVATION.txt" || true
+        abort_cutover 'committed activation record failed validation' 6
+    }
 trap - ERR
+if [ "$DEPLOY_MODE" = full ]; then
+    if ! clear_predeploy_backup_hold; then
+        printf 'activation_warning=predeploy_hold_cleanup_failed retained=%s\n' \
+            "${PREDEPLOY_HOLD_ROOT:-unknown}" >&2
+    fi
+fi
 [[ "$ROLLBACK_DIR" == /var/tmp/finance-radar-install-* ]] || exit 70
 rm -rf -- "$ROLLBACK_DIR"
 
-printf 'activation=PASS\nrelease=%s\nprevious_release=%s\npublic_web=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_format=%s\npredeploy_backup_receipt_sha256=%s\npostdeploy_backup_snapshot_id=%s\npostdeploy_backup_manifest_sha256=%s\npostdeploy_full_bundle=VERIFIED\nnginx_edge=PASS\n' \
+printf 'activation=PASS\nrelease=%s\nprevious_release=%s\npublic_web=%s\ndeploy_mode=%s\nrecovery_basis=%s\npredeploy_backup_run_id=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_format=%s\npredeploy_backup_receipt_sha256=%s\npostdeploy_backup_run_id=%s\npostdeploy_backup_snapshot_id=%s\npostdeploy_backup_manifest_sha256=%s\npostdeploy_full_bundle=%s\nnginx_edge=PASS\n' \
     "$RELEASE" "${PREVIOUS_RELEASE:-none}" "$PUBLIC_WEB_URL" \
+    "$DEPLOY_MODE" "$RECOVERY_BASIS" \
+    "${PREDEPLOY_BACKUP_RUN_ID:-not-recorded}" \
     "$PREDEPLOY_BACKUP_ID" "$PREDEPLOY_BACKUP_KIND" "$PREDEPLOY_BACKUP_RECEIPT_SHA256" \
-    "$POSTDEPLOY_BACKUP_ID" "$POSTDEPLOY_BACKUP_MANIFEST_SHA256"
+    "${POSTDEPLOY_BACKUP_RUN_ID:-not-recorded}" \
+    "$POSTDEPLOY_BACKUP_ID" "$POSTDEPLOY_BACKUP_MANIFEST_SHA256" "$POSTDEPLOY_FULL_BUNDLE_STATUS"

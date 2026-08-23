@@ -558,8 +558,11 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
                 headers={"X-Reviewer-Token": "review-secret"},
             )
         assert response.status_code == 200
-        assert response.json()["data"]["total"] == 1
-        assert response.json()["data"]["reader_ready"] is True
+        # Public browsing contains every canonical event. Evidentiary readiness
+        # remains visible per item and may only be used as an authenticated
+        # reviewer filter; it is no longer a public visibility switch.
+        assert response.json()["data"]["total"] == 20
+        assert response.json()["data"]["reader_ready"] is None
         public_event_keys = {
             "event_id",
             "current_version",
@@ -583,6 +586,8 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
             "known_at",
             "reader_ready",
             "no_trading",
+            "unverified_capture_excerpt",
+            "summary_basis",
         }
         assert set(response.json()["data"]["items"][0]) == public_event_keys
         assert api_overview.status_code == 200
@@ -592,12 +597,12 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
         assert "manual_grade" not in response.json()["data"]["items"][0]
         assert "label_status" not in response.json()["data"]["items"][0]
         assert bypass_attempt.status_code == 200
-        assert bypass_attempt.json()["data"]["total"] == 1
-        assert bypass_attempt.json()["data"]["reader_ready"] is True
-        assert invalid_credential.json()["data"]["total"] == 1
-        assert invalid_credential.json()["data"]["reader_ready"] is True
+        assert bypass_attempt.json()["data"]["total"] == 20
+        assert bypass_attempt.json()["data"]["reader_ready"] is None
+        assert invalid_credential.json()["data"]["total"] == 20
+        assert invalid_credential.json()["data"]["reader_ready"] is None
         assert facet_response.status_code == 200
-        assert facet_response.json()["data"]["reader_ready"] is True
+        assert facet_response.json()["data"]["reader_ready"] is None
         assert visible_detail.status_code == 200
         public_detail = visible_detail.json()["data"]
         assert set(public_detail) == {
@@ -655,7 +660,16 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
         assert "observation_id" not in visible_evidence.json()["data"]["items"][0]
         assert "evidence_fingerprint" not in visible_evidence.json()["data"]["items"][0]
         assert "auto_verification_allowed" not in visible_evidence.json()["data"]["items"][0]
-        assert all(response.status_code == 404 for response in hidden_public.values())
+        assert all(response.status_code == 200 for response in hidden_public.values())
+        assert hidden_public[
+            "/api/v1/events/rough-insufficient-00/evidence"
+        ].json()["data"]["items"] == []
+        hidden_detail = hidden_public[
+            "/api/v1/events/rough-insufficient-00"
+        ].json()["data"]
+        assert hidden_detail["event"]["reader_ready"] == 0
+        assert "market_jobs" not in hidden_detail
+        assert "assessment" not in hidden_detail
         assert protected_timeline.status_code == 403
         assert admin_all.status_code == 200
         assert admin_all.json()["data"]["total"] == 20
@@ -724,6 +738,93 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
         assert deleted["reader_eligible"] == 0
 
 
+def test_unready_public_event_never_promotes_private_fact_fallbacks() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        ledger_path = _populated_ledger(root)
+        connection = open_ledger(ledger_path)
+        captured_at = "2026-08-05T00:00:00+00:00"
+        private_fact = "REVIEWER_PRIVATE_FACT_DO_NOT_PUBLISH"
+        private_evidence = "INTERNAL_DETECTOR_REASON_DO_NOT_PUBLISH"
+        raw_marker = "RAW_JSON_DO_NOT_PUBLISH"
+        captured_excerpt = (
+            "The source API reported a filing-related discovery item that still "
+            "requires independent verification."
+        )
+        connection.execute(
+            """INSERT INTO event_versions VALUES (
+               'rough-insufficient-00',1,?,'candidate','candidate','regulatory',
+               'filing',NULL,?,'seed')""",
+            (
+                captured_at,
+                json.dumps(
+                    {
+                        "fact_summary": private_fact,
+                        "evidence_summary": private_evidence,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+        connection.execute(
+            """INSERT INTO raw_observations(
+               observation_id,source_id,external_id,source_published_at,local_received_at,
+               title,summary,canonical_url,content_sha256,raw_json,observation_status
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "unready-public-capture",
+                "src",
+                "unready-public-external",
+                captured_at,
+                captured_at,
+                "Captured source headline",
+                captured_excerpt,
+                "https://example.test/captured-source",
+                "a" * 64,
+                json.dumps({"private": raw_marker}),
+                "captured",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO event_observations VALUES (?,?,?,?)",
+            (
+                "rough-insufficient-00",
+                "unready-public-capture",
+                "primary",
+                captured_at,
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+        application = create_app(_settings(root, ledger_path))
+        with TestClient(application) as client:
+            feed = client.get(
+                "/api/v1/events", params={"q": "rough-insufficient-00"}
+            )
+            detail = client.get("/api/v1/events/rough-insufficient-00")
+            dossier = client.get("/api/v1/events/rough-insufficient-00/dossier")
+
+        assert feed.status_code == detail.status_code == dossier.status_code == 200
+        feed_item = feed.json()["data"]["items"][0]
+        detail_data = detail.json()["data"]
+        dossier_data = dossier.json()["data"]
+        assert feed_item["public_fact_summary"] is None
+        assert feed_item["unverified_capture_excerpt"] == captured_excerpt
+        assert feed_item["summary_basis"] == "UNVERIFIED_CAPTURE_EXCERPT"
+        assert detail_data["event"]["unverified_capture_excerpt"] == captured_excerpt
+        assert detail_data["event"]["summary_basis"] == "UNVERIFIED_CAPTURE_EXCERPT"
+        assert detail_data["current_version"]["facts"] == {}
+        assert dossier_data["detail"] == detail_data
+        public_payload = json.dumps(
+            {"feed": feed.json(), "detail": detail.json(), "dossier": dossier.json()},
+            ensure_ascii=False,
+        )
+        assert private_fact not in public_payload
+        assert private_evidence not in public_payload
+        assert raw_marker not in public_payload
+
+
 def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -784,6 +885,7 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
             interpretations = client.get(
                 "/api/v1/events/excluded-0/source-interpretations"
             )
+            dossier = client.get("/api/v1/events/excluded-0/dossier")
             public_mutation = client.post(
                 "/api/v1/events/excluded-0/sources/excluded-capture/interpret",
                 json={"audit_write_confirmed": True},
@@ -808,13 +910,13 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
             )
 
         assert default_feed.status_code == 200
-        assert all(
-            item["event_id"] != "excluded-0"
+        assert any(
+            item["event_id"] == "excluded-0"
             for item in default_feed.json()["data"]["items"]
         )
         assert archive_feed.status_code == 200
         assert archive_feed.json()["data"]["reader_ready"] is None
-        assert archive_feed.json()["data"]["captured_source_required"] is True
+        assert archive_feed.json()["data"]["captured_source_required"] is False
         assert [
             item["event_id"] for item in archive_feed.json()["data"]["items"]
         ] == ["excluded-0"]
@@ -876,6 +978,25 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
             "no_trading": True,
         }
         assert len(interpretation_data["items"]) == 1
+        assert dossier.status_code == 200
+        dossier_data = dossier.json()["data"]
+        assert dossier_data["detail"] == detail.json()["data"]
+        assert dossier_data["evidence"] == evidence.json()["data"]
+        assert dossier_data["sources"] == public_sources
+        assert dossier_data["source_interpretations"]["contract"] == interpretation_data[
+            "contract"
+        ]
+        assert dossier_data["source_interpretations"]["items"][0]["one_line_zh"] == (
+            interpretation_data["items"][0]["one_line_zh"]
+        )
+        assert dossier_data["contract"] == {
+            "public_projection": True,
+            "consistency_scope": "bounded_multi_read_best_effort",
+            "no_trading": True,
+        }
+        dossier_payload = json.dumps(dossier_data, ensure_ascii=False)
+        assert "MUST_NOT_LEAK" not in dossier_payload
+        assert "market_jobs" not in dossier_payload
         preview = interpretation_data["items"][0]
         assert preview["mode"] == "DETERMINISTIC"
         assert preview["persisted"] is False
@@ -901,7 +1022,8 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
         assert len(rows) == 1
         assert rows[0]["canonical_mutation_allowed"] == 0
         assert rows[0]["no_trading"] == 1
-        assert hidden_without_capture.status_code == 404
+        assert hidden_without_capture.status_code == 200
+        assert hidden_without_capture.json()["data"]["event"]["reader_ready"] == 0
         assert internal_sources.status_code == 200
         assert "raw_json" in internal_sources.json()["data"]["items"][0]
 

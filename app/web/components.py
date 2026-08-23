@@ -720,11 +720,7 @@ def public_event_fact_summary(item: dict[str, Any]) -> tuple[str, str]:
         facts = {}
     candidates = (
         ("结构化事实摘要", item.get("public_fact_summary")),
-        ("结构化事实摘要", item.get("fact_summary")),
-        ("结构化事实摘要", item.get("evidence_summary")),
         ("结构化事实摘要", facts.get("public_fact_summary")),
-        ("结构化事实摘要", facts.get("fact_summary")),
-        ("结构化事实摘要", facts.get("evidence_summary")),
     )
     for provenance, value in candidates:
         summary = _bounded_public_text(value)
@@ -825,6 +821,7 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
     authority = str(item.get("credibility_tier") or "P?")
     authority_label = PUBLIC_AUTHORITY_LABELS.get(authority, "来源待核实")
     fact_summary, fact_provenance = public_event_fact_summary(item)
+    capture_excerpt = _bounded_public_text(item.get("unverified_capture_excerpt"))
     state_suffixes = {
         "verified": "账本状态为已核验，但当前缺少可公开复述的结构化事实摘要。",
         "excluded": "当前线索已排除，不作为有效事实结论。",
@@ -842,6 +839,17 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
         }[state]
         separator = " " if fact_summary[-1:] in {"。", "！", "？", ".", "!", "?"} else "。"
         summary = f"{fact_provenance}：{fact_summary}{separator}{state_suffix}"
+    elif capture_excerpt:
+        separator = (
+            " "
+            if capture_excerpt[-1:] in {"。", "！", "？", ".", "!", "?"}
+            else "。"
+        )
+        summary = (
+            f"未核验来源节选：{capture_excerpt}{separator}"
+            "该节选只说明系统采集到了什么，不是正式事件事实。"
+        )
+        fact_provenance = "未核验来源节选"
     else:
         summary = (
             f"目前只记录到{subject}的一条“{family}”分类线索；"

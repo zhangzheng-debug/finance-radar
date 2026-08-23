@@ -161,6 +161,29 @@ def test_public_event_copy_never_promotes_raw_english_boilerplate() -> None:
     assert "正式证据核验" in copy["summary"]
 
 
+def test_public_event_copy_labels_capture_excerpt_and_ignores_private_fallbacks() -> None:
+    copy = public_event_copy(
+        {
+            "status": "candidate",
+            "public_state": "pending_verification",
+            "event_family": "listing_status",
+            "company_name": "Example Ltd.",
+            "facts": {
+                "fact_summary": "REVIEWER_PRIVATE_FACT",
+                "evidence_summary": "INTERNAL_DETECTOR_REASON",
+            },
+            "unverified_capture_excerpt": "The source API reported a listing item.",
+        }
+    )
+
+    assert copy["summary_provenance"] == "未核验来源节选"
+    assert "未核验来源节选" in copy["summary"]
+    assert "不是正式事件事实" in copy["summary"]
+    assert "The source API reported a listing item" in copy["summary"]
+    assert "REVIEWER_PRIVATE_FACT" not in copy["summary"]
+    assert "INTERNAL_DETECTOR_REASON" not in copy["summary"]
+
+
 def test_public_event_copy_prefers_structured_fact_and_keeps_state_boundary() -> None:
     copy = public_event_copy(
         {
@@ -169,7 +192,7 @@ def test_public_event_copy_prefers_structured_fact_and_keeps_state_boundary() ->
             "event_family": "listing_status",
             "company_name": "Example Ltd.",
             "facts": {
-                "evidence_summary": "交易所公告称该公司收到上市合规通知。",
+                "public_fact_summary": "交易所公告称该公司收到上市合规通知。",
             },
             "evidence_excerpt": "UNRELATED RAW ENGLISH EXCERPT",
         }
@@ -209,7 +232,7 @@ def test_public_event_quality_requires_subject_fact_and_citable_passage() -> Non
     event = {
         "company_name": "Example Ltd.",
         "facts": {
-            "evidence_summary": "交易所公告称该公司收到上市合规通知并说明了整改期限。",
+            "public_fact_summary": "交易所公告称该公司收到上市合规通知并说明了整改期限。",
             "claim_subject": "Example Ltd.",
             "claim_action": "listing_compliance_notice",
             "claim_stage": "DISCLOSED",

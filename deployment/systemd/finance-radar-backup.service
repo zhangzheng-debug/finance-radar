@@ -45,4 +45,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/finance-radar/shared/data
+ReadWritePaths=/opt/finance-radar/shared/data /var/lib/finance-radar

@@ -117,7 +117,7 @@ def _fake_api(path: str, **_kwargs: Any) -> dict[str, Any]:
             "event": event,
             "current_version": {
                 "facts": {
-                    "evidence_summary": event["evidence_excerpt"],
+                    "public_fact_summary": event["evidence_excerpt"],
                     "claim_subject": "Example Holdings",
                     "claim_action": "sec_litigation_release",
                     "claim_stage": "DISCLOSED",
@@ -143,9 +143,10 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert not page.exception
     assert "事件浏览" in rendered
     assert "Example Holdings" in rendered
-    assert "可核验事件队列" in rendered
-    assert "另有 5 条历史或发现记录未达到公开可读标准" in rendered
-    assert "先看证据是否足够" in rendered
+    assert "事件可见性与证据层级" in rendered
+    assert "账本中的 12 条事件现在全部可以浏览" in rendered
+    assert "5 条尚未达到正式引用条件" in rendered
+    assert "全部事件，分级展示" in rendered
     assert "证据路径" not in rendered
     assert "UTC" in rendered
     assert any(item.label == "搜索事件" for item in page.text_input)
@@ -155,10 +156,10 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert "已粗审" in rendered
     assert "最近成功采集" in rendered
     assert "最近发现新事件" in rendered
-    assert "公开可读" in rendered
-    assert "7 / 12" in rendered
-    assert "待恢复 / 补证" in rendered
-    assert "历史标签、证据不足和待核验记录" in rendered
+    assert "事件总量" in rendered
+    assert "正式可引用 / 待补证" in rendered
+    assert "7 / 5" in rendered
+    assert "全部规范事件均可浏览" in rendered
     assert "实时事件、原始证据与核验进度" not in rendered
     assert "正式处置状态" not in rendered
     assert "Schema" not in rendered
@@ -326,7 +327,7 @@ def test_public_inline_preview_bounds_long_source_text(monkeypatch) -> None:
         if parsed.path == "/api/v1/events/event-a/evidence":
             data["items"][0]["evidence_passage"] = "Z" * 1500
         elif parsed.path == "/api/v1/events/event-a":
-            data["current_version"]["facts"]["evidence_summary"] = "Y" * 800
+            data["current_version"]["facts"]["public_fact_summary"] = "Y" * 800
         return data
 
     monkeypatch.setattr(web_common, "UI_ROLE", "public")

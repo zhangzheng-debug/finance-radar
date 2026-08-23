@@ -102,8 +102,8 @@ def render_public_reading_prompt(event: dict[str, object], evidence: list[dict[s
         steps = ("查看最初捕获内容", "核对排除理由", "只有新增高权威材料时才重新判断")
         tone = "ok"
     elif not quality["reader_ready"]:
-        title = "这还不是一条可读事件"
-        reason = "当前只是一条发现线索：" + "、".join(quality["gaps"]) + "。"
+        title = "可以浏览，但还不能作为正式结论引用"
+        reason = "当前仍是一条待核验记录：" + "、".join(quality["gaps"]) + "。"
         steps = (
             "先确认是谁、做了什么以及处于哪个阶段",
             "找到监管、交易所或公司原始文件中的精确段落",
@@ -494,19 +494,14 @@ canonical_public_funnel = overview.get("public_funnel") or {
         int(event_status.get("candidate") or 0) - rough_reviewed,
     ),
 }
-public_funnel = overview.get("reader_funnel") or canonical_public_funnel
-reader_ready_count = max(0, int(public_funnel.get("total") or 0))
+public_funnel = canonical_public_funnel
+reader_funnel = overview.get("reader_funnel") or {}
+reader_ready_count = max(0, int(reader_funnel.get("total") or 0))
 canonical_inventory_count = max(
     reader_ready_count,
     int(canonical_public_funnel.get("total") or counts.get("canonical_events") or 0),
 )
-reader_hidden_inventory = max(
-    0,
-    int(
-        overview.get("reader_hidden_inventory", overview.get("discovery_backlog"))
-        or 0
-    ),
-)
+evidence_gap_inventory = max(0, canonical_inventory_count - reader_ready_count)
 timing = overview.get("timing", {})
 event_age = timing.get("latest_new_event_age_seconds", timing.get("latest_event_age_seconds"))
 worker_age = timing.get("latest_worker_success_age_seconds")
@@ -521,48 +516,33 @@ if UI_ROLE == "admin":
     )
     attention_sources = source_watch + source_error
 
-review_queue = int(
-    (
-        overview.get("review_queue")
-        if UI_ROLE == "admin"
-        else overview.get("reader_review_queue", overview.get("review_queue"))
-    )
-    or 0
-)
-if review_queue:
-    brief_copy = f"有 {review_queue:,} 条可读事件仍在等待证据或规则核验。"
-    brief_copy += (
-        "先在当前页预览证据与下一步行动，需要完整工具时再进入人工复核。"
-        if UI_ROLE == "admin"
-        else "你可以先看原始证据与上下文，不必把未闭合的信息当成确定事实。"
-    )
-else:
-    brief_copy = (
-        "当前没有等待复核的事件。可以浏览最新事件流，或按需展开运行健康与来源状态。"
-        if UI_ROLE == "admin"
-        else "当前没有满足公共阅读门槛、同时仍等待核验的事件。"
-    )
-if UI_ROLE != "admin" and reader_hidden_inventory:
-    brief_copy += (
-        f"另有 {reader_hidden_inventory:,} 条历史或发现记录尚未达到公开可读标准，"
-        "已与当前事件流分开。"
-    )
-situation_brief(
-    "先看需要判断的事件" if UI_ROLE == "admin" else "先看证据是否足够",
-    brief_copy,
-    focus_label="当前优先级",
-    focus_value=(
-        f"{review_queue:,} {'待复核' if UI_ROLE == 'admin' else '待核验'}"
-        if review_queue
-        else (
-            f"公开可读 {reader_ready_count:,}"
-            if UI_ROLE != "admin" and reader_hidden_inventory
-            else "队列已清"
+review_queue = int(overview.get("review_queue") or 0)
+if UI_ROLE != "admin":
+    brief_copy = f"账本中的 {canonical_inventory_count:,} 条事件现在全部可以浏览。"
+    if review_queue:
+        brief_copy += f"其中 {review_queue:,} 条仍在等待证据或规则核验。"
+    if evidence_gap_inventory:
+        brief_copy += (
+            f"另有 {evidence_gap_inventory:,} 条尚未达到正式引用条件；"
+            "它们会明确标注不确定性，不再从事件流中消失。"
         )
+elif review_queue:
+    brief_copy = f"有 {review_queue:,} 条可读事件仍在等待证据或规则核验。"
+    brief_copy += "先在当前页预览证据与下一步行动，需要完整工具时再进入人工复核。"
+else:
+    brief_copy = "当前没有等待复核的事件。可以浏览最新事件流，或按需展开运行健康与来源状态。"
+situation_brief(
+    "先看需要判断的事件" if UI_ROLE == "admin" else "全部事件，分级展示",
+    brief_copy,
+    focus_label="当前优先级" if UI_ROLE == "admin" else "当前可见性",
+    focus_value=(
+        f"{review_queue:,} 待复核"
+        if UI_ROLE == "admin" and review_queue
+        else ("队列已清" if UI_ROLE == "admin" else f"全部可浏览 {canonical_inventory_count:,}")
     ),
     focus_state=(
         "watch"
-        if review_queue or (UI_ROLE != "admin" and reader_hidden_inventory)
+        if review_queue or (UI_ROLE != "admin" and evidence_gap_inventory)
         else "ok"
     ),
 )
@@ -646,14 +626,14 @@ else:
         ("采集状态", collector_label, collector_state),
         ("最近成功采集", format_elapsed(worker_age), collector_state),
         (
-            "公开可读",
-            f"{reader_ready_count:,} / {canonical_inventory_count:,}",
-            "ok" if reader_ready_count else "watch",
+            "事件总量",
+            f"{canonical_inventory_count:,} 条",
+            "ok" if canonical_inventory_count else "watch",
         ),
         (
-            "待恢复 / 补证",
-            f"{reader_hidden_inventory:,} 条",
-            "watch" if reader_hidden_inventory else "ok",
+            "正式可引用 / 待补证",
+            f"{reader_ready_count:,} / {evidence_gap_inventory:,}",
+            "watch" if evidence_gap_inventory else "ok",
         ),
     ]
 status_strip(status_items)
@@ -661,8 +641,8 @@ if UI_ROLE != "admin":
     st.markdown(
         '<p class="public-health-explainer">'
         f'采集与核验是两条独立时间线（最近发现新事件：{escape(format_elapsed(event_age))} 前）。'
-        '“公开可读”只统计通过当前证据门槛的记录；历史标签、证据不足和待核验记录'
-        '都留在待恢复库存，不会伪装成正式结论。'
+        '全部规范事件均可浏览；“正式可引用”只统计通过严格证据条件的记录。'
+        '未核验、证据不足和历史记录会保留并明确分级，不会伪装成正式结论。'
         '</p>',
         unsafe_allow_html=True,
     )
@@ -691,7 +671,7 @@ if UI_ROLE != "admin":
     )
 try:
     facets, facets_cache = cached_api_get(
-        query_path("/api/v1/events/facets", reader_ready=True),
+        "/api/v1/events/facets",
         ttl_seconds=30,
         stale_if_error_seconds=300,
         timeout_seconds=5,
@@ -792,20 +772,28 @@ try:
             if period_days
             else None
         )
-        feed_result = api_request(
-            query_path(
+        feed_path = query_path(
                 "/api/v1/events",
                 public_state=public_state,
                 family=public_family,
                 source=public_source,
                 q=preview_query,
                 date_from=date_from,
-                reader_ready=True,
                 sort=public_sort,
                 limit=public_page_size,
                 offset=(public_page - 1) * public_page_size,
             )
+        feed_result, feed_cache = cached_api_get(
+            feed_path,
+            ttl_seconds=20,
+            stale_if_error_seconds=180,
+            timeout_seconds=20,
         )
+        if feed_cache.stale:
+            st.caption(
+                "事件流刷新失败；暂用 "
+                f"{format_elapsed(feed_cache.age_seconds)} 前的安全快照。"
+            )
     live_feed = list(feed_result.get("items") or [])
     live_total = int(feed_result.get("total") or 0)
     if UI_ROLE != "admin":
@@ -847,54 +835,118 @@ if preview_event_id:
         unsafe_allow_html=True,
     )
     try:
-        preview_detail = api_request(f"/api/v1/events/{preview_event_id}")
-        preview_evidence = sorted(
-            api_request(f"/api/v1/events/{preview_event_id}/evidence")["items"],
-            key=public_evidence_sort_key,
-        )
-        if UI_ROLE != "admin":
-            preview_evidence = [
-                item for item in preview_evidence if int(item.get("reader_eligible") or 0) == 1
-            ]
         preview_sources: list[dict[str, object]] = []
         preview_interpretations: list[dict[str, object]] = []
         preview_knowledge: dict[str, object] = {}
         preview_sources_error: Exception | None = None
         preview_interpretations_error: Exception | None = None
-        try:
-            knowledge_response = api_request(
-                f"/api/v1/events/{preview_event_id}/knowledge"
-            )
-            if isinstance(knowledge_response, dict):
-                preview_knowledge = knowledge_response
-        except Exception:
-            # Knowledge is explanatory and must not hide the underlying event.
-            preview_knowledge = {}
-        try:
-            source_response = api_request(
-                f"/api/v1/events/{preview_event_id}/sources"
-            )
-            source_items = source_response.get("items", [])
-            if isinstance(source_items, list):
-                preview_sources = [
-                    item for item in source_items if isinstance(item, dict)
-                ]
-        except Exception as exc:
-            # Discovery history is explanatory and must never turn an
-            # otherwise readable event detail into a total page failure.
-            preview_sources_error = exc
-        if preview_sources:
+        if UI_ROLE != "admin":
             try:
-                interpretation_response = api_request(
-                    f"/api/v1/events/{preview_event_id}/source-interpretations"
+                dossier = api_request(f"/api/v1/events/{preview_event_id}/dossier")
+            except Exception:
+                # Keep a compatibility path during rolling/local development;
+                # production releases expose the single-read dossier endpoint.
+                preview_detail = api_request(f"/api/v1/events/{preview_event_id}")
+                preview_evidence = sorted(
+                    api_request(f"/api/v1/events/{preview_event_id}/evidence")["items"],
+                    key=public_evidence_sort_key,
                 )
-                interpretation_items = interpretation_response.get("items", [])
+                try:
+                    knowledge_response = api_request(
+                        f"/api/v1/events/{preview_event_id}/knowledge"
+                    )
+                    if isinstance(knowledge_response, dict):
+                        preview_knowledge = knowledge_response
+                except Exception:
+                    preview_knowledge = {}
+                try:
+                    source_response = api_request(
+                        f"/api/v1/events/{preview_event_id}/sources"
+                    )
+                    source_items = source_response.get("items", [])
+                    if isinstance(source_items, list):
+                        preview_sources = [
+                            item for item in source_items if isinstance(item, dict)
+                        ]
+                except Exception as exc:
+                    preview_sources_error = exc
+                if preview_sources:
+                    try:
+                        interpretation_response = api_request(
+                            f"/api/v1/events/{preview_event_id}/source-interpretations"
+                        )
+                        interpretation_items = interpretation_response.get("items", [])
+                        if isinstance(interpretation_items, list):
+                            preview_interpretations = [
+                                item
+                                for item in interpretation_items
+                                if isinstance(item, dict)
+                            ]
+                    except Exception as exc:
+                        preview_interpretations_error = exc
+            else:
+                preview_detail = dossier.get("detail") or {}
+                preview_evidence = sorted(
+                    (dossier.get("evidence") or {}).get("items", []),
+                    key=public_evidence_sort_key,
+                )
+                knowledge_response = dossier.get("knowledge") or {}
+                if isinstance(knowledge_response, dict):
+                    preview_knowledge = knowledge_response
+                source_items = (dossier.get("sources") or {}).get("items", [])
+                if isinstance(source_items, list):
+                    preview_sources = [
+                        item for item in source_items if isinstance(item, dict)
+                    ]
+                interpretation_items = (
+                    dossier.get("source_interpretations") or {}
+                ).get("items", [])
                 if isinstance(interpretation_items, list):
                     preview_interpretations = [
                         item for item in interpretation_items if isinstance(item, dict)
                     ]
+            preview_evidence = [
+                item
+                for item in preview_evidence
+                if int(item.get("reader_eligible") or 0) == 1
+            ]
+        else:
+            preview_detail = api_request(f"/api/v1/events/{preview_event_id}")
+            preview_evidence = sorted(
+                api_request(f"/api/v1/events/{preview_event_id}/evidence")["items"],
+                key=public_evidence_sort_key,
+            )
+            try:
+                knowledge_response = api_request(
+                    f"/api/v1/events/{preview_event_id}/knowledge"
+                )
+                if isinstance(knowledge_response, dict):
+                    preview_knowledge = knowledge_response
+            except Exception:
+                preview_knowledge = {}
+            try:
+                source_response = api_request(
+                    f"/api/v1/events/{preview_event_id}/sources"
+                )
+                source_items = source_response.get("items", [])
+                if isinstance(source_items, list):
+                    preview_sources = [
+                        item for item in source_items if isinstance(item, dict)
+                    ]
             except Exception as exc:
-                preview_interpretations_error = exc
+                preview_sources_error = exc
+            if preview_sources:
+                try:
+                    interpretation_response = api_request(
+                        f"/api/v1/events/{preview_event_id}/source-interpretations"
+                    )
+                    interpretation_items = interpretation_response.get("items", [])
+                    if isinstance(interpretation_items, list):
+                        preview_interpretations = [
+                            item for item in interpretation_items if isinstance(item, dict)
+                        ]
+                except Exception as exc:
+                    preview_interpretations_error = exc
     except Exception as exc:
         render_api_error(exc)
     else:
@@ -1290,15 +1342,15 @@ elif UI_ROLE != "admin":
         st.rerun()
     active_state_label = PUBLIC_STATE_LABELS.get(public_state, "全部状态")
     st.markdown(
-        '<section class="queue-card queue-card-horizontal" aria-label="可核验事件队列">'
+        '<section class="queue-card queue-card-horizontal" aria-label="事件可见性与证据层级">'
         '<div>'
-        '<div class="queue-card-label">可核验事件队列</div>'
-        f'<div class="queue-card-value">{review_queue:,}</div>'
+        '<div class="queue-card-label">全部可浏览</div>'
+        f'<div class="queue-card-value">{canonical_inventory_count:,}</div>'
         '</div>'
         '<div class="queue-card-copy">'
-        '这里只统计已有明确主体、结构化事实摘要和可引用原文，但仍需补证或规则处理的记录。'
-        f'<div>另有 {reader_hidden_inventory:,} 条历史或发现记录未达到公开可读标准。</div>'
-        '<div class="queue-card-next">下一步 · 打开事件，先读中文结论，再核对原始证据</div>'
+        f'其中 {reader_ready_count:,} 条达到正式引用条件；'
+        f'{evidence_gap_inventory:,} 条仍是待核验、证据不足、粗审或历史记录。'
+        '<div class="queue-card-next">下一步 · 打开事件，先读中文说明，再核对捕获来源或原始证据</div>'
         '</div>'
         '</section>',
         unsafe_allow_html=True,

@@ -445,6 +445,16 @@ BACKUP_QUIESCE_WRAPPER="$BASE/current/deployment/systemd/run_backup_quiesced.sh"
 install -D -m 0750 -o root -g root \
     "$BACKUP_QUIESCE_WRAPPER" /usr/local/libexec/finance-radar/run_backup_quiesced.sh
 
+# The versioned backup unit writes its root-only verified-backup attestation
+# here.  A freshly restored host will not have the directory from the old
+# machine, so create it before systemd starts the backup timer.
+if [ -e /var/lib/finance-radar ] && \
+   { [ -L /var/lib/finance-radar ] || [ ! -d /var/lib/finance-radar ]; }; then
+    printf 'unsafe root backup attestation path after recovery\n' >&2
+    exit 6
+fi
+install -d -m 0700 -o root -g root /var/lib/finance-radar
+
 assert_public_web_identity_and_boundary() {
     local user group protect_proc proc_subset
     user="$(systemctl show finance-radar-web -p User --value)" || return 1
