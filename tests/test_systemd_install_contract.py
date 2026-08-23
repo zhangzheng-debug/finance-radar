@@ -104,8 +104,18 @@ def test_code_only_mode_skips_expensive_recovery_and_dependency_work_fail_closed
     assert "reused_verified_daily" in source
     assert "immutable=1" not in validator
     assert "MAX_BACKUP_AGE_SECONDS = 93_600" in validator
-    assert 'ALLOWED_CHANGE_PREFIXES = ("app/web/", ".streamlit/")' in validator
-    assert 'ALLOWED_CHANGE_FILES = {"VERSION"}' in validator
+    assert (
+        'ALLOWED_CHANGE_PREFIXES = ("app/web/", ".streamlit/", "docs/", "tests/")'
+        in validator
+    )
+    assert 'ALLOWED_CHANGE_DIRECTORIES = {"docs", "tests"}' in validator
+    for non_runtime_file in (
+        '"CHANGELOG.md"',
+        '"CURRENT_STATE.md"',
+        '"README.md"',
+        '"VERSION"',
+    ):
+        assert non_runtime_file in validator
     assert "candidate contains generated Python bytecode" in validator
     assert "release content outside the public-Web whitelist changed" in validator
     assert 'inventory[relative] = ("directory", 0, "")' in validator
@@ -153,6 +163,45 @@ def test_code_only_mode_skips_expensive_recovery_and_dependency_work_fail_closed
     )
     assert 'OPERATIONS_DB="${FINANCE_RADAR_OPS_DB:-$BASE/shared/data/finance_radar_operations.sqlite3}"' in backup_wrapper
     assert 'python3 - "$OPERATIONS_DB"' in backup_wrapper
+
+
+def test_code_only_keeps_collection_live_until_the_short_activation_window() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+    long_quiescence = source[
+        source.index("# A full deployment may change persistence") : source.index(
+            'if [ -f "$BASE/current/.env" ]'
+        )
+    ]
+    full_branch, code_only_branch = long_quiescence.split(
+        "else\n    # Validate only after both the timer", 1
+    )
+
+    assert "systemctl stop finance-radar-capture-interpretation.timer" in full_branch
+    assert "assert_capture_interpretation_quiescent" in full_branch
+    assert "systemctl stop finance-radar-worker" in full_branch
+    assert "systemctl stop finance-radar-capture-interpretation.timer" not in code_only_branch
+    assert "assert_capture_interpretation_quiescent" not in code_only_branch
+    assert "systemctl stop finance-radar-worker" not in code_only_branch
+    assert "require_recent_verified_backup_record" in code_only_branch
+
+    assert (
+        'if [ "$DEPLOY_MODE" = full ]; then\n'
+        '    chown -R finance-radar:finance-radar "$SHARED/data" "$SHARED/reports"\n'
+        "fi"
+    ) in source
+
+    cutover = source.split("# The only point at which the running release changes.", 1)[1]
+    code_only_stop = cutover.index(
+        "worker failed to stop for the short code-only activation window"
+    )
+    current_switch = cutover.index('ln -sfn "$RELEASE" "$BASE/current"')
+    code_only_start = cutover.index(
+        "worker failed to start after the short code-only activation window"
+    )
+    assert code_only_stop < current_switch < code_only_start
+
+    rollback = source.split("rollback() {", 1)[1].split("abort_cutover() {", 1)[0]
+    assert '{ [ "$DEPLOY_MODE" = full ] || [ "$CUTOVER_STARTED" -eq 1 ]; }' in rollback
 
 
 def test_prepared_restore_creates_root_backup_attestation_directory() -> None:

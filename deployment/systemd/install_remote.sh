@@ -2053,7 +2053,13 @@ rollback() {
     trap - ERR
     set +e
     printf 'cutover_failed=1; restoring previous release and configuration\n' >&2
-    if [ "$SERVICES_TOUCHED" -eq 1 ]; then
+    # A code-only failure before the current symlink changes has touched only
+    # the backup timer and byte-identical unit/config files.  Do not turn an
+    # eligibility or preparation failure into an avoidable API/Web/collector
+    # outage.  Once cutover starts (or for every full deployment), stop the
+    # runtime before restoring its release/configuration snapshot as before.
+    if [ "$SERVICES_TOUCHED" -eq 1 ] && \
+       { [ "$DEPLOY_MODE" = full ] || [ "$CUTOVER_STARTED" -eq 1 ]; }; then
         systemctl stop finance-radar-evidence-llm \
             finance-radar-worker finance-radar-api finance-radar-web finance-radar-backup.timer \
             2>/dev/null || true
@@ -2149,30 +2155,33 @@ if ! assert_backup_service_quiescent; then
 fi
 clear_scheduled_backup_start_inhibit || \
     abort_cutover 'backup timer stopped but its start inhibit could not be cleared' 4
-# The independent capture interpreter also writes the operations database.  It
-# must not run old-release code during the candidate backup, schema migration
-# or symlink switch.  Preserve timer enablement/activity from the rollback
-# snapshot, stop new launches, and let an in-flight provider call finish rather
-# than terminating a potentially billable request.
+# A full deployment may change persistence, collection or schema code.  It must
+# quiesce every writer before the candidate backup and keep the collector down
+# through the post-cutover restore drill.  The code-only contract proves those
+# trees and dependencies byte-identical, so that path leaves the worker running
+# through candidate preparation and never terminates an in-flight interpretation
+# batch. The worker stops only for the short activation window below.
+# Preserve the credential gate in both modes: an enabled interpretation timer
+# without its root-only credential is already an unsafe state to carry forward.
 if { grep -Fqx -- finance-radar-capture-interpretation.timer "$ROLLBACK_ENABLED_UNITS" || \
      grep -Fqx -- finance-radar-capture-interpretation.timer "$ROLLBACK_ACTIVE_UNITS"; } && \
    [ "$DEEPSEEK_CREDENTIAL_READY" -ne 1 ]; then
     abort_cutover 'capture interpretation was enabled or active but its new root-only credential is unavailable' 4
 fi
-if systemctl cat finance-radar-capture-interpretation.timer >/dev/null 2>&1; then
-    systemctl stop finance-radar-capture-interpretation.timer || \
-        abort_cutover 'capture interpretation timer failed to stop before protected bridge backup' 4
-fi
-assert_capture_interpretation_quiescent || \
-    abort_cutover 'capture interpretation remained active before protected bridge backup' 4
-inhibit_worker_resume || \
-    abort_cutover 'unable to inhibit worker resume during protected bridge backup' 4
-systemctl stop finance-radar-worker || \
-    abort_cutover 'worker failed to stop before protected bridge backup' 4
-systemctl is-active --quiet finance-radar-worker && \
-    abort_cutover 'worker remains active before protected bridge backup' 4
-systemctl stop finance-radar-evidence-llm.service 2>/dev/null || true
 if [ "$DEPLOY_MODE" = full ]; then
+    if systemctl cat finance-radar-capture-interpretation.timer >/dev/null 2>&1; then
+        systemctl stop finance-radar-capture-interpretation.timer || \
+            abort_cutover 'capture interpretation timer failed to stop before protected bridge backup' 4
+    fi
+    assert_capture_interpretation_quiescent || \
+        abort_cutover 'capture interpretation remained active before protected bridge backup' 4
+    inhibit_worker_resume || \
+        abort_cutover 'unable to inhibit worker resume during protected bridge backup' 4
+    systemctl stop finance-radar-worker || \
+        abort_cutover 'worker failed to stop before protected bridge backup' 4
+    systemctl is-active --quiet finance-radar-worker && \
+        abort_cutover 'worker remains active before protected bridge backup' 4
+    systemctl stop finance-radar-evidence-llm.service 2>/dev/null || true
     require_predeploy_memory_headroom || \
         abort_cutover 'insufficient host memory for protected bridge backup' 4
     require_predeploy_verified_backup || \
@@ -2192,7 +2201,9 @@ if [ -f "$BASE/current/.env" ]; then
 else
     install -m 0640 -o root -g finance-radar "$SOURCE_ENV" "$RELEASE/.env"
 fi
-chown -R finance-radar:finance-radar "$SHARED/data" "$SHARED/reports"
+if [ "$DEPLOY_MODE" = full ]; then
+    chown -R finance-radar:finance-radar "$SHARED/data" "$SHARED/reports"
+fi
 
 DIRECT_ENDPOINT_TEMPLATE="$RELEASE/deployment/systemd/nginx-radar-direct.conf"
 DIRECT_ENDPOINT_CANDIDATE="/tmp/finance-radar-nginx-$RELEASE_ID.conf"
@@ -2388,11 +2399,21 @@ fi
 # The only point at which the running release changes. Everything before this
 # line was validated against the candidate and snapshotted for automatic
 # rollback. Keep the failed release on disk for forensic inspection.
-# The mutable collector was stopped before the bridge backup and remains
-# quiesced until the candidate's full recovery receipt succeeds.  API/Web stay
-# available until their controlled restart below.
-systemctl is-active --quiet finance-radar-worker && \
-    abort_cutover 'worker unexpectedly restarted during protected cutover' 5
+# A full deployment keeps the mutable collector quiesced until the candidate's
+# recovery receipt succeeds.  A code-only deployment proves the worker tree and
+# dependencies unchanged and deliberately keeps collection live until this
+# short activation window.  Stop it only now so the candidate overview can be
+# built immediately and no process remains attached to the predecessor release.
+# API/Web stay available until their controlled restart below in either mode.
+if [ "$DEPLOY_MODE" = full ]; then
+    systemctl is-active --quiet finance-radar-worker && \
+        abort_cutover 'worker unexpectedly restarted during protected cutover' 5
+else
+    systemctl stop finance-radar-worker || \
+        abort_cutover 'worker failed to stop for the short code-only activation window' 5
+    systemctl is-active --quiet finance-radar-worker && \
+        abort_cutover 'worker remains active during the short code-only activation window' 5
+fi
 systemctl stop finance-radar-evidence-llm.service 2>/dev/null || true
 systemctl disable finance-radar-evidence-llm.service
 CUTOVER_STARTED=1
@@ -2603,8 +2624,15 @@ else
     RECOVERY_BASIS=reused_verified_daily
     POSTDEPLOY_FULL_BUNDLE_STATUS=REUSED_VERIFIED_DAILY
 fi
-systemctl start finance-radar-worker || \
-    abort_cutover 'worker failed to start after the protected postcutover backup' 6
+if [ "$DEPLOY_MODE" = full ]; then
+    systemctl start finance-radar-worker || \
+        abort_cutover 'worker failed to start after the protected postcutover backup' 6
+else
+    # The fast path kept the byte-identical worker alive while validating and
+    # preparing the candidate, then stopped it only for the atomic activation.
+    systemctl start finance-radar-worker || \
+        abort_cutover 'worker failed to start after the short code-only activation window' 6
+fi
 systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker || \
     abort_cutover 'required services are not active after protected postcutover backup' 6
 systemctl is-active --quiet finance-radar-overview-snapshot.timer || \

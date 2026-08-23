@@ -5,6 +5,15 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+- Let public-Web-only releases carry their tests, documentation and bounded
+  root release notes through the fail-closed `code-only` path while API,
+  persistence, collection, deployment, dependency, model and replay trees
+  remain byte-identical to the active release.
+- Keep collection and capture interpretation running while a `code-only`
+  candidate is validated and prepared. The worker now stops only for the short
+  atomic activation window, and the fast path no longer recursively changes
+  ownership across existing shared data.
+
 ## 2026.08.23.6
 
 - Make captured-source dossier reads event-scoped. The previous query ranked

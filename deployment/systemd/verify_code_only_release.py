@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Fail-closed eligibility checks for a Finance Radar code-only release.
 
-The fast path is deliberately limited to public Web code.  Everything
-that owns persistence, collection, dependencies, services, recovery or the
-runtime model must be byte-identical to the active release.  A recent root-
-owned attestation binds the fast cutover to a full restore drill that already
-completed successfully.
+The fast path is deliberately limited to public Web code and non-runtime
+release evidence. Everything that owns persistence, collection, dependencies,
+services, recovery or the runtime model must be byte-identical to the active
+release. A recent root-owned attestation binds the fast cutover to a full
+restore drill that already completed successfully.
 """
 
 from __future__ import annotations
@@ -26,8 +26,19 @@ MAX_BACKUP_AGE_SECONDS = 93_600
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
 GENERATED_RUNTIME_ROOTS = {"data", "reports", "release-records"}
 GENERATED_RUNTIME_FILES = {".env"}
-ALLOWED_CHANGE_PREFIXES = ("app/web/", ".streamlit/")
-ALLOWED_CHANGE_FILES = {"VERSION"}
+# The fast path may carry public-Web code plus release evidence that is never
+# imported or executed by a production unit.  Keep this list explicit: adding a
+# new top-level tree must remain a reviewed change, and every API, persistence,
+# collector, deployment, dependency, model and replay path remains protected by
+# the byte-for-byte comparison below.
+ALLOWED_CHANGE_PREFIXES = ("app/web/", ".streamlit/", "docs/", "tests/")
+ALLOWED_CHANGE_DIRECTORIES = {"docs", "tests"}
+ALLOWED_CHANGE_FILES = {
+    "CHANGELOG.md",
+    "CURRENT_STATE.md",
+    "README.md",
+    "VERSION",
+}
 
 
 def fail(message: str) -> "NoReturn":
@@ -77,8 +88,10 @@ def _generated_runtime_path(relative: str, *, active_release: bool) -> bool:
 
 
 def _allowed_change(relative: str) -> bool:
-    return relative in ALLOWED_CHANGE_FILES or relative.startswith(
-        ALLOWED_CHANGE_PREFIXES
+    return (
+        relative in ALLOWED_CHANGE_FILES
+        or relative in ALLOWED_CHANGE_DIRECTORIES
+        or relative.startswith(ALLOWED_CHANGE_PREFIXES)
     )
 
 
