@@ -117,9 +117,14 @@ sudo deployment/systemd/install_remote.sh \
   "https://YOUR_DOMAIN:8443/radar"
 ```
 
-Place `<release-id>.release-records.SHA256` beside the JSON manifest. When the
-fifth argument is present, the installer verifies all of the following before
-changing shared data, `/opt/finance-radar/current`, or any service unit:
+Stage the archive plus both release-record files before invoking the installer.
+The manifest must keep the exact basename
+`<release-id>.release-manifest.json`; place
+`<release-id>.release-records.SHA256` beside it without renaming either file.
+The installer rejects a missing, renamed or symlinked record before extracting
+the archive. When the fifth argument is present, it verifies all of the
+following before changing shared data, `/opt/finance-radar/current`, or any
+service unit:
 
 - a Python tar preflight rejects traversal, links, devices, sensitive names,
   duplicate paths, setuid/setgid entries and excessive expanded size before

@@ -20,6 +20,7 @@ LEGACY_STATIC_INDEX="$PUBLIC_STATUS_DIR/index.html"
 LEGACY_STATIC_RETIRE_DIR=/etc/nginx/finance-radar-retired
 INSTALLER_SOURCE="$(readlink -f -- "${BASH_SOURCE[0]}")"
 DEEPSEEK_CREDENTIAL_READY=0
+MANIFEST_SIDECAR=""
 
 [ "$(id -u)" -eq 0 ] || { printf 'run as root\n' >&2; exit 2; }
 case "$DEPLOY_MODE" in
@@ -67,15 +68,28 @@ PUBLIC_WEB_BASE="${PUBLIC_WEB_URL%/}"
 printf '%s  %s\n' "$EXPECTED_SHA256" "$ARCHIVE" | sha256sum -c -
 [ -f "$SOURCE_ENV" ] || { printf 'source env not found: %s\n' "$SOURCE_ENV" >&2; exit 2; }
 for required_command in \
-    awk curl find getent nginx openssl python3 readlink runuser sha256sum stat systemctl systemd-run tar; do
+    awk basename curl dirname find getent nginx openssl python3 readlink runuser sha256sum stat systemctl systemd-run tar; do
     command -v "$required_command" >/dev/null || {
         printf 'missing prerequisite: %s\n' "$required_command" >&2
         exit 2
     }
 done
 if [ -n "$RELEASE_MANIFEST" ]; then
-    [ -f "$RELEASE_MANIFEST" ] || {
-        printf 'release manifest not found\n' >&2
+    EXPECTED_MANIFEST_NAME="$RELEASE_ID.release-manifest.json"
+    [ "$(basename -- "$RELEASE_MANIFEST")" = "$EXPECTED_MANIFEST_NAME" ] || {
+        printf 'release manifest must keep the exact basename: %s\n' \
+            "$EXPECTED_MANIFEST_NAME" >&2
+        exit 2
+    }
+    [ -f "$RELEASE_MANIFEST" ] && [ ! -L "$RELEASE_MANIFEST" ] || {
+        printf 'release manifest must be a regular non-symlink file: %s\n' \
+            "$RELEASE_MANIFEST" >&2
+        exit 2
+    }
+    MANIFEST_SIDECAR="$(dirname -- "$RELEASE_MANIFEST")/$RELEASE_ID.release-records.SHA256"
+    [ -f "$MANIFEST_SIDECAR" ] && [ ! -L "$MANIFEST_SIDECAR" ] || {
+        printf 'release manifest sidecar must be staged beside the manifest as a regular non-symlink file: %s\n' \
+            "$MANIFEST_SIDECAR" >&2
         exit 2
     }
 fi
@@ -382,7 +396,6 @@ if [ -n "$RELEASE_MANIFEST" ]; then
         --report-dir "$RELEASE_RECORDS"
     install -m 0640 -o root -g finance-radar \
         "$RELEASE_MANIFEST" "$RELEASE_RECORDS/RELEASE_MANIFEST.json"
-    MANIFEST_SIDECAR="$(dirname "$RELEASE_MANIFEST")/$RELEASE_ID.release-records.SHA256"
     install -m 0640 -o root -g finance-radar \
         "$MANIFEST_SIDECAR" "$RELEASE_RECORDS/RELEASE_RECORDS.SHA256"
     printf 'release_manifest=verified\n'

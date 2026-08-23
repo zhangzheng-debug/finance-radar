@@ -427,6 +427,14 @@ def test_systemd_installer_verifies_optional_manifest_before_cutover() -> None:
     )[0]
 
     assert "RELEASE_MANIFEST=${5:-}" in installer
+    sidecar_preflight = installer.split('if [ -n "$RELEASE_MANIFEST" ]; then', 1)[1].split("\nfi\n", 1)[0]
+    assert 'EXPECTED_MANIFEST_NAME="$RELEASE_ID.release-manifest.json"' in sidecar_preflight
+    assert '[ -f "$RELEASE_MANIFEST" ] && [ ! -L "$RELEASE_MANIFEST" ]' in sidecar_preflight
+    assert 'MANIFEST_SIDECAR="$(dirname -- "$RELEASE_MANIFEST")/$RELEASE_ID.release-records.SHA256"' in sidecar_preflight
+    assert '[ -f "$MANIFEST_SIDECAR" ] && [ ! -L "$MANIFEST_SIDECAR" ]' in sidecar_preflight
+    assert installer.index('MANIFEST_SIDECAR="$(dirname -- "$RELEASE_MANIFEST")') < installer.index(
+        'tar -xzf "$ARCHIVE"'
+    )
     assert 'python3 "$RELEASE/scripts/release_audit.py" verify' in gate
     for flag in (
         "--expected-release-id",
