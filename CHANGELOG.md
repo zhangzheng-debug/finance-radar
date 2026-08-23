@@ -5,6 +5,19 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.23.6
+
+- Make captured-source dossier reads event-scoped. The previous query ranked
+  every source revision in the ledger before applying the event filter; the
+  new projection uses the existing observation/revision index and preserves
+  OpenNews revision-time and canonical-link normalization.
+- Replace one SQLite interpretation lookup per captured source with one
+  event-scoped bulk query. External completed interpretations retain their
+  existing preference over deterministic fallbacks, and deleted captures stay
+  outside the public dossier.
+- Add regression coverage for latest edit/delete semantics, capture receipts,
+  missing receipts and external-versus-local interpretation selection.
+
 ## 2026.08.23.5
 
 - Replace the public workflow funnel with two independent reader contracts:

@@ -173,6 +173,48 @@ def test_source_observation_recovery_is_complete_read_only_and_deterministic() -
         ]
 
 
+def test_captured_sources_reads_only_the_latest_event_scoped_revision() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        ledger = _seed(Path(directory))
+        connection = open_ledger(ledger)
+        connection.execute(
+            """INSERT INTO source_revisions(
+               revision_id,observation_id,source_id,external_id,revision_no,revision_kind,
+               revision_at,content_sha256,title,summary,raw_json
+               ) VALUES (?,?,?,?,2,'edit',?,?,?,?,?)""",
+            (
+                "rev-opennews-edit",
+                "obs-p2",
+                "opennews_free",
+                "external-obs-p2",
+                "2026-08-21T03:00:00+00:00",
+                "e" * 64,
+                "Revised title",
+                "Revised summary",
+                json.dumps(
+                    {
+                        "item": {
+                            "published_at": "2026-08-21T02:59:00+00:00",
+                            "link": "https://news.test/revised",
+                        }
+                    }
+                ),
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+        capture = LedgerRepository(ledger).captured_sources("e-p2")[0]
+
+        assert capture["title"] == "Revised title"
+        assert capture["summary"] == "Revised summary"
+        assert capture["source_published_at"] == "2026-08-21T02:59:00+00:00"
+        assert capture["canonical_url"] == "https://news.test/revised"
+        assert capture["latest_revision_no"] == 2
+        assert capture["latest_revision_kind"] == "edit"
+        assert capture["semantic_content_sha256"] == "e" * 64
+
+
 def test_cli_builds_manifest_records_and_hashes() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)

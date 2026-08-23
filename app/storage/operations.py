@@ -1184,6 +1184,55 @@ class OperationsRepository:
         )
         return completed[0]
 
+    def latest_capture_interpretations(
+        self,
+        event_id: str,
+        capture_receipt_sha256s: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Return the preferred completed run for each requested capture.
+
+        A public dossier may contain many captures.  Looking them up through
+        ``latest_capture_interpretation`` opened one SQLite connection per
+        capture.  This event-scoped query keeps the same preference order
+        (external generation first, then newest update) with one connection
+        and one statement.  ``json_each`` keeps the statement bounded without
+        depending on SQLite's positional-parameter limit.
+        """
+
+        receipts = sorted(
+            {
+                str(receipt).strip()
+                for receipt in capture_receipt_sha256s
+                if str(receipt).strip()
+            }
+        )
+        if not receipts:
+            return {}
+        with closing(self.connect()) as connection:
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    """SELECT * FROM capture_interpretation_runs
+                       WHERE event_id=? AND status='COMPLETED'
+                         AND capture_receipt_sha256 IN (
+                           SELECT value FROM json_each(?)
+                         )
+                       ORDER BY capture_receipt_sha256,
+                                external_call DESC,updated_at DESC""",
+                    (event_id, json.dumps(receipts, ensure_ascii=False)),
+                )
+            ]
+        selected: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            receipt = str(row.get("capture_receipt_sha256") or "")
+            if receipt in selected:
+                continue
+            row["output"] = _safe_json(row.pop("output_json"), {})
+            row["guardrails"] = _safe_json(row.pop("guardrails_json"), {})
+            row["usage"] = _safe_json(row.pop("usage_json"), {})
+            selected[receipt] = row
+        return selected
+
     def latest_capture_interpretation_run(
         self,
         event_id: str,
