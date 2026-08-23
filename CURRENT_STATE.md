@@ -1,5 +1,29 @@
 # Finance Radar current state
 
+## 2026-08-24 `2026.08.24.3` Shadow 查询热修候选
+
+`2026.08.24.2` 已在美国 `us-east-1` 实例 `i-0fa9bfafa5eab00bf` 完成
+`ACCEPTED` 激活；生产链接精确指向
+`20260823T170744Z-d88afa87d603`，切换后完整恢复包
+`finance_radar_20260823T185509Z_efe9fe31` 独立验证成功。API、Public Web、
+连续 Worker、每日备份、五分钟捕获解读和 overview 快照计时器均已恢复；没有
+活动 `worker-resume.inhibit`，切换后内核日志未发现 OOM。
+
+生产账本当前有 14,438 条 canonical 事件，公开事件接口首屏返回 24 条且总数为
+14,438，offset 7,200 也返回 200；所有事件保持可浏览。`reader_funnel=0` 只是旧的
+“当前版本达到正式引用门槛”度量，不再是公开可见门。loopback 实测 overview
+约 0.78 秒、首屏事件约 0.28 秒、offset 7,200 约 0.07 秒、facets 约 0.03 秒。
+DeepSeek 捕获解读队列 COMPLETED 428、remaining 0，最近五分钟任务为 IDLE/
+success；当日 15 次调用估算约 0.049899 CNY。
+
+现场同时确认 `2026.08.24.2` 的最新完整 Worker 周期在
+`shadow_routing` 阶段达到 600 秒外层截止并记为 `DEGRADED`。来源采集和已完成
+账本写入未回滚，问题是 Shadow 批次虽然只返回最多 200 条事件，SQL 仍先展开并
+排序全部历史来源修订。本候选先锁定 200 条事件，再仅对这些事件读取最新版来源
+和证据；不改变数据库结构、事件状态、事实结论、模型输出空间或交易边界。新增的
+5,000 事件回归用例约 0.26 秒通过，完整组合回归为
+`1077 passed, 6 skipped`。正式生产结论仍须以部署后 Worker 完整成功周期为准。
+
 ## 2026-08-24 `2026.08.24.2` 生产复核与单次完整部署候选
 
 2026-08-24 00:36–00:41（Asia/Singapore）已通过 AWS EC2 Instance Connect
