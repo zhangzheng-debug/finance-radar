@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -36,6 +37,14 @@ class _RawResponse(_JsonResponse):
 
     def read(self) -> bytes:
         return json.dumps(self.payload).encode("utf-8")
+
+
+class _ContextHeaders(dict[str, object]):
+    def get_all(self, *, key: str) -> list[object]:
+        value = self.get(key)
+        if value is None:
+            return []
+        return list(value) if isinstance(value, list) else [value]
 
 
 def test_api_error_descriptor_is_safe_and_deterministic() -> None:
@@ -121,6 +130,86 @@ def test_public_api_requests_never_attach_admin_token(monkeypatch) -> None:
     assert api_request("/api/v1/overview") == {"ok": True}
     assert captured
     assert captured[0].get_header("X-admin-token") is None
+
+
+def test_public_api_forwards_valid_streamlit_peer_ip_to_loopback_api(monkeypatch) -> None:
+    captured: list[object] = []
+
+    def fake_urlopen(request: object, *, timeout: int) -> _JsonResponse:
+        captured.append(request)
+        return _JsonResponse()
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(
+        web_common.st,
+        "context",
+        SimpleNamespace(ip_address="2001:db8::10", headers=_ContextHeaders()),
+    )
+    monkeypatch.setattr(web_common.urllib.request, "urlopen", fake_urlopen)
+
+    assert api_request("/api/v1/overview") == {"ok": True}
+    assert captured[0].get_header("X-real-ip") == "2001:db8::10"
+
+
+def test_public_api_accepts_only_consistent_overwritten_proxy_ip_headers(monkeypatch) -> None:
+    captured: list[object] = []
+
+    def fake_urlopen(request: object, *, timeout: int) -> _JsonResponse:
+        captured.append(request)
+        return _JsonResponse()
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(
+        web_common.st,
+        "context",
+        SimpleNamespace(
+            ip_address=None,
+            headers=_ContextHeaders(
+                {
+                    "X-Real-IP": "203.0.113.17",
+                    "X-Forwarded-For": "203.0.113.17",
+                    "X-Forwarded-Proto": "https",
+                }
+            ),
+        ),
+    )
+    monkeypatch.setattr(web_common.urllib.request, "urlopen", fake_urlopen)
+
+    assert api_request("/api/v1/overview") == {"ok": True}
+    assert captured[0].get_header("X-real-ip") == "203.0.113.17"
+
+    captured.clear()
+    web_common.st.context.headers["X-Forwarded-For"] = "198.51.100.8"
+    assert api_request("/api/v1/overview") == {"ok": True}
+    assert captured[0].get_header("X-real-ip") is None
+
+
+def test_internal_ui_never_forwards_browser_address_metadata(monkeypatch) -> None:
+    captured: list[object] = []
+
+    def fake_urlopen(request: object, *, timeout: int) -> _JsonResponse:
+        captured.append(request)
+        return _JsonResponse()
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "reviewer")
+    monkeypatch.setattr(
+        web_common.st,
+        "context",
+        SimpleNamespace(
+            ip_address="203.0.113.20",
+            headers=_ContextHeaders(
+                {
+                    "X-Real-IP": "198.51.100.9",
+                    "X-Forwarded-For": "198.51.100.9",
+                    "X-Forwarded-Proto": "https",
+                }
+            ),
+        ),
+    )
+    monkeypatch.setattr(web_common.urllib.request, "urlopen", fake_urlopen)
+
+    assert api_request("/api/v1/overview") == {"ok": True}
+    assert captured[0].get_header("X-real-ip") is None
 
 
 def test_admin_api_request_can_attach_configured_token(monkeypatch) -> None:

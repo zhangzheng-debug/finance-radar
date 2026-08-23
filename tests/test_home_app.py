@@ -52,6 +52,20 @@ def _overview() -> dict[str, Any]:
                 "event_id": "event-a",
                 "status": "candidate",
                 "public_state": "rough_reviewed",
+                "citation_ready": True,
+                "evidence_posture": "PRIMARY_SUPPORTED",
+                "evidence_gap_codes": [],
+                "risk_assessment": {
+                    "route": "ABSTAIN",
+                    "confidence": 0.5,
+                    "confidence_applicable": False,
+                    "model_version": "risk-router-test-v1",
+                    "decision_source": "TRAINED_SEMANTIC_MODEL",
+                    "evidence_state": "SUPPORTED",
+                    "evaluated_at": "2026-08-03T20:01:00+00:00",
+                    "shadow": True,
+                    "current": True,
+                },
                 "reviewed_at": "2026-08-03T23:00:00+00:00",
                 "event_family": "enforcement",
                 "event_type": "sec_litigation_release",
@@ -145,7 +159,7 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert "Example Holdings" in rendered
     assert "事件可见性与证据层级" in rendered
     assert "账本中的 12 条事件现在全部可以浏览" in rendered
-    assert "5 条尚未达到正式引用条件" in rendered
+    assert "其余 5 条按一手材料、来源捕获或尚无来源分级展示" in rendered
     assert "全部事件，分级展示" in rendered
     assert "证据路径" not in rendered
     assert "UTC" in rendered
@@ -153,11 +167,16 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert any(item.label == "应用筛选" for item in page.button)
     assert "系统与来源健康" not in rendered
     assert "Worker" not in rendered
-    assert "已粗审" in rendered
+    assert "官方原文支持" in rendered
+    assert "影子模型 · 暂不判断" in rendered
+    assert "待核验" not in rendered
+    assert "已粗审" not in rendered
+    assert "证据不足" not in rendered
+    assert "已核验" not in rendered
     assert "最近成功采集" in rendered
     assert "最近发现新事件" in rendered
     assert "事件总量" in rendered
-    assert "正式可引用 / 待补证" in rendered
+    assert "正式可引用 / 其他证据姿态" in rendered
     assert "7 / 5" in rendered
     assert "全部规范事件均可浏览" in rendered
     assert "实时事件、原始证据与核验进度" not in rendered
@@ -168,6 +187,30 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert "运行状态" not in rendered
     assert 'target="_self"' in rendered
     assert 'target="_blank"' not in rendered
+
+
+def test_public_legacy_state_url_cannot_hide_the_event_inventory(monkeypatch) -> None:
+    requests: list[str] = []
+
+    def recording_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        requests.append(path)
+        return _fake_api(path, **kwargs)
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", recording_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_state"] = "verified"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    event_requests = [
+        value for value in requests if urllib.parse.urlsplit(value).path == "/api/v1/events"
+    ]
+    assert event_requests
+    assert all("public_state" not in urllib.parse.parse_qs(urllib.parse.urlsplit(value).query) for value in event_requests)
+    assert "官方原文支持" in rendered
+    assert "preview_state=" not in rendered
 
 
 def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch) -> None:
@@ -182,19 +225,22 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "当前页事件预览" in rendered
     assert "Exact primary-source passage naming the issuer, action, and event stage." in rendered
     assert "阅读提示" in rendered
-    assert "粗审已完成，继续核对正式证据" in rendered
+    assert "先读支持当前事实的官方原文" in rendered
     assert "监管执法" in rendered
     assert "SEC 官方文件" in rendered
     assert "原始证据 · 请结合完整文件阅读" in rendered
     assert "发生了什么" in rendered
     assert "为什么关注" in rendered
-    assert "粗审已完成，尚未正式核验" in rendered
+    assert "证据与引用" in rendered
+    assert "官方原文支持" in rendered
+    assert "模型研判" in rendered
+    assert "影子模型 · 暂不判断" in rendered
     assert "时间口径" in rendered
     assert "来源发布" in rendered
     assert "系统发现" in rendered
-    assert "核验记录" in rendered
-    assert "本轮引用证据 ID" in rendered
-    assert "ev-primary-1" in rendered
+    assert "人工复核记录" not in rendered
+    assert "本轮引用证据 ID" not in rendered
+    assert "ev-primary-1" not in rendered
     assert "已按一级来源证据门槛完成" not in rendered
     assert "sec_litigation_release" not in rendered
     assert "sec_current_filings" not in rendered
@@ -206,6 +252,77 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert not any(button.label == "收起当前页预览" for button in page.button)
     assert "返回原筛选位置" in rendered
     assert "本次浏览会话首次查看" in "\n".join(str(item.value) for item in page.caption)
+
+
+def test_preview_event_id_is_path_quoted_without_losing_the_deep_link(monkeypatch) -> None:
+    raw_event_id = "event/a?x=1"
+    encoded_event_id = urllib.parse.quote(raw_event_id, safe="")
+    requests: list[str] = []
+
+    def encoded_event_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        requests.append(path)
+        return _fake_api(path.replace(encoded_event_id, "event-a"), **kwargs)
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", encoded_event_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = raw_event_id
+    page.run()
+
+    assert not page.exception
+    preview_requests = [
+        value
+        for value in requests
+        if urllib.parse.urlsplit(value).path.startswith("/api/v1/events/")
+        and urllib.parse.urlsplit(value).path != "/api/v1/events/facets"
+    ]
+    assert preview_requests
+    assert all(encoded_event_id in urllib.parse.urlsplit(value).path for value in preview_requests)
+    assert page.query_params["preview_event_id"] == [raw_event_id]
+
+
+def test_home_calls_evidence_gate_result_automatic_routing_not_model_judgment(
+    monkeypatch,
+) -> None:
+    def evidence_gate_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        response = _fake_api(path, **kwargs)
+        parsed = urllib.parse.urlsplit(path)
+        gate = {
+            "route": "ABSTAIN",
+            "confidence": None,
+            "confidence_applicable": False,
+            "model_version": "risk-router-test-v1",
+            "decision_source": "DETERMINISTIC_EVIDENCE_GATE",
+            "evidence_state": "DISCOVERY_ONLY",
+            "evaluated_at": "2026-08-03T20:01:00+00:00",
+            "shadow": True,
+            "current": True,
+        }
+        if parsed.path == "/api/v1/overview":
+            response["recent_events"][0]["risk_assessment"] = gate
+        elif parsed.path == "/api/v1/events":
+            response["items"][0]["risk_assessment"] = gate
+        elif parsed.path == "/api/v1/events/event-a":
+            response["event"]["risk_assessment"] = gate
+        return response
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", evidence_gate_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+
+    assert not page.exception
+    event_card = next(
+        str(item.value)
+        for item in page.markdown
+        if '<section class="event-answer"' in str(item.value)
+    )
+    assert "<article><span>自动风险分流</span>" in event_card
+    assert "影子管线 · 证据规则门 · 自动弃权" in event_card
+    assert "训练模型没有被调用" in event_card
+    assert "<article><span>模型研判</span>" not in event_card
+    assert "影子模型" not in event_card
 
 
 def test_public_preview_reports_changes_since_last_view(monkeypatch) -> None:
@@ -258,7 +375,7 @@ def test_public_preview_reports_changes_since_last_view(monkeypatch) -> None:
     assert "关联证据：新增 1 条，移除 0 条" in rendered
 
 
-def test_public_verified_event_without_receipt_is_labeled_as_historical(monkeypatch) -> None:
+def test_public_workflow_verified_without_receipt_does_not_become_public_trust_label(monkeypatch) -> None:
     def historical_verified_api(path: str, **kwargs: Any) -> dict[str, Any]:
         data = _fake_api(path, **kwargs)
         if urllib.parse.urlsplit(path).path == "/api/v1/events/event-a":
@@ -279,13 +396,14 @@ def test_public_verified_event_without_receipt_is_labeled_as_historical(monkeypa
     rendered = "\n".join(str(item.value) for item in page.markdown)
 
     assert not page.exception
-    assert "历史已核验记录 · 核验时间与核验留痕未存档" in rendered
-    assert "核验留痕" in rendered
-    assert "历史记录未存档" in rendered
+    assert "官方原文支持" in rendered
+    assert "人工复核记录" not in rendered
+    assert "历史已核验记录" not in rendered
+    assert "核验留痕" not in rendered
     assert "正式核验已完成" not in rendered
 
 
-def test_public_verified_event_with_receipt_keeps_formal_label(monkeypatch) -> None:
+def test_public_workflow_receipt_stays_out_of_reader_surface(monkeypatch) -> None:
     def recorded_verified_api(path: str, **kwargs: Any) -> dict[str, Any]:
         data = _fake_api(path, **kwargs)
         if urllib.parse.urlsplit(path).path == "/api/v1/events/event-a":
@@ -315,7 +433,11 @@ def test_public_verified_event_with_receipt_keeps_formal_label(monkeypatch) -> N
     rendered = "\n".join(str(item.value) for item in page.markdown)
 
     assert not page.exception
-    assert "正式核验已完成" in rendered
+    assert "官方原文支持" in rendered
+    assert "治理留痕 · 限定检查" not in rendered
+    assert "评分 74" not in rendered
+    assert "ev-primary-1" not in rendered
+    assert "正式核验已完成" not in rendered
     assert "历史已核验记录" not in rendered
     assert "核验留痕" not in rendered
 
@@ -414,6 +536,9 @@ def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatc
                 **data["event"],
                 "status": "rejected",
                 "public_state": "excluded",
+                "citation_ready": False,
+                "evidence_posture": "SOURCE_CAPTURED",
+                "evidence_gap_codes": ["MISSING_CITABLE_EVIDENCE"],
                 "reader_ready": 0,
                 "citable_evidence_count": 0,
                 "captured_source_count": 1,
@@ -433,10 +558,11 @@ def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatc
     rendered = "\n".join(str(item.value) for item in page.markdown)
 
     assert not page.exception
-    assert "0 条可引用支持证据" in rendered
+    assert "仅捕获来源" in rendered
+    assert "0 条可读证据" in rendered
     assert "1 条采集来源记录" in rendered
     assert any(
-        item.label == "查看采集到的原始线索与内容解读（未核验、非证据）"
+        item.label == "查看来源捕获与内容解读（非正式证据）"
         for item in page.expander
     )
     assert "Markets await central-bank minutes while gold rises" in rendered
@@ -445,7 +571,8 @@ def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatc
     assert "来源称市场正在等待央行会议纪要" in rendered
     assert "没有证明央行已经发布会议纪要" in rendered
     assert "确定性预览 · 外部模型待接入" in rendered
-    assert "保留排除结果，等待真正的新证据" in rendered
+    assert "这是一条异常处置记录" in rendered
+    assert "异常处置：已排除" in rendered
     assert any(
         link.label == "查看这条发现来源（非核验证据）"
         for link in page.get("link_button")

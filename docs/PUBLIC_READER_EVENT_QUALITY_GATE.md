@@ -1,18 +1,48 @@
-# Public reader event quality gate
+# Public event visibility and citation quality contract
 
-Status: implemented locally, not evidence of production deployment
-Decision date: 2026-08-20
+Status: active repository contract; deployment still requires separate live verification
+Decision date: 2026-08-23
 
 ## User and task
 
 The primary user is the personal researcher, followed by the public reader. The
-task is to answer “who did what, at what stage, and which original passage can I
-open?” without making a discovery classifier look like a complete event.
+task is to let the reader browse the complete canonical event ledger while
+answering three separate questions:
 
-## Reader-ready contract
+1. what did the source say;
+2. how strong is the current evidence; and
+3. how does the short-risk router assess review priority.
 
-A canonical record enters the public event feed only when all three conditions
-are true:
+Internal processing progress is not an event fact and must not replace any of
+those answers.
+
+## Public visibility contract
+
+Every canonical event is browseable in the Public feed. Visibility does not
+depend on `canonical.status`, `public_state`, rough review, light verification,
+dual-human review, or `citation_ready`.
+
+Records that have not met the formal citation contract remain visible with a
+truthful, bounded source-capture excerpt and explicit uncertainty. Public must
+not expose unrestricted `raw_json`, internal IDs, reviewer identities,
+authorization receipts, prompts, traces, secrets, or provider trading signals.
+Exceptional legal, security or deletion handling may redact unsafe payloads,
+but must not silently recast an event as verified or erase its audit history.
+
+`public_state` remains a compatibility disposition only. Labels such as
+“待核验”“粗审”“待补证”“已核验” are internal workflow language; they are not the
+primary Public status, filter or badge.
+
+The public API 1.x still carries `status`, `public_state`, and `reviewed_at` for
+compatibility. New clients must not use them as reader trust labels. They are
+deprecated for the next major public projection, where removal requires a
+versioned migration rather than an in-place breaking change.
+
+## Automatically derived citation contract
+
+`citation_ready` is a deterministic, current-version projection. It is not a
+manual approval, canonical status, or visibility gate. It is true only when all
+three conditions are true:
 
 1. `company_name` or `ticker_at_event` identifies the subject;
 2. the current event version contains a concrete `public_fact_summary` produced
@@ -22,37 +52,89 @@ are true:
    be supportive; `non_decision`, `no_keyword`, `link_only`, and incomplete
    attachments fail closed even when their text is long.
 
-The API exposes this as `reader_ready`. Public event and facet requests use
-`reader_ready=true`. Failed records are not deleted, rejected, downgraded, or
-rewritten. They remain in the canonical ledger and internal review path as a
-separately measured discovery backlog.
+The legacy API field `reader_ready` may remain as an alias while clients migrate,
+but the Public contract names the property `citation_ready`. A false value
+forbids the UI from presenting a synthesized summary as a formal fact; it does
+not remove the event from the feed.
+
+The same boundary applies to the public API, not only to the bundled UI. When
+`citation_ready=false`, `public_fact_summary`, `claim_subject`, `claim_action`,
+`claim_stage`, and `known_at` are null and `current_version.facts` is empty.
+Only a bounded `unverified_capture_excerpt` may remain, with
+`summary_basis=UNVERIFIED_CAPTURE_EXCERPT` (or `NO_PUBLIC_SUMMARY`). A dormant
+historical fact slot without a current qualifying relation must not cross this
+boundary. When the gate passes, `summary_basis=CITATION_READY_FACT`.
+
+Formal claims remain fail-closed. A source title, URL, filing accession, long
+document, model interpretation, risk score, reviewer progress state, or
+canonical `verified` label is not by itself sufficient to set
+`citation_ready=true`.
+
+## Public evidence posture
+
+Every Public event exposes one machine-derived `evidence_posture`, independent
+of workflow and risk assessment:
+
+| Value | Public meaning |
+|---|---|
+| `PRIMARY_SUPPORTED` | A current-version primary passage supports the concrete fact claim; `citation_ready=true`. |
+| `PRIMARY_SOURCE_AVAILABLE` | A primary source is present, but the current subject/fact/passage relation is incomplete. |
+| `SOURCE_CAPTURED` | The system retained a source capture, but no qualifying primary support is currently bound. |
+| `NO_SOURCE` | No displayable source capture is currently available. |
+
+`evidence_gap_codes` explains the gap without pretending to know more than the
+ledger proves. The initial codes are `MISSING_SUBJECT`,
+`MISSING_FACT_SUMMARY`, `MISSING_CITABLE_EVIDENCE`, and
+`NO_CAPTURED_SOURCE`. A later vocabulary extension requires a versioned
+contract and tests.
+
+## Public risk assessment
+
+Risk assessment is a separate optional object. When current, it may expose
+`route`, `confidence`, `confidence_applicable`, `model_version`,
+`decision_source`, `evidence_state`, `evaluated_at`, `shadow`, and `current`.
+
+- `route` is limited to `RISK_REVIEW`, `NON_TARGET`, or `ABSTAIN`;
+- confidence is shown only when `confidence_applicable=true`; otherwise it is
+  null/hidden;
+- absent or stale assessment means “等待研判”, never `NON_TARGET`;
+- risk routing never changes evidence posture, citation readiness, canonical
+  facts, alerts, or trading permissions.
 
 ## Reader-facing behavior
 
-- Reader-ready records keep their evidence state and can be opened from the
-  public event feed.
-- Discovery-only records do not inflate public event or filter counts.
-- An old direct link to a discovery-only record says that it is not yet a
-  readable event and lists the missing subject, structured fact, or source
-  passage.
+- All canonical records contribute to Public event and facet counts.
+- Every card exposes the evidence posture; the risk assessment is visually and
+  semantically separate.
+- An old direct link to a non-citation-ready record remains readable and lists
+  the missing subject, structured fact, source passage or capture.
+- `PRIMARY_SUPPORTED` may render the concrete fact summary; all other postures
+  render source-attributed, uncertainty-preserving copy rather than a confirmed
+  fact.
 - The former subject-plus-category fallback is forbidden because text such as
   “ICX has a listing-status lead” does not identify the actual listing action or
   stage.
+- Internal workflow states stay in Reviewer/Operator surfaces. Public does not
+  make the reader decode how far the team has processed an event.
 
 ## Measurement and acceptance
 
 The following must remain separately measurable:
 
 - total canonical records;
-- reader-ready records and their public-state partition;
-- discovery-only records;
+- publicly browseable records (expected to equal total canonical records);
+- citation-ready records and `non_citation_ready_inventory`, plus the full
+  evidence-posture partition; the deprecated `reader_hidden_inventory` and
+  `discovery_backlog` aliases never mean an event is hidden from Public;
+- current, stale and absent risk assessments by route;
 - non-exclusive missing-subject, missing-fact-summary, and missing-citable-
-  evidence counts;
-- total internal review queue, reader-ready review queue, and discovery backlog.
+  evidence counts, plus missing-capture counts;
+- internal review queues, without using them as Public feed admission counts.
 
-Acceptance requires zero records returned by the public feed without all three
-reader-ready conditions, consistent reader-ready facets, truthful direct-link
-fallback copy, and full regression coverage.
+Acceptance requires every canonical event to remain browseable, consistent
+facets, deterministic evidence posture and citation readiness, truthful
+direct-link fallback copy, workflow/risk/evidence namespace separation, and full
+regression coverage.
 
 ## Deterministic machine fact-slot closure
 
@@ -73,9 +155,16 @@ exact evidence sentence must remain in the selected passage, and its action and
 object must remain in the public summary.  `event-admission-v1/v2`, generic
 type-only summaries, stale source revisions,
 unsupported issuers, denied actions and non-reproducible receipts are not
-machine-reader-ready.  They remain available for human review.
+machine-citation-ready. They remain visible with their derived evidence posture
+and available for internal review.
 
 ## Dual-human review version closure
+
+Dual-human work has two distinct uses. Its primary product-governance use is to
+create gold labels for training, evaluation, calibration, drift sampling and
+exception analysis. It is not a per-event publication queue and its absence
+does not hide an event. When an authorized consensus additionally mutates a
+formal fact, the strict version/evidence closure below applies.
 
 Applying an authorized two-reviewer consensus is a versioned fact mutation, not
 just a status update.  One `BEGIN IMMEDIATE` transaction must write the new
@@ -128,7 +217,7 @@ adding it requires a new contract/test change rather than an ad-hoc reviewer
 override.
 
 Legacy `event-fact-review-v1` rejection and `NEEDS_EVIDENCE` decisions retain
-their audit meaning.  A v1 confirmation is never reader-ready and is reported
+their audit meaning. A v1 confirmation is never citation-ready and is reported
 as `V1_CONFIRM_REQUIRES_FACT_CLAIM_ADDENDUM`; it must be reissued as a v2
 independent addendum rather than silently upgraded.
 
@@ -138,14 +227,16 @@ receipt.  The reader recomputes the canonical claim SHA-256, public-summary
 SHA-256 and selected-receipt SHA-256 rather than trusting mutually copied hash
 fields.  The receipt freezes the URL, exact passage and passage digest, source
 ID, source content SHA-256, authority tier, observation state, latest revision
-number/kind, and pre-application evidence fingerprint.  A later official-source
-revision therefore makes the event reader-ineligible until it is reviewed again,
-even when a caller retries the old consensus.  It is not a shortcut around the
-relation gate.
+number/kind, and pre-application evidence fingerprint. A later official-source
+revision therefore makes the old formal claim citation-ineligible until the
+current relation is rebuilt or reviewed again, even when a caller retries the
+old consensus. The event itself remains browseable under its downgraded evidence
+posture. Human consensus is not a shortcut around the relation gate.
 
-Deletion is globally reader-ineligible.  For any later edit, every reader path
-fails closed unless the current content still proves the selected passage and
-the branch-specific current receipt remains bound to that source revision.
+Deletion is globally citation-ineligible. For any later edit, every formal-claim
+path fails closed unless the current content still proves the selected passage
+and the branch-specific current receipt remains bound to that source revision.
+Public may retain a safe tombstone or capture history with explicit uncertainty.
 This rule applies equally to standard machine evidence, SEC evidence and
 dual-human evidence.
 `NEEDS_EVIDENCE` advances to a current-version `NEEDS_EVIDENCE` workflow without

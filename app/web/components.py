@@ -42,12 +42,57 @@ PUBLIC_STATE_LABELS = {
     "pending_verification": "待核验",
 }
 
-PUBLIC_STATE_STATUS_CLASS = {
-    "verified": "verified",
-    "excluded": "rejected",
-    "insufficient": "weak",
-    "rough_reviewed": "reviewed",
-    "pending_verification": "candidate",
+# Public readers need to know what the available material supports, not how far
+# an internal review queue has progressed.  ``PUBLIC_STATE_LABELS`` remains a
+# compatibility contract for reviewer/admin workflows; these two maps are the
+# public product vocabulary.
+PUBLIC_EVIDENCE_POSTURE_LABELS = {
+    "PRIMARY_SUPPORTED": "官方原文支持",
+    "PRIMARY_SOURCE_AVAILABLE": "已有一手材料但事实槽待补",
+    "SOURCE_CAPTURED": "仅捕获来源",
+    "NO_SOURCE": "尚无来源",
+}
+
+PUBLIC_EVIDENCE_POSTURE_COPY = {
+    "PRIMARY_SUPPORTED": "已有可定位的官方原文支持当前结构化事实，可作为正式引用起点。",
+    "PRIMARY_SOURCE_AVAILABLE": "系统已有一手材料，但主体、动作、阶段或时间等事实槽仍需补齐。",
+    "SOURCE_CAPTURED": "系统保存了来源捕获内容，但它尚未达到正式引用条件。",
+    "NO_SOURCE": "当前记录尚未关联可供读者核对的来源。",
+}
+
+PUBLIC_EVIDENCE_POSTURE_STATUS_CLASS = {
+    "PRIMARY_SUPPORTED": "verified",
+    "PRIMARY_SOURCE_AVAILABLE": "reviewed",
+    "SOURCE_CAPTURED": "candidate",
+    "NO_SOURCE": "weak",
+}
+
+PUBLIC_RISK_ROUTE_LABELS = {
+    "RISK_REVIEW": "优先复核",
+    "NON_TARGET": "非目标",
+    "ABSTAIN": "暂不判断",
+}
+
+PUBLIC_RISK_DECISION_SOURCE_LABELS = {
+    "TRAINED_SEMANTIC_MODEL": "训练模型",
+    "DETERMINISTIC_EVIDENCE_GATE": "证据规则门",
+    "DETERMINISTIC_SEMANTIC_POLICY_GATE": "语义规则门",
+    "KEYWORD_FALLBACK": "关键词回退",
+    "LEGACY_SCOPE_GUARDRAIL": "范围规则门",
+}
+
+PUBLIC_EVIDENCE_GAP_LABELS = {
+    "MISSING_SUBJECT": "主体待补",
+    "SUBJECT_UNRESOLVED": "主体待确认",
+    "MISSING_FACT_SUMMARY": "结构化事实摘要待补",
+    "MISSING_ACTION": "具体动作待补",
+    "MISSING_STAGE": "事件阶段待补",
+    "MISSING_KNOWN_AT": "时间锚待补",
+    "NO_CITABLE_EVIDENCE": "可引用原文待补",
+    "MISSING_CITABLE_EVIDENCE": "可引用原文待补",
+    "NO_PRIMARY_SOURCE": "一手来源待补",
+    "NO_CAPTURED_SOURCE": "来源捕获待补",
+    "SOURCE_CONFLICT": "来源冲突待解",
 }
 
 STATUS_GLYPHS = {
@@ -676,8 +721,211 @@ def event_anchor_id(event_id: object) -> str:
     return f"event-row-{digest}"
 
 
+def _public_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def public_event_evidence_posture(item: dict[str, Any]) -> dict[str, Any]:
+    """Return the reader-facing evidence axis for one canonical event.
+
+    New API responses declare ``evidence_posture`` directly.  The fallback is
+    intentionally conservative so rolling deployments and historical fixtures
+    remain readable without being promoted by an old workflow state.
+    """
+
+    declared = str(item.get("evidence_posture") or "").strip().upper()
+    if "citation_ready" in item:
+        citation_ready = _public_bool(item.get("citation_ready"))
+    else:
+        citation_ready = _public_bool(item.get("reader_ready"))
+
+    try:
+        citable_count = max(0, int(item.get("citable_evidence_count") or 0))
+    except (TypeError, ValueError):
+        citable_count = 0
+    try:
+        capture_count = max(0, int(item.get("captured_source_count") or 0))
+    except (TypeError, ValueError):
+        capture_count = 0
+
+    if declared in PUBLIC_EVIDENCE_POSTURE_LABELS:
+        posture = declared
+    elif citation_ready:
+        posture = "PRIMARY_SUPPORTED"
+    elif citable_count:
+        posture = "PRIMARY_SOURCE_AVAILABLE"
+    elif (
+        capture_count
+        or _bounded_public_text(item.get("unverified_capture_excerpt"))
+    ):
+        posture = "SOURCE_CAPTURED"
+    else:
+        posture = "NO_SOURCE"
+
+    if posture == "PRIMARY_SUPPORTED":
+        citation_ready = True
+
+    raw_gaps = item.get("evidence_gap_codes") or []
+    if not isinstance(raw_gaps, (list, tuple, set)):
+        raw_gaps = []
+    gap_labels: list[str] = []
+    for value in raw_gaps:
+        label = PUBLIC_EVIDENCE_GAP_LABELS.get(str(value or "").strip().upper())
+        if label and label not in gap_labels:
+            gap_labels.append(label)
+
+    return {
+        "key": posture,
+        "label": PUBLIC_EVIDENCE_POSTURE_LABELS[posture],
+        "explanation": PUBLIC_EVIDENCE_POSTURE_COPY[posture],
+        "citation_ready": citation_ready,
+        "gap_labels": gap_labels,
+        "status_class": PUBLIC_EVIDENCE_POSTURE_STATUS_CLASS[posture],
+    }
+
+
+def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
+    """Translate current risk routing without pretending every run used a model.
+
+    ``route`` says where the item was routed; ``decision_source`` says what
+    produced that route.  Those are deliberately kept separate because the
+    deterministic gates and keyword fallback can return a route without ever
+    invoking the trained semantic model.
+    """
+
+    raw = item.get("risk_assessment")
+    if not isinstance(raw, dict):
+        raw = {}
+    route = str(raw.get("route") or "").strip().upper()
+    current_value = raw.get("current")
+    current = bool(route) if current_value is None else _public_bool(current_value)
+    if not current or route not in PUBLIC_RISK_ROUTE_LABELS:
+        route = ""
+
+    shadow = _public_bool(raw.get("shadow"))
+    decision_source = str(raw.get("decision_source") or "").strip().upper()
+    source_label = PUBLIC_RISK_DECISION_SOURCE_LABELS.get(
+        decision_source, "研判来源未标明"
+    )
+    trained_model = decision_source == "TRAINED_SEMANTIC_MODEL"
+
+    if not route:
+        heading = "模型研判"
+        label = "等待模型研判"
+        source_label = ""
+    elif trained_model:
+        heading = "模型研判"
+        label = (
+            f"{'影子模型' if shadow else source_label} · "
+            f"{PUBLIC_RISK_ROUTE_LABELS[route]}"
+        )
+    else:
+        heading = "自动风险分流"
+        route_label = (
+            "自动弃权"
+            if route == "ABSTAIN"
+            and decision_source
+            in {
+                "DETERMINISTIC_EVIDENCE_GATE",
+                "DETERMINISTIC_SEMANTIC_POLICY_GATE",
+                "LEGACY_SCOPE_GUARDRAIL",
+            }
+            else PUBLIC_RISK_ROUTE_LABELS[route]
+        )
+        shadow_prefix = "影子管线 · " if shadow else ""
+        label = f"{shadow_prefix}{source_label} · {route_label}"
+
+    confidence_text = ""
+    # Only an explicitly identified trained-model result may expose calibrated
+    # confidence.  Rule gates and keyword fallbacks keep diagnostic scores out
+    # of the reader UI even if an old producer accidentally marks them usable.
+    if (
+        route
+        and trained_model
+        and _public_bool(raw.get("confidence_applicable"))
+    ):
+        try:
+            confidence = float(raw.get("confidence"))
+        except (TypeError, ValueError):
+            confidence = -1.0
+        if confidence >= 0:
+            confidence = confidence * 100 if confidence <= 1 else confidence
+            confidence_text = f"{min(confidence, 100):.0f}%"
+
+    if not route:
+        explanation = "尚无绑定当前事件版本的模型研判。"
+    elif trained_model:
+        explanation = {
+            "RISK_REVIEW": "训练模型建议优先复核这条可能的下行风险线索。",
+            "NON_TARGET": "训练模型暂未把这条事件路由为主要做空风险目标。",
+            "ABSTAIN": "当前信息不足以支持训练模型作出方向性研判。",
+        }[route]
+    elif decision_source == "DETERMINISTIC_EVIDENCE_GATE":
+        explanation = (
+            "当前版本未通过确定性证据门，系统自动弃权；训练模型没有被调用。"
+            if route == "ABSTAIN"
+            else "该路由由确定性证据门产生；训练模型没有被调用。"
+        )
+    elif decision_source == "DETERMINISTIC_SEMANTIC_POLICY_GATE":
+        explanation = (
+            "确定性语义规则门自动弃权；训练模型没有被调用。"
+            if route == "ABSTAIN"
+            else "该路由由确定性语义规则门产生；训练模型没有被调用。"
+        )
+    elif decision_source == "KEYWORD_FALLBACK":
+        explanation = (
+            "这是关键词回退启发式的自动分流，不是训练模型输出，"
+            "也不是校准后的概率判断。"
+        )
+    elif decision_source == "LEGACY_SCOPE_GUARDRAIL":
+        explanation = (
+            "该路由由兼容旧数据的确定性范围规则产生；训练模型没有被调用。"
+        )
+    else:
+        explanation = (
+            "API 未提供可识别的 decision_source，无法把这次路由归因为训练模型；"
+            "这里只展示路由结果。"
+        )
+
+    if route and shadow:
+        explanation += (
+            "这是影子模型的实验分流，不是正式事件结论。"
+            if trained_model
+            else "该规则运行在影子分流管线中，不是正式事件结论。"
+        )
+    elif route:
+        explanation += "风险分流不负责确认事件真假。"
+
+    return {
+        "route": route,
+        "label": label,
+        "heading": heading,
+        "explanation": explanation,
+        "confidence": confidence_text,
+        "model_version": (
+            _bounded_public_text(raw.get("model_version"), limit=80)
+            if trained_model and route
+            else ""
+        ),
+        "decision_source": decision_source if route else "",
+        "decision_source_label": source_label,
+        "trained_model": trained_model and bool(route),
+        "shadow": shadow,
+        "current": bool(route),
+    }
+
+
 def public_event_state(item: dict[str, Any]) -> str:
-    """Return the stable reader-facing lifecycle state for one event."""
+    """Return the legacy workflow projection for compatibility and disposition.
+
+    Public navigation and trust labels must use ``public_event_evidence_posture``
+    and ``public_event_risk_assessment`` instead.  The legacy state is retained
+    so exceptional dispositions such as an excluded record remain auditable.
+    """
     declared = str(item.get("public_state") or "").strip().lower()
     if declared in PUBLIC_STATE_LABELS:
         return declared
@@ -789,7 +1037,6 @@ def public_event_timing(item: dict[str, Any]) -> list[tuple[str, str]]:
     )
     discovered_at = _bounded_public_text(item.get("first_seen_at"), limit=64)
     updated_at = _bounded_public_text(item.get("last_updated_at"), limit=64)
-    reviewed_at = _bounded_public_text(item.get("reviewed_at"), limit=64)
 
     timing: list[tuple[str, str]] = []
     if event_date:
@@ -800,12 +1047,10 @@ def public_event_timing(item: dict[str, Any]) -> list[tuple[str, str]]:
         timing.append(("系统发现", compact_timestamp(discovered_at) + " UTC"))
     if updated_at:
         timing.append(("最后更新", compact_timestamp(updated_at) + " UTC"))
-    if reviewed_at:
-        timing.append(("核验记录", compact_timestamp(reviewed_at) + " UTC"))
     return timing
 
 
-def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
+def public_event_copy(item: dict[str, Any]) -> dict[str, Any]:
     """Translate event metadata into calm Chinese product copy.
 
     Raw filing prose remains available as evidence.  It is deliberately not
@@ -813,6 +1058,8 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
     text are poor substitutes for a bounded statement of what is known.
     """
     state = public_event_state(item)
+    evidence = public_event_evidence_posture(item)
+    risk = public_event_risk_assessment(item)
     subject = public_event_subject(item)
     family_key = str(item.get("event_family") or "")
     family = EVENT_FAMILY_LABELS.get(family_key, "其他公司事件")
@@ -822,23 +1069,13 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
     authority_label = PUBLIC_AUTHORITY_LABELS.get(authority, "来源待核实")
     fact_summary, fact_provenance = public_event_fact_summary(item)
     capture_excerpt = _bounded_public_text(item.get("unverified_capture_excerpt"))
-    state_suffixes = {
-        "verified": "账本状态为已核验，但当前缺少可公开复述的结构化事实摘要。",
-        "excluded": "当前线索已排除，不作为有效事实结论。",
-        "insufficient": "当前证据不足，不将这条线索作为确定事实。",
-        "rough_reviewed": "当前仅完成粗审，仍需正式证据核验。",
-        "pending_verification": "当前仍需核对原始文件与上下文。",
-    }
-    if fact_summary:
-        state_suffix = {
-            "verified": "当前状态为已核验；仍建议回到完整原文核对上下文。",
-            "excluded": "当前线索已排除，不作为有效事实结论。",
-            "insufficient": "当前证据不足，不将这段材料作为确定事实。",
-            "rough_reviewed": "当前仅完成粗审，仍需正式证据核验。",
-            "pending_verification": "当前仍需核对原始文件与上下文。",
-        }[state]
+    fact_is_public = bool(fact_summary and evidence["citation_ready"])
+    if fact_is_public:
         separator = " " if fact_summary[-1:] in {"。", "！", "？", ".", "!", "?"} else "。"
-        summary = f"{fact_provenance}：{fact_summary}{separator}{state_suffix}"
+        summary = (
+            f"{fact_provenance}：{fact_summary}{separator}"
+            f"{evidence['explanation']}"
+        )
     elif capture_excerpt:
         separator = (
             " "
@@ -846,30 +1083,47 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, str]:
             else "。"
         )
         summary = (
-            f"未核验来源节选：{capture_excerpt}{separator}"
-            "该节选只说明系统采集到了什么，不是正式事件事实。"
+            f"来源捕获节选：{capture_excerpt}{separator}"
+            "这只说明系统采集到了什么，不等于原文已经支持一条确定事实。"
         )
-        fact_provenance = "未核验来源节选"
+        fact_provenance = "来源捕获节选"
     else:
         summary = (
             f"目前只记录到{subject}的一条“{family}”分类线索；"
-            f"尚没有可公开复述的主体—动作—阶段事实。{state_suffixes[state]}"
+            f"尚没有可公开复述的主体—动作—阶段事实。{evidence['explanation']}"
         )
+        fact_provenance = ""
+    disposition_label = "异常处置：已排除" if state == "excluded" else ""
+    if disposition_label:
+        summary += " 该记录已作排除处置，仅保留来源与审计上下文。"
     return {
         "subject": subject,
         "family": family,
         "source": source,
         "authority": authority_label,
-        "state": state,
-        "state_label": PUBLIC_STATE_LABELS[state],
+        "disposition_label": disposition_label,
+        "evidence_posture": str(evidence["key"]),
+        "evidence_label": str(evidence["label"]),
+        "evidence_explanation": str(evidence["explanation"]),
+        "citation_ready": bool(evidence["citation_ready"]),
+        "evidence_gaps": "、".join(evidence["gap_labels"]),
+        "risk_route": str(risk["route"]),
+        "risk_label": str(risk["label"]),
+        "risk_heading": str(risk["heading"]),
+        "risk_explanation": str(risk["explanation"]),
+        "risk_confidence": str(risk["confidence"]),
+        "risk_model_version": str(risk["model_version"]),
+        "risk_decision_source": str(risk["decision_source"]),
+        "risk_decision_source_label": str(risk["decision_source_label"]),
+        "risk_shadow": bool(risk["shadow"]),
         "summary": summary,
-        "summary_provenance": fact_provenance or "发现线索说明",
+        "summary_provenance": fact_provenance or "来源与事实槽说明",
         "relevance": (
             EVENT_FAMILY_RELEVANCE.get(
                 family_key,
                 "请结合原始来源、主体、日期与上下文判断其实际意义。",
             )
-            if fact_summary
+            if fact_is_public
             else f"先确认具体动作、阶段和原始来源，再判断这条{family}线索是否值得关注。"
         ),
     }
@@ -885,10 +1139,15 @@ def event_feed_row(
     """Return one safe, compact Situation Room event row."""
     canonical_status = str(item.get("status") or "candidate").lower()
     copy = public_event_copy(item) if public else None
-    public_state = copy["state"] if copy else ""
-    status_key = PUBLIC_STATE_STATUS_CLASS.get(public_state, canonical_status)
+    status_key = (
+        PUBLIC_EVIDENCE_POSTURE_STATUS_CLASS.get(
+            str(copy["evidence_posture"]), "candidate"
+        )
+        if copy
+        else canonical_status
+    )
     status = (
-        copy["state_label"]
+        copy["evidence_label"]
         if public
         else STATUS_LABELS.get(canonical_status, "EVENT")
     )
@@ -948,6 +1207,25 @@ def event_feed_row(
         if item.get("_changed_since_view")
         else ""
     )
+    if copy:
+        risk_class = {
+            "RISK_REVIEW": "status-candidate",
+            "ABSTAIN": "status-weak",
+        }.get(str(copy["risk_route"]), "")
+        risk_markup = (
+            f'<span class="feed-chip {risk_class}">'
+            f'{escape(str(copy["risk_heading"]))}：'
+            f'{escape(str(copy["risk_label"]))}</span>'
+        )
+        disposition_markup = (
+            f'<span class="feed-chip status-rejected">'
+            f'{escape(str(copy["disposition_label"]))}</span>'
+            if copy["disposition_label"]
+            else ""
+        )
+    else:
+        risk_markup = ""
+        disposition_markup = ""
     return (
         f'<a id="{event_anchor_id(item.get("event_id"))}" class="{row_class}" href="{preview_url}" target="_self" '
         f'aria-label="{escape(str(aria_label), quote=True)}">'
@@ -957,6 +1235,8 @@ def event_feed_row(
         '<div class="feed-body">'
         '<div class="feed-meta">'
         f'<span class="feed-chip status-{escape(status_key)}">{escape(status)}</span>'
+        f'{risk_markup}'
+        f'{disposition_markup}'
         f'{changed_markup}'
         f'{authority_chip}'
         f'<span class="feed-chip">{escape(family)}</span>'
@@ -1045,29 +1325,10 @@ def flow_shortcuts_markup(
             return fallback if value is None else max(0, int(value))
 
         total = funnel_count("total", verified + candidate + weak + rejected)
-        flows = [
-            ("", "全部事件", total, ""),
-            (
-                "pending_verification",
-                "待核验",
-                funnel_count("pending_verification", candidate),
-                "is-review",
-            ),
-            (
-                "rough_reviewed",
-                "已粗审",
-                funnel_count("rough_reviewed", 0),
-                "is-reviewed",
-            ),
-            (
-                "insufficient",
-                "证据不足",
-                funnel_count("insufficient", weak),
-                "is-review",
-            ),
-            ("verified", "已核验", funnel_count("verified", verified), "is-verified"),
-            ("excluded", "已排除", funnel_count("excluded", rejected), ""),
-        ]
+        # Workflow states are reviewer queues, not reader-facing event
+        # attributes.  Public filtering is handled by search, category, source
+        # and time; evidence posture remains visible on each event card.
+        flows = [("", "全部事件", total, "")]
     else:
         flows = [
             ("全部事件", "全部事件", verified + candidate + weak + rejected, ""),

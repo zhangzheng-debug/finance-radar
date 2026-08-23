@@ -107,10 +107,11 @@ OPERATIONS_V8_TABLES = (
 OPERATIONS_V9_TABLES = (
     "capture_interpretation_attempts",
 )
-# Versions 2--4 are historical recovery points.  Version 6 is the currently
-# deployed operations store.  There was no released schema 5 migration, so do
-# not silently accept an unknown intermediate shape.
-SUPPORTED_OPERATIONS_SCHEMA_VERSIONS = frozenset({2, 3, 4, 6, 7, 8, 9})
+# Versions 2--4 are historical recovery points.  There was no released schema
+# 5 migration, so do not silently accept an unknown intermediate shape.  Newer
+# additive versions remain accepted so old verified recovery bundles can still
+# be audited alongside the current store.
+SUPPORTED_OPERATIONS_SCHEMA_VERSIONS = frozenset({2, 3, 4, 6, 7, 8, 9, 10})
 
 
 def utc_now() -> str:
@@ -500,6 +501,23 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
                     ).fetchone()[0]
                 ),
             }
+        elif schema_version >= 10:
+            model_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(model_runs)")
+            }
+            model_indexes = {
+                str(row[1])
+                for row in connection.execute("PRAGMA index_list(model_runs)")
+            }
+            if "event_version" not in model_columns:
+                raise ValueError(
+                    "operations database is missing model_runs.event_version for schema 10"
+                )
+            if "idx_model_event_version_created" not in model_indexes:
+                raise ValueError(
+                    "operations database is missing current-version model-run index for schema 10"
+                )
     if quick_check != "ok" or integrity_check != "ok":
         raise ValueError(f"SQLite integrity failure: quick={quick_check} integrity={integrity_check}")
     if ledger and (schema_version != 14 or any(audit.values())):

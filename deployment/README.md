@@ -270,6 +270,11 @@ services. They load only their scoped token (Admin is the explicit full-access
 exception), listen on loopback, and are not referenced by Nginx. Start exactly
 one for an SSH-tunnel session, then stop it:
 
+On Windows, prefer the audited launcher in
+[`deployment/windows/README.md`](windows/README.md). It requires an explicit
+host, supports a `--dry-run`, opens the local browser and owns cleanup for the
+one service/tunnel it starts; it stores no host, key or token in the repository.
+
 ```bash
 sudo systemctl start finance-radar-admin
 ssh -N -L 18502:127.0.0.1:18502 ubuntu@YOUR_SERVER

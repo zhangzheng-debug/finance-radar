@@ -112,6 +112,58 @@ class Settings:
     # leases, retry counts, timeouts and output tokens.
     capture_llm_daily_request_cap: int = 0
 
+    def __post_init__(self) -> None:
+        """Fail closed when scoped credentials can impersonate one another.
+
+        Personal reviewer identity is derived from the credential presented to
+        the API.  Reusing an Admin, shared Reviewer or Operator secret as a
+        personal token would therefore let a shared role masquerade as a named
+        human.  Validate direct test/local construction as well as environment
+        loading so no startup path can create that ambiguity.
+        """
+
+        fingerprints: dict[str, str] = {}
+        for scope, token in (
+            ("admin", self.admin_token),
+            ("shared_reviewer", self.reviewer_token),
+            ("operator", self.operator_token),
+        ):
+            normalized = str(token or "").strip()
+            if not normalized:
+                continue
+            fingerprint = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+            previous = fingerprints.get(fingerprint)
+            if previous is not None:
+                raise ValueError(
+                    f"internal credentials must be distinct across scopes: {previous} and {scope}"
+                )
+            fingerprints[fingerprint] = scope
+
+        seen_ids: set[str] = set()
+        for principal_id, role, token in self.reviewer_principals:
+            normalized_id = str(principal_id or "").strip().casefold()
+            normalized_role = str(role or "").strip().upper()
+            normalized_token = str(token or "").strip()
+            if (
+                len(normalized_id) < 3
+                or normalized_role not in {"REVIEWER", "ARBITER"}
+                or len(normalized_token) < 24
+            ):
+                raise ValueError(
+                    "reviewer principal requires principal_id, role and a 24+ character token"
+                )
+            if normalized_id in seen_ids:
+                raise ValueError("reviewer principal IDs must be unique")
+            seen_ids.add(normalized_id)
+            fingerprint = hashlib.sha256(normalized_token.encode("utf-8")).hexdigest()
+            previous = fingerprints.get(fingerprint)
+            if previous is not None:
+                raise ValueError(
+                    "personal reviewer credentials must be distinct from every shared role "
+                    f"and other principal (collision with {previous})"
+                )
+            fingerprints[fingerprint] = f"principal:{normalized_id}"
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(

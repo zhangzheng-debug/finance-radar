@@ -109,3 +109,42 @@ def test_reviewer_principals_reject_ambiguous_secret_sources(monkeypatch, tmp_pa
 
     with pytest.raises(ValueError, match="either environment JSON or a systemd credential"):
         Settings.from_env()
+
+
+def test_internal_and_personal_credentials_must_be_distinct(monkeypatch) -> None:
+    import pytest
+
+    shared = "same-secret-must-not-cross-role-boundaries-001"
+    monkeypatch.setenv("FINANCE_RADAR_ADMIN_TOKEN", shared)
+    monkeypatch.setenv("FINANCE_RADAR_REVIEWER_TOKEN", shared)
+    with pytest.raises(ValueError, match="distinct across scopes"):
+        Settings.from_env()
+
+    monkeypatch.setenv("FINANCE_RADAR_REVIEWER_TOKEN", "separate-shared-reviewer-secret-002")
+    monkeypatch.setenv(
+        "FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON",
+        json.dumps(
+            [
+                {
+                    "principal_id": "reviewer-a",
+                    "role": "REVIEWER",
+                    "token": shared,
+                }
+            ]
+        ),
+    )
+    with pytest.raises(ValueError, match="personal reviewer credentials must be distinct"):
+        Settings.from_env()
+
+
+def test_direct_settings_construction_rejects_duplicate_personal_credentials() -> None:
+    import pytest
+
+    duplicate = "duplicate-personal-reviewer-secret-000001"
+    with pytest.raises(ValueError, match="other principal"):
+        Settings(
+            reviewer_principals=(
+                ("reviewer-a", "REVIEWER", duplicate),
+                ("reviewer-b", "REVIEWER", duplicate),
+            )
+        )

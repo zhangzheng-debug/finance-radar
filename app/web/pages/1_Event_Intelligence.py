@@ -488,15 +488,18 @@ with context_col:
     if UI_ROLE == "reviewer":
         st.caption("证据代理运行属于 Operator/Admin 权限；Reviewer 只核对证据并记录人工判断。")
 
-    if decisions:
+    if decisions and UI_ROLE == "reviewer":
         latest = decisions[0]
         with st.expander("人工复核记录"):
             st.caption("会写入不可变的人工复核记录；不触发交易，也不会自动改写事件的正式结论。")
+            reviewer_credential = st.text_input(
+                "个人审核凭据",
+                type="password",
+                key=f"event-personal-reviewer-credential-{selected_id}",
+                help="由运维单独发给本人；只驻留当前 Streamlit 会话，不能使用共享 Reviewer 凭据代替。",
+            )
             with st.form(f"human-override-{selected_id}"):
-                actor = st.text_input(
-                    "审核者标识（姓名、工号或组织 ID）",
-                    placeholder="例如：li.ming / R-042",
-                )
+                st.caption("审核者身份由当前个人 Reviewer 凭据绑定，页面不能填写或冒充身份。")
                 review_status = st.selectbox(
                     "复核结果", ["REVIEWED_NO_CHANGE", "HUMAN_REVIEW", "INSUFFICIENT"]
                 )
@@ -510,7 +513,9 @@ with context_col:
                     key=f"reviewer-attestation-{selected_id}",
                 )
                 if st.form_submit_button("记录人工复核（会写入）", width="stretch"):
-                    if not reviewer_attestation:
+                    if len(reviewer_credential.strip()) < 24:
+                        st.warning("请先输入本人个人审核凭据；共享 Reviewer 凭据不能提交人工判断。")
+                    elif not reviewer_attestation:
                         st.warning("请先确认身份和事件特定理由，再写入人工复核记录。")
                     else:
                         try:
@@ -518,15 +523,17 @@ with context_col:
                                 f"/api/v1/events/{selected_id}/human-override",
                                 method="POST",
                                 json_body={
-                                    "actor": actor,
                                     "reason": reason,
                                     "review_status": review_status,
                                     "reviewer_attestation": True,
                                 },
+                                reviewer_credential=reviewer_credential,
                             )
                             st.success(f"已记录 {saved['override_id']}")
                         except Exception as exc:
                             st.error(str(exc))
+    elif decisions and UI_ROLE == "admin":
+        st.info("Admin 可查看审计历史，但不能代替个人 Reviewer 提交人工复核判断。")
 
     overrides = trace.get("human_overrides") or []
     if overrides:

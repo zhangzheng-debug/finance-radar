@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ipaddress
 import hashlib
+import logging
 import secrets
+import sqlite3
 import time
 import uuid
 from copy import deepcopy
@@ -41,17 +43,19 @@ from app.services import (
     validate_interpretation_result,
 )
 from app.services.capture_interpretation import CAPTURE_INTERPRETATION_PROMPT_VERSION
+from app.services.public_event_semantics import (
+    derive_public_event_semantics,
+    project_public_risk_assessment,
+)
 from app.services.replay import ReplayCaseNotFound
 from app.storage import EvidenceObjectStore, LedgerRepository, OperationsRepository
 
 
-API_SCHEMA_VERSION = "1.1"
+API_SCHEMA_VERSION = "1.2"
+LOGGER = logging.getLogger(__name__)
 BACKUP_SNAPSHOT_MAX_AGE_SECONDS = 36 * 60 * 60
 OVERVIEW_SNAPSHOT_REFRESH_SECONDS = 30.0
 OVERVIEW_PUBLISHED_SNAPSHOT_REFRESH_SECONDS = 5 * 60.0
-GENERIC_REVIEWER_IDENTITIES = frozenset(
-    {"reviewer", "defense-reviewer", "审核者", "审查员", "unknown", "test"}
-)
 GENERIC_REVIEW_REASONS = frozenset(
     {
         "已逐条核对精确引文",
@@ -103,7 +107,8 @@ def _backup_artifact_visibility(path: Path) -> tuple[bool | None, str]:
 
 
 class HumanOverrideRequest(BaseModel):
-    actor: str = Field(min_length=3, max_length=80)
+    model_config = ConfigDict(extra="forbid")
+
     reason: str = Field(min_length=20, max_length=1000)
     review_status: Literal["HUMAN_REVIEW", "INSUFFICIENT", "REVIEWED_NO_CHANGE"]
     reviewer_attestation: Literal[True]
@@ -140,19 +145,15 @@ def _normalized_audit_text(value: str) -> str:
     return " ".join(value.split()).strip()
 
 
-def validate_human_override_attribution(payload: HumanOverrideRequest) -> tuple[str, str]:
-    """Reject placeholder attribution before it becomes an immutable audit row."""
+def validate_human_override_rationale(payload: HumanOverrideRequest) -> str:
+    """Reject placeholder rationale before it becomes an immutable audit row.
 
-    actor = _normalized_audit_text(payload.actor)
+    Reviewer identity is deliberately not accepted from the request body.  The
+    endpoint binds attribution to the personal credential resolved by
+    ``require_bound_reviewer_principal``.
+    """
+
     reason = _normalized_audit_text(payload.reason)
-    if len(actor) < 3 or actor.casefold() in GENERIC_REVIEWER_IDENTITIES:
-        raise HTTPException(
-            422,
-            {
-                "code": "SPECIFIC_REVIEWER_ID_REQUIRED",
-                "message": "human-review audit records require a specific reviewer identity",
-            },
-        )
     if len(reason) < 20 or reason.casefold() in GENERIC_REVIEW_REASONS:
         raise HTTPException(
             422,
@@ -161,7 +162,7 @@ def validate_human_override_attribution(payload: HumanOverrideRequest) -> tuple[
                 "message": "human-review audit records require an event-specific rationale",
             },
         )
-    return actor, reason
+    return reason
 
 
 def generated_at() -> str:
@@ -802,6 +803,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         value: dict[str, Any],
         *,
         captured_source: dict[str, Any] | None = None,
+        risk_run: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Return the public event fields without promoting private review prose.
 
@@ -813,9 +815,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
 
         result = {key: value.get(key) for key in public_event_fields}
-        if str(result.get("public_fact_summary") or "").strip():
+        result.update(derive_public_event_semantics(value))
+        result["risk_assessment"] = project_public_risk_assessment(
+            risk_run,
+            current_version=int(value.get("current_version") or 0),
+        )
+        # A structured claim is public only when the current event version has
+        # crossed the citation gate.  Historical ledgers may already contain
+        # claim slots even though the evidence relationship for that version
+        # is missing or no longer reader-eligible.  Keeping every canonical
+        # event visible must never turn those dormant slots into a public fact.
+        if result["citation_ready"] and str(
+            result.get("public_fact_summary") or ""
+        ).strip():
             result["unverified_capture_excerpt"] = None
-            result["summary_basis"] = "EXPLICIT_PUBLIC_FACT_SUMMARY"
+            result["summary_basis"] = "CITATION_READY_FACT"
             return result
 
         source = captured_source if isinstance(captured_source, dict) else value
@@ -832,12 +846,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         excerpt = " ".join(printable.split())
         if len(excerpt) > 360:
             excerpt = excerpt[:359].rstrip() + "…"
-        result["public_fact_summary"] = None
+        for field in (
+            "public_fact_summary",
+            "claim_subject",
+            "claim_action",
+            "claim_stage",
+            "known_at",
+        ):
+            result[field] = None
         result["unverified_capture_excerpt"] = excerpt or None
         result["summary_basis"] = (
             "UNVERIFIED_CAPTURE_EXCERPT" if excerpt else "NO_PUBLIC_SUMMARY"
         )
         return result
+
+    def current_risk_runs(
+        events: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        event_versions: dict[str, int] = {}
+        for event in events:
+            event_id = str(event.get("event_id") or "").strip()
+            try:
+                current_version = int(event.get("current_version") or 0)
+            except (TypeError, ValueError):
+                continue
+            if event_id and current_version > 0:
+                event_versions[event_id] = current_version
+        try:
+            return operations.latest_model_runs_for_versions(event_versions)
+        except (OSError, sqlite3.Error) as exc:
+            # Risk routing is an optional reader axis, not an event-admission
+            # dependency.  If the operations store is locked or unavailable,
+            # keep every canonical event visible and project a null assessment.
+            LOGGER.warning("public risk assessment unavailable: %s", exc)
+            return {}
 
     def public_evidence_item(value: dict[str, Any]) -> dict[str, Any]:
         return {key: value.get(key) for key in public_evidence_fields}
@@ -1097,6 +1139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         value: dict[str, Any],
         *,
         evidence: list[dict[str, Any]],
+        risk_run: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Return only fields consumed by the public event dossier.
 
@@ -1120,22 +1163,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "claim_stage",
             "known_at",
         )
-        result: dict[str, Any] = {
-            "event": public_event_item(
-                raw_event,
-                captured_source=(
-                    value.get("preferred_source")
-                    if isinstance(value.get("preferred_source"), dict)
-                    else None
-                ),
+        public_event = public_event_item(
+            raw_event,
+            captured_source=(
+                value.get("preferred_source")
+                if isinstance(value.get("preferred_source"), dict)
+                else None
             ),
+            risk_run=risk_run,
+        )
+        public_facts = (
+            {
+                key: facts.get(key)
+                for key in public_fact_fields
+                if key in facts
+            }
+            if public_event.get("citation_ready") is True
+            else {}
+        )
+        result: dict[str, Any] = {
+            "event": public_event,
             "current_version": {
                 "version": version.get("version"),
-                "facts": {
-                    key: facts.get(key)
-                    for key in public_fact_fields
-                    if key in facts
-                },
+                "facts": public_facts,
             },
             "preferred_source": {
                 "source_published_at": (
@@ -1305,8 +1355,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             latest_backup,
         )
         if not internal_reader:
+            recent_events = list(data.get("recent_events", []))
+            risk_runs = current_risk_runs(recent_events)
             data["recent_events"] = [
-                public_event_item(item) for item in data.get("recent_events", [])
+                public_event_item(
+                    item,
+                    risk_run=risk_runs.get(str(item.get("event_id") or "")),
+                )
+                for item in recent_events
             ]
             data["source_health"] = [
                 public_source_health(item) for item in data.get("source_health", [])
@@ -1466,7 +1522,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if internal_reader:
             data = read_events()
         else:
-            cache_key = "public-event-feed-v2:" + repr(
+            cache_key = "public-event-feed-v3:" + repr(
                 (
                     status,
                     public_state,
@@ -1482,7 +1538,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             data = cached_read(cache_key, 20.0, read_events)
         if not internal_reader:
-            data["items"] = [public_event_item(item) for item in data["items"]]
+            risk_runs = current_risk_runs(data["items"])
+            data["items"] = [
+                public_event_item(
+                    item,
+                    risk_run=risk_runs.get(str(item.get("event_id") or "")),
+                )
+                for item in data["items"]
+            ]
         return envelope(request, data)
 
     @application.get("/api/v1/events/facets")
@@ -1530,8 +1593,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if item.get("observation_status") != "deleted"
             ]
             event = dict(data.get("event") or {})
+            risk_runs = current_risk_runs([event])
             return {
-                "detail": public_event_detail(data, evidence=evidence),
+                "detail": public_event_detail(
+                    data,
+                    evidence=evidence,
+                    risk_run=risk_runs.get(str(event.get("event_id") or "")),
+                ),
                 "evidence": {"items": evidence},
                 "knowledge": knowledge_context(
                     str(event.get("event_family") or ""),
@@ -1566,7 +1634,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         return envelope(
             request,
-            cached_read(f"public-event-dossier-v1:{event_id}", 20.0, read_dossier),
+            cached_read(f"public-event-dossier-v2:{event_id}", 20.0, read_dossier),
         )
 
     @application.get("/api/v1/events/{event_id}")
@@ -1610,7 +1678,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "shadow_only": True,
             }
         else:
-            data = public_event_detail(data, evidence=evidence)
+            event = dict(data.get("event") or {})
+            risk_runs = current_risk_runs([event])
+            data = public_event_detail(
+                data,
+                evidence=evidence,
+                risk_run=risk_runs.get(str(event.get("event_id") or "")),
+            )
         return envelope(request, data)
 
     @application.get("/api/v1/events/{event_id}/knowledge")
@@ -1830,10 +1904,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ),
         )
 
-    @application.post("/api/v1/events/{event_id}/human-override", dependencies=[Depends(require_reviewer)])
-    def record_human_override(request: Request, event_id: str, payload: HumanOverrideRequest):
+    @application.post("/api/v1/events/{event_id}/human-override")
+    def record_human_override(
+        request: Request,
+        event_id: str,
+        payload: HumanOverrideRequest,
+        principal: dict[str, str] = Depends(require_bound_reviewer_principal),
+    ):
         event_or_404(event_id)
-        actor, reason = validate_human_override_attribution(payload)
+        reason = validate_human_override_rationale(payload)
         decisions = operations.agent_decisions(event_id, limit=1)
         if not decisions:
             raise HTTPException(
@@ -1884,12 +1963,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         override_id = operations.record_human_override(
             event_id,
             decision["decision_id"],
-            actor=actor,
+            actor=principal["principal_alias"],
             reason=reason,
             before={"review_status": decision["status"], "trace_id": decision["trace_id"]},
             after={
                 "review_status": payload.review_status,
                 "reviewer_attestation": payload.reviewer_attestation,
+                "reviewer_principal_hash": principal["principal_hash"],
+                "reviewer_role": principal["role"],
+                "credential_bound": True,
             },
         )
         return envelope(
@@ -1899,6 +1981,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "event_id": event_id,
                 "decision_id": decision["decision_id"],
                 "review_status": payload.review_status,
+                "reviewer_principal": principal["principal_alias"],
+                "credential_bound": True,
                 "no_trading": True,
             },
         )

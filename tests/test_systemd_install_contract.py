@@ -171,12 +171,70 @@ def test_prepared_restore_creates_root_backup_attestation_directory() -> None:
 
 def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() -> None:
     source = CAPTURE_INTERPRETATION_UNIT.read_text(encoding="utf-8")
+    installer = INSTALLER.read_text(encoding="utf-8")
 
     assert (
         "scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 100000 --workers 3"
         in source
     )
     assert "--env-file /dev/null" not in source
+    assert "EnvironmentFile=/etc/finance-radar.env" not in source
+    assert "LoadCredential=deepseek_api_key:/etc/finance-radar/deepseek-api-key" in source
+    assert "ExecStartPre=/usr/bin/test -s %d/deepseek_api_key" in source
+    for literal in (
+        "UMask=0077",
+        "CapabilityBoundingSet=",
+        "ProtectProc=invisible",
+        "ProcSubset=pid",
+        "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+        "ReadWritePaths=/opt/finance-radar/shared/data",
+        "InaccessiblePaths=-/etc/finance-radar.env",
+        "FINANCE_RADAR_ADMIN_TOKEN",
+        "FINANCE_RADAR_REVIEWER_TOKEN",
+        "FINANCE_RADAR_OPERATOR_TOKEN",
+    ):
+        assert literal in source
+    assert "ReadWritePaths=/opt/finance-radar/shared\n" not in source
+    assert "validate_optional_deepseek_credential" in installer
+    assert "[ -f \"$credential\" ] && [ ! -L \"$credential\" ]" in installer
+    assert "stat -c '%u:%g:%a:%s' -- \"$credential\"" in installer
+    assert '"$owner_id" = 0' in installer
+    assert '"$group_id" = 0' in installer
+    assert '"$mode" = 600' in installer
+    assert "DeepSeek LoadCredential source validation failed" in installer
+
+
+def test_deploy_quiesces_capture_interpretation_and_restores_only_timer_state() -> None:
+    source = INSTALLER.read_text(encoding="utf-8")
+    rollback_units = source.split("ROLLBACK_SERVICE_UNITS=(", 1)[1].split(")", 1)[0]
+    assert "finance-radar-capture-interpretation.timer" in rollback_units
+    assert "finance-radar-capture-interpretation.service" not in rollback_units
+    assert "assert_capture_interpretation_quiescent" in source
+    assert "restore_capture_interpretation_runtime" in source
+    assert "DEEPSEEK_CREDENTIAL_READY" in source
+
+    stop_timer = source.index(
+        "systemctl stop finance-radar-capture-interpretation.timer"
+    )
+    bridge_backup = source.index("require_predeploy_verified_backup ||")
+    postcutover_backup = source.index("require_postcutover_verified_backup ||")
+    restore_timer = source.index(
+        "if ! restore_capture_interpretation_runtime; then",
+        postcutover_backup,
+    )
+    assert stop_timer < bridge_backup < postcutover_backup < restore_timer
+    assert "for attempt in $(seq 1 480); do" in source
+    assert "did not become quiescent within 480 seconds" in source
+    assert "never kills or restarts it" in source
+
+
+def test_direct_nginx_denies_framing_including_release_marker() -> None:
+    source = (INSTALLER.parent / "nginx-radar-direct.conf").read_text(encoding="utf-8")
+    assert source.count("Content-Security-Policy \"frame-ancestors 'none'\" always;") == 2
+    assert source.count('X-Frame-Options "DENY" always;') == 2
+    release_block = source.split("location = /radar/release.json {", 1)[1].split("}", 1)[0]
+    assert "frame-ancestors 'none'" in release_block
+    assert 'X-Frame-Options "DENY"' in release_block
 
 
 def test_overview_is_published_by_a_bounded_external_process() -> None:

@@ -19,6 +19,7 @@ LEGACY_STATIC_NGINX=/etc/nginx/conf.d/finance-radar-aws.conf
 LEGACY_STATIC_INDEX="$PUBLIC_STATUS_DIR/index.html"
 LEGACY_STATIC_RETIRE_DIR=/etc/nginx/finance-radar-retired
 INSTALLER_SOURCE="$(readlink -f -- "${BASH_SOURCE[0]}")"
+DEEPSEEK_CREDENTIAL_READY=0
 
 [ "$(id -u)" -eq 0 ] || { printf 'run as root\n' >&2; exit 2; }
 case "$DEPLOY_MODE" in
@@ -66,7 +67,7 @@ PUBLIC_WEB_BASE="${PUBLIC_WEB_URL%/}"
 printf '%s  %s\n' "$EXPECTED_SHA256" "$ARCHIVE" | sha256sum -c -
 [ -f "$SOURCE_ENV" ] || { printf 'source env not found: %s\n' "$SOURCE_ENV" >&2; exit 2; }
 for required_command in \
-    awk curl find getent nginx openssl python3 runuser sha256sum systemctl systemd-run tar; do
+    awk curl find getent nginx openssl python3 readlink runuser sha256sum stat systemctl systemd-run tar; do
     command -v "$required_command" >/dev/null || {
         printf 'missing prerequisite: %s\n' "$required_command" >&2
         exit 2
@@ -152,6 +153,47 @@ ensure_public_web_principal() {
         useradd --system --gid finance-radar-web --home-dir /nonexistent \
             --shell /usr/sbin/nologin finance-radar-web
     fi
+}
+
+validate_optional_deepseek_credential() {
+    local credential=/etc/finance-radar/deepseek-api-key
+    local resolved metadata owner_id group_id mode size
+
+    # The interpretation units remain installed but disabled when no provider
+    # credential has been provisioned.  Once the path exists, fail closed on
+    # anything that systemd LoadCredential should not consume.
+    if [ ! -e "$credential" ] && [ ! -L "$credential" ]; then
+        DEEPSEEK_CREDENTIAL_READY=0
+        printf 'deepseek_credential=not_provisioned\n'
+        return 0
+    fi
+    [ -f "$credential" ] && [ ! -L "$credential" ] || {
+        printf 'DeepSeek credential must be a regular non-symlink file: %s\n' \
+            "$credential" >&2
+        return 1
+    }
+    resolved="$(readlink -f -- "$credential")" || return 1
+    [ "$resolved" = "$credential" ] || {
+        printf 'DeepSeek credential path must not traverse a symlink: %s\n' \
+            "$credential" >&2
+        return 1
+    }
+    metadata="$(stat -c '%u:%g:%a:%s' -- "$credential")" || return 1
+    IFS=: read -r owner_id group_id mode size <<< "$metadata"
+    [ "$owner_id" = 0 ] && [ "$group_id" = 0 ] || {
+        printf 'DeepSeek credential must be owned by root:root\n' >&2
+        return 1
+    }
+    [ "$mode" = 600 ] || {
+        printf 'DeepSeek credential mode must be exactly 0600\n' >&2
+        return 1
+    }
+    [ "$size" -gt 0 ] && [ "$size" -le 512 ] && [ -r "$credential" ] || {
+        printf 'DeepSeek credential must be non-empty, root-readable and at most 512 bytes\n' >&2
+        return 1
+    }
+    DEEPSEEK_CREDENTIAL_READY=1
+    printf 'deepseek_credential=validated_loadcredential_source\n'
 }
 
 grant_public_web_runtime_access() {
@@ -356,6 +398,14 @@ python3 "$RELEASE/scripts/verify_dependency_locks.py" || {
     exit 4
 }
 printf 'dependency_lock=verified\n'
+
+# Validate an already provisioned provider secret before any recovery backup,
+# package mutation or service cutover.  The secret is not copied into an
+# environment file and its contents are never printed.
+validate_optional_deepseek_credential || {
+    printf 'DeepSeek LoadCredential source validation failed\n' >&2
+    exit 4
+}
 
 # Mandatory recovery gates. A code/config rollback without a fresh recovery
 # point is not a safe cutover.  The first release on an older host is allowed
@@ -1043,7 +1093,10 @@ ROLLBACK_SERVICE_UNITS=(
     # unrelated daily recovery drill.
     finance-radar-backup.timer
     finance-radar-evidence-llm.service
-    finance-radar-capture-interpretation.service
+    # The interpretation service is a bounded oneshot, not a persistent
+    # session.  Deployment waits for an in-flight invocation to finish but
+    # never kills or restarts it merely because it was active at snapshot time.
+    # The timer below is the durable state that must be restored.
     finance-radar-capture-interpretation.timer
 )
 ROLLBACK_PATHS=(
@@ -1897,6 +1950,68 @@ assert_backup_service_quiescent() {
     printf 'backup_service_quiescent=PASS\n'
 }
 
+assert_capture_interpretation_quiescent() {
+    local attempt state jobs
+    # An already running provider call owns its lease and may already be
+    # billable.  Stop only the timer, then wait up to one bounded request
+    # window for the oneshot to finish naturally; never SIGTERM it mid-call.
+    # One batch may contain 20 requests, run with three workers and a 45-second
+    # provider timeout.  Eight minutes covers that bounded worst case plus
+    # scheduler/database overhead without turning a healthy in-flight batch
+    # into a repeatable deployment failure.
+    for attempt in $(seq 1 480); do
+        state="$(systemctl show finance-radar-capture-interpretation.service \
+            --property=ActiveState --value 2>/dev/null || printf 'not-found')"
+        jobs="$(systemctl list-jobs --no-legend --plain 2>/dev/null | \
+            awk '$2 == "finance-radar-capture-interpretation.service" { print $0 }')" || return 1
+        case "$state" in
+            inactive|failed|not-found)
+                if [ -z "$jobs" ]; then
+                    systemctl reset-failed finance-radar-capture-interpretation.service \
+                        2>/dev/null || true
+                    printf 'capture_interpretation_quiescent=PASS wait_seconds=%s\n' \
+                        "$((attempt - 1))"
+                    return 0
+                fi
+                ;;
+        esac
+        sleep 1
+    done
+    printf 'capture interpretation did not become quiescent within 480 seconds: state=%s jobs=%s\n' \
+        "$state" "${jobs:-none}" >&2
+    return 1
+}
+
+restore_capture_interpretation_runtime() {
+    local timer=finance-radar-capture-interpretation.timer
+    local was_enabled=0 was_active=0
+    if grep -Fqx -- "$timer" "$ROLLBACK_ENABLED_UNITS"; then
+        was_enabled=1
+    fi
+    if grep -Fqx -- "$timer" "$ROLLBACK_ACTIVE_UNITS"; then
+        was_active=1
+    fi
+
+    if [ "$was_enabled" -eq 1 ]; then
+        systemctl enable "$timer" || return 1
+    else
+        systemctl disable "$timer" || return 1
+    fi
+    if [ "$was_active" -eq 1 ]; then
+        [ "$DEEPSEEK_CREDENTIAL_READY" -eq 1 ] || {
+            printf 'cannot resume capture interpretation timer without a validated credential\n' >&2
+            return 1
+        }
+        systemctl start "$timer" || return 1
+        systemctl is-active --quiet "$timer" || return 1
+        printf 'capture_interpretation_timer=RESTORED_ACTIVE enabled=%s\n' "$was_enabled"
+    else
+        systemctl stop "$timer" 2>/dev/null || true
+        systemctl is-active --quiet "$timer" && return 1
+        printf 'capture_interpretation_timer=RESTORED_INACTIVE enabled=%s\n' "$was_enabled"
+    fi
+}
+
 preserve_failed_predeploy_backup_hold() {
     local failed_root failure_phase
     [ -n "$PREDEPLOY_HOLD_ROOT" ] && [ -d "$PREDEPLOY_HOLD_ROOT" ] || return 0
@@ -2021,6 +2136,22 @@ if ! assert_backup_service_quiescent; then
 fi
 clear_scheduled_backup_start_inhibit || \
     abort_cutover 'backup timer stopped but its start inhibit could not be cleared' 4
+# The independent capture interpreter also writes the operations database.  It
+# must not run old-release code during the candidate backup, schema migration
+# or symlink switch.  Preserve timer enablement/activity from the rollback
+# snapshot, stop new launches, and let an in-flight provider call finish rather
+# than terminating a potentially billable request.
+if { grep -Fqx -- finance-radar-capture-interpretation.timer "$ROLLBACK_ENABLED_UNITS" || \
+     grep -Fqx -- finance-radar-capture-interpretation.timer "$ROLLBACK_ACTIVE_UNITS"; } && \
+   [ "$DEEPSEEK_CREDENTIAL_READY" -ne 1 ]; then
+    abort_cutover 'capture interpretation was enabled or active but its new root-only credential is unavailable' 4
+fi
+if systemctl cat finance-radar-capture-interpretation.timer >/dev/null 2>&1; then
+    systemctl stop finance-radar-capture-interpretation.timer || \
+        abort_cutover 'capture interpretation timer failed to stop before protected bridge backup' 4
+fi
+assert_capture_interpretation_quiescent || \
+    abort_cutover 'capture interpretation remained active before protected bridge backup' 4
 inhibit_worker_resume || \
     abort_cutover 'unable to inhibit worker resume during protected bridge backup' 4
 systemctl stop finance-radar-worker || \
@@ -2513,6 +2644,14 @@ mv -f -- "$ACTIVATION_PENDING" "$RELEASE_RECORDS/ACTIVATION.txt" || \
         rm -f -- "$RELEASE_RECORDS/ACTIVATION.txt" || true
         abort_cutover 'committed activation record failed validation' 6
     }
+# Resume provider interpretation last.  A Persistent timer can immediately
+# launch a missed run, so keep it quiescent until the activation record itself
+# has been atomically committed and validated.  If restoration fails, remove
+# that record and execute the normal rollback transaction.
+if ! restore_capture_interpretation_runtime; then
+    rm -f -- "$RELEASE_RECORDS/ACTIVATION.txt" || true
+    abort_cutover 'capture interpretation timer state could not be restored after activation checks' 6
+fi
 trap - ERR
 if [ "$DEPLOY_MODE" = full ]; then
     if ! clear_predeploy_backup_hold; then

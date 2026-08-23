@@ -445,23 +445,60 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
 
         assert overview["review_queue"] == 2
         assert overview["reader_review_queue"] == 1
+        assert overview["non_citation_ready_inventory"] == 19
+        assert overview["review_queue_non_citation_ready"] == 1
+        # Deprecated aliases remain numeric-compatible, but no longer define
+        # these records as hidden from the public event feed.
         assert overview["discovery_backlog"] == 19
         assert overview["reader_hidden_inventory"] == 19
         assert overview["review_queue_hidden_by_reader_gate"] == 1
-        assert overview["inventory_contract"]["reader_hidden_inventory"] == {
+        assert overview["inventory_contract"]["non_citation_ready_inventory"] == {
             "authoritative": True,
-            "definition": "all canonical events currently hidden by the public reader gate",
+            "definition": (
+                "all canonical events whose current version is not citation-ready; "
+                "they remain browseable in the public event feed"
+            ),
+        }
+        assert overview["inventory_contract"]["reader_hidden_inventory"] == {
+            "deprecated": True,
+            "replacement": "non_citation_ready_inventory",
+            "definition": "legacy numeric alias; these events are not hidden from Public",
         }
         assert overview["inventory_contract"]["discovery_backlog"] == {
             "deprecated": True,
-            "replacement": "reader_hidden_inventory",
+            "replacement": "non_citation_ready_inventory",
             "definition": (
-                "legacy numeric alias; it includes every reader-hidden canonical event, "
+                "legacy numeric alias; it includes every non-citation-ready canonical event, "
                 "not only discovery-stage leads"
             ),
         }
         assert overview["recent_events"] == []
         assert overview["reader_quality"]["total"] == 20
+        assert overview["reader_quality"]["citation_ready"] == 1
+        assert overview["reader_quality"]["non_citation_ready_inventory"] == 19
+        assert overview["reader_quality"]["inventory_contract"] == {
+            "citation_ready": {
+                "authoritative": True,
+                "definition": (
+                    "canonical events whose current version may support a formal claim"
+                ),
+            },
+            "non_citation_ready_inventory": {
+                "authoritative": True,
+                "definition": (
+                    "canonical events whose current version is not citation-ready; "
+                    "they remain publicly browseable"
+                ),
+            },
+            "reader_ready": {
+                "deprecated": True,
+                "replacement": "citation_ready",
+            },
+            "discovery_only": {
+                "deprecated": True,
+                "replacement": "non_citation_ready_inventory",
+            },
+        }
         assert overview["reader_quality"]["reader_ready"] == 1
         assert overview["reader_quality"]["discovery_only"] == 19
         assert overview["reader_funnel"]["total"] == 1
@@ -588,6 +625,10 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
             "no_trading",
             "unverified_capture_excerpt",
             "summary_basis",
+            "citation_ready",
+            "evidence_posture",
+            "evidence_gap_codes",
+            "risk_assessment",
         }
         assert set(response.json()["data"]["items"][0]) == public_event_keys
         assert api_overview.status_code == 200
@@ -746,6 +787,7 @@ def test_unready_public_event_never_promotes_private_fact_fallbacks() -> None:
         captured_at = "2026-08-05T00:00:00+00:00"
         private_fact = "REVIEWER_PRIVATE_FACT_DO_NOT_PUBLISH"
         private_evidence = "INTERNAL_DETECTOR_REASON_DO_NOT_PUBLISH"
+        dormant_public_fact = "DORMANT_PUBLIC_FACT_WITHOUT_CURRENT_CITATION"
         raw_marker = "RAW_JSON_DO_NOT_PUBLISH"
         captured_excerpt = (
             "The source API reported a filing-related discovery item that still "
@@ -761,6 +803,11 @@ def test_unready_public_event_never_promotes_private_fact_fallbacks() -> None:
                     {
                         "fact_summary": private_fact,
                         "evidence_summary": private_evidence,
+                        "public_fact_summary": dormant_public_fact,
+                        "claim_subject": "Dormant subject",
+                        "claim_action": "Dormant action",
+                        "claim_stage": "DISCLOSED",
+                        "known_at": captured_at,
                     },
                     ensure_ascii=False,
                 ),
@@ -810,8 +857,14 @@ def test_unready_public_event_never_promotes_private_fact_fallbacks() -> None:
         detail_data = detail.json()["data"]
         dossier_data = dossier.json()["data"]
         assert feed_item["public_fact_summary"] is None
+        assert feed_item["claim_subject"] is None
+        assert feed_item["claim_action"] is None
+        assert feed_item["claim_stage"] is None
+        assert feed_item["known_at"] is None
         assert feed_item["unverified_capture_excerpt"] == captured_excerpt
         assert feed_item["summary_basis"] == "UNVERIFIED_CAPTURE_EXCERPT"
+        assert feed_item["citation_ready"] is False
+        assert feed_item["evidence_posture"] == "SOURCE_CAPTURED"
         assert detail_data["event"]["unverified_capture_excerpt"] == captured_excerpt
         assert detail_data["event"]["summary_basis"] == "UNVERIFIED_CAPTURE_EXCERPT"
         assert detail_data["current_version"]["facts"] == {}
@@ -822,6 +875,7 @@ def test_unready_public_event_never_promotes_private_fact_fallbacks() -> None:
         )
         assert private_fact not in public_payload
         assert private_evidence not in public_payload
+        assert dormant_public_fact not in public_payload
         assert raw_marker not in public_payload
 
 

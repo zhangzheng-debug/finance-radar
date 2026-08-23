@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-OPS_SCHEMA_VERSION = 9
+OPS_SCHEMA_VERSION = 10
 DEMO_MODES = {"LIVE", "RECENT_CAPTURE", "REPLAY"}
 FORMAL_MUTATION_KIND_LIGHT_VERIFICATION = "LIGHT_VERIFICATION"
 FORMAL_MUTATION_STATES = {
@@ -90,7 +90,8 @@ class OperationsRepository:
                 );
                 CREATE INDEX IF NOT EXISTS idx_replay_case ON replay_runs(case_id, started_at DESC);
                 CREATE TABLE IF NOT EXISTS model_runs(
-                    run_id TEXT PRIMARY KEY, event_id TEXT, input_sha256 TEXT NOT NULL,
+                    run_id TEXT PRIMARY KEY, event_id TEXT, event_version INTEGER,
+                    input_sha256 TEXT NOT NULL,
                     model_version TEXT NOT NULL, output_label TEXT NOT NULL,
                     confidence REAL NOT NULL, latency_ms REAL NOT NULL,
                     shadow INTEGER NOT NULL CHECK(shadow IN (0,1)), created_at TEXT NOT NULL,
@@ -295,11 +296,51 @@ class OperationsRepository:
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(model_runs)")
             }
+            model_event_version_migration_needed = (
+                "event_version" not in model_columns
+                or connection.execute(
+                    "SELECT 1 FROM operations_schema WHERE version=?",
+                    (OPS_SCHEMA_VERSION,),
+                ).fetchone()
+                is None
+            )
             if "idempotency_key" not in model_columns:
                 connection.execute("ALTER TABLE model_runs ADD COLUMN idempotency_key TEXT")
+            if "event_version" not in model_columns:
+                connection.execute("ALTER TABLE model_runs ADD COLUMN event_version INTEGER")
+
+            # Schema 9 stored the immutable event version only inside output_json.
+            # Materialize that value once during the additive upgrade so current-
+            # version lookups can use a bounded indexed read.  Rows without a
+            # usable positive version remain NULL and keep their legacy audit
+            # payload intact; they cannot safely be projected as current.
+            if model_event_version_migration_needed:
+                legacy_model_versions: list[tuple[int, str]] = []
+                for row in connection.execute(
+                    """SELECT run_id,output_json FROM model_runs
+                       WHERE event_id IS NOT NULL AND event_version IS NULL"""
+                ).fetchall():
+                    output = _safe_json(row["output_json"], {})
+                    if not isinstance(output, dict):
+                        continue
+                    try:
+                        event_version = int(output.get("event_version") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if event_version > 0:
+                        legacy_model_versions.append((event_version, str(row["run_id"])))
+                if legacy_model_versions:
+                    connection.executemany(
+                        "UPDATE model_runs SET event_version=? WHERE run_id=?",
+                        legacy_model_versions,
+                    )
             connection.execute(
                 """CREATE UNIQUE INDEX IF NOT EXISTS idx_model_runs_idempotency
                    ON model_runs(idempotency_key) WHERE idempotency_key IS NOT NULL"""
+            )
+            connection.execute(
+                """CREATE INDEX IF NOT EXISTS idx_model_event_version_created
+                   ON model_runs(event_id,event_version,created_at DESC)"""
             )
             light_columns = {
                 row["name"]
@@ -425,15 +466,17 @@ class OperationsRepository:
 
     def record_model_run(self, event_id: str | None, result: dict[str, Any]) -> str:
         run_id = f"model-{uuid.uuid4().hex}"
+        event_version = self._normalized_model_event_version(result)
         with closing(self.connect()) as connection:
             connection.execute(
                 """INSERT INTO model_runs(
-                       run_id,event_id,input_sha256,model_version,output_label,confidence,
+                       run_id,event_id,event_version,input_sha256,model_version,output_label,confidence,
                        latency_ms,shadow,created_at,output_json,idempotency_key
-                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     run_id,
                     event_id,
+                    event_version,
                     result["input_sha256"],
                     result["model_version"],
                     result["label"],
@@ -447,6 +490,14 @@ class OperationsRepository:
             )
             connection.commit()
         return run_id
+
+    @staticmethod
+    def _normalized_model_event_version(result: dict[str, Any]) -> int | None:
+        try:
+            event_version = int(result.get("event_version") or 0)
+        except (TypeError, ValueError):
+            return None
+        return event_version if event_version > 0 else None
 
     @staticmethod
     def _model_run_idempotency_key(event_id: str, result: dict[str, Any]) -> str:
@@ -469,16 +520,18 @@ class OperationsRepository:
         """Persist one shadow result per event version/input/model combination."""
         idempotency_key = self._model_run_idempotency_key(event_id, result)
         run_id = f"model-{idempotency_key.removeprefix('model-input-')}"
+        event_version = self._normalized_model_event_version(result)
         with closing(self.connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             cursor = connection.execute(
                 """INSERT OR IGNORE INTO model_runs(
-                       run_id,event_id,input_sha256,model_version,output_label,confidence,
+                       run_id,event_id,event_version,input_sha256,model_version,output_label,confidence,
                        latency_ms,shadow,created_at,output_json,idempotency_key
-                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     run_id,
                     event_id,
+                    event_version,
                     result["input_sha256"],
                     result["model_version"],
                     result["label"],
@@ -509,7 +562,7 @@ class OperationsRepository:
                    ORDER BY created_at DESC LIMIT 10""",
                 (event_id, result["input_sha256"], result["model_version"]),
             ).fetchall()
-        event_version = int(result.get("event_version") or 0)
+        event_version = int(event_version or 0)
         for legacy in rows:
             previous = _safe_json(legacy["output_json"], {})
             if int(previous.get("event_version") or 0) == event_version:
@@ -529,6 +582,74 @@ class OperationsRepository:
         for row in rows:
             row["output"] = json.loads(row.pop("output_json"))
         return rows
+
+    def latest_model_runs_for_versions(
+        self,
+        event_versions: dict[str, int],
+    ) -> dict[str, dict[str, Any]]:
+        """Return the latest current-version model run for each requested event.
+
+        Public event pages are loaded in batches of up to 200 rows.  Reading one
+        model result per item would otherwise add an avoidable N+1 query pattern.
+        Version matching is performed before selecting the newest row so a
+        recently revised event never inherits a stale shadow assessment.
+        """
+
+        requested: dict[str, int] = {}
+        for event_id, version in event_versions.items():
+            normalized_id = str(event_id or "").strip()
+            if not normalized_id:
+                continue
+            try:
+                normalized_version = int(version)
+            except (TypeError, ValueError):
+                continue
+            if normalized_version > 0:
+                requested[normalized_id] = normalized_version
+        if not requested:
+            return {}
+
+        selected: dict[str, dict[str, Any]] = {}
+        requested_items = list(requested.items())
+        # Stay below SQLite's conservative host-parameter limit while retaining
+        # one connection and one bounded read per public page in normal use.
+        # The persisted event_version and composite index keep this query off
+        # unrelated historical versions instead of decoding every output_json.
+        with closing(self.connect()) as connection:
+            for start in range(0, len(requested_items), 400):
+                chunk = requested_items[start : start + 400]
+                requested_values = ",".join("(?,?)" for _ in chunk)
+                params: list[Any] = []
+                for event_id, event_version in chunk:
+                    params.extend((event_id, event_version))
+                rows = connection.execute(
+                    f"""WITH requested(event_id,event_version) AS (
+                            VALUES {requested_values}
+                        )
+                        SELECT model_runs.*
+                        FROM requested
+                        JOIN model_runs
+                          ON model_runs.run_id = (
+                              SELECT candidate.run_id
+                              FROM model_runs AS candidate
+                              WHERE candidate.event_id=requested.event_id
+                                AND candidate.event_version=requested.event_version
+                              ORDER BY candidate.created_at DESC,candidate.run_id DESC
+                              LIMIT 1
+                          )""",
+                    params,
+                ).fetchall()
+                for sqlite_row in rows:
+                    row = dict(sqlite_row)
+                    event_id = str(row.get("event_id") or "")
+                    output = _safe_json(row.pop("output_json", None), {})
+                    if not isinstance(output, dict):
+                        continue
+                    if int(row.get("event_version") or 0) != requested.get(event_id):
+                        continue
+                    row["output"] = output
+                    selected[event_id] = row
+        return selected
 
     @staticmethod
     def _capture_interpretation_idempotency_key(

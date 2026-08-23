@@ -74,7 +74,19 @@ def _operations(path: Path, *, schema_version: int = 4) -> None:
             "evidence_objects",
             "human_overrides",
         ):
-            connection.execute(f"CREATE TABLE {table}(id INTEGER)")
+            if table == "model_runs" and schema_version >= 10:
+                connection.execute(
+                    """CREATE TABLE model_runs(
+                           id INTEGER,event_id TEXT,event_version INTEGER,created_at TEXT
+                       )"""
+                )
+            else:
+                connection.execute(f"CREATE TABLE {table}(id INTEGER)")
+        if schema_version >= 10:
+            connection.execute(
+                """CREATE INDEX idx_model_event_version_created
+                   ON model_runs(event_id,event_version,created_at DESC)"""
+            )
         connection.execute("CREATE TABLE adjudication_samples(id INTEGER)")
         connection.execute("CREATE TABLE adjudication_reviews(id INTEGER)")
         if schema_version >= 6:
@@ -370,6 +382,23 @@ def test_restore_audit_accepts_operations_schema_nine(tmp_path: Path) -> None:
     )
 
     assert result["operations_restore"]["schema_version"] == 9
+    assert result["operations_restore"]["counts"]["capture_interpretation_runs"] == 0
+    assert result["operations_restore"]["counts"]["capture_interpretation_attempts"] == 0
+
+
+def test_restore_audit_accepts_operations_schema_ten(tmp_path: Path) -> None:
+    encrypted, passphrase, expected_sha256 = _fixture(
+        tmp_path, operations_schema_version=10
+    )
+
+    result = audit_archive(
+        encrypted,
+        passphrase,
+        expected_release=RELEASE,
+        expected_sha256=expected_sha256,
+    )
+
+    assert result["operations_restore"]["schema_version"] == 10
     assert result["operations_restore"]["counts"]["capture_interpretation_runs"] == 0
     assert result["operations_restore"]["counts"]["capture_interpretation_attempts"] == 0
 

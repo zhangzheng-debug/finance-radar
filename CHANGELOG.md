@@ -5,6 +5,42 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.23.5
+
+- Replace the public workflow funnel with two independent reader contracts:
+  deterministic evidence posture and an optional current-version shadow risk
+  assessment. Every canonical event remains browseable; citation readiness is
+  never a publication gate.
+- Fail closed at the public API boundary. Structured fact summaries and claim
+  slots are returned only for citation-ready current versions; other records
+  expose a bounded, explicitly unverified source-capture excerpt instead.
+- Add the operations-schema index and bounded bulk projection needed to read
+  current-version risk routes without an event-by-event query. A locked or
+  unavailable operations store removes only the optional risk assessment and
+  never hides canonical events.
+- Bind human overrides to a server-derived personal Reviewer principal. Shared
+  Reviewer and Admin credentials cannot submit them, clients cannot self-report
+  actor identity, and all privileged credential/principal collisions fail
+  closed at startup.
+- Make replay use the same evidence-context derivation as production, reject
+  lookalike P0/P1 authority strings, safely quote event IDs in public links, and
+  propagate only trustworthy public visitor addresses to the API rate limiter.
+- Add a loopback-only Windows launcher for exactly one internal Admin, Reviewer
+  or Operator surface, plus an owner-facing read-only Admin summary that does
+  not invent release IDs, model coverage, queue depth, backup freshness or
+  unavailable metrics.
+- Isolate capture interpretation from the shared privileged environment and
+  load its provider key through a validated root-owned `0600` systemd
+  credential. The five-minute timer remains unlimited by daily budget policy,
+  while batch, concurrency, timeout, retry and output bounds remain enforced.
+- Quiesce capture interpretation across backup, schema migration and symlink
+  cutover. An in-flight provider batch is allowed up to eight minutes to finish
+  naturally, is never killed mid-request, and its timer is restored only after
+  the activation record has committed and verified.
+- Harden recovery decryption so unauthenticated GCM plaintext never reaches a
+  named destination, and add clickjacking denial headers to both the main
+  public route and release marker.
+
 ## 2026.08.23.4
 
 - Decouple event visibility from formal citation readiness. Every canonical

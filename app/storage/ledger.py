@@ -1351,24 +1351,47 @@ class LedgerRepository:
             "reader_quality": reader_quality,
             "review_queue": review_queue,
             "reader_review_queue": reader_review_queue,
-            "reader_hidden_inventory": int(reader_quality["discovery_only"]),
-            "discovery_backlog": int(reader_quality["discovery_only"]),
+            "non_citation_ready_inventory": int(
+                reader_quality["non_citation_ready_inventory"]
+            ),
+            # Deprecated numeric aliases retained for older clients.  These
+            # records remain browseable in Public; the value only measures
+            # which current event versions cannot yet support a formal claim.
+            "reader_hidden_inventory": int(
+                reader_quality["non_citation_ready_inventory"]
+            ),
+            "discovery_backlog": int(
+                reader_quality["non_citation_ready_inventory"]
+            ),
             "inventory_contract": {
-                "reader_hidden_inventory": {
+                "non_citation_ready_inventory": {
                     "authoritative": True,
                     "definition": (
-                        "all canonical events currently hidden by the public reader gate"
+                        "all canonical events whose current version is not citation-ready; "
+                        "they remain browseable in the public event feed"
+                    ),
+                },
+                "reader_hidden_inventory": {
+                    "deprecated": True,
+                    "replacement": "non_citation_ready_inventory",
+                    "definition": (
+                        "legacy numeric alias; these events are not hidden from Public"
                     ),
                 },
                 "discovery_backlog": {
                     "deprecated": True,
-                    "replacement": "reader_hidden_inventory",
+                    "replacement": "non_citation_ready_inventory",
                     "definition": (
-                        "legacy numeric alias; it includes every reader-hidden canonical event, "
+                        "legacy numeric alias; it includes every non-citation-ready canonical event, "
                         "not only discovery-stage leads"
                     ),
                 },
             },
+            "review_queue_non_citation_ready": max(
+                0, review_queue - reader_review_queue
+            ),
+            # Deprecated alias: citation readiness is not a Public visibility
+            # gate, so the historical name no longer describes the value.
             "review_queue_hidden_by_reader_gate": max(
                 0, review_queue - reader_review_queue
             ),
@@ -1726,11 +1749,11 @@ class LedgerRepository:
 
     @staticmethod
     def _reader_quality(connection: sqlite3.Connection) -> dict[str, Any]:
-        """Measure which canonical records are useful in the public reader.
+        """Measure formal-claim citation quality across the canonical ledger.
 
-        A discovery candidate remains preserved even when this gate fails.  The
-        gate changes only public browsing: it requires a named subject, a
-        structured statement of what happened, and a citable source passage.
+        Citation readiness requires a named subject, a structured statement of
+        what happened, and a citable source passage.  A false value limits how
+        the claim may be presented; it never hides the event from Public.
         """
 
         rows = connection.execute(
@@ -1770,14 +1793,42 @@ class LedgerRepository:
             missing_subject += int(row["missing_subject"] or 0)
             missing_fact_summary += int(row["missing_fact_summary"] or 0)
             missing_citable_evidence += int(row["missing_citable_evidence"] or 0)
+        non_citation_ready_inventory = max(0, total - ready)
         return {
             "schema_version": 1,
             "definition": (
                 "named subject + subject-action-stage-known_at fact + current supported P0/P1 passage"
             ),
             "total": total,
+            "citation_ready": ready,
+            "non_citation_ready_inventory": non_citation_ready_inventory,
+            # Deprecated aliases retained for clients migrating from the
+            # former reader-gate vocabulary.
             "reader_ready": ready,
-            "discovery_only": max(0, total - ready),
+            "discovery_only": non_citation_ready_inventory,
+            "inventory_contract": {
+                "citation_ready": {
+                    "authoritative": True,
+                    "definition": (
+                        "canonical events whose current version may support a formal claim"
+                    ),
+                },
+                "non_citation_ready_inventory": {
+                    "authoritative": True,
+                    "definition": (
+                        "canonical events whose current version is not citation-ready; "
+                        "they remain publicly browseable"
+                    ),
+                },
+                "reader_ready": {
+                    "deprecated": True,
+                    "replacement": "citation_ready",
+                },
+                "discovery_only": {
+                    "deprecated": True,
+                    "replacement": "non_citation_ready_inventory",
+                },
+            },
             "gap_counts_nonexclusive": {
                 "missing_subject": missing_subject,
                 "missing_fact_summary": missing_fact_summary,

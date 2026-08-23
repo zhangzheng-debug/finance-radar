@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.models import RiskRouter
+from app.evidence_policy import is_primary_authority_tier
+from app.models import RiskRouter, derive_evidence_context
 from app.storage.operations import OperationsRepository
 
 
@@ -44,26 +45,34 @@ class ReplayService:
         raise ReplayCaseNotFound(case_id)
 
     @staticmethod
-    def _evidence_state(observations: list[dict[str, Any]]) -> dict[str, Any]:
-        tiers = [item.get("authority_tier", "P3") for item in observations]
-        has_primary = "P0" in tiers
-        has_conflict = any(bool(item.get("contradicts")) for item in observations)
-        passage_count = sum(bool(item.get("passage")) for item in observations)
-        if has_conflict:
-            status = "CONFLICT_REVIEW"
-        elif has_primary and passage_count:
-            status = "PRIMARY_SUPPORTED"
-        elif passage_count:
-            status = "DISCOVERY_ONLY"
-        else:
-            status = "INSUFFICIENT"
-        return {
-            "status": status,
-            "has_primary": has_primary,
-            "has_conflict": has_conflict,
-            "passage_count": passage_count,
-            "authority_tiers": sorted(set(tiers)),
-        }
+    def _router_evidence(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Adapt frozen teaching observations to the production evidence contract."""
+        evidence: list[dict[str, Any]] = []
+        for observation in observations:
+            authority_tier = str(observation.get("authority_tier") or "P3")
+            passage = " ".join(str(observation.get("passage") or "").split())
+            is_primary = is_primary_authority_tier(authority_tier)
+            if bool(observation.get("contradicts")) and is_primary:
+                evidence_status = "contradicted_by_primary"
+            elif passage and is_primary:
+                # Replay cases are frozen, curated teaching fixtures rather
+                # than live machine extraction.  Their quoted P0/P1 passages
+                # therefore use the reviewed-primary branch of the same
+                # derive_evidence_context contract as the API.
+                evidence_status = "confirmed_primary"
+            elif passage:
+                evidence_status = "candidate_passage"
+            else:
+                evidence_status = ""
+            evidence.append(
+                {
+                    "evidence_status": evidence_status,
+                    "source_id": observation.get("source"),
+                    "authority_tier": authority_tier,
+                    "evidence_passage": passage,
+                }
+            )
+        return evidence
 
     def run(self, case_id: str) -> dict[str, Any]:
         case = self.get_case(case_id)
@@ -77,12 +86,19 @@ class ReplayService:
                 combined_text = "\n".join(
                     f"{item.get('title','')}\n{item.get('passage','')}" for item in observed
                 )
-                model = self.router.predict(combined_text)
-                evidence = self._evidence_state(observed)
-                if evidence["has_conflict"]:
+                evidence_context = derive_evidence_context(
+                    self._router_evidence(observed)
+                )
+                model = self.router.predict(
+                    combined_text,
+                    evidence_context=evidence_context,
+                )
+                evidence_state = str(evidence_context.get("state") or "INSUFFICIENT")
+                primary_supported = evidence_state.startswith("PRIMARY_SUPPORTED")
+                if evidence_state == "CONFLICTED":
                     final_label = "ABSTAIN"
                     reason = "evidence_conflict_cap"
-                elif model["label"] == "RISK_REVIEW" and not evidence["has_primary"]:
+                elif model["label"] == "RISK_REVIEW" and not primary_supported:
                     final_label = "ABSTAIN"
                     reason = "evidence_gate_hold_pending_primary"
                 else:
@@ -94,14 +110,16 @@ class ReplayService:
                     "model_label": model["label"],
                     "decision_reason": reason,
                     "alert_eligible": bool(
-                        final_label == "RISK_REVIEW" and evidence["has_primary"] and not evidence["has_conflict"]
+                        final_label == "RISK_REVIEW"
+                        and primary_supported
+                        and evidence_state != "CONFLICTED"
                     ),
                 }
                 steps.append(
                     {
                         "simulated_at_seconds": observation["at_seconds"],
                         "observation": observation,
-                        "evidence_state": evidence,
+                        "evidence_state": evidence_context,
                         "shadow_decision": decision,
                     }
                 )
@@ -120,7 +138,14 @@ class ReplayService:
                 "no_trading": True,
             }
             self.operations.finish_replay_run(run_id, result, last_model["model_version"] if last_model else None)
-            self.operations.record_model_run(None, last_model or self.router.predict(""))
+            self.operations.record_model_run(
+                None,
+                last_model
+                or self.router.predict(
+                    "",
+                    evidence_context=derive_evidence_context([]),
+                ),
+            )
             return result
         except Exception as exc:
             self.operations.fail_replay_run(run_id, f"{type(exc).__name__}: {exc}")

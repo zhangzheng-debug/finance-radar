@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from html import escape
 from math import ceil
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 import streamlit as st
 
@@ -29,14 +29,15 @@ from app.web.components import (
     FLOW_PRESETS,
     PUBLIC_AUTHORITY_LABELS,
     PUBLIC_SOURCE_LABELS,
-    PUBLIC_STATE_LABELS,
     facet_counts,
     facet_values,
     event_anchor_id,
     focus_event_preview,
     next_action_guidance,
     public_event_copy,
+    public_event_evidence_posture,
     public_event_quality,
+    public_event_risk_assessment,
     public_event_state,
     render_evidence_route,
     render_event_feed,
@@ -49,7 +50,6 @@ from app.web.components import (
 )
 
 
-PUBLIC_STATES = frozenset(PUBLIC_STATE_LABELS)
 PUBLIC_PERIODS = {
     "全部时间": None,
     "最近 24 小时": 1,
@@ -95,41 +95,38 @@ def public_source_label(value: str, counts: dict[str, int]) -> str:
 def render_public_reading_prompt(event: dict[str, object], evidence: list[dict[str, object]]) -> None:
     """Give public readers a useful next step without exposing review tooling."""
     state = public_event_state(event)
+    posture = public_event_evidence_posture(event)
     quality = public_event_quality(event, evidence)
     if state == "excluded":
-        title = "保留排除结果，等待真正的新证据"
-        reason = "当前线索已被排除；采集到的来源记录可解释系统为什么曾捕获它，但不构成事实证据。"
-        steps = ("查看最初捕获内容", "核对排除理由", "只有新增高权威材料时才重新判断")
+        title = "这是一条异常处置记录"
+        reason = "系统保留它是为了说明曾捕获过什么；这项处置不等于一条有效事件事实。"
+        steps = ("查看最初捕获内容", "核对处置原因", "只有出现新的高权威材料时再重新判断")
         tone = "ok"
-    elif not quality["reader_ready"]:
-        title = "可以浏览，但还不能作为正式结论引用"
-        reason = "当前仍是一条待核验记录：" + "、".join(quality["gaps"]) + "。"
+    elif posture["key"] == "PRIMARY_SUPPORTED":
+        title = "先读支持当前事实的官方原文"
+        reason = f"当前结构化事实已关联 {len(evidence)} 条可读证据；摘要仍不能替代完整上下文。"
+        steps = ("打开官方原始来源", "核对主体、日期和文件版本", "区分已发生事实与前瞻性表述")
+        tone = "ok"
+    elif posture["key"] == "PRIMARY_SOURCE_AVAILABLE":
+        title = "一手材料已经找到，事实槽仍需补齐"
+        missing = posture["gap_labels"] or quality["gaps"]
+        reason = "当前缺口：" + "、".join(missing or ["结构化事实尚未闭合"]) + "。"
         steps = (
             "先确认是谁、做了什么以及处于哪个阶段",
-            "找到监管、交易所或公司原始文件中的精确段落",
-            "补齐中文事实摘要前，不把分类标签当作事件结论",
+            "从现有一手材料中定位支持该事实的精确段落",
+            "事实槽补齐前，不把分类标签当作事件结论",
         )
-        tone = "risk"
-    elif state == "verified":
-        title = "回到原始来源核对上下文"
-        reason = f"当前事件已关联 {len(evidence)} 条证据；摘要仍不能替代完整原文。"
-        steps = ("打开原始来源", "核对主体、日期和版本", "区分已发生事实与前瞻性表述")
-        tone = "ok"
-    elif state == "insufficient":
-        title = "证据不足，暂不形成事实结论"
-        reason = f"现有 {len(evidence)} 条关联材料仍不能闭合事实链。"
-        steps = ("确认缺失的是主体、日期还是关键事实", "优先寻找官方原始文件", "补证前保留不确定性")
-        tone = "risk"
-    elif state == "rough_reviewed":
-        title = "粗审已完成，继续核对正式证据"
-        reason = f"现有 {len(evidence)} 条关联材料已完成快速筛查，但粗审不等于正式核验。"
-        steps = ("先读最高权威证据段落", "核对主体、日期与文件版本", "不要把粗审状态理解为事实确认")
+        tone = "watch"
+    elif posture["key"] == "SOURCE_CAPTURED":
+        title = "先读来源捕获，再寻找一手原文"
+        reason = "当前只有系统捕获到的来源内容，它可以解释线索来自哪里，但不能单独确认事件事实。"
+        steps = ("阅读捕获原文与自动解读", "寻找监管、交易所或公司原始文件", "不要从风险路由推断事件真假")
         tone = "watch"
     else:
-        title = "把它当作待核验线索"
-        reason = f"当前事件已关联 {len(evidence)} 条证据，但事实链仍未完全闭合。"
-        steps = ("先读最高权威证据段落", "核对是否存在修订或来源冲突", "不要从核验状态推断价格方向")
-        tone = "watch"
+        title = "当前还没有可供核对的来源"
+        reason = "页面只保留规范化事件记录；在来源补齐前，不应把类别、主体或模型标签写成确定事实。"
+        steps = ("确认来源采集是否遗漏", "优先寻找官方原始文件", "来源补齐前保留不确定性")
+        tone = "risk"
     step_markup = "".join(f"<li>{escape(step)}</li>" for step in steps)
     st.markdown(
         f'<section class="next-action next-action-{tone}" aria-labelledby="public-reading-title">'
@@ -193,9 +190,19 @@ def public_event_snapshot(
 ) -> dict[str, object]:
     version = detail.get("current_version") or {}
     version_number = version.get("version") if isinstance(version, dict) else None
+    semantic_input = dict(event)
+    if not isinstance(semantic_input.get("risk_assessment"), dict):
+        semantic_input["risk_assessment"] = detail.get("risk_assessment")
+    posture = public_event_evidence_posture(semantic_input)
+    risk = public_event_risk_assessment(semantic_input)
+    legacy_state = public_event_state(event)
     return {
         "last_updated_at": str(event.get("last_updated_at") or ""),
-        "status": public_event_state(event),
+        "evidence_posture": posture["key"],
+        "citation_ready": posture["citation_ready"],
+        "risk_route": risk["route"],
+        "risk_model_version": risk["model_version"],
+        "disposition": legacy_state if legacy_state == "excluded" else "",
         "version": version_number or event.get("current_version"),
         "evidence_ids": sorted(
             str(item.get("evidence_id") or "")
@@ -212,8 +219,21 @@ def public_event_changes(
     if not previous:
         return []
     changes: list[str] = []
-    if previous.get("status") != current.get("status"):
-        changes.append(f"状态：{previous.get('status') or '未记录'} → {current.get('status') or '未记录'}")
+    if previous.get("evidence_posture") != current.get("evidence_posture"):
+        changes.append(
+            "证据姿态："
+            f"{previous.get('evidence_posture') or '未记录'} → "
+            f"{current.get('evidence_posture') or '未记录'}"
+        )
+    if previous.get("citation_ready") != current.get("citation_ready"):
+        changes.append("正式引用条件发生变化。")
+    if (
+        previous.get("risk_route") != current.get("risk_route")
+        or previous.get("risk_model_version") != current.get("risk_model_version")
+    ):
+        changes.append("模型研判或模型版本发生变化。")
+    if previous.get("disposition") != current.get("disposition"):
+        changes.append("异常处置记录发生变化。")
     if previous.get("version") != current.get("version"):
         changes.append(f"事件版本：{previous.get('version') or '未记录'} → {current.get('version') or '未记录'}")
     previous_ids = set(previous.get("evidence_ids") or [])
@@ -223,7 +243,7 @@ def public_event_changes(
     if added or removed:
         changes.append(f"关联证据：新增 {added} 条，移除 {removed} 条")
     if previous.get("last_updated_at") != current.get("last_updated_at") and not changes:
-        changes.append("事件记录的最后更新时间发生变化；事实状态与证据集合未变。")
+        changes.append("事件记录的最后更新时间发生变化；证据姿态与关联材料未变。")
     return changes
 
 
@@ -243,23 +263,8 @@ def public_time_value(value: object, *, date_only: bool = False) -> str:
     return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def has_recorded_public_verification(verification: dict[str, object] | None) -> bool:
-    """Return true only for a public verification receipt with a timestamp.
-
-    A canonical event may be marked ``verified`` by an older historical import
-    without carrying a current verification receipt.  The public UI must not
-    turn that status alone into a claim that a formal verification record is
-    available.
-    """
-
-    if not isinstance(verification, dict):
-        return False
-    reviewed_at = " ".join(str(verification.get("reviewed_at") or "").split())
-    return bool(reviewed_at)
-
-
-def public_time_markup(event: dict[str, object], detail: dict[str, object], verification: dict[str, object] | None) -> str:
-    """Render the five reader-facing clocks for a selected event."""
+def public_time_markup(event: dict[str, object], detail: dict[str, object]) -> str:
+    """Render event/source clocks without exposing internal review workflow."""
     version = detail.get("current_version") or {}
     facts = version.get("facts") or {} if isinstance(version, dict) else {}
     if not isinstance(facts, dict):
@@ -272,22 +277,11 @@ def public_time_markup(event: dict[str, object], detail: dict[str, object], veri
         or facts.get("source_published_at")
         or facts.get("published_at")
     )
-    verified_at = (verification or {}).get("reviewed_at") or event.get("reviewed_at")
-    historical_verified_without_receipt = (
-        public_event_state(event) == "verified"
-        and not has_recorded_public_verification(verification)
-    )
     values = (
         ("事件日", public_time_value(event.get("event_date"), date_only=True)),
         ("来源发布", public_time_value(published_at)),
         ("系统发现", public_time_value(event.get("first_seen_at"))),
         ("最后更新", public_time_value(event.get("last_updated_at"))),
-        (
-            "核验留痕" if historical_verified_without_receipt else "核验记录",
-            "历史记录未存档"
-            if historical_verified_without_receipt
-            else public_time_value(verified_at),
-        ),
     )
     cells = "".join(
         '<div class="event-time-cell"><span>{}</span><strong>{}</strong></div>'.format(
@@ -296,62 +290,11 @@ def public_time_markup(event: dict[str, object], detail: dict[str, object], veri
         for label, value in values
     )
     return (
-        '<section class="event-time-facts" aria-label="事件与核验时间">'
+        '<section class="event-time-facts" aria-label="事件与来源时间">'
         '<div class="event-time-heading">时间口径 · 事件本身、来源发布、系统处理不是同一个时间</div>'
         f'<div class="event-time-grid">{cells}</div>'
         '</section>'
     )
-
-
-def public_verification_markup(
-    state: str,
-    verification: dict[str, object],
-    evidence: list[dict[str, object]],
-) -> str:
-    """Explain a light-verification record without implying every record passed."""
-    score = verification.get("score")
-    score_copy = f"评分 {escape(str(score))}" if score not in (None, "") else "未记录评分"
-    state_copy = {
-        "verified": "本轮引用材料通过轻量细核，当前状态为“已核验”。",
-        "insufficient": "本轮轻量细核没有形成已核验结论，当前仍为“证据不足”。",
-        "excluded": "本轮记录不改变已排除状态。",
-        "rough_reviewed": "本轮记录不替代后续正式核验。",
-        "pending_verification": "本轮记录不等于正式核验完成。",
-    }.get(state, "本轮记录仅说明曾进行限定检查。")
-    raw_ids = verification.get("evidence_ids") or []
-    known_ids = {
-        str(item.get("evidence_id") or "").strip()
-        for item in evidence
-        if str(item.get("evidence_id") or "").strip()
-    }
-    evidence_ids = []
-    for value in raw_ids if isinstance(raw_ids, list) else []:
-        normalized = " ".join(str(value or "").split())[:96]
-        if normalized and normalized not in evidence_ids:
-            evidence_ids.append(normalized)
-    chips = "".join(
-        '<code class="evidence-id-chip{}">{}</code>'.format(
-            " is-linked" if item in known_ids else "", escape(item)
-        )
-        for item in evidence_ids[:8]
-    )
-    remaining = len(evidence_ids) - min(len(evidence_ids), 8)
-    ids_copy = (
-        f'<div class="verification-evidence-ids"><span>本轮引用证据 ID</span>{chips}'
-        f'{f"<em>另有 {remaining} 条</em>" if remaining else ""}'
-        '<small>这些是本次限定核验实际引用的材料，不等于全部关联证据。</small></div>'
-        if evidence_ids
-        else '<div class="verification-evidence-ids"><span>本轮引用证据 ID 未记录</span>'
-        '<small>因此不能把这条核验记录理解为完整证据链。</small></div>'
-    )
-    return (
-        '<div class="verification-method" role="note">'
-        '<strong>核验记录 · 轻量细核</strong>'
-        f'<span>{state_copy} {score_copy}；模型不负责改写正式结论。</span>'
-        f'{ids_copy}'
-        '</div>'
-    )
-
 
 st.set_page_config(page_title="态势总览 · Finance Radar", page_icon="◎", layout="wide")
 install_style()
@@ -384,11 +327,11 @@ if requested_page in page_targets:
 
 header(
     "态势总览",
-    "事件记录、原始证据与核验进度" if UI_ROLE != "admin" else "事件流、复核队列与运行态总览",
+    "事件记录、证据姿态与模型研判" if UI_ROLE != "admin" else "事件流、复核队列与运行态总览",
 )
 no_trading_banner()
 overview_loading = st.empty()
-overview_loading.caption("正在读取采集状态与核验概览…")
+overview_loading.caption("正在读取采集状态与证据概览…")
 try:
     overview, overview_cache = cached_api_get(
         "/api/v1/overview",
@@ -438,7 +381,10 @@ active_flow = str(st.query_params.get("preview_flow") or "全部事件")
 if active_flow not in FLOW_PRESETS:
     active_flow = "全部事件"
 preview_query = str(st.query_params.get("preview_query") or "")
-public_state = query_choice(st.query_params.get("preview_state"), PUBLIC_STATES)
+# Legacy public workflow filters hid most of the canonical inventory.  Ignore
+# and remove them on public pages; workflow filtering remains admin-only.
+if UI_ROLE != "admin":
+    st.query_params.pop("preview_state", None)
 public_family = str(st.query_params.get("preview_family") or "")
 public_source = str(st.query_params.get("preview_source") or "")
 public_period = query_choice(
@@ -464,7 +410,6 @@ public_page = bounded_int(st.query_params.get("preview_page"), 1, minimum=1, max
 
 def public_filter_return_url(event_id: str) -> str:
     params = {
-        "preview_state": public_state,
         "preview_query": preview_query,
         "preview_family": public_family,
         "preview_source": public_source,
@@ -519,13 +464,10 @@ if UI_ROLE == "admin":
 review_queue = int(overview.get("review_queue") or 0)
 if UI_ROLE != "admin":
     brief_copy = f"账本中的 {canonical_inventory_count:,} 条事件现在全部可以浏览。"
-    if review_queue:
-        brief_copy += f"其中 {review_queue:,} 条仍在等待证据或规则核验。"
-    if evidence_gap_inventory:
-        brief_copy += (
-            f"另有 {evidence_gap_inventory:,} 条尚未达到正式引用条件；"
-            "它们会明确标注不确定性，不再从事件流中消失。"
-        )
+    brief_copy += (
+        f"其中 {reader_ready_count:,} 条达到正式引用条件；"
+        f"其余 {evidence_gap_inventory:,} 条按一手材料、来源捕获或尚无来源分级展示。"
+    )
 elif review_queue:
     brief_copy = f"有 {review_queue:,} 条可读事件仍在等待证据或规则核验。"
     brief_copy += "先在当前页预览证据与下一步行动，需要完整工具时再进入人工复核。"
@@ -542,7 +484,8 @@ situation_brief(
     ),
     focus_state=(
         "watch"
-        if review_queue or (UI_ROLE != "admin" and evidence_gap_inventory)
+        if (UI_ROLE == "admin" and review_queue)
+        or (UI_ROLE != "admin" and evidence_gap_inventory)
         else "ok"
     ),
 )
@@ -555,13 +498,12 @@ if UI_ROLE != "admin":
     workspace_cols = st.columns(3, gap="small")
     workspace_actions = (
         ("今日新增", {"preview_period": "最近 24 小时", "preview_sort": "latest"}),
-        ("需要关注", {"preview_state": "pending_verification", "preview_sort": "latest"}),
-        ("继续跟进", {"preview_state": "rough_reviewed", "preview_sort": "latest"}),
+        ("最近 7 天", {"preview_period": "最近 7 天", "preview_sort": "latest"}),
+        ("全部事件", {"preview_period": "", "preview_sort": "latest"}),
     )
     for column, (label, updates) in zip(workspace_cols, workspace_actions, strict=True):
         if column.button(label, width="stretch", key=f"public-workspace-{label}"):
             for key in (
-                "preview_state",
                 "preview_period",
                 "preview_event_id",
                 "preview_page",
@@ -570,7 +512,7 @@ if UI_ROLE != "admin":
             for key, value in updates.items():
                 st.query_params[key] = value
             st.rerun()
-    st.caption("三个入口分别回答：今天发生了什么、哪些事实仍待核验、哪些粗审线索需要继续补证。")
+    st.caption("三个时间入口只改变发生时间范围；证据姿态和模型研判会显示在每条事件上。")
 if UI_ROLE == "admin":
     with st.form("terminal-global-search", border=False):
         search_col, submit_col = st.columns([5.4, .8], gap="small", vertical_alignment="bottom")
@@ -589,7 +531,7 @@ if UI_ROLE == "admin":
             st.query_params["preview_query"] = search_state["q"]
         st.rerun()
     render_saved_public_flow_manager(
-        public_state,
+        "",
         public_family,
         preview_query,
         public_period if public_period != "全部时间" else "",
@@ -631,7 +573,7 @@ else:
             "ok" if canonical_inventory_count else "watch",
         ),
         (
-            "正式可引用 / 待补证",
+            "正式可引用 / 其他证据姿态",
             f"{reader_ready_count:,} / {evidence_gap_inventory:,}",
             "watch" if evidence_gap_inventory else "ok",
         ),
@@ -640,24 +582,15 @@ status_strip(status_items)
 if UI_ROLE != "admin":
     st.markdown(
         '<p class="public-health-explainer">'
-        f'采集与核验是两条独立时间线（最近发现新事件：{escape(format_elapsed(event_age))} 前）。'
-        '全部规范事件均可浏览；“正式可引用”只统计通过严格证据条件的记录。'
-        '未核验、证据不足和历史记录会保留并明确分级，不会伪装成正式结论。'
+        f'采集、证据归类与模型研判是独立时间线（最近发现新事件：{escape(format_elapsed(event_age))} 前）。'
+        '全部规范事件均可浏览；“正式可引用”只统计已有官方原文支持的结构化事实。'
+        '其余记录按证据姿态展示，不会因为内部流程进度从事件流中消失。'
         '</p>',
         unsafe_allow_html=True,
     )
 if UI_ROLE == "admin":
     render_evidence_route(event_status, review_queue)
-render_flow_shortcuts(
-    event_status,
-    public=UI_ROLE != "admin",
-    public_funnel=public_funnel if UI_ROLE != "admin" else None,
-)
-if UI_ROLE != "admin":
-    st.markdown(
-        '<p class="mobile-scroll-cue" aria-label="筛选提示">左右滑动可查看全部状态筛选 · 向下浏览事件</p>',
-        unsafe_allow_html=True,
-    )
+    render_flow_shortcuts(event_status, public=False)
 
 facets: dict[str, object] = {"families": [], "sources": []}
 feed_loading = st.empty()
@@ -774,7 +707,6 @@ try:
         )
         feed_path = query_path(
                 "/api/v1/events",
-                public_state=public_state,
                 family=public_family,
                 source=public_source,
                 q=preview_query,
@@ -804,9 +736,16 @@ try:
             previous = seen_events.get(str(item.get("event_id") or ""))
             if not isinstance(previous, dict):
                 continue
+            feed_posture = public_event_evidence_posture(item)
+            feed_risk = public_event_risk_assessment(item)
+            legacy_state = public_event_state(item)
             current_feed_state = {
                 "last_updated_at": str(item.get("last_updated_at") or ""),
-                "status": public_event_state(item),
+                "evidence_posture": feed_posture["key"],
+                "citation_ready": feed_posture["citation_ready"],
+                "risk_route": feed_risk["route"],
+                "risk_model_version": feed_risk["model_version"],
+                "disposition": legacy_state if legacy_state == "excluded" else "",
                 "version": item.get("current_version"),
             }
             item["_changed_since_view"] = any(
@@ -824,6 +763,7 @@ finally:
 
 preview_event_id = str(st.query_params.get("preview_event_id") or "")
 if preview_event_id:
+    preview_event_path_id = quote(preview_event_id, safe="")
     st.markdown('<div id="event-preview" class="event-preview-focus"></div>', unsafe_allow_html=True)
     focus_event_preview(preview_event_id)
     preview_loading = st.empty()
@@ -842,18 +782,18 @@ if preview_event_id:
         preview_interpretations_error: Exception | None = None
         if UI_ROLE != "admin":
             try:
-                dossier = api_request(f"/api/v1/events/{preview_event_id}/dossier")
+                dossier = api_request(f"/api/v1/events/{preview_event_path_id}/dossier")
             except Exception:
                 # Keep a compatibility path during rolling/local development;
                 # production releases expose the single-read dossier endpoint.
-                preview_detail = api_request(f"/api/v1/events/{preview_event_id}")
+                preview_detail = api_request(f"/api/v1/events/{preview_event_path_id}")
                 preview_evidence = sorted(
-                    api_request(f"/api/v1/events/{preview_event_id}/evidence")["items"],
+                    api_request(f"/api/v1/events/{preview_event_path_id}/evidence")["items"],
                     key=public_evidence_sort_key,
                 )
                 try:
                     knowledge_response = api_request(
-                        f"/api/v1/events/{preview_event_id}/knowledge"
+                        f"/api/v1/events/{preview_event_path_id}/knowledge"
                     )
                     if isinstance(knowledge_response, dict):
                         preview_knowledge = knowledge_response
@@ -861,7 +801,7 @@ if preview_event_id:
                     preview_knowledge = {}
                 try:
                     source_response = api_request(
-                        f"/api/v1/events/{preview_event_id}/sources"
+                        f"/api/v1/events/{preview_event_path_id}/sources"
                     )
                     source_items = source_response.get("items", [])
                     if isinstance(source_items, list):
@@ -873,7 +813,7 @@ if preview_event_id:
                 if preview_sources:
                     try:
                         interpretation_response = api_request(
-                            f"/api/v1/events/{preview_event_id}/source-interpretations"
+                            f"/api/v1/events/{preview_event_path_id}/source-interpretations"
                         )
                         interpretation_items = interpretation_response.get("items", [])
                         if isinstance(interpretation_items, list):
@@ -911,14 +851,14 @@ if preview_event_id:
                 if int(item.get("reader_eligible") or 0) == 1
             ]
         else:
-            preview_detail = api_request(f"/api/v1/events/{preview_event_id}")
+            preview_detail = api_request(f"/api/v1/events/{preview_event_path_id}")
             preview_evidence = sorted(
-                api_request(f"/api/v1/events/{preview_event_id}/evidence")["items"],
+                api_request(f"/api/v1/events/{preview_event_path_id}/evidence")["items"],
                 key=public_evidence_sort_key,
             )
             try:
                 knowledge_response = api_request(
-                    f"/api/v1/events/{preview_event_id}/knowledge"
+                    f"/api/v1/events/{preview_event_path_id}/knowledge"
                 )
                 if isinstance(knowledge_response, dict):
                     preview_knowledge = knowledge_response
@@ -926,7 +866,7 @@ if preview_event_id:
                 preview_knowledge = {}
             try:
                 source_response = api_request(
-                    f"/api/v1/events/{preview_event_id}/sources"
+                    f"/api/v1/events/{preview_event_path_id}/sources"
                 )
                 source_items = source_response.get("items", [])
                 if isinstance(source_items, list):
@@ -938,7 +878,7 @@ if preview_event_id:
             if preview_sources:
                 try:
                     interpretation_response = api_request(
-                        f"/api/v1/events/{preview_event_id}/source-interpretations"
+                        f"/api/v1/events/{preview_event_path_id}/source-interpretations"
                     )
                     interpretation_items = interpretation_response.get("items", [])
                     if isinstance(interpretation_items, list):
@@ -957,9 +897,6 @@ if preview_event_id:
         preview_facts = preview_version.get("facts") or {}
         if not isinstance(preview_facts, dict):
             preview_facts = {}
-        public_verification = preview_detail.get("verification_method")
-        if not isinstance(public_verification, dict):
-            public_verification = None
         preview_model = (
             preview_detail.get("model_shadow_output") or {} if UI_ROLE == "admin" else {}
         )
@@ -975,6 +912,10 @@ if preview_event_id:
         else:
             copy_input = dict(preview_event)
             copy_input["facts"] = preview_facts
+            if not isinstance(copy_input.get("risk_assessment"), dict):
+                copy_input["risk_assessment"] = preview_detail.get("risk_assessment")
+            copy_input.setdefault("citable_evidence_count", len(preview_evidence))
+            copy_input.setdefault("captured_source_count", len(preview_sources))
             if preview_evidence and not copy_input.get("credibility_tier"):
                 copy_input["credibility_tier"] = preview_evidence[0].get("authority_tier")
             public_copy = public_event_copy(copy_input)
@@ -1022,24 +963,26 @@ if preview_event_id:
                     if preview_evidence
                     else "尚无可引用证据"
                 )
-                reviewed_at = str(
-                    (public_verification or {}).get("reviewed_at")
-                    or preview_event.get("reviewed_at")
-                    or ""
+                citation_copy = (
+                    "达到正式引用条件"
+                    if public_copy["citation_ready"]
+                    else "尚未达到正式引用条件"
                 )
-                review_copy = {
-                    "verified": (
-                        "正式核验已完成"
-                        if has_recorded_public_verification(public_verification)
-                        else "历史已核验记录 · 核验时间与核验留痕未存档"
-                    ),
-                    "excluded": "线索已排除",
-                    "insufficient": "证据不足，不形成结论",
-                    "rough_reviewed": "粗审已完成，尚未正式核验",
-                    "pending_verification": "尚未完成正式核验",
-                }[public_copy["state"]]
-                if reviewed_at and public_copy["state"] == "rough_reviewed":
-                    review_copy += f" · {escape(reviewed_at[:10])}"
+                gap_copy = (
+                    f" · 当前缺口：{escape(str(public_copy['evidence_gaps']))}"
+                    if public_copy["evidence_gaps"]
+                    else ""
+                )
+                disposition_copy = (
+                    f" · {escape(str(public_copy['disposition_label']))}"
+                    if public_copy["disposition_label"]
+                    else ""
+                )
+                risk_meta = ""
+                if public_copy["risk_confidence"]:
+                    risk_meta += f" · 置信度 {escape(str(public_copy['risk_confidence']))}"
+                if public_copy["risk_model_version"]:
+                    risk_meta += f" · 模型 {escape(str(public_copy['risk_model_version']))}"
                 st.markdown(
                     '<section class="event-answer" aria-label="事件阅读摘要">'
                     '<div class="event-answer-meta">'
@@ -1053,22 +996,24 @@ if preview_event_id:
                     f'<p>{escape(public_copy["summary"])}</p></article>'
                     '<article><span>为什么关注</span>'
                     f'<p>{escape(public_copy["relevance"])}</p></article>'
-                    '<article><span>当前状态</span>'
-                    f'<p><strong>{escape(public_copy["state_label"])}</strong> · {review_copy}</p></article>'
-                    '<article><span>证据情况</span>'
-                    f'<p>{len(preview_evidence):,} 条可引用支持证据 · {escape(evidence_authority)}'
+                    '<article><span>证据与引用</span>'
+                    f'<p><strong>{escape(str(public_copy["evidence_label"]))}</strong> · {citation_copy}'
+                    f'{gap_copy}{disposition_copy} · {len(preview_evidence):,} 条可读证据 · {escape(evidence_authority)}'
                     + (
                         f' · {len(preview_sources):,} 条采集来源记录'
                         if preview_sources
                         else ''
                     )
                     + '</p></article>'
+                    f'<article><span>{escape(str(public_copy["risk_heading"]))}</span>'
+                    f'<p><strong>{escape(str(public_copy["risk_label"]))}</strong>{risk_meta} · '
+                    f'{escape(str(public_copy["risk_explanation"]))}</p></article>'
                     '</div>'
                     '</section>',
                     unsafe_allow_html=True,
                 )
                 st.markdown(
-                    public_time_markup(preview_event, preview_detail, public_verification),
+                    public_time_markup(preview_event, preview_detail),
                     unsafe_allow_html=True,
                 )
                 if previous_snapshot is None:
@@ -1078,14 +1023,7 @@ if preview_event_id:
                     for change in changes_since_view:
                         st.markdown(f"- {escape(change)}")
                 else:
-                    st.caption("与本次浏览会话中的上次查看相比，状态、版本和证据集合没有变化。")
-            if UI_ROLE != "admin" and public_verification:
-                st.markdown(
-                    public_verification_markup(
-                        public_copy["state"], public_verification, preview_evidence
-                    ),
-                    unsafe_allow_html=True,
-                )
+                    st.caption("与本次浏览会话中的上次查看相比，证据姿态、模型研判和材料集合没有变化。")
             if preview_evidence and UI_ROLE == "admin":
                 top_evidence = preview_evidence[0]
                 top_passage = (
@@ -1150,7 +1088,7 @@ if preview_event_id:
                     preview_interpretations[0] if preview_interpretations else None,
                 )
                 with st.expander(
-                    "查看采集到的原始线索与内容解读（未核验、非证据）",
+                    "查看来源捕获与内容解读（非正式证据）",
                     expanded=not bool(preview_evidence),
                 ):
                     st.markdown(
@@ -1159,7 +1097,7 @@ if preview_event_id:
                         f'<h3>{escape(source_title)}</h3>'
                         f'<p>{escape(source_excerpt)}</p>'
                         '<small>该记录仅说明系统当时收到了什么；它不是 P0/P1 权威证据，'
-                        '也不会改变已排除状态或触发交易。'
+                        '也不会改变事件事实、异常处置或触发交易。'
                         + (
                             f' 当前仅展示前 {int(source.get("source_excerpt_original_length") or 0):,} 字中的限长节选。'
                             if source.get("source_excerpt_truncated")
@@ -1179,7 +1117,7 @@ if preview_event_id:
                         mode = str(interpretation.get("mode") or "DETERMINISTIC")
                         status = str(interpretation.get("status") or "PARTIAL")
                         label = (
-                            "AI 辅助解读 · 未核验 · 非证据"
+                            "AI 辅助解读 · 来源捕获 · 非正式证据"
                             if mode == "LLM_ASSISTED"
                             else "确定性预览 · 外部模型待接入"
                         )
@@ -1228,7 +1166,7 @@ if preview_event_id:
                                 else ''
                             )
                             + '<div class="capture-interpretation-grid">'
-                            '<article><h4>仅凭这段未核验来源仍不能确认</h4><ul>'
+                            '<article><h4>仅凭这段来源捕获仍不能确认</h4><ul>'
                             + not_proven_markup
                             + '</ul></article>'
                             '<article><h4>要改变当前结论，还需要</h4><ul>'
@@ -1340,7 +1278,6 @@ elif UI_ROLE != "admin":
         st.query_params["preview_page"] = str(total_pages)
         st.query_params.pop("preview_event_id", None)
         st.rerun()
-    active_state_label = PUBLIC_STATE_LABELS.get(public_state, "全部状态")
     st.markdown(
         '<section class="queue-card queue-card-horizontal" aria-label="事件可见性与证据层级">'
         '<div>'
@@ -1349,23 +1286,19 @@ elif UI_ROLE != "admin":
         '</div>'
         '<div class="queue-card-copy">'
         f'其中 {reader_ready_count:,} 条达到正式引用条件；'
-        f'{evidence_gap_inventory:,} 条仍是待核验、证据不足、粗审或历史记录。'
+        f'{evidence_gap_inventory:,} 条按“一手材料待补、仅捕获来源或尚无来源”如实展示。'
         '<div class="queue-card-next">下一步 · 打开事件，先读中文说明，再核对捕获来源或原始证据</div>'
         '</div>'
         '</section>',
         unsafe_allow_html=True,
     )
     st.markdown('<div id="live-events"></div>', unsafe_allow_html=True)
-    feed_context = active_state_label
-    if preview_query:
-        feed_context += f" · 搜索 {preview_query}"
     section_header(
         "事件浏览",
         f"本页 {len(live_feed):,} 条 · 共 {live_total:,} 条 · 第 {public_page}/{total_pages} 页 · UTC",
     )
     if live_feed:
         link_context = {
-            "preview_state": public_state,
             "preview_query": preview_query,
             "preview_family": public_family,
             "preview_source": public_source,
@@ -1391,7 +1324,6 @@ elif UI_ROLE != "admin":
 
     def public_page_url(page_number: int) -> str:
         params = {
-            "preview_state": public_state,
             "preview_query": preview_query,
             "preview_family": public_family,
             "preview_source": public_source,
@@ -1549,5 +1481,5 @@ if UI_ROLE != "admin":
 st.caption(
     "J/K 在人工复核中切换事件 · / 聚焦检索 · 所有行情只读 · 所有模型输出均为 shadow"
     if UI_ROLE == "admin"
-    else "事件状态互斥且总和等于全部事件 · 时间统一为 UTC · 原始证据可能保留发布语言"
+    else "全部事件均可浏览 · 证据姿态与模型研判分开表达 · 时间统一为 UTC · 原始材料可能保留发布语言"
 )

@@ -342,6 +342,6 @@ def test_api_exposes_guarded_queue_and_review_contract(workflow) -> None:
         )
         assert spoofed.status_code == 422
         health = client.get("/api/v1/health").json()["data"]
-        assert health["operations"]["schema_version"] == 9
+        assert health["operations"]["schema_version"] == 10
         assert health["operations"]["counts"]["adjudication_freezes"] == 0
         assert health["operations"]["counts"]["adjudication_samples"] == 1

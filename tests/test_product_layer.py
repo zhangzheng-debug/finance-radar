@@ -87,6 +87,9 @@ class ProductLayerTests(unittest.TestCase):
             replay_dir=ROOT / "replay" / "cases",
             demo_mode="RECENT_CAPTURE",
             admin_token="test-secret",
+            reviewer_principals=(
+                ("student-reviewer", "REVIEWER", "student-reviewer-personal-token-000001"),
+            ),
             api_base_url="http://testserver",
             web_base_url="http://testserver",
         )
@@ -393,9 +396,8 @@ class ProductLayerTests(unittest.TestCase):
 
             override = client.post(
                 "/api/v1/events/evt-1/human-override",
-                headers={"X-Admin-Token": "test-secret"},
+                headers={"X-Reviewer-Token": "student-reviewer-personal-token-000001"},
                 json={
-                    "actor": "student-reviewer",
                     "reason": "Verified SEC 8-K Item 1.03 passage against the incident summary.",
                     "review_status": "REVIEWED_NO_CHANGE",
                     "reviewer_attestation": True,
@@ -403,6 +405,8 @@ class ProductLayerTests(unittest.TestCase):
             )
             self.assertEqual(override.status_code, 200)
             self.assertTrue(override.json()["data"]["no_trading"])
+            self.assertTrue(override.json()["data"]["credential_bound"])
+            self.assertTrue(override.json()["data"]["reviewer_principal"].startswith("human-"))
             trace = client.get(
                 "/api/v1/events/evt-1/trace",
                 headers={"X-Admin-Token": "test-secret"},
@@ -424,9 +428,8 @@ class ProductLayerTests(unittest.TestCase):
         with TestClient(create_app(self.settings)) as client:
             response = client.post(
                 "/api/v1/events/evt-1/human-override",
-                headers={"X-Admin-Token": "test-secret"},
+                headers={"X-Reviewer-Token": "student-reviewer-personal-token-000001"},
                 json={
-                    "actor": "student-reviewer",
                     "reason": "No agent decision exists yet",
                     "review_status": "HUMAN_REVIEW",
                     "reviewer_attestation": True,
@@ -454,9 +457,8 @@ class ProductLayerTests(unittest.TestCase):
 
             response = client.post(
                 "/api/v1/events/evt-1/human-override",
-                headers={"X-Admin-Token": "test-secret"},
+                headers={"X-Reviewer-Token": "student-reviewer-personal-token-000001"},
                 json={
-                    "actor": "student-reviewer",
                     "reason": "Reviewed the revised SEC passage against the current incident summary.",
                     "review_status": "HUMAN_REVIEW",
                     "reviewer_attestation": True,
@@ -501,45 +503,41 @@ class ProductLayerTests(unittest.TestCase):
                 "EVIDENCE_CHANGE_CONFIRMATION_REQUIRED",
             )
 
-    def test_human_override_rejects_placeholder_attribution(self) -> None:
+    def test_human_override_rejects_admin_or_body_supplied_attribution(self) -> None:
         with TestClient(create_app(self.settings)) as client:
-            response = client.post(
+            admin_response = client.post(
                 "/api/v1/events/evt-1/human-override",
                 headers={"X-Admin-Token": "test-secret"},
                 json={
-                    "actor": "defense-reviewer",
                     "reason": "Verified the exact primary-source passage",
                     "review_status": "REVIEWED_NO_CHANGE",
                     "reviewer_attestation": True,
                 },
             )
-            self.assertEqual(response.status_code, 422)
+            self.assertEqual(admin_response.status_code, 403)
             self.assertEqual(
-                response.json()["error"]["code"], "SPECIFIC_REVIEWER_ID_REQUIRED"
+                admin_response.json()["error"]["code"], "BOUND_REVIEWER_PRINCIPAL_REQUIRED"
             )
 
-    def test_human_override_rejects_whitespace_only_normalized_attribution(self) -> None:
-        with TestClient(create_app(self.settings)) as client:
-            blank_actor = client.post(
+            body_actor = client.post(
                 "/api/v1/events/evt-1/human-override",
-                headers={"X-Admin-Token": "test-secret"},
+                headers={"X-Reviewer-Token": "student-reviewer-personal-token-000001"},
                 json={
-                    "actor": "   ",
-                    "reason": "A reviewer checked the current evidence for this specific event.",
+                    "actor": "another-person",
+                    "reason": "Verified the exact primary-source passage for the current event.",
                     "review_status": "REVIEWED_NO_CHANGE",
                     "reviewer_attestation": True,
                 },
             )
-            self.assertEqual(blank_actor.status_code, 422)
-            self.assertEqual(
-                blank_actor.json()["error"]["code"], "SPECIFIC_REVIEWER_ID_REQUIRED"
-            )
+            self.assertEqual(body_actor.status_code, 422)
+            self.assertEqual(body_actor.json()["error"]["code"], "VALIDATION_ERROR")
 
+    def test_human_override_rejects_whitespace_only_normalized_rationale(self) -> None:
+        with TestClient(create_app(self.settings)) as client:
             blank_reason = client.post(
                 "/api/v1/events/evt-1/human-override",
-                headers={"X-Admin-Token": "test-secret"},
+                headers={"X-Reviewer-Token": "student-reviewer-personal-token-000001"},
                 json={
-                    "actor": "student-reviewer",
                     "reason": "                    ",
                     "review_status": "REVIEWED_NO_CHANGE",
                     "reviewer_attestation": True,
@@ -713,28 +711,55 @@ class ProductLayerTests(unittest.TestCase):
         operations = OperationsRepository(self.settings.operations_db)
         replay = ReplayService(
             self.settings.replay_dir,
-            RiskRouter(Path(self.temp_dir.name) / "missing.joblib"),
+            RiskRouter(
+                ROOT / "artifacts" / "risk_router.joblib",
+                ROOT / "artifacts" / "risk_router_model_card.json",
+            ),
             operations,
         )
         results = [replay.run(case["case_id"]) for case in replay.cases()]
         self.assertEqual(len(results), 4)
         self.assertTrue(all(result["expectation_met"] for result in results))
         self.assertTrue(all(not result["external_network_used"] for result in results))
+        self.assertTrue(
+            all(
+                step["evidence_state"]["version"] == "structured-evidence-gate-v1"
+                for result in results
+                for step in result["steps"]
+            )
+        )
         risk_case = next(result for result in results if result["case_id"] == "sec_bankruptcy_verified")
         self.assertEqual(risk_case["steps"][0]["shadow_decision"]["label"], "ABSTAIN")
         self.assertFalse(risk_case["steps"][0]["shadow_decision"]["alert_eligible"])
+        self.assertEqual(risk_case["steps"][0]["evidence_state"]["state"], "DISCOVERY_ONLY")
+        self.assertEqual(
+            risk_case["steps"][1]["evidence_state"]["state"],
+            "PRIMARY_SUPPORTED_REVIEWED",
+        )
         self.assertTrue(risk_case["steps"][1]["shadow_decision"]["alert_eligible"])
         correction_case = next(
             result for result in results if result["case_id"] == "sec_filing_corrected_abstain"
         )
         self.assertTrue(correction_case["steps"][0]["shadow_decision"]["alert_eligible"])
-        self.assertEqual(correction_case["steps"][1]["evidence_state"]["status"], "CONFLICT_REVIEW")
+        self.assertEqual(correction_case["steps"][1]["evidence_state"]["state"], "CONFLICTED")
         self.assertEqual(correction_case["steps"][1]["shadow_decision"]["label"], "ABSTAIN")
         self.assertFalse(correction_case["steps"][1]["shadow_decision"]["alert_eligible"])
         self.assertEqual(correction_case["steps"][1]["observation"]["revision_kind"], "CORRECTION")
         self.assertEqual(correction_case["steps"][1]["observation"]["supersedes_step"], 1)
         self.assertEqual(len(operations.replay_runs()), 4)
         self.assertTrue(all(run["status"] == "COMPLETED" for run in operations.replay_runs()))
+
+    def test_replay_rejects_lookalike_primary_authority_tiers(self) -> None:
+        adapted = ReplayService._router_evidence(
+            [
+                {
+                    "source": "malformed-tier-fixture",
+                    "authority_tier": "P00",
+                    "passage": "A quoted passage must not become primary evidence through a prefix match.",
+                }
+            ]
+        )
+        self.assertEqual(adapted[0]["evidence_status"], "candidate_passage")
 
     def test_online_backup_and_isolated_restore_drill(self) -> None:
         operations = OperationsRepository(self.settings.operations_db)

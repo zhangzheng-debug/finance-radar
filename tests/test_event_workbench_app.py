@@ -193,6 +193,10 @@ def test_event_workbench_labels_its_controlled_audit_and_review_writes() -> None
     assert "会写入不可变的人工复核记录" in source
     assert "audit_write_confirmed" in source
     assert "reviewer_attestation" in source
+    assert "个人审核凭据" in source
+    assert "reviewer_credential=reviewer_credential" in source
+    assert '"actor": actor' not in source
+    assert "Admin 可查看审计历史，但不能代替个人 Reviewer" in source
     assert "由本人填写，将作为不可变审计记录保存" in source
     assert "我确认已有新增或修订证据，需要创建新的审计记录" in source
     assert "确认重新运行证据代理（受控写入）" in source
