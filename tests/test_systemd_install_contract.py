@@ -240,7 +240,7 @@ def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() ->
     installer = INSTALLER.read_text(encoding="utf-8")
 
     assert (
-        "scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 100000 --workers 3"
+        "scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 500 --workers 3"
         in source
     )
     assert "--env-file /dev/null" not in source

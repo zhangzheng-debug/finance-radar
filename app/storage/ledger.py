@@ -82,6 +82,65 @@ current_source_content AS (
 """.strip()
 
 
+_CAPTURE_INTERPRETATION_CANDIDATE_CTES = """
+live_interpretation_capture AS (
+    SELECT eo.event_id,r.observation_id,r.source_id,r.external_id,
+           r.source_published_at,r.local_received_at,r.title,r.summary,
+           r.canonical_url,r.content_sha256,r.raw_json,
+           r.observation_status,r.latest_revision_no,r.latest_revision_kind,
+           s.authority_tier,
+           CASE WHEN x.observation_id IS NOT NULL
+                     AND (
+                       LOWER(COALESCE(x.last_error,'')) LIKE '%exceeds safe capture limit%'
+                       OR LOWER(COALESCE(x.last_error,'')) LIKE '%exceeded safe capture limit%'
+                     )
+                THEN 1 ELSE 0 END AS oversized_sec_capture
+    FROM event_observations eo
+    JOIN latest_source_content r ON r.observation_id=eo.observation_id
+    JOIN sources s ON s.source_id=r.source_id
+    LEFT JOIN sec_filing_enrichments x ON x.observation_id=r.observation_id
+    WHERE r.observation_status!='deleted'
+),
+interpretation_event_bucket AS (
+    SELECT ce.event_id,
+           CASE
+             WHEN MAX(CASE WHEN c.oversized_sec_capture=1
+                                  AND TRIM(COALESCE(c.canonical_url,''))!=''
+                            THEN 1 ELSE 0 END)=1
+               THEN 'SEC_OVERSIZE_REFETCH_READY'
+             WHEN MAX(CASE WHEN TRIM(COALESCE(c.canonical_url,''))!=''
+                                  AND (
+                                    UPPER(c.authority_tier) IN ('P0','P1')
+                                    OR UPPER(c.authority_tier) GLOB 'P0_*'
+                                    OR UPPER(c.authority_tier) GLOB 'P1_*'
+                                  )
+                            THEN 1 ELSE 0 END)=1
+               THEN 'OFFICIAL_REFETCH_READY'
+             WHEN MAX(CASE WHEN TRIM(COALESCE(c.canonical_url,''))!=''
+                            THEN 1 ELSE 0 END)=1
+               THEN 'P2_CAPTURE_ONLY'
+             ELSE 'NO_URL_RAW_ONLY'
+           END AS bucket
+    FROM canonical_events ce
+    JOIN live_interpretation_capture c ON c.event_id=ce.event_id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM event_evidence ee WHERE ee.event_id=ce.event_id
+    )
+    GROUP BY ce.event_id
+),
+eligible_interpretation_capture AS (
+    SELECT b.bucket,c.*
+    FROM interpretation_event_bucket b
+    JOIN live_interpretation_capture c ON c.event_id=b.event_id
+    WHERE b.bucket IN ('NO_URL_RAW_ONLY','P2_CAPTURE_ONLY')
+      AND (
+        TRIM(COALESCE(c.title,''))!=''
+        OR TRIM(COALESCE(c.summary,''))!=''
+      )
+)
+""".strip()
+
+
 _DUAL_HUMAN_RECEIPT_MATCH_SQL = """
 json_valid(current_version.facts_json)
 AND json_extract(
@@ -1200,12 +1259,96 @@ class LedgerRepository:
             revisions = connection.execute(
                 "SELECT COUNT(*) AS n,MAX(revision_at) AS latest FROM source_revisions"
             ).fetchone()
+            relations = connection.execute(
+                "SELECT COUNT(*) AS n,MAX(linked_at) AS latest FROM event_observations"
+            ).fetchone()
+            evidence = connection.execute(
+                "SELECT COUNT(*) AS n,MAX(updated_at) AS latest FROM event_evidence"
+            ).fetchone()
         return {
             "observation_count": int(observations["n"] or 0),
             "latest_observation_at": observations["latest"],
             "revision_count": int(revisions["n"] or 0),
             "latest_revision_at": revisions["latest"],
+            "relation_count": int(relations["n"] or 0),
+            "latest_relation_at": relations["latest"],
+            "evidence_count": int(evidence["n"] or 0),
+            "latest_evidence_at": evidence["latest"],
         }
+
+    def capture_interpretation_candidate_count(self) -> int:
+        """Count current receipt-bound DeepSeek candidates without materializing them."""
+
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                f"""WITH {_CAPTURE_INTERPRETATION_CANDIDATE_CTES}
+                    SELECT COUNT(*) FROM eligible_interpretation_capture"""
+            ).fetchone()
+        return int(row[0] or 0)
+
+    def capture_interpretation_candidates(
+        self,
+        *,
+        limit: int = 250,
+        offset: int = 0,
+    ) -> list[dict[str, str]]:
+        """Load one bounded, stable window of receipt-bound LLM candidates.
+
+        This is the scheduler path, not the historical recovery-report path.
+        It intentionally excludes orphan captures and official/refetch buckets,
+        preserves the exact immutable receipt used by the single-job runner,
+        and never loads more than 1,000 capture payloads into memory.
+        """
+
+        limit = max(1, min(int(limit), 1_000))
+        offset = max(0, int(offset))
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                f"""WITH {_CAPTURE_INTERPRETATION_CANDIDATE_CTES}
+                    SELECT bucket,event_id,observation_id,source_id,external_id,
+                           source_published_at,local_received_at,canonical_url,
+                           content_sha256,raw_json,latest_revision_no,
+                           latest_revision_kind
+                    FROM eligible_interpretation_capture
+                    ORDER BY CASE bucket WHEN 'NO_URL_RAW_ONLY' THEN 0 ELSE 1 END,
+                             event_id,observation_id
+                    LIMIT ? OFFSET ?""",
+                (limit, offset),
+            ).fetchall()
+
+        candidates: list[dict[str, str]] = []
+        for row in rows:
+            item = dict(row)
+            raw_payload_sha256 = hashlib.sha256(
+                str(item.pop("raw_json", "") or "").encode("utf-8")
+            ).hexdigest()
+            receipt_payload = {
+                "source_id": item.get("source_id"),
+                "external_id": item.get("external_id"),
+                "semantic_content_sha256": item.get("content_sha256"),
+                "canonical_url": item.get("canonical_url"),
+                "source_published_at": item.get("source_published_at"),
+                "local_received_at": item.get("local_received_at"),
+                "latest_revision_no": item.get("latest_revision_no"),
+                "latest_revision_kind": item.get("latest_revision_kind"),
+                "raw_payload_sha256": raw_payload_sha256,
+            }
+            candidates.append(
+                {
+                    "event_id": str(item["event_id"]),
+                    "observation_id": str(item["observation_id"]),
+                    "capture_receipt_sha256": hashlib.sha256(
+                        json.dumps(
+                            receipt_payload,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest(),
+                    "bucket": str(item["bucket"]),
+                }
+            )
+        return candidates
 
     def capture_interpretation_context(
         self,
@@ -1272,15 +1415,32 @@ class LedgerRepository:
         capture["semantic_content_sha256"] = capture.pop("content_sha256", None)
         return {"event": dict(event_row), "capture": capture}
 
-    def shadow_batch(self, *, limit: int = 200) -> list[dict[str, Any]]:
+    def shadow_batch(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+        order: str = "latest",
+    ) -> list[dict[str, Any]]:
         """Load recent shadow-router inputs with two bounded SQL queries.
 
         The old implementation called the full public-reader CTE once for the
         page and again for every event.  On the production ledger that made a
         bounded shadow batch take longer than the whole worker deadline.
+
+        ``order='event_id'`` plus ``offset`` is reserved for the durable fair
+        queue.  It walks the whole canonical ledger in stable windows while the
+        default recent lane keeps newly changed events responsive.
         """
 
         limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        sort_orders = {
+            "latest": "ce.last_updated_at DESC,ce.event_id DESC",
+            "event_id": "ce.event_id ASC",
+        }
+        if order not in sort_orders:
+            raise ValueError(f"unsupported shadow batch order: {order}")
         with closing(self.connect()) as connection:
             event_rows = connection.execute(
                 f"""WITH {_CURRENT_SOURCE_CONTENT_CTES},
@@ -1306,9 +1466,9 @@ class LedgerRepository:
                       ON v.event_id=ce.event_id AND v.version=ce.current_version
                     LEFT JOIN ranked_source rs
                       ON rs.event_id=ce.event_id AND rs.source_rank=1
-                    ORDER BY ce.last_updated_at DESC,ce.event_id DESC
-                    LIMIT ?""",
-                (limit,),
+                    ORDER BY {sort_orders[order]}
+                    LIMIT ? OFFSET ?""",
+                (limit, offset),
             ).fetchall()
             event_ids = [str(row["event_id"]) for row in event_rows]
             evidence_by_event: dict[str, list[dict[str, Any]]] = {
