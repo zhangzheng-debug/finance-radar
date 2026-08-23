@@ -366,10 +366,17 @@ find "$RELEASE" -type f -exec chmod 0640 {} +
 # helpers; in code-only mode it must first prove they are byte-identical to the
 # already installed, trusted release.
 PREVIOUS_RELEASE=""
+PREVIOUS_ACCEPTED_RELEASE_ID=""
 if [ -e "$BASE/current" ] || [ -L "$BASE/current" ]; then
     PREVIOUS_RELEASE="$(readlink -f -- "$BASE/current")"
     [[ "$PREVIOUS_RELEASE" == "$BASE/releases/"* ]] && [ -d "$PREVIOUS_RELEASE" ] || {
         printf 'current release is not a complete release directory: %s\n' "$PREVIOUS_RELEASE" >&2
+        exit 3
+    }
+    PREVIOUS_ACCEPTED_RELEASE_ID="${PREVIOUS_RELEASE##*/}"
+    [[ "$PREVIOUS_ACCEPTED_RELEASE_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$ ]] || {
+        printf 'current release has an invalid release id: %s\n' \
+            "$PREVIOUS_ACCEPTED_RELEASE_ID" >&2
         exit 3
     }
 fi
@@ -1072,6 +1079,8 @@ VENV_CREATED=0
 CUTOVER_STARTED=0
 SERVICES_TOUCHED=0
 EDGE_TOUCHED=0
+ACTIVATION_RECORD_COMMITTED=0
+ACTIVATION_PENDING=""
 LEGACY_MANAGED_PROPERTY_DROPINS=(
     /etc/systemd/system.control/finance-radar-api.service.d/50-MemoryHigh.conf
     /etc/systemd/system.control/finance-radar-api.service.d/50-MemoryMax.conf
@@ -1336,8 +1345,26 @@ assert_candidate_vhost_owns_public_edge() {
 }
 
 write_public_release_marker() {
+    local activation_state=${1:?activation state required}
+    local accepted_release_id
+    case "$activation_state" in
+        ACTIVATING)
+            # Keep the legacy release_id pinned to the last accepted release.
+            # Status-aware clients can inspect candidate_release_id, while old
+            # clients cannot mistake a candidate for a completed deployment.
+            accepted_release_id="$PREVIOUS_ACCEPTED_RELEASE_ID"
+            ;;
+        ACCEPTED)
+            accepted_release_id="$RELEASE_ID"
+            ;;
+        *)
+            printf 'invalid public activation state: %s\n' "$activation_state" >&2
+            return 2
+            ;;
+    esac
     install -d -m 0755 -o root -g root "$PUBLIC_STATUS_DIR" || return 1
-    python3 - "$PUBLIC_RELEASE_MARKER" "$RELEASE_ID" <<'PY'
+    python3 - "$PUBLIC_RELEASE_MARKER" "$activation_state" "$RELEASE_ID" \
+        "$accepted_release_id" <<'PY'
 from __future__ import annotations
 
 import json
@@ -1346,47 +1373,80 @@ from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
-release = sys.argv[2]
+activation_state, candidate_release_id, accepted_release_id = sys.argv[2:]
+if activation_state not in {"ACTIVATING", "ACCEPTED"}:
+    raise SystemExit("unsupported activation state")
+if activation_state == "ACCEPTED" and accepted_release_id != candidate_release_id:
+    raise SystemExit("accepted marker must expose the candidate as the accepted release")
+if path.is_symlink() or (path.exists() and not path.is_file()):
+    raise SystemExit("public release marker target is unsafe")
 temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-temporary.write_text(
-    json.dumps({"release_id": release, "public_ui": "streamlit"}, sort_keys=True) + "\n",
-    encoding="utf-8",
-)
+payload = {
+    "activation_state": activation_state,
+    "candidate_release_id": candidate_release_id,
+    # Existing clients continue to read release_id/public_ui. During activation
+    # release_id is the prior accepted release, or null on a first deployment.
+    "release_id": accepted_release_id or None,
+    "public_ui": "streamlit",
+}
+temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
 os.chmod(temporary, 0o644)
 os.replace(temporary, path)
 PY
 }
 
 assert_public_release_marker() {
+    local expected_state=${1:?expected activation state required}
+    local expected_accepted_release_id
+    case "$expected_state" in
+        ACTIVATING)
+            expected_accepted_release_id="$PREVIOUS_ACCEPTED_RELEASE_ID"
+            ;;
+        ACCEPTED)
+            expected_accepted_release_id="$RELEASE_ID"
+            ;;
+        *)
+            printf 'invalid expected public activation state: %s\n' "$expected_state" >&2
+            return 2
+            ;;
+    esac
     local attempt marker
     for attempt in $(seq 1 15); do
         marker=""
         if marker="$(curl --noproxy '*' --fail --silent --show-error --max-time 5 \
             --resolve "$PUBLIC_EDGE_HOST:$PUBLIC_EDGE_PORT:127.0.0.1" \
             "$PUBLIC_WEB_BASE/release.json")" && \
-            python3 - "$RELEASE_ID" "$marker" <<'PY'
+            python3 - "$expected_state" "$RELEASE_ID" \
+                "$expected_accepted_release_id" "$marker" <<'PY'
 from __future__ import annotations
 
 import json
 import sys
 
-expected, raw = sys.argv[1:]
+expected_state, candidate_release_id, accepted_release_id, raw = sys.argv[1:]
 try:
     value = json.loads(raw)
 except json.JSONDecodeError:
     raise SystemExit(1)
-if value != {"public_ui": "streamlit", "release_id": expected}:
+expected = {
+    "activation_state": expected_state,
+    "candidate_release_id": candidate_release_id,
+    "release_id": accepted_release_id or None,
+    "public_ui": "streamlit",
+}
+if value != expected:
     raise SystemExit(1)
 PY
         then
-            printf 'public_release_marker=PASS attempt=%s release_id=%s\n' \
-                "$attempt" "$RELEASE_ID"
+            printf 'public_release_marker=PASS attempt=%s activation_state=%s release_id=%s candidate_release_id=%s\n' \
+                "$attempt" "$expected_state" \
+                "${expected_accepted_release_id:-none}" "$RELEASE_ID"
             return 0
         fi
         sleep 1
     done
-    printf 'public release marker did not converge after %s attempts: %s\n' \
-        15 "$PUBLIC_WEB_BASE/release.json" >&2
+    printf 'public release marker did not converge to %s after %s attempts: %s\n' \
+        "$expected_state" 15 "$PUBLIC_WEB_BASE/release.json" >&2
     return 1
 }
 
@@ -2052,7 +2112,8 @@ rollback() {
     local path
     trap - ERR
     set +e
-    printf 'cutover_failed=1; restoring previous release and configuration\n' >&2
+    printf 'activation_state=ROLLBACK candidate_release_id=%s; restoring previous release and configuration\n' \
+        "$RELEASE_ID" >&2
     # A code-only failure before the current symlink changes has touched only
     # the backup timer and byte-identical unit/config files.  Do not turn an
     # eligibility or preparation failure into an avoidable API/Web/collector
@@ -2071,6 +2132,19 @@ rollback() {
         printf 'rollback_warning=backup_start_inhibit_cleanup_failed\n' >&2
     clear_worker_resume_inhibit || \
         printf 'rollback_warning=worker_resume_inhibit_cleanup_failed\n' >&2
+    if [ "$ACTIVATION_RECORD_COMMITTED" -eq 1 ]; then
+        # ACTIVATION.txt belongs to the candidate tree, which the archive was
+        # required not to contain. Never retain an accepted receipt for a
+        # release whose symlink, services or public marker are being rolled back.
+        rm -f -- "$RELEASE_RECORDS/ACTIVATION.txt" || \
+            printf 'rollback_warning=activation_receipt_cleanup_failed\n' >&2
+        ACTIVATION_RECORD_COMMITTED=0
+    fi
+    if [ -n "$ACTIVATION_PENDING" ] && \
+       [[ "$ACTIVATION_PENDING" == "$RELEASE_RECORDS/.ACTIVATION.pending."* ]]; then
+        rm -f -- "$ACTIVATION_PENDING" || \
+            printf 'rollback_warning=activation_pending_cleanup_failed\n' >&2
+    fi
     if [ "$CUTOVER_STARTED" -eq 1 ]; then
         if [ -n "$PREVIOUS_RELEASE" ]; then
             ln -sfn "$PREVIOUS_RELEASE" "$BASE/current" || true
@@ -2593,13 +2667,13 @@ fi
 EDGE_TOUCHED=1
 retire_known_predecessor_vhost || \
     abort_cutover 'unable to retire the previous Finance Radar Nginx vhost safely' 6
-write_public_release_marker || \
-    abort_cutover 'unable to write the public release fingerprint' 6
+write_public_release_marker ACTIVATING || \
+    abort_cutover 'unable to publish the activating release state' 6
 bash "$DIRECT_ENDPOINT_INSTALLER" "$DIRECT_ENDPOINT_CANDIDATE" "$DIRECT_ENDPOINT_HOOK"
 assert_candidate_vhost_owns_public_edge || \
     abort_cutover 'candidate Nginx vhost does not exclusively own the public edge' 6
-assert_public_release_marker || \
-    abort_cutover 'public edge does not serve the candidate release fingerprint' 6
+assert_public_release_marker ACTIVATING || \
+    abort_cutover 'public edge does not serve the activating release state' 6
 for denied_path in \
     /finance-radar-api/ \
     /radar/offhost-status.json \
@@ -2664,7 +2738,7 @@ ACTIVATION_PENDING="$RELEASE_RECORDS/.ACTIVATION.pending.$$"
 [ ! -e "$ACTIVATION_PENDING" ] && [ ! -L "$ACTIVATION_PENDING" ] || \
     abort_cutover 'activation pending record path is unsafe' 6
 install -m 0640 -o root -g finance-radar /dev/null "$ACTIVATION_PENDING"
-printf 'release=%s\nprevious_release=%s\npublic_web=%s\ndeploy_mode=%s\nrecovery_basis=%s\npredeploy_backup_run_id=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_format=%s\npredeploy_backup_receipt_sha256=%s\npostdeploy_backup_run_id=%s\npostdeploy_backup_snapshot_id=%s\npostdeploy_backup_manifest_sha256=%s\npostdeploy_full_bundle=%s\nservices=active\nnginx_edge=PASS\n' \
+printf 'activation_state=ACCEPTED\nactivation=PASS\nrelease=%s\nprevious_release=%s\npublic_web=%s\ndeploy_mode=%s\nrecovery_basis=%s\npredeploy_backup_run_id=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_format=%s\npredeploy_backup_receipt_sha256=%s\npostdeploy_backup_run_id=%s\npostdeploy_backup_snapshot_id=%s\npostdeploy_backup_manifest_sha256=%s\npostdeploy_full_bundle=%s\nservices=active\noverview_snapshot_timer=active\nbackup_timer=active\nnginx_edge=PASS\n' \
     "$RELEASE_ID" "${PREVIOUS_RELEASE:-none}" "$PUBLIC_WEB_URL" \
     "$DEPLOY_MODE" "$RECOVERY_BASIS" \
     "${PREDEPLOY_BACKUP_RUN_ID:-not-recorded}" \
@@ -2678,11 +2752,13 @@ printf 'release=%s\nprevious_release=%s\npublic_web=%s\ndeploy_mode=%s\nrecovery
 # report it, but never leave a rolled-back release carrying activation=PASS.
 mv -f -- "$ACTIVATION_PENDING" "$RELEASE_RECORDS/ACTIVATION.txt" || \
     abort_cutover 'atomic activation record commit failed' 6
+ACTIVATION_RECORD_COMMITTED=1
 [ -f "$RELEASE_RECORDS/ACTIVATION.txt" ] && \
     [ ! -L "$RELEASE_RECORDS/ACTIVATION.txt" ] && \
+    grep -Fx 'activation_state=ACCEPTED' "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null && \
+    grep -Fx 'activation=PASS' "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null && \
     grep -Fx "release=$RELEASE_ID" "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null && \
     grep -Fx 'services=active' "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null || {
-        rm -f -- "$RELEASE_RECORDS/ACTIVATION.txt" || true
         abort_cutover 'committed activation record failed validation' 6
     }
 # Resume provider interpretation last.  A Persistent timer can immediately
@@ -2690,9 +2766,24 @@ mv -f -- "$ACTIVATION_PENDING" "$RELEASE_RECORDS/ACTIVATION.txt" || \
 # has been atomically committed and validated.  If restoration fails, remove
 # that record and execute the normal rollback transaction.
 if ! restore_capture_interpretation_runtime; then
-    rm -f -- "$RELEASE_RECORDS/ACTIVATION.txt" || true
     abort_cutover 'capture interpretation timer state could not be restored after activation checks' 6
 fi
+# Recheck every public runtime and persistent timer after the activation receipt
+# and optional interpretation timer have settled. The accepted public marker is
+# the last deployment mutation: no candidate release_id is advertised as final
+# before these checks and the private receipt all succeed.
+systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker || \
+    abort_cutover 'required services are not active at final acceptance' 6
+systemctl is-active --quiet finance-radar-overview-snapshot.timer \
+    finance-radar-backup.timer || \
+    abort_cutover 'required timers are not active at final acceptance' 6
+systemctl is-enabled --quiet finance-radar-api finance-radar-web finance-radar-worker \
+    finance-radar-overview-snapshot.timer finance-radar-backup.timer || \
+    abort_cutover 'required services or timers are not enabled at final acceptance' 6
+write_public_release_marker ACCEPTED || \
+    abort_cutover 'unable to publish the accepted release state' 6
+assert_public_release_marker ACCEPTED || \
+    abort_cutover 'public edge does not serve the accepted release state' 6
 trap - ERR
 if [ "$DEPLOY_MODE" = full ]; then
     if ! clear_predeploy_backup_hold; then
@@ -2703,7 +2794,7 @@ fi
 [[ "$ROLLBACK_DIR" == /var/tmp/finance-radar-install-* ]] || exit 70
 rm -rf -- "$ROLLBACK_DIR"
 
-printf 'activation=PASS\nrelease=%s\nprevious_release=%s\npublic_web=%s\ndeploy_mode=%s\nrecovery_basis=%s\npredeploy_backup_run_id=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_format=%s\npredeploy_backup_receipt_sha256=%s\npostdeploy_backup_run_id=%s\npostdeploy_backup_snapshot_id=%s\npostdeploy_backup_manifest_sha256=%s\npostdeploy_full_bundle=%s\nnginx_edge=PASS\n' \
+printf 'activation_state=ACCEPTED\nactivation=PASS\nrelease=%s\nprevious_release=%s\npublic_web=%s\ndeploy_mode=%s\nrecovery_basis=%s\npredeploy_backup_run_id=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_format=%s\npredeploy_backup_receipt_sha256=%s\npostdeploy_backup_run_id=%s\npostdeploy_backup_snapshot_id=%s\npostdeploy_backup_manifest_sha256=%s\npostdeploy_full_bundle=%s\nnginx_edge=PASS\n' \
     "$RELEASE" "${PREVIOUS_RELEASE:-none}" "$PUBLIC_WEB_URL" \
     "$DEPLOY_MODE" "$RECOVERY_BASIS" \
     "${PREDEPLOY_BACKUP_RUN_ID:-not-recorded}" \
