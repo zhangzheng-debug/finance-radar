@@ -1,5 +1,47 @@
 # Finance Radar current state
 
+## 2026-08-24 `2026.08.24.2` 生产复核与单次完整部署候选
+
+2026-08-24 00:36–00:41（Asia/Singapore）已通过 AWS EC2 Instance Connect
+只读复核美国 `us-east-1` 实例 `i-0fa9bfafa5eab00bf`。当前生产仍精确指向
+`20260823T143441Z-e16cf5310366` / `2026.08.23.6`，而不是尚未部署的本地候选。
+API、Public Web、连续 Worker、每日备份计时器、五分钟捕获解读计时器和五分钟
+overview 快照计时器均在预期状态；Reviewer、Operator、Admin 和本地 evidence
+LLM 仍保持手动或停用。
+
+现场账本共有 14,438 条规范事件：candidate 10,028、weak 2,688、verified 546、
+rejected 1,176。最新 Worker 周期于 16:41:07 UTC 成功结束，耗时约 189.7 秒；
+最新事件在 16:30:16 UTC 更新。公开筛选项、最近 24 条和 offset 7,200 的 loopback
+读取分别约 0.143、0.452 和 0.343 秒，均返回 200。因此此前“0 条事件”和
+12–50 秒深分页已经不是当前生产事实；所有 canonical 事件可浏览，证据姿态只描述
+可引用程度，不再控制可见性。
+
+Worker 自 16:00:59 UTC 启动后 `NRestarts=0`，现场约 59 MiB、历史峰值约
+399 MiB。DeepSeek 队列为 COMPLETED 428、remaining 0，当前无待处理；当日已记录
+15 次请求，估算费用约 0.049899 CNY。最近备份服务结果为 success，当前生产发布
+收据绑定的切换后完整恢复包
+`finance_radar_20260823T145915Z_1f9c4676` 已验证。根盘 61 GiB 中使用约 39 GiB、
+可用约 23 GiB（63%）；908 MiB 内存中约 464 MiB 已用，2 GiB swap 中约
+703 MiB 已用。主机提示 30 个可更新软件包并要求重启，但这属于需另择维护窗口的
+系统更新，不应混入本次应用发布。
+
+当前 systemd 仍保留两个历史失败瞬态单元；其中一次 2026-08-22 失败已明确因旧
+`worker-resume.inhibit` 冲突而在切换前回滚，不能代表现在的 API、Web 或 Worker
+失败。当前 `/run/finance-radar` 只保留带 `stale-...` 后缀的审计遗迹，没有活动
+inhibit 标记。`2026.08.23.6` 的 ACTIVATION 收据、切换前/后恢复点、services=active
+和 nginx_edge=PASS 均存在。
+
+本候选在 `2026.08.24.1` 的事件列表与深分页修复之上再收口三项长期问题：发布
+marker 在事务中显式区分 ACTIVATING/ACCEPTED；shadow 风险路由使用“最近变化 +
+全账本轮转”双通道避免旧事件永久饥饿；DeepSeek 从每次变化后物化完整历史恢复
+计划改为 500 条有界窗口、精确 receipt 和持久游标。因为涉及 API/存储读取路径、
+Worker 和安装器，上线必须只做一次 `full` 部署并重新生成切换后完整恢复包；不得
+拆成多次慢部署。
+
+本地完整组合回归为 `1076 passed, 6 skipped`；依赖锁核验、`compileall`、安装
+脚本 `bash -n` 和 `git diff --check` 均通过。该结果只证明候选构建通过本地门，仍须以
+合并后的精确提交生成归档和发布记录，并在 AWS 上完成完整部署与现场验收。
+
 ## 2026-08-24 `2026.08.24.1` 本地发布候选与当前生产阻断
 
 生产公网的 release marker 已切到

@@ -5,6 +5,20 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.24.2
+
+- Publish a release as `ACTIVATING` during edge cutover and expose it as
+  `ACCEPTED` only after the recovery bundle, activation receipt, API, Web,
+  Worker and persistent timers have all passed their final checks. Legacy
+  marker readers remain pinned to the previous accepted release in between.
+- Split shadow routing into alternating recent and durable round-robin lanes.
+  New or changed events stay responsive while every older canonical event is
+  eventually revisited instead of being starved behind the newest 200 rows.
+- Replace the DeepSeek timer's full historical recovery-plan materialization
+  with a bounded 500-capture incremental sweep. The scheduler preserves exact
+  capture receipts, resumes from a durable cursor and resets on source,
+  relation or evidence-generation changes.
+
 ## 2026.08.24.1
 
 - Let public-Web-only releases carry their tests, documentation and bounded
