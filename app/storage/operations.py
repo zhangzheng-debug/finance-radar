@@ -2168,6 +2168,23 @@ class OperationsRepository:
         result["result"] = json.loads(result.pop("result_json"))
         return result
 
+    def latest_worker_cycle_summary(self) -> dict[str, Any] | None:
+        """Return the latest cycle clock without loading its potentially large report.
+
+        The public overview needs only cycle state and timestamps.  Keeping the
+        full collector report out of the published snapshot prevents one large
+        API-source payload from being copied and hashed on every dashboard
+        refresh.  Authenticated operator views may still call
+        :meth:`latest_worker_cycle` when they explicitly need diagnostics.
+        """
+
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                """SELECT cycle_id,started_at,finished_at,status
+                   FROM worker_cycles ORDER BY started_at DESC LIMIT 1"""
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def latest_successful_worker_cycle(self) -> dict[str, Any] | None:
         """Return the newest completed SUCCESS cycle, ignoring newer failures/runs."""
         with closing(self.connect()) as connection:
@@ -2181,6 +2198,18 @@ class OperationsRepository:
         result = dict(row)
         result["result"] = json.loads(result.pop("result_json"))
         return result
+
+    def latest_successful_worker_cycle_summary(self) -> dict[str, Any] | None:
+        """Return the latest successful cycle clock without its report body."""
+
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                """SELECT cycle_id,started_at,finished_at,status
+                   FROM worker_cycles
+                   WHERE status='SUCCESS' AND finished_at IS NOT NULL
+                   ORDER BY finished_at DESC,started_at DESC LIMIT 1"""
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     def worker_window(
         self,

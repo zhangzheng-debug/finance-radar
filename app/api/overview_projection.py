@@ -38,8 +38,14 @@ def build_overview_payload(
         "latest_verified_backup": operations.latest_verified_backup(),
         "latest_backup_attempt": operations.latest_backup(),
         "demo_mode": operations.demo_mode(settings.demo_mode),
-        "latest_worker_cycle": operations.latest_worker_cycle(),
-        "latest_successful_worker_cycle": operations.latest_successful_worker_cycle(),
+        # Worker result_json may contain multi-megabyte source reports.  The
+        # public overview only needs status and clocks; authenticated operator
+        # diagnostics load the full report on demand instead of publishing it
+        # into every immutable dashboard generation.
+        "latest_worker_cycle": operations.latest_worker_cycle_summary(),
+        "latest_successful_worker_cycle": (
+            operations.latest_successful_worker_cycle_summary()
+        ),
     }
 
 

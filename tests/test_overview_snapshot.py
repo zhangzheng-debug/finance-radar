@@ -8,7 +8,9 @@ from app.api.main import create_app
 from app.api.overview_projection import publish_overview_snapshot
 from app.api.snapshot import PrecomputedSnapshot, PublishedSnapshot
 from app.config import Settings
+from app.storage import OperationsRepository
 from event_ledger import open_ledger
+from scripts.build_overview_snapshot import wait_for_worker_idle
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -167,6 +169,55 @@ def test_production_overview_reads_only_the_published_file(tmp_path: Path) -> No
     status = response.json()["data"]["overview_snapshot"]
     assert status["producer"] == "external_atomic_file"
     assert status["generation"] == 1
+
+
+def test_published_overview_omits_large_worker_report(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    operations = OperationsRepository(settings.operations_db)
+    cycle_id = operations.start_worker_cycle()
+    operations.finish_worker_cycle(
+        cycle_id,
+        "SUCCESS",
+        {"source_report": "x" * 2_000_000},
+    )
+    snapshot_path = tmp_path / "overview_snapshot_v1.json"
+
+    envelope = publish_overview_snapshot(settings, snapshot_path)
+
+    latest_cycle = envelope["payload"]["latest_worker_cycle"]
+    assert latest_cycle == {
+        "cycle_id": cycle_id,
+        "started_at": latest_cycle["started_at"],
+        "finished_at": latest_cycle["finished_at"],
+        "status": "SUCCESS",
+    }
+    assert "result" not in latest_cycle
+    assert snapshot_path.stat().st_size < 100_000
+
+
+def test_snapshot_worker_gate_waits_only_for_current_running_cycle(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    operations = OperationsRepository(settings.operations_db)
+    cycle_id = operations.start_worker_cycle()
+
+    blocked = wait_for_worker_idle(
+        settings,
+        timeout_seconds=0,
+        poll_seconds=0.25,
+    )
+    assert blocked["status"] == "TIMEOUT_PROCEEDING"
+    assert blocked["cycle_id"] == cycle_id
+
+    operations.finish_worker_cycle(cycle_id, "SUCCESS", {})
+    idle = wait_for_worker_idle(
+        settings,
+        timeout_seconds=0,
+        poll_seconds=0.25,
+    )
+    assert idle["status"] == "IDLE"
+    assert idle["cycle_id"] == cycle_id
 
 
 def test_home_allows_twenty_seconds_for_the_first_overview_read() -> None:

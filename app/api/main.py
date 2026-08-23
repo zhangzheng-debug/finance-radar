@@ -1237,7 +1237,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         latest_worker = snapshot_data["latest_worker_cycle"]
         latest_successful_worker = snapshot_data["latest_successful_worker_cycle"]
         data["latest_worker_cycle"] = (
-            latest_worker if internal_reader else public_worker_cycle(latest_worker)
+            operations.latest_worker_cycle()
+            if internal_reader
+            else public_worker_cycle(latest_worker)
         )
         data["latest_backup"] = public_backup_status(latest_backup)
         data["latest_backup_attempt"] = public_backup_status(

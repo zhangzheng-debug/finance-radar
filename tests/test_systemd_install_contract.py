@@ -97,6 +97,8 @@ def test_overview_is_published_by_a_bounded_external_process() -> None:
 
     assert "Type=oneshot" in unit
     assert "scripts/build_overview_snapshot.py" in unit
+    assert "--wait-for-worker-idle-seconds 600" in unit
+    assert "--worker-idle-poll-seconds 5" in unit
     assert "Slice=finance-radar.slice" in unit
     assert "MemoryMax=360M" in unit
     assert "TimeoutStartSec=15min" in unit
