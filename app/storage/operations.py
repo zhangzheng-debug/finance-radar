@@ -60,13 +60,23 @@ class OperationsRepository:
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=10)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=5000")
         return connection
 
     def initialize(self) -> None:
         with closing(self.connect()) as connection:
+            # WAL is a database-level setting, not a per-request setting.  Reissuing
+            # ``PRAGMA journal_mode=WAL`` on every short-lived read connection can
+            # wait behind an active writer and serially turn a handful of cheap
+            # overview queries into a multi-second request.  Establish it once
+            # while initializing a repository, and let normal connections remain
+            # read-only until their caller explicitly writes.
+            current_journal_mode = str(
+                connection.execute("PRAGMA journal_mode").fetchone()[0]
+            ).lower()
+            if current_journal_mode != "wal":
+                connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS operations_schema(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);

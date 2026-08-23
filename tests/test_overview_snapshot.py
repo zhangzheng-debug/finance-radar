@@ -47,6 +47,26 @@ def test_overview_requests_only_read_the_startup_snapshot(tmp_path: Path) -> Non
     assert first.json()["data"]["overview_snapshot"]["generation"] == 1
 
 
+def test_overview_request_never_reopens_operational_state(tmp_path: Path) -> None:
+    application = create_app(_settings(tmp_path))
+
+    def unexpected_read(*_args, **_kwargs):
+        raise AssertionError("request path must only read the in-memory overview snapshot")
+
+    with TestClient(application) as client:
+        operations = application.state.operations
+        operations.latest_verified_backup = unexpected_read
+        operations.latest_backup = unexpected_read
+        operations.demo_mode = unexpected_read
+        operations.latest_worker_cycle = unexpected_read
+        operations.latest_successful_worker_cycle = unexpected_read
+
+        response = client.get("/api/v1/overview")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["overview_snapshot"]["status"] == "READY"
+
+
 def test_refresh_failure_keeps_last_good_snapshot() -> None:
     state = {"fail": False}
 

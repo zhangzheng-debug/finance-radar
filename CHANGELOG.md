@@ -5,6 +5,16 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.22.13
+
+- Make `/api/v1/overview` a complete in-memory projection: backup state, demo
+  mode and worker-cycle metadata now refresh with the ledger snapshot instead
+  of reopening the operations database on every public request.
+- Configure SQLite WAL when an operations repository is initialized rather
+  than on every connection. This removes compounded lock waits while the live
+  collection worker is writing without weakening snapshot freshness or the
+  reader-only product boundary.
+
 ## 2026.08.22.12
 
 - Align deployment and prepared-restore API health gates with the measured

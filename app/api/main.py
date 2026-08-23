@@ -311,8 +311,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         evidence_model_provider,
     )
     adjudication = AdjudicationService(ledger, operations)
+
+    def build_overview_snapshot() -> dict[str, Any]:
+        """Read every mutable input away from the public request path.
+
+        The ledger projection was the dominant cost originally, but operational
+        status also lives in SQLite and can briefly contend with the collection
+        worker.  Keeping even one of those reads in ``GET /overview`` defeats the
+        fail-open snapshot design: a perfectly healthy writer can make the page
+        hit its timeout.  The request now only copies this in-memory generation
+        and applies public redaction.
+        """
+
+        return {
+            "overview_base": ledger.overview(run_integrity_check=False),
+            "latest_verified_backup": operations.latest_verified_backup(),
+            "latest_backup_attempt": operations.latest_backup(),
+            "demo_mode": operations.demo_mode(settings.demo_mode),
+            "latest_worker_cycle": operations.latest_worker_cycle(),
+            "latest_successful_worker_cycle": operations.latest_successful_worker_cycle(),
+        }
+
     overview_snapshot = PrecomputedSnapshot(
-        lambda: ledger.overview(run_integrity_check=False),
+        build_overview_snapshot,
         refresh_interval_seconds=OVERVIEW_SNAPSHOT_REFRESH_SECONDS,
         name="overview",
     )
@@ -1192,9 +1213,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         internal_reader: bool = Depends(internal_reader_access),
     ):
-        latest_backup = operations.latest_verified_backup()
         try:
-            overview_base, overview_snapshot_status = overview_snapshot.read()
+            snapshot_data, overview_snapshot_status = overview_snapshot.read()
         except SnapshotUnavailable as exc:
             raise HTTPException(
                 503,
@@ -1203,6 +1223,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "message": "overview snapshot has not completed successfully yet",
                 },
             ) from exc
+        overview_base = snapshot_data["overview_base"]
+        latest_backup = snapshot_data["latest_verified_backup"]
         data = health_from_latest_verified_backup(
             overview_base,
             latest_backup,
@@ -1214,14 +1236,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             data["source_health"] = [
                 public_source_health(item) for item in data.get("source_health", [])
             ]
-        data["demo_mode"] = operations.demo_mode(settings.demo_mode)
-        latest_worker = operations.latest_worker_cycle()
-        latest_successful_worker = operations.latest_successful_worker_cycle()
+        data["demo_mode"] = snapshot_data["demo_mode"]
+        latest_worker = snapshot_data["latest_worker_cycle"]
+        latest_successful_worker = snapshot_data["latest_successful_worker_cycle"]
         data["latest_worker_cycle"] = (
             latest_worker if internal_reader else public_worker_cycle(latest_worker)
         )
         data["latest_backup"] = public_backup_status(latest_backup)
-        data["latest_backup_attempt"] = public_backup_status(operations.latest_backup())
+        data["latest_backup_attempt"] = public_backup_status(
+            snapshot_data["latest_backup_attempt"]
+        )
         data["overview_snapshot"] = overview_snapshot_status
         # Keep the legacy alias and the explicit update clock exactly aligned.
         # Computing elapsed time twice makes an otherwise identical API fact
