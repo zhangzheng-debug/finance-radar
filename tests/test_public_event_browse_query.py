@@ -88,6 +88,104 @@ def test_unfiltered_public_browse_scopes_quality_work_to_the_page(tmp_path: Path
     assert repository.progress_callbacks < 400
 
 
+def test_deep_public_page_uses_stable_browse_indexes(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "deep.sqlite3"
+    _large_unreviewed_ledger(ledger_path, event_count=14_500)
+
+    repository = _CountingRepository(ledger_path)
+    deep_page = repository.list_events(
+        sort="latest",
+        limit=48,
+        offset=14_400,
+        source_excerpt_chars=512,
+    )
+    strict_page = LedgerRepository(ledger_path).list_events(
+        sort="latest",
+        reader_ready=False,
+        limit=48,
+        offset=14_400,
+    )
+
+    assert deep_page["total"] == 14_500
+    assert len(deep_page["items"]) == 48
+    assert deep_page["items"] == strict_page["items"]
+    # This upper bound catches a regression to sorting full canonical rows in a
+    # temporary B-tree before discarding the first 300 public pages.
+    assert repository.progress_callbacks < 150
+
+    with repository.connect() as connection:
+        indexes = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA index_list(canonical_events)")
+        }
+    assert {
+        "idx_events_public_latest",
+        "idx_events_public_event_date",
+        "idx_events_public_subject",
+    } <= indexes
+
+
+def test_public_excerpt_bound_does_not_change_internal_source_semantics(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "source-excerpt.sqlite3"
+    _large_unreviewed_ledger(ledger_path, event_count=1)
+    timestamp = "2026-08-21T12:00:00+00:00"
+    long_summary = "source supplied text " * 800
+    with open_ledger(ledger_path) as connection:
+        observations = (
+            ("active", "active", "2026-08-21T10:00:00+00:00", "Active", long_summary),
+            ("noise", "noise", "2026-08-21T12:00:00+00:00", "Filtered", "noise"),
+            ("deleted", "deleted", "2026-08-21T11:00:00+00:00", "Deleted", long_summary),
+        )
+        for observation_id, external_id, received_at, title, summary in observations:
+            connection.execute(
+                """INSERT INTO raw_observations VALUES (
+                   ?,'src',?,?,?, ?,?,'https://example.test/source',?,'{}','captured'
+                )""",
+                (
+                    observation_id,
+                    external_id,
+                    timestamp,
+                    received_at,
+                    title,
+                    summary,
+                    observation_id[0] * 64,
+                ),
+            )
+            connection.execute(
+                """INSERT INTO source_revisions VALUES (
+                   ?,?,'src',?,1,?,?,?, ?,?,'{}'
+                )""",
+                (
+                    f"revision-{observation_id}",
+                    observation_id,
+                    external_id,
+                    "delete" if observation_id == "deleted" else "new",
+                    received_at,
+                    observation_id[0] * 64,
+                    title,
+                    summary,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO event_observations VALUES ('browse-00000',?,?,?)",
+                (
+                    observation_id,
+                    "filtered_aggregated_noise" if observation_id == "noise" else "primary",
+                    received_at,
+                ),
+            )
+        connection.commit()
+
+    repository = LedgerRepository(ledger_path)
+    bounded = repository.list_events(limit=1, source_excerpt_chars=512)["items"][0]
+    unbounded = repository.list_events(limit=1)["items"][0]
+
+    assert bounded["captured_source_count"] == 2
+    assert bounded["source_title"] == "Deleted"
+    assert len(bounded["source_summary"]) == 512
+    assert unbounded["source_summary"] == long_summary
+
+
 def test_explicit_reader_ready_filter_still_uses_full_gate(tmp_path: Path) -> None:
     ledger_path = tmp_path / "strict.sqlite3"
     _large_unreviewed_ledger(ledger_path, event_count=25)
@@ -95,6 +193,8 @@ def test_explicit_reader_ready_filter_still_uses_full_gate(tmp_path: Path) -> No
     repository = LedgerRepository(ledger_path)
     assert repository.list_events(reader_ready=True, limit=50)["total"] == 0
     assert repository.list_events(reader_ready=False, limit=50)["total"] == 25
+    assert repository.list_events(public_state="pending_verification", limit=50)["total"] == 25
+    assert repository.list_events(public_state="verified", limit=50)["total"] == 0
 
     empty_page = repository.list_events(limit=10, offset=1000)
     assert empty_page["total"] == 25

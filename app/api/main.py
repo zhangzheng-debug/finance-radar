@@ -1525,6 +1525,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 date_to=date_to.isoformat() if date_to else None,
                 reader_ready=effective_reader_ready,
                 captured_source_required=False,
+                # The public card renders at most 360 characters.  Avoid
+                # pulling multi-megabyte provider summaries from historical
+                # observations only to discard them in ``public_event_item``.
+                # Authenticated readers retain the unbounded repository view.
+                source_excerpt_chars=512 if not internal_reader else None,
                 sort=sort,
                 limit=limit,
                 offset=offset,
