@@ -35,8 +35,11 @@ def build_overview_payload(
     operations = operations or OperationsRepository(settings.operations_db)
     return {
         "overview_base": ledger.overview(run_integrity_check=False),
-        "latest_verified_backup": operations.latest_verified_backup(),
-        "latest_backup_attempt": operations.latest_backup(),
+        # A verified recovery bundle may carry a multi-megabyte per-file
+        # inventory.  Keep that protected operator artifact out of the public
+        # snapshot just as we do for full worker reports.
+        "latest_verified_backup": operations.latest_verified_backup_summary(),
+        "latest_backup_attempt": operations.latest_backup_summary(),
         "demo_mode": operations.demo_mode(settings.demo_mode),
         # Worker result_json may contain multi-megabyte source reports.  The
         # public overview only needs status and clocks; authenticated operator

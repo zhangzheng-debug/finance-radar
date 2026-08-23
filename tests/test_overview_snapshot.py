@@ -195,6 +195,44 @@ def test_published_overview_omits_large_worker_report(tmp_path: Path) -> None:
     assert snapshot_path.stat().st_size < 100_000
 
 
+def test_published_overview_omits_large_backup_component_inventory(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    operations = OperationsRepository(settings.operations_db)
+    backup_path = tmp_path / "recovery" / "manifest.json"
+    backup_path.parent.mkdir()
+    backup_path.write_text("{}", encoding="utf-8")
+    backup_id = operations.create_backup_run(
+        backup_path,
+        source_bytes=2_000_000,
+        manifest_path=backup_path,
+        snapshot_kind="recovery_bundle",
+    )
+    operations.finish_backup_run(
+        backup_id,
+        backup_bytes=1_500_000,
+        quick_check="ok",
+        counts={"events": 10},
+        manifest_path=backup_path,
+        components={
+            "ledger": {"file_inventory": ["x" * 2_000_000]},
+            "operations": {"file_inventory": ["y" * 2_000_000]},
+        },
+        snapshot_kind="recovery_bundle",
+    )
+    snapshot_path = tmp_path / "overview_snapshot_v1.json"
+
+    envelope = publish_overview_snapshot(settings, snapshot_path)
+
+    for key in ("latest_verified_backup", "latest_backup_attempt"):
+        backup = envelope["payload"][key]
+        assert backup["backup_id"] == backup_id
+        assert backup["restored_counts"] == {"events": 10}
+        assert "components" not in backup
+    assert snapshot_path.stat().st_size < 100_000
+
+
 def test_snapshot_worker_gate_waits_only_for_current_running_cycle(
     tmp_path: Path,
 ) -> None:

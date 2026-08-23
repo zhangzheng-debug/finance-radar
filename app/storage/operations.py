@@ -2410,9 +2410,51 @@ class OperationsRepository:
         """Return the latest attempt, including failures, for operator diagnostics."""
         return self._backup_row()
 
+    def _backup_row_summary(
+        self,
+        where: str = "",
+        params: tuple[Any, ...] = (),
+    ) -> dict[str, Any] | None:
+        """Return backup clocks and integrity facts without its file inventory.
+
+        Recovery-bundle ``components_json`` is an operator artifact and can be
+        several megabytes.  A dashboard snapshot only needs the terminal state,
+        verification clock and integrity counters, so it must not deserialize or
+        duplicate that protected inventory on every publication.
+        """
+
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                f"""SELECT backup_id,backup_path,source_bytes,backup_bytes,
+                           quick_check,restored_count_json,status,created_at,
+                           verified_at,error,manifest_path,snapshot_kind
+                    FROM backup_runs {where}
+                    ORDER BY created_at DESC LIMIT 1""",
+                params,
+            ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["restored_counts"] = (
+            json.loads(item.pop("restored_count_json"))
+            if item["restored_count_json"]
+            else None
+        )
+        return item
+
+    def latest_backup_summary(self) -> dict[str, Any] | None:
+        """Return the latest backup attempt without protected component inventory."""
+
+        return self._backup_row_summary()
+
     def latest_verified_backup(self) -> dict[str, Any] | None:
         """Return the latest usable recovery point rather than a later failed attempt."""
         return self._backup_row("WHERE status='VERIFIED'")
+
+    def latest_verified_backup_summary(self) -> dict[str, Any] | None:
+        """Return the latest recovery point without protected component inventory."""
+
+        return self._backup_row_summary("WHERE status='VERIFIED'")
 
     def backup_summary(self) -> dict[str, Any]:
         """Separate historical run records from files retained on this host."""
