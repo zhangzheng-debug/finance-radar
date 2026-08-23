@@ -5,6 +5,8 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.24.1
+
 - Let public-Web-only releases carry their tests, documentation and bounded
   root release notes through the fail-closed `code-only` path while API,
   persistence, collection, deployment, dependency, model and replay trees
