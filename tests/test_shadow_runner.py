@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import tempfile
 from pathlib import Path
 
@@ -57,6 +58,50 @@ class FakeRouter:
         }
 
 
+class FairLedger:
+    def __init__(self, count: int = 8) -> None:
+        self.items = [self._item(index) for index in range(count)]
+
+    @staticmethod
+    def _item(index: int):
+        event_id = f"evt-{index:02d}"
+        return {
+            "detail": {
+                "event": {
+                    "event_id": event_id,
+                    "current_version": 1,
+                    "status": "candidate",
+                    "company_name": f"Company {index}",
+                },
+                "current_version": {"facts": {"source_summary": event_id}},
+                "preferred_source": {"title": event_id, "summary": event_id},
+            },
+            "evidence": [],
+        }
+
+    def shadow_batch(self, *, limit: int, offset: int = 0, order: str = "latest"):
+        ordered = list(reversed(self.items)) if order == "latest" else list(self.items)
+        return ordered[offset : offset + limit]
+
+
+class FairRouter:
+    def predict(self, text: str, evidence_context):
+        return {
+            "label": "ABSTAIN",
+            "confidence": 0.0,
+            "probabilities": {"RISK_REVIEW": 0.0, "NON_TARGET": 0.0},
+            "model_version": "fair-router-v1",
+            "runtime": "structured_evidence_gate",
+            "decision_source": "DETERMINISTIC_EVIDENCE_GATE",
+            "semantic_model_invoked": False,
+            "confidence_applicable": False,
+            "shadow": True,
+            "no_trading": True,
+            "input_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "latency_ms": 0.1,
+        }
+
+
 def test_shadow_batch_persists_once_per_event_version_and_input() -> None:
     with tempfile.TemporaryDirectory() as directory:
         operations = OperationsRepository(Path(directory) / "operations.sqlite3")
@@ -70,3 +115,30 @@ def test_shadow_batch_persists_once_per_event_version_and_input() -> None:
     assert len(rows) == 1
     assert rows[0]["output"]["event_version"] == 2
     assert rows[0]["output"]["execution_status"] == "MODEL_EXECUTED"
+
+
+def test_shadow_batch_round_robin_lane_eventually_reaches_old_history() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        operations = OperationsRepository(Path(directory) / "operations.sqlite3")
+        ledger = FairLedger(count=8)
+        results = [
+            run_shadow_batch(
+                ledger,
+                operations,
+                FairRouter(),
+                scan_limit=4,
+                run_limit=2,
+            )
+            for _ in range(8)
+        ]
+        rows = operations.model_runs(limit=200)
+        cursor = operations.get_state("shadow_router_fair_cursor_v1")
+
+    assert {row["event_id"] for row in rows} == {
+        f"evt-{index:02d}" for index in range(8)
+    }
+    assert results[0]["selection"]["recent_loaded"] == 2
+    assert results[0]["selection"]["fair_loaded"] == 2
+    assert results[0]["selection"]["fair_examined"] == 1
+    assert results[0]["input_loader"] == "fair_recent_bulk_v3"
+    assert isinstance(cursor["next_offset"], int)

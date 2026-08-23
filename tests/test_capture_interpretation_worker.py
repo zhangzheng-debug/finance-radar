@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
+from types import SimpleNamespace
 
 import scripts.run_capture_interpretation_worker as worker
 from app.services.capture_interpretation import (
@@ -104,3 +106,95 @@ def test_worker_overlaps_only_a_bounded_number_of_independent_receipts(
 
     assert outcomes == ["COMPLETED"] * 6
     assert 2 <= peak <= 3
+
+
+def test_worker_advances_a_bounded_inventory_and_then_uses_generation_shortcut(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    items = [
+        {
+            "event_id": f"event-{index}",
+            "observation_id": f"obs-{index}",
+            "capture_receipt_sha256": str(index) * 64,
+            "bucket": "P2_CAPTURE_ONLY",
+        }
+        for index in range(1, 4)
+    ]
+
+    class FakeLedger:
+        calls: list[tuple[int, int]] = []
+
+        def capture_source_generation(self):
+            return {"observation_count": 3, "revision_count": 0}
+
+        def capture_interpretation_candidate_count(self):
+            return len(items)
+
+        def capture_interpretation_candidates(self, *, limit: int, offset: int):
+            self.calls.append((limit, offset))
+            return items[offset : offset + limit]
+
+    class FakeOperations:
+        def __init__(self) -> None:
+            self.state = {}
+            self.terminal: set[tuple[str, str]] = set()
+
+        def get_state(self, key, default=None):
+            return self.state.get(key, default)
+
+        def set_state(self, key, value):
+            self.state[key] = value
+
+        def capture_interpretation_queue_health(self, *args, **kwargs):
+            return {"by_status": {"COMPLETED": len(self.terminal)}, "daily": {}}
+
+        def capture_interpretation_terminal_keys(self, **kwargs):
+            return {key: "COMPLETED" for key in self.terminal}
+
+    ledger = FakeLedger()
+    operations = FakeOperations()
+
+    monkeypatch.setattr(worker, "load_local_env", lambda path: None)
+    monkeypatch.setattr(
+        worker.Settings,
+        "from_env",
+        classmethod(
+            lambda cls: SimpleNamespace(
+                ledger_db=tmp_path / "ledger.sqlite3",
+                operations_db=tmp_path / "operations.sqlite3",
+            )
+        ),
+    )
+    monkeypatch.setattr(worker, "LedgerRepository", lambda path: ledger)
+    monkeypatch.setattr(worker, "OperationsRepository", lambda path: operations)
+
+    def complete(selected, env_file, *, workers):
+        operations.terminal.update(
+            (item["event_id"], item["capture_receipt_sha256"])
+            for item in selected
+        )
+        return ["COMPLETED"] * len(selected)
+
+    monkeypatch.setattr(worker, "process_pending_items", complete)
+    args = SimpleNamespace(
+        env_file=Path(tmp_path / "capture.env"),
+        limit=2,
+        scan_limit=2,
+        workers=2,
+    )
+
+    assert worker.run(args) == 0
+    first_state = operations.state[worker.INVENTORY_STATE_KEY]
+    assert first_state["next_offset"] == 2
+    assert first_state["backlog_complete"] is False
+
+    assert worker.run(args) == 0
+    second_state = operations.state[worker.INVENTORY_STATE_KEY]
+    assert second_state["next_offset"] == 0
+    assert second_state["backlog_complete"] is True
+    calls_before_idle = list(ledger.calls)
+
+    assert worker.run(args) == 0
+    assert ledger.calls == calls_before_idle
+    assert len(operations.terminal) == 3

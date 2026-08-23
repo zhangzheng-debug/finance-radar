@@ -132,6 +132,23 @@ def test_code_only_mode_skips_expensive_recovery_and_dependency_work_fail_closed
     assert "activation record target already exists or is unsafe" in source
     assert 'mv -f -- "$ACTIVATION_PENDING" "$RELEASE_RECORDS/ACTIVATION.txt"' in source
     assert "committed activation record failed validation" in source
+    assert 'write_public_release_marker ACTIVATING' in source
+    assert 'assert_public_release_marker ACTIVATING' in source
+    assert 'write_public_release_marker ACCEPTED' in source
+    assert 'assert_public_release_marker ACCEPTED' in source
+    activating_marker = source.index('write_public_release_marker ACTIVATING')
+    activation_receipt = source.index('mv -f -- "$ACTIVATION_PENDING"', activating_marker)
+    accepted_marker = source.index('write_public_release_marker ACCEPTED', activation_receipt)
+    assert activating_marker < activation_receipt < accepted_marker
+    assert source.index("require_postcutover_verified_backup ||", activating_marker) < accepted_marker
+    assert source.index("restore_capture_interpretation_runtime", activation_receipt) < accepted_marker
+    assert '"activation_state": activation_state' in source
+    assert '"candidate_release_id": candidate_release_id' in source
+    assert '"release_id": accepted_release_id or None' in source
+    assert 'activation_state=ACCEPTED\\nactivation=PASS' in source
+    assert 'ACTIVATION_RECORD_COMMITTED=1' in source
+    rollback = source.split("rollback() {", 1)[1].split("abort_cutover() {", 1)[0]
+    assert 'rm -f -- "$RELEASE_RECORDS/ACTIVATION.txt"' in rollback
     assert source.index('mv -f -- "$ACTIVATION_PENDING"') < source.index("trap - ERR", source.index('mv -f -- "$ACTIVATION_PENDING"'))
     assert "activation_warning=predeploy_hold_cleanup_failed" in source
     assert 'operations_db="$(operations_database_path)"' in source
@@ -223,7 +240,7 @@ def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() ->
     installer = INSTALLER.read_text(encoding="utf-8")
 
     assert (
-        "scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 100000 --workers 3"
+        "scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 500 --workers 3"
         in source
     )
     assert "--env-file /dev/null" not in source

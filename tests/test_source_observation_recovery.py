@@ -215,6 +215,50 @@ def test_captured_sources_reads_only_the_latest_event_scoped_revision() -> None:
         assert capture["semantic_content_sha256"] == "e" * 64
 
 
+def test_incremental_interpretation_inventory_matches_recovery_buckets_and_receipts() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        ledger_path = _seed(Path(directory))
+        connection = open_ledger(ledger_path)
+        # A summary remains a usable retained capture when the title is empty.
+        connection.execute(
+            "UPDATE raw_observations SET title='' WHERE observation_id='obs-raw'"
+        )
+        connection.commit()
+        connection.close()
+
+        repository = LedgerRepository(ledger_path)
+        plan = build_source_observation_recovery_plan(ledger_path)
+        expected = {
+            (
+                str(record["event"]["event_id"]),
+                str(capture["observation_id"]),
+            ): str(capture["capture_receipt_sha256"])
+            for record in plan["records"]
+            if record.get("event")
+            and record["bucket"] in {"NO_URL_RAW_ONLY", "P2_CAPTURE_ONLY"}
+            for capture in record["captures"]
+            if capture["observation_status"] != "deleted"
+            and str(capture.get("title") or capture.get("summary") or "").strip()
+        }
+
+        candidates = repository.capture_interpretation_candidates(limit=10)
+
+        assert repository.capture_interpretation_candidate_count() == 2
+        assert [(item["event_id"], item["bucket"]) for item in candidates] == [
+            ("e-raw", "NO_URL_RAW_ONLY"),
+            ("e-p2", "P2_CAPTURE_ONLY"),
+        ]
+        assert {
+            (item["event_id"], item["observation_id"]): item[
+                "capture_receipt_sha256"
+            ]
+            for item in candidates
+        } == expected
+        assert repository.capture_interpretation_candidates(limit=1, offset=1) == [
+            candidates[1]
+        ]
+
+
 def test_cli_builds_manifest_records_and_hashes() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)

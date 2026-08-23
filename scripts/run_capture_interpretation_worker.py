@@ -29,9 +29,6 @@ from app.services.capture_interpretation import (  # noqa: E402
 from app.services.deepseek_capture_interpretation import (  # noqa: E402
     DEEPSEEK_CHEAP_TEXT_MODEL,
 )
-from app.services.source_observation_recovery import (  # noqa: E402
-    build_source_observation_recovery_plan,
-)
 from app.storage import LedgerRepository, OperationsRepository  # noqa: E402
 from scripts.run_capture_interpretation_deepseek import (  # noqa: E402
     RUN_CACHED,
@@ -42,7 +39,7 @@ from scripts.run_capture_interpretation_deepseek import (  # noqa: E402
 
 
 PRIORITY = {"NO_URL_RAW_ONLY": 0, "P2_CAPTURE_ONLY": 1}
-INVENTORY_STATE_KEY = "capture_interpretation_inventory_v1"
+INVENTORY_STATE_KEY = "capture_interpretation_inventory_v2"
 
 
 def is_current_terminal(run: dict[str, Any] | None) -> bool:
@@ -195,8 +192,64 @@ def run(args: argparse.Namespace) -> int:
         )
         return 0
 
-    plan = build_source_observation_recovery_plan(Path(settings.ledger_db))
-    inventory = candidates(plan)
+    candidate_count = ledger.capture_interpretation_candidate_count()
+    generation_changed = not (
+        isinstance(prior_inventory, dict)
+        and prior_inventory.get("source_generation") == generation
+    )
+    try:
+        cursor_offset = (
+            0
+            if generation_changed
+            else max(0, int(prior_inventory.get("next_offset") or 0))
+        )
+    except (AttributeError, TypeError, ValueError):
+        cursor_offset = 0
+    window_limit = max(args.limit, min(args.scan_limit, 1_000))
+    inventory = ledger.capture_interpretation_candidates(
+        limit=window_limit,
+        offset=cursor_offset,
+    )
+    if not inventory and cursor_offset:
+        # The stable sweep reached the end. A generation change resets the
+        # cursor before the next query, so no newly linked/revised capture can
+        # be skipped by this completion shortcut.
+        operations.set_state(
+            INVENTORY_STATE_KEY,
+            {
+                "source_generation": generation,
+                "candidate_count": candidate_count,
+                "remaining": 0,
+                "remaining_exact": True,
+                "backlog_complete": True,
+                "next_offset": 0,
+                "contract_version": CAPTURE_INTERPRETATION_CONTRACT,
+                "prompt_version": CAPTURE_INTERPRETATION_PROMPT_VERSION,
+                "prompt_sha256": CAPTURE_INTERPRETATION_PROMPT_SHA256,
+                "provider": "deepseek",
+                "model_snapshot": DEEPSEEK_CHEAP_TEXT_MODEL,
+                "only_new_or_changed": True,
+                "inventory_loader": "bounded_keyset_v2",
+            },
+        )
+        _safe_json(
+            status="IDLE",
+            reason="BACKLOG_SWEEP_COMPLETE",
+            examined=0,
+            candidates=candidate_count,
+            completed=0,
+            remaining=0,
+            remaining_exact=True,
+            backlog_complete=True,
+            source_generation=generation,
+            queue=health.get("by_status") or {},
+            daily=health.get("daily") or {},
+            only_new_or_changed=True,
+            canonical_state_unchanged=True,
+            inventory_loader="bounded_keyset_v2",
+            no_trading=True,
+        )
+        return 0
     terminal_before = operations.capture_interpretation_terminal_keys(
         provider="deepseek",
         contract_version=CAPTURE_INTERPRETATION_CONTRACT,
@@ -215,7 +268,7 @@ def run(args: argparse.Namespace) -> int:
     failed = 0
     examined = 0
 
-    work_items = pending[: min(args.scan_limit, args.limit)]
+    work_items = pending[: args.limit]
     outcomes = process_pending_items(
         work_items,
         args.env_file,
@@ -239,23 +292,37 @@ def run(args: argparse.Namespace) -> int:
         prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
         model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
     )
-    remaining = sum(
-        (item["event_id"], item["capture_receipt_sha256"]) not in terminal_after
-        for item in inventory
+    advance = 0
+    for item in inventory:
+        key = (item["event_id"], item["capture_receipt_sha256"])
+        if key not in terminal_after:
+            break
+        advance += 1
+    next_offset = cursor_offset + advance
+    backlog_complete = len(inventory) < window_limit and advance == len(inventory)
+    if backlog_complete:
+        next_offset = 0
+    remaining = (
+        0
+        if backlog_complete
+        else max(1, candidate_count - (cursor_offset + advance))
     )
     operations.set_state(
         INVENTORY_STATE_KEY,
         {
             "source_generation": generation,
-            "candidate_count": len(inventory),
+            "candidate_count": candidate_count,
             "remaining": remaining,
-            "backlog_complete": remaining == 0,
+            "remaining_exact": backlog_complete,
+            "backlog_complete": backlog_complete,
+            "next_offset": next_offset,
             "contract_version": CAPTURE_INTERPRETATION_CONTRACT,
             "prompt_version": CAPTURE_INTERPRETATION_PROMPT_VERSION,
             "prompt_sha256": CAPTURE_INTERPRETATION_PROMPT_SHA256,
             "provider": "deepseek",
             "model_snapshot": DEEPSEEK_CHEAP_TEXT_MODEL,
             "only_new_or_changed": True,
+            "inventory_loader": "bounded_keyset_v2",
         },
     )
     health = operations.capture_interpretation_queue_health(
@@ -268,11 +335,15 @@ def run(args: argparse.Namespace) -> int:
     _safe_json(
         status="COMPLETED" if failed == 0 else "PARTIAL",
         examined=examined,
-        candidates=len(inventory),
+        candidates=candidate_count,
+        window_candidates=len(inventory),
+        window_offset=cursor_offset,
+        next_offset=next_offset,
         completed=completed,
         skipped_terminal=skipped_terminal,
         remaining=remaining,
-        backlog_complete=remaining == 0,
+        remaining_exact=backlog_complete,
+        backlog_complete=backlog_complete,
         deferred=deferred,
         failed=failed,
         queue=health.get("by_status") or {},
@@ -280,6 +351,7 @@ def run(args: argparse.Namespace) -> int:
         source_generation=generation,
         only_new_or_changed=True,
         canonical_state_unchanged=True,
+        inventory_loader="bounded_keyset_v2",
         no_trading=True,
     )
     return 0 if failed == 0 else 1
@@ -297,7 +369,7 @@ def parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = parser().parse_args()
     args.limit = max(1, min(int(args.limit), 20))
-    args.scan_limit = max(args.limit, min(int(args.scan_limit), 250_000))
+    args.scan_limit = max(args.limit, min(int(args.scan_limit), 1_000))
     args.workers = max(1, min(int(args.workers), 4, args.limit))
     try:
         return run(args)
