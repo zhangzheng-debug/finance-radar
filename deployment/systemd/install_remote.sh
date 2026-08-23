@@ -859,6 +859,8 @@ LEGACY_MANAGED_PROPERTY_DROPINS=(
 )
 ROLLBACK_SERVICE_UNITS=(
     finance-radar-api
+    finance-radar-overview-snapshot.service
+    finance-radar-overview-snapshot.timer
     finance-radar-web
     finance-radar-worker
     finance-radar-backup.service
@@ -872,6 +874,8 @@ ROLLBACK_PATHS=(
     /etc/finance-radar-public.env
     /etc/finance-radar-reviewer-principals.json
     /etc/systemd/system/finance-radar-api.service
+    /etc/systemd/system/finance-radar-overview-snapshot.service
+    /etc/systemd/system/finance-radar-overview-snapshot.timer
     /etc/systemd/system/finance-radar-web.service
     /etc/systemd/system/finance-radar-admin.service
     /etc/systemd/system/finance-radar-reviewer.service
@@ -1909,6 +1913,10 @@ printf '%s\n' \
     > /etc/finance-radar-public.env
 
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-api.service" /etc/systemd/system/
+install -m 0644 "$RELEASE/deployment/systemd/finance-radar-overview-snapshot.service" \
+    /etc/systemd/system/
+install -m 0644 "$RELEASE/deployment/systemd/finance-radar-overview-snapshot.timer" \
+    /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-web.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-admin.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-reviewer.service" /etc/systemd/system/
@@ -1966,9 +1974,17 @@ systemctl stop finance-radar-evidence-llm.service 2>/dev/null || true
 systemctl disable finance-radar-evidence-llm.service
 CUTOVER_STARTED=1
 ln -sfn "$RELEASE" "$BASE/current"
-systemctl enable finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer
+# Publish the candidate's complete overview while the previous API/Web are
+# still serving.  Only after the atomic data file exists do we restart the
+# request process, so a multi-minute ledger aggregation cannot become public
+# downtime.
+systemctl start finance-radar-overview-snapshot.service || \
+    abort_cutover 'external overview snapshot publication failed before API restart' 6
+systemctl enable finance-radar-api finance-radar-overview-snapshot.service \
+    finance-radar-overview-snapshot.timer finance-radar-web finance-radar-worker \
+    finance-radar-backup.timer
 systemctl restart finance-radar-api finance-radar-web
-systemctl start finance-radar-backup.timer
+systemctl start finance-radar-overview-snapshot.timer finance-radar-backup.timer
 
 wait_for_url() {
     local url="$1"
@@ -2100,9 +2116,14 @@ assert_edge_status() {
 
 wait_for_url http://127.0.0.1:18000/api/v1/live || \
     abort_cutover 'API health check failed after activation' 6
+wait_for_url http://127.0.0.1:18000/api/v1/overview || \
+    abort_cutover 'published overview is unavailable after activation' 6
 wait_for_url http://127.0.0.1:18501/radar/_stcore/health || \
     abort_cutover 'public Web loopback health check failed after activation' 6
 systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-backup.timer
+systemctl is-active --quiet finance-radar-overview-snapshot.timer
+test "$(systemctl show finance-radar-overview-snapshot.service -p Result --value)" = success || \
+    abort_cutover 'overview snapshot service did not finish successfully' 6
 assert_effective_slice_budget || \
     abort_cutover 'aggregate Finance Radar memory budget is not effective after activation' 6
 assert_active_service_cgroup finance-radar-api || \
@@ -2156,6 +2177,8 @@ systemctl start finance-radar-worker || \
     abort_cutover 'worker failed to start after the protected postcutover backup' 6
 systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer || \
     abort_cutover 'required services are not active after protected postcutover backup' 6
+systemctl is-active --quiet finance-radar-overview-snapshot.timer || \
+    abort_cutover 'overview snapshot timer is not active after protected postcutover backup' 6
 assert_active_service_cgroup finance-radar-worker || \
     abort_cutover 'worker cgroup is not protected by the aggregate budget' 6
 if systemctl is-active --quiet finance-radar-evidence-llm.service || \

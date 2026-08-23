@@ -89,7 +89,7 @@ CI 还会检查编译、测试、秘密模式、交易写路由和部署 Shell �
 
 ## 部署
 
-主部署形态是 AWS 上的 systemd + Nginx：API、Public Web、三种按需内部 UI、Worker、备份和可选 Evidence LLM 分离运行，并由 systemd slice 约束总内存与任务数。Docker Compose + Caddy 仅是可移植备选形态。
+主部署形态是 AWS 上的 systemd + Nginx：API、Public Web、外置总览快照发布器、三种按需内部 UI、Worker、备份和可选 Evidence LLM 分离运行，并由 systemd slice 约束总内存与任务数。`/overview` 使用五分钟原子数据快照，聚合过程不占用 API 解释器。Docker Compose + Caddy 仅是可移植备选形态。
 
 公网入口不写死在仓库中；部署时必须显式传入 `https://YOUR_DOMAIN[:PORT]/radar/`，当前实际域名与运行状态以部署后现场验收记录为准。
 

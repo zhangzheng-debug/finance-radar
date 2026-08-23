@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh the Finance Radar overview data snapshot
+
+[Timer]
+OnUnitInactiveSec=5min
+RandomizedDelaySec=20s
+AccuracySec=15s
+Persistent=true
+Unit=finance-radar-overview-snapshot.service
+
+[Install]
+WantedBy=timers.target

@@ -82,6 +82,10 @@ class Settings:
     artifact_dir: Path = ROOT / "artifacts"
     evidence_object_dir: Path = ROOT / "data" / "evidence_objects"
     replay_dir: Path = ROOT / "replay" / "cases"
+    # Production publishes the expensive overview projection as an atomic data
+    # artifact from a separate systemd process.  Local development and unit
+    # tests leave this unset and retain the lightweight in-process fallback.
+    overview_snapshot_path: Path | None = None
     demo_mode: str = "RECENT_CAPTURE"
     admin_token: str | None = None
     reviewer_token: str | None = None
@@ -118,6 +122,11 @@ class Settings:
                 os.getenv("FINANCE_RADAR_EVIDENCE_OBJECT_DIR", cls.evidence_object_dir)
             ).resolve(),
             replay_dir=Path(os.getenv("FINANCE_RADAR_REPLAY_DIR", cls.replay_dir)).resolve(),
+            overview_snapshot_path=(
+                Path(os.environ["FINANCE_RADAR_OVERVIEW_SNAPSHOT_PATH"]).resolve()
+                if os.getenv("FINANCE_RADAR_OVERVIEW_SNAPSHOT_PATH")
+                else None
+            ),
             demo_mode=os.getenv("FINANCE_RADAR_DEMO_MODE", "RECENT_CAPTURE").upper(),
             admin_token=os.getenv("FINANCE_RADAR_ADMIN_TOKEN") or None,
             reviewer_token=os.getenv("FINANCE_RADAR_REVIEWER_TOKEN") or None,

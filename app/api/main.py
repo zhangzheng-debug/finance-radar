@@ -22,7 +22,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import __version__
-from app.api.snapshot import PrecomputedSnapshot, SnapshotUnavailable
+from app.api.overview_projection import build_overview_payload
+from app.api.snapshot import PrecomputedSnapshot, PublishedSnapshot, SnapshotUnavailable
 from app.config import Settings
 from app.models import RiskRouter, derive_evidence_context
 from app.services import (
@@ -47,6 +48,7 @@ from app.storage import EvidenceObjectStore, LedgerRepository, OperationsReposit
 API_SCHEMA_VERSION = "1.1"
 BACKUP_SNAPSHOT_MAX_AGE_SECONDS = 36 * 60 * 60
 OVERVIEW_SNAPSHOT_REFRESH_SECONDS = 30.0
+OVERVIEW_PUBLISHED_SNAPSHOT_REFRESH_SECONDS = 5 * 60.0
 GENERIC_REVIEWER_IDENTITIES = frozenset(
     {"reviewer", "defense-reviewer", "审核者", "审查员", "unknown", "test"}
 )
@@ -312,31 +314,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     adjudication = AdjudicationService(ledger, operations)
 
-    def build_overview_snapshot() -> dict[str, Any]:
-        """Read every mutable input away from the public request path.
-
-        The ledger projection was the dominant cost originally, but operational
-        status also lives in SQLite and can briefly contend with the collection
-        worker.  Keeping even one of those reads in ``GET /overview`` defeats the
-        fail-open snapshot design: a perfectly healthy writer can make the page
-        hit its timeout.  The request now only copies this in-memory generation
-        and applies public redaction.
-        """
-
-        return {
-            "overview_base": ledger.overview(run_integrity_check=False),
-            "latest_verified_backup": operations.latest_verified_backup(),
-            "latest_backup_attempt": operations.latest_backup(),
-            "demo_mode": operations.demo_mode(settings.demo_mode),
-            "latest_worker_cycle": operations.latest_worker_cycle(),
-            "latest_successful_worker_cycle": operations.latest_successful_worker_cycle(),
-        }
-
-    overview_snapshot = PrecomputedSnapshot(
-        build_overview_snapshot,
-        refresh_interval_seconds=OVERVIEW_SNAPSHOT_REFRESH_SECONDS,
-        name="overview",
-    )
+    if settings.overview_snapshot_path is not None:
+        # Production never performs the expensive ledger aggregation inside the
+        # API interpreter.  A bounded systemd oneshot publishes this file and
+        # the request process only loads complete atomic generations.
+        overview_snapshot = PublishedSnapshot(
+            settings.overview_snapshot_path,
+            refresh_interval_seconds=OVERVIEW_PUBLISHED_SNAPSHOT_REFRESH_SECONDS,
+            name="overview",
+        )
+    else:
+        # Small local/test ledgers retain a zero-configuration fallback.
+        overview_snapshot = PrecomputedSnapshot(
+            lambda: build_overview_payload(
+                settings,
+                ledger=ledger,
+                operations=operations,
+            ),
+            refresh_interval_seconds=OVERVIEW_SNAPSHOT_REFRESH_SECONDS,
+            name="overview",
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):

@@ -139,6 +139,13 @@ remain immutable and rollbackable. The public Web unit reads only
 non-secret values. It never loads `/etc/finance-radar.env` and explicitly
 removes `FINANCE_RADAR_ADMIN_TOKEN` from its process environment.
 
+`finance-radar-overview-snapshot.service` computes the expensive public
+overview outside the API process and atomically publishes
+`shared/data/overview_snapshot_v1.json`. Its timer refreshes after each
+completed run with a five-minute delay. The API refuses to start without an
+initial file, verifies the payload hash, and preserves the last valid
+generation if a later publication fails.
+
 Human reviewer identities are provisioned separately from the shared Reviewer
 UI token. The installer creates
 `/etc/finance-radar-reviewer-principals.json` as root-owned `0600` containing

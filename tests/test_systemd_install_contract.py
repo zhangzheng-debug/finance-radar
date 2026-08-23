@@ -25,6 +25,18 @@ CAPTURE_INTERPRETATION_UNIT = (
     / "systemd"
     / "finance-radar-capture-interpretation.service"
 )
+OVERVIEW_SNAPSHOT_UNIT = (
+    Path(__file__).parents[1]
+    / "deployment"
+    / "systemd"
+    / "finance-radar-overview-snapshot.service"
+)
+OVERVIEW_SNAPSHOT_TIMER = (
+    Path(__file__).parents[1]
+    / "deployment"
+    / "systemd"
+    / "finance-radar-overview-snapshot.timer"
+)
 RECEIPT_VALIDATOR = Path(__file__).parents[1] / "deployment" / "systemd" / "verify_backup_receipt.py"
 LOCAL_LLM_INSTALLER = Path(__file__).parents[1] / "deployment" / "systemd" / "install_local_evidence_model.sh"
 MIGRATION_BACKUP = Path(__file__).parents[1] / "deployment" / "systemd" / "create_migration_backup.sh"
@@ -74,6 +86,27 @@ def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() ->
         in source
     )
     assert "--env-file /dev/null" not in source
+
+
+def test_overview_is_published_by_a_bounded_external_process() -> None:
+    unit = OVERVIEW_SNAPSHOT_UNIT.read_text(encoding="utf-8")
+    timer = OVERVIEW_SNAPSHOT_TIMER.read_text(encoding="utf-8")
+    api = (INSTALLER.parent / "finance-radar-api.service").read_text(encoding="utf-8")
+    installer = INSTALLER.read_text(encoding="utf-8")
+    activator = ACTIVATOR.read_text(encoding="utf-8")
+
+    assert "Type=oneshot" in unit
+    assert "scripts/build_overview_snapshot.py" in unit
+    assert "Slice=finance-radar.slice" in unit
+    assert "MemoryMax=360M" in unit
+    assert "TimeoutStartSec=15min" in unit
+    assert "OnUnitInactiveSec=5min" in timer
+    assert "FINANCE_RADAR_OVERVIEW_SNAPSHOT_PATH=" in api
+    assert "ExecStartPre=/usr/bin/test -s" in api
+    assert "systemctl start finance-radar-overview-snapshot.service" in installer
+    assert "systemctl start finance-radar-overview-snapshot.service" in activator
+    assert "api/v1/overview" in installer
+    assert "api/v1/overview" in activator
 
 
 def test_remote_installer_uses_explicit_current_public_url() -> None:
@@ -145,7 +178,14 @@ def test_all_radar_workloads_share_an_aggregate_memory_budget_and_prioritize_rec
     assert "MemoryMax=700M" in slice_source
     assert "MemorySwapMax=384M" in slice_source
     assert "TasksMax=256" in slice_source
-    for unit in (WORKER_UNIT, WEB_UNIT, ADMIN_UNIT, BACKUP_UNIT, LLM_UNIT):
+    for unit in (
+        WORKER_UNIT,
+        WEB_UNIT,
+        ADMIN_UNIT,
+        BACKUP_UNIT,
+        LLM_UNIT,
+        OVERVIEW_SNAPSHOT_UNIT,
+    ):
         source = unit.read_text(encoding="utf-8")
         assert "Slice=finance-radar.slice" in source
         assert "MemoryAccounting=true" in source

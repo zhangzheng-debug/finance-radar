@@ -5,6 +5,16 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.23.1
+
+- Move the expensive `/api/v1/overview` aggregation into a bounded external
+  systemd oneshot. It publishes a hash-verified JSON generation atomically;
+  the API only reloads that data file and therefore remains responsive while
+  collection writes or a multi-minute overview refresh are in progress.
+- Refresh the overview data every five minutes, preserve the last valid
+  generation after a failed publication, and require a successfully published
+  snapshot in both in-place deployment and disaster-restore activation gates.
+
 ## 2026.08.22.13
 
 - Make `/api/v1/overview` a complete in-memory projection: backup state, demo

@@ -5,7 +5,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.api.main import create_app
-from app.api.snapshot import PrecomputedSnapshot
+from app.api.overview_projection import publish_overview_snapshot
+from app.api.snapshot import PrecomputedSnapshot, PublishedSnapshot
 from app.config import Settings
 from event_ledger import open_ledger
 
@@ -94,6 +95,78 @@ def test_refresh_failure_keeps_last_good_snapshot() -> None:
     assert second_status["generation"] == 1
     assert second_status["last_refresh_error_code"] == "RuntimeError"
     assert "private upstream detail" not in str(second_status)
+
+
+def test_published_snapshot_reloads_atomic_server_data(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    snapshot_path = tmp_path / "overview_snapshot_v1.json"
+    first_envelope = publish_overview_snapshot(settings, snapshot_path)
+    snapshot = PublishedSnapshot(
+        snapshot_path,
+        refresh_interval_seconds=300,
+        name="test-overview",
+    )
+    snapshot.start()
+
+    first, first_status = snapshot.read()
+    first["demo_mode"] = "MUTATED_BY_CALLER"
+    assert first_status["producer"] == "external_atomic_file"
+    assert first_status["generation"] == 1
+    assert first_status["payload_sha256"] == first_envelope["payload_sha256"]
+
+    settings = Settings(**{**settings.__dict__, "demo_mode": "OFF"})
+    second_envelope = publish_overview_snapshot(settings, snapshot_path)
+    second, second_status = snapshot.read()
+
+    assert second["demo_mode"] == "OFF"
+    assert second_status["generation"] == 2
+    assert second_status["payload_sha256"] == second_envelope["payload_sha256"]
+
+
+def test_invalid_published_generation_preserves_last_good_snapshot(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    snapshot_path = tmp_path / "overview_snapshot_v1.json"
+    publish_overview_snapshot(settings, snapshot_path)
+    snapshot = PublishedSnapshot(
+        snapshot_path,
+        refresh_interval_seconds=300,
+        name="test-overview",
+    )
+    snapshot.start()
+    expected, _ = snapshot.read()
+
+    snapshot_path.write_text('{"schema":"wrong"}\n', encoding="utf-8")
+    actual, status = snapshot.read()
+
+    assert actual == expected
+    assert status["status"] == "STALE_AFTER_REFRESH_ERROR"
+    assert status["last_refresh_error_code"] == "ValueError"
+
+
+def test_production_overview_reads_only_the_published_file(tmp_path: Path) -> None:
+    base_settings = _settings(tmp_path)
+    snapshot_path = tmp_path / "overview_snapshot_v1.json"
+    publish_overview_snapshot(base_settings, snapshot_path)
+    settings = Settings(
+        **{
+            **base_settings.__dict__,
+            "overview_snapshot_path": snapshot_path,
+        }
+    )
+    application = create_app(settings)
+
+    def unexpected_read(*_args, **_kwargs):
+        raise AssertionError("production overview must not aggregate SQLite in API")
+
+    application.state.ledger.overview = unexpected_read
+    application.state.operations.latest_verified_backup = unexpected_read
+    with TestClient(application) as client:
+        response = client.get("/api/v1/overview")
+
+    assert response.status_code == 200
+    status = response.json()["data"]["overview_snapshot"]
+    assert status["producer"] == "external_atomic_file"
+    assert status["generation"] == 1
 
 
 def test_home_allows_twenty_seconds_for_the_first_overview_read() -> None:
