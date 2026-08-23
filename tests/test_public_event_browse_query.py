@@ -125,6 +125,77 @@ def test_deep_public_page_uses_stable_browse_indexes(tmp_path: Path) -> None:
     } <= indexes
 
 
+def test_shadow_batch_scopes_source_revision_work_to_bounded_window(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "shadow.sqlite3"
+    event_count = 5_000
+    _large_unreviewed_ledger(ledger_path, event_count=event_count)
+    timestamp = "2026-08-21T12:00:00+00:00"
+    with open_ledger(ledger_path) as connection:
+        observations = []
+        revisions = []
+        relations = []
+        for index in range(event_count):
+            event_id = f"browse-{index:05d}"
+            observation_id = f"observation-{index:05d}"
+            external_id = f"external-{index:05d}"
+            title = f"Source {index:05d}"
+            observations.append(
+                (
+                    observation_id,
+                    "src",
+                    external_id,
+                    timestamp,
+                    timestamp,
+                    title,
+                    f"Summary {index:05d}",
+                    "https://example.test/source",
+                    f"{index:064x}"[-64:],
+                    "{}",
+                    "captured",
+                )
+            )
+            revisions.append(
+                (
+                    f"revision-{index:05d}",
+                    observation_id,
+                    "src",
+                    external_id,
+                    1,
+                    "new",
+                    timestamp,
+                    f"{index:064x}"[-64:],
+                    title,
+                    f"Summary {index:05d}",
+                    "{}",
+                )
+            )
+            relations.append((event_id, observation_id, "primary", timestamp))
+        connection.executemany(
+            "INSERT INTO raw_observations VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            observations,
+        )
+        connection.executemany(
+            "INSERT INTO source_revisions VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            revisions,
+        )
+        connection.executemany(
+            "INSERT INTO event_observations VALUES (?,?,?,?)",
+            relations,
+        )
+        connection.commit()
+
+    repository = _CountingRepository(ledger_path)
+    batch = repository.shadow_batch(limit=48)
+
+    assert len(batch) == 48
+    assert all(item["detail"]["preferred_source"]["title"] for item in batch)
+    # The bounded batch may use the latest-revision index for its selected
+    # observations, but it must not rank all 5,000 historical revisions.
+    assert repository.progress_callbacks < 1_000
+
+
 def test_public_excerpt_bound_does_not_change_internal_source_semantics(tmp_path: Path) -> None:
     ledger_path = tmp_path / "source-excerpt.sqlite3"
     _large_unreviewed_ledger(ledger_path, event_count=1)

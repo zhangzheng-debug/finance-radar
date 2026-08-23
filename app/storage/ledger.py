@@ -1442,43 +1442,58 @@ class LedgerRepository:
         if order not in sort_orders:
             raise ValueError(f"unsupported shadow batch order: {order}")
         with closing(self.connect()) as connection:
+            # Select the bounded event window before touching observations or
+            # revisions.  The previous query embedded the global
+            # ``_CURRENT_SOURCE_CONTENT_CTES`` and ranked every retained source
+            # revision before SQLite could apply LIMIT.  On the production
+            # ledger that made a 200-event shadow window consume the outer
+            # ten-minute worker deadline.
             event_rows = connection.execute(
-                f"""WITH {_CURRENT_SOURCE_CONTENT_CTES},
-                    ranked_source AS (
-                      SELECT eo.event_id,r.title,r.summary,r.source_id,
-                             r.source_published_at,r.local_received_at,
-                             ROW_NUMBER() OVER (
-                               PARTITION BY eo.event_id
-                               ORDER BY r.local_received_at DESC,r.observation_id DESC
-                             ) AS source_rank
-                      FROM event_observations eo
-                      JOIN current_source_content r
-                        ON r.observation_id=eo.observation_id
-                      WHERE eo.relation_type!='filtered_aggregated_noise'
-                        AND r.observation_status!='deleted'
-                    )
-                    SELECT ce.*,v.facts_json,
-                           rs.title AS source_title,rs.summary AS source_summary,
-                           rs.source_id AS preferred_source_id,
-                           rs.source_published_at,rs.local_received_at
+                f"""SELECT ce.*,v.facts_json
                     FROM canonical_events ce
                     JOIN event_versions v
                       ON v.event_id=ce.event_id AND v.version=ce.current_version
-                    LEFT JOIN ranked_source rs
-                      ON rs.event_id=ce.event_id AND rs.source_rank=1
                     ORDER BY {sort_orders[order]}
                     LIMIT ? OFFSET ?""",
                 (limit, offset),
             ).fetchall()
             event_ids = [str(row["event_id"]) for row in event_rows]
+            preferred_source_by_event: dict[str, dict[str, Any]] = {
+                event_id: {} for event_id in event_ids
+            }
             evidence_by_event: dict[str, list[dict[str, Any]]] = {
                 event_id: [] for event_id in event_ids
             }
             if event_ids:
                 placeholders = ",".join("?" for _ in event_ids)
+                source_rows = connection.execute(
+                    f"""WITH ranked_source AS (
+                          SELECT eo.event_id,r.title,r.summary,r.source_id,
+                                 r.source_published_at,r.local_received_at,
+                                 ROW_NUMBER() OVER (
+                                   PARTITION BY eo.event_id
+                                   ORDER BY r.local_received_at DESC,
+                                            r.observation_id DESC
+                                 ) AS source_rank
+                          FROM event_observations eo
+                          JOIN latest_source_content r
+                            ON r.observation_id=eo.observation_id
+                          WHERE eo.event_id IN ({placeholders})
+                            AND eo.relation_type!='filtered_aggregated_noise'
+                            AND r.observation_status!='deleted'
+                        )
+                        SELECT event_id,title,summary,source_id,
+                               source_published_at,local_received_at
+                        FROM ranked_source
+                        WHERE source_rank=1""",
+                    event_ids,
+                ).fetchall()
+                for row in source_rows:
+                    item = dict(row)
+                    event_id = str(item.pop("event_id"))
+                    preferred_source_by_event[event_id] = item
                 evidence_rows = connection.execute(
-                    f"""WITH {_CURRENT_SOURCE_CONTENT_CTES},
-                        ranked_evidence AS (
+                    f"""WITH ranked_evidence AS (
                           SELECT ev.*,r.source_id,src.authority_tier,
                                  ROW_NUMBER() OVER (
                                    PARTITION BY ev.event_id
@@ -1486,7 +1501,7 @@ class LedgerRepository:
                                             ev.updated_at DESC,ev.evidence_id
                                  ) AS evidence_rank
                           FROM event_evidence ev
-                          JOIN current_source_content r
+                          JOIN latest_source_content r
                             ON r.observation_id=ev.observation_id
                           JOIN sources src ON src.source_id=r.source_id
                           WHERE ev.event_id IN ({placeholders})
@@ -1507,13 +1522,7 @@ class LedgerRepository:
             item = dict(row)
             facts = _json(item.pop("facts_json"), {})
             event_id = str(item["event_id"])
-            preferred_source = {
-                "title": item.pop("source_title", None),
-                "summary": item.pop("source_summary", None),
-                "source_id": item.pop("preferred_source_id", None),
-                "source_published_at": item.pop("source_published_at", None),
-                "local_received_at": item.pop("local_received_at", None),
-            }
+            preferred_source = preferred_source_by_event[event_id]
             result.append(
                 {
                     "detail": {

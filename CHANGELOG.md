@@ -5,6 +5,15 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.24.3
+
+- Scope Shadow-router source and evidence revision work to the already selected
+  200-event window. The previous bounded API still expanded and ranked every
+  retained source revision twice, causing the continuous Worker to reach its
+  ten-minute deadline during `shadow_routing` on the production ledger.
+- Add a 5,000-event regression fixture that fails if a bounded Shadow batch
+  returns to a whole-history source-revision scan.
+
 ## 2026.08.24.2
 
 - Publish a release as `ACTIVATING` during edge cutover and expose it as
