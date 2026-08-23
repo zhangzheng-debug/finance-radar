@@ -81,6 +81,33 @@ def test_code_only_contract_accepts_public_web_change(tmp_path: Path) -> None:
     assert "code_only_candidate_contract=PASS" in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("relative", "content"),
+    (
+        ("tests/test_public_web.py", "def test_public_web():\n    assert True\n"),
+        ("docs/PUBLIC_WEB.md", "# Public Web\n"),
+        ("CHANGELOG.md", "# Changelog\n\n- Public Web update.\n"),
+        ("CURRENT_STATE.md", "# Current state\n"),
+        ("README.md", "# Finance Radar\n"),
+    ),
+)
+def test_code_only_contract_accepts_non_runtime_release_evidence(
+    tmp_path: Path,
+    relative: str,
+    content: str,
+) -> None:
+    previous = _release(tmp_path / "previous", "same")
+    candidate = _release(tmp_path / "candidate", "same")
+    target = candidate / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+
+    result = _contract(previous, candidate)
+
+    assert result.returncode == 0, result.stderr
+    assert "code_only_candidate_contract=PASS" in result.stdout
+
+
 def test_code_only_contract_rejects_api_change(tmp_path: Path) -> None:
     previous = _release(tmp_path / "previous", "same")
     candidate = _release(tmp_path / "candidate", "same")
@@ -151,6 +178,30 @@ def test_code_only_contract_rejects_storage_or_deployment_changes(tmp_path: Path
 
     assert deployment_result.returncode != 0
     assert "deployment/systemd/new.service" in deployment_result.stderr
+
+
+@pytest.mark.parametrize(
+    "relative",
+    (
+        "scripts/worker.py",
+        "requirements.lock",
+        "config/sources.json",
+        "replay/cases/example.json",
+        "artifacts/risk_router.joblib",
+    ),
+)
+def test_code_only_contract_still_rejects_executable_or_runtime_changes(
+    tmp_path: Path,
+    relative: str,
+) -> None:
+    previous = _release(tmp_path / "previous", "same")
+    candidate = _release(tmp_path / "candidate", "same")
+    (candidate / relative).write_text("changed\n", encoding="utf-8")
+
+    result = _contract(previous, candidate)
+
+    assert result.returncode != 0
+    assert relative in result.stderr
 
 
 @pytest.mark.skipif(
