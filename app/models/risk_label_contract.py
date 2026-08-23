@@ -11,6 +11,8 @@ from datetime import datetime
 import re
 from typing import Any
 
+from app.evidence_policy import is_primary_authority_tier
+
 
 LABELS = {"RISK_REVIEW", "NON_TARGET", "ABSTAIN"}
 MATERIALITY = {"MATERIAL_ADVERSE", "NOT_MATERIAL_ADVERSE", "UNCLEAR"}
@@ -50,11 +52,11 @@ def deterministic_source_lane(authority_tier: str, evidence_state: str) -> str:
     """Route evidence acquisition deterministically without deciding polarity."""
     tier = str(authority_tier or "").upper()
     evidence = str(evidence_state or "").upper()
-    if tier.startswith("P0"):
+    if not is_primary_authority_tier(tier):
+        return "DISCOVERY_ONLY"
+    if tier.split("_", 1)[0] == "P0":
         return "P0_EVIDENCE_READY" if evidence in FINALIZABLE_EVIDENCE else "P0_EVIDENCE_REQUIRED"
-    if tier.startswith("P1"):
-        return "P1_ISSUER_CONTEXT"
-    return "DISCOVERY_ONLY"
+    return "P1_ISSUER_CONTEXT"
 
 
 def coherent_label(materiality: str, polarity: str, evidence_state: str) -> str:

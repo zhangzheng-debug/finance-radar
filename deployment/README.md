@@ -139,6 +139,13 @@ remain immutable and rollbackable. The public Web unit reads only
 non-secret values. It never loads `/etc/finance-radar.env` and explicitly
 removes `FINANCE_RADAR_ADMIN_TOKEN` from its process environment.
 
+`finance-radar-overview-snapshot.service` computes the expensive public
+overview outside the API process and atomically publishes
+`shared/data/overview_snapshot_v1.json`. Its timer refreshes after each
+completed run with a five-minute delay. The API refuses to start without an
+initial file, verifies the payload hash, and preserves the last valid
+generation if a later publication fails.
+
 Human reviewer identities are provisioned separately from the shared Reviewer
 UI token. The installer creates
 `/etc/finance-radar-reviewer-principals.json` as root-owned `0600` containing
@@ -200,6 +207,23 @@ The manual loopback Reviewer, Operator and Admin services are neither enabled no
 during this cutover; an existing internal session makes the installer stop
 before the symlink change rather than terminating that session.
 
+For a later release that changes only `app/web/**`, public
+Streamlit configuration or `VERSION`, the operator may explicitly set
+`FINANCE_RADAR_DEPLOY_MODE=code-only` when invoking `install_remote.sh`. This
+fast path is never selected automatically and must be invoked through the
+currently active release's root-owned `install_remote.sh`, not the candidate's
+copy. It refuses the cutover unless the
+active and candidate releases have byte-identical API, persistence, worker, script,
+deployment, dependency, replay and runtime-model trees and a root-owned
+attestation proves that a complete daily recovery bundle passed an isolated
+restore drill within the previous 26 hours. It skips new multi-gigabyte backup
+copies, venv copying and package installation, but retains the atomic release
+symlink, service/Nginx rollback and all public health/deny checks. Any failed
+precondition requires the ordinary `full` transaction; it must not be bypassed
+or silently downgraded. A release that introduces or changes this fast-path
+machinery itself must use `full` once so the new backup unit can create the
+first trusted attestation.
+
 The Evidence Agent also has an optional, independent loopback service on port
 18601. `install_local_evidence_model.sh` pins both llama.cpp and the GGUF model
 by SHA-256, enforces a resource gate, and requires explicit `--activate`.
@@ -245,6 +269,11 @@ The three internal UIs are manual, non-enabled, mutually conflicting systemd
 services. They load only their scoped token (Admin is the explicit full-access
 exception), listen on loopback, and are not referenced by Nginx. Start exactly
 one for an SSH-tunnel session, then stop it:
+
+On Windows, prefer the audited launcher in
+[`deployment/windows/README.md`](windows/README.md). It requires an explicit
+host, supports a `--dry-run`, opens the local browser and owns cleanup for the
+one service/tunnel it starts; it stores no host, key or token in the repository.
 
 ```bash
 sudo systemctl start finance-radar-admin

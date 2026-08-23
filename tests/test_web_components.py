@@ -23,6 +23,9 @@ from app.web.components import (
     market_context_markup,
     market_horizon_items,
     public_event_copy,
+    public_event_evidence_posture,
+    public_event_quality,
+    public_event_risk_assessment,
     public_event_state,
     score_dimensions,
     source_health_state,
@@ -75,12 +78,25 @@ def test_public_event_feed_row_hides_internal_codes_and_bounds_excerpt() -> None
             "last_updated_at": "2026-08-03T22:34:00+00:00",
             "credibility_tier": "P?",
             "discovery_source": "sec_current_filings",
+            "citation_ready": False,
+            "evidence_posture": "SOURCE_CAPTURED",
+            "captured_source_count": 1,
+            "risk_assessment": {
+                "route": "RISK_REVIEW",
+                "confidence": 0.82,
+                "confidence_applicable": True,
+                "model_version": "risk-router-test-v1",
+                "decision_source": "TRAINED_SEMANTIC_MODEL",
+                "shadow": True,
+                "current": True,
+            },
             "evidence_excerpt": "A" * 500,
         },
         public=True,
     )
 
-    assert "待核验" in row
+    assert "仅捕获来源" in row
+    assert "模型研判：影子模型 · 优先复核" in row
     assert "债务融资" in row
     assert "SEC 官方文件" in row
     assert "查看证据" in row
@@ -89,7 +105,7 @@ def test_public_event_feed_row_hides_internal_codes_and_bounds_excerpt() -> None
     assert "sec_current_filings" not in row
     assert "internal classifier slug" not in row
     assert "A" * 20 not in row
-    assert "仍需核对原始文件" in row
+    assert "尚未达到正式引用条件" in row
     assert "为什么关注" in row
 
 
@@ -108,24 +124,25 @@ def test_public_event_feed_row_marks_session_changes_without_internal_details() 
     assert "is-changed" in row
 
 
-def test_public_flow_shortcuts_use_reader_facing_labels() -> None:
+def test_public_flow_shortcuts_do_not_expose_reviewer_workflow_labels() -> None:
     markup = flow_shortcuts_markup(
         {"verified": 5, "candidate": 4, "weak": 2, "rejected": 1},
         public=True,
     )
 
-    assert "待核验" in markup
-    assert "已粗审" in markup
-    assert "已核验" in markup
-    assert "已排除" in markup
+    assert "全部事件" in markup
+    assert "待核验" not in markup
+    assert "已粗审" not in markup
+    assert "已核验" not in markup
+    assert "已排除" not in markup
     assert "待复核" not in markup
     assert "已拒绝" not in markup
-    assert "preview_state=pending_verification" in markup
+    assert "preview_state=" not in markup
     assert 'target="_self"' in markup
     assert 'target="_blank"' not in markup
 
 
-def test_public_flow_shortcuts_use_partitioned_funnel_counts() -> None:
+def test_public_flow_shortcuts_only_report_total_inventory() -> None:
     markup = flow_shortcuts_markup(
         {"verified": 5, "candidate": 4, "weak": 0, "rejected": 1},
         public=True,
@@ -138,8 +155,9 @@ def test_public_flow_shortcuts_use_partitioned_funnel_counts() -> None:
             "pending_verification": 1,
         },
     )
-    assert "在当前页面筛选证据不足信息流，2条" in markup
-    assert "在当前页面筛选已粗审信息流，3条" in markup
+    assert "在当前页面筛选全部事件信息流，12条" in markup
+    assert "证据不足" not in markup
+    assert "已粗审" not in markup
     assert '<span class="flow-count">12</span>' in markup
 
 
@@ -147,6 +165,8 @@ def test_public_event_copy_never_promotes_raw_english_boilerplate() -> None:
     event = {
         "status": "candidate",
         "public_state": "rough_reviewed",
+        "citation_ready": False,
+        "evidence_posture": "PRIMARY_SOURCE_AVAILABLE",
         "event_family": "capital_structure",
         "company_name": "Example Ltd.",
         "discovery_source": "sec_current_filings",
@@ -154,30 +174,347 @@ def test_public_event_copy_never_promotes_raw_english_boilerplate() -> None:
     }
     copy = public_event_copy(event)
     assert public_event_state(event) == "rough_reviewed"
-    assert copy["state_label"] == "已粗审"
+    assert copy["evidence_label"] == "已有一手材料但事实槽待补"
     assert "资本结构" in copy["summary"]
     assert "THIS WARRANT" not in copy["summary"]
-    assert "正式证据核验" in copy["summary"]
+    assert "事实槽" in copy["summary"]
+    assert "已粗审" not in copy["summary"]
 
 
-def test_public_event_copy_prefers_structured_fact_and_keeps_state_boundary() -> None:
+def test_public_event_copy_labels_capture_excerpt_and_ignores_private_fallbacks() -> None:
+    copy = public_event_copy(
+        {
+            "status": "candidate",
+            "public_state": "pending_verification",
+            "citation_ready": False,
+            "evidence_posture": "SOURCE_CAPTURED",
+            "captured_source_count": 1,
+            "event_family": "listing_status",
+            "company_name": "Example Ltd.",
+            "facts": {
+                "fact_summary": "REVIEWER_PRIVATE_FACT",
+                "evidence_summary": "INTERNAL_DETECTOR_REASON",
+            },
+            "unverified_capture_excerpt": "The source API reported a listing item.",
+        }
+    )
+
+    assert copy["summary_provenance"] == "来源捕获节选"
+    assert "来源捕获节选" in copy["summary"]
+    assert "不等于原文已经支持一条确定事实" in copy["summary"]
+    assert "The source API reported a listing item" in copy["summary"]
+    assert "REVIEWER_PRIVATE_FACT" not in copy["summary"]
+    assert "INTERNAL_DETECTOR_REASON" not in copy["summary"]
+
+
+def test_public_event_copy_suppresses_structured_fact_until_citation_ready() -> None:
     copy = public_event_copy(
         {
             "status": "candidate",
             "public_state": "insufficient",
+            "citation_ready": False,
+            "evidence_posture": "PRIMARY_SOURCE_AVAILABLE",
             "event_family": "listing_status",
             "company_name": "Example Ltd.",
             "facts": {
-                "evidence_summary": "交易所公告称该公司收到上市合规通知。",
+                "public_fact_summary": "交易所公告称该公司收到上市合规通知。",
             },
             "evidence_excerpt": "UNRELATED RAW ENGLISH EXCERPT",
         }
     )
 
+    assert copy["summary_provenance"] == "来源与事实槽说明"
+    assert "交易所公告称该公司收到上市合规通知" not in copy["summary"]
+    assert "已有一手材料" in copy["summary"]
+    assert "证据不足" not in copy["summary"]
+    assert "UNRELATED RAW ENGLISH EXCERPT" not in copy["summary"]
+
+
+def test_public_event_copy_renders_structured_fact_only_when_primary_supported() -> None:
+    copy = public_event_copy(
+        {
+            "status": "candidate",
+            "public_state": "pending_verification",
+            "citation_ready": True,
+            "evidence_posture": "PRIMARY_SUPPORTED",
+            "event_family": "listing_status",
+            "company_name": "Example Ltd.",
+            "facts": {
+                "public_fact_summary": "交易所公告称该公司收到上市合规通知。",
+            },
+        }
+    )
+
     assert copy["summary_provenance"] == "结构化事实摘要"
     assert "交易所公告称该公司收到上市合规通知" in copy["summary"]
-    assert "当前证据不足" in copy["summary"]
-    assert "UNRELATED RAW ENGLISH EXCERPT" not in copy["summary"]
+    assert copy["evidence_label"] == "官方原文支持"
+
+
+def test_public_event_copy_does_not_invent_an_event_from_subject_and_family() -> None:
+    event = {
+        "status": "candidate",
+        "public_state": "pending_verification",
+        "event_family": "listing_status",
+        "ticker_at_event": "ICX",
+        "event_type": "listing_status",
+    }
+
+    copy = public_event_copy(event)
+    quality = public_event_quality(event, [])
+
+    assert "ICX" in copy["summary"]
+    assert "上市状态" in copy["summary"]
+    assert "尚没有可公开复述的主体—动作—阶段事实" in copy["summary"]
+    assert "出现一项" not in copy["summary"]
+    assert copy["summary_provenance"] == "来源与事实槽说明"
+    assert quality["reader_ready"] is False
+    assert quality["gaps"] == [
+        "缺少主体—动作—阶段事实摘要",
+        "缺少可定位的原文段落",
+    ]
+
+
+def test_public_evidence_posture_prefers_contract_and_uses_conservative_fallbacks() -> None:
+    explicit = public_event_evidence_posture(
+        {
+            "evidence_posture": "PRIMARY_SOURCE_AVAILABLE",
+            "citation_ready": False,
+            "evidence_gap_codes": [
+                "MISSING_CITABLE_EVIDENCE",
+                "NO_CAPTURED_SOURCE",
+            ],
+        }
+    )
+    assert explicit["label"] == "已有一手材料但事实槽待补"
+    assert explicit["gap_labels"] == ["可引用原文待补", "来源捕获待补"]
+
+    # A source registry name alone proves neither a successful capture nor an
+    # available original document.
+    no_source = public_event_evidence_posture(
+        {"discovery_source": "sec_current_filings", "citation_ready": False}
+    )
+    assert no_source["key"] == "NO_SOURCE"
+    assert no_source["label"] == "尚无来源"
+
+    captured = public_event_evidence_posture(
+        {"captured_source_count": 1, "citation_ready": False}
+    )
+    assert captured["key"] == "SOURCE_CAPTURED"
+
+
+def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() -> None:
+    waiting = public_event_risk_assessment({"risk_assessment": None})
+    assert waiting["label"] == "等待模型研判"
+    assert waiting["current"] is False
+
+    shadow = public_event_risk_assessment(
+        {
+            "risk_assessment": {
+                "route": "RISK_REVIEW",
+                "confidence": 0.836,
+                "confidence_applicable": True,
+                "model_version": "risk-router-v4",
+                "decision_source": "TRAINED_SEMANTIC_MODEL",
+                "shadow": True,
+                "current": True,
+            }
+        }
+    )
+    assert shadow["label"] == "影子模型 · 优先复核"
+    assert shadow["confidence"] == "84%"
+    assert "实验分流" in shadow["explanation"]
+
+
+def test_public_risk_assessment_distinguishes_rules_fallback_and_unknown_source() -> None:
+    evidence_gate = public_event_risk_assessment(
+        {
+            "risk_assessment": {
+                "route": "ABSTAIN",
+                "confidence": 1.0,
+                # A stale/malformed producer flag still must not expose a rule
+                # score as if it were calibrated model confidence.
+                "confidence_applicable": True,
+                "model_version": "router-package-v4",
+                "decision_source": "DETERMINISTIC_EVIDENCE_GATE",
+                "shadow": True,
+                "current": True,
+            }
+        }
+    )
+    assert evidence_gate["heading"] == "自动风险分流"
+    assert evidence_gate["label"] == "影子管线 · 证据规则门 · 自动弃权"
+    assert evidence_gate["confidence"] == ""
+    assert evidence_gate["model_version"] == ""
+    assert evidence_gate["decision_source"] == "DETERMINISTIC_EVIDENCE_GATE"
+    assert "训练模型没有被调用" in evidence_gate["explanation"]
+    assert "影子模型" not in evidence_gate["label"]
+    assert "影子模型" not in evidence_gate["explanation"]
+
+    semantic_gate = public_event_risk_assessment(
+        {
+            "risk_assessment": {
+                "route": "NON_TARGET",
+                "confidence": 0.99,
+                "confidence_applicable": True,
+                "decision_source": "DETERMINISTIC_SEMANTIC_POLICY_GATE",
+                "shadow": False,
+                "current": True,
+            }
+        }
+    )
+    assert semantic_gate["label"] == "语义规则门 · 非目标"
+    assert semantic_gate["confidence"] == ""
+    assert "确定性语义规则门" in semantic_gate["explanation"]
+
+    keyword = public_event_risk_assessment(
+        {
+            "risk_assessment": {
+                "route": "RISK_REVIEW",
+                "confidence": 0.91,
+                "confidence_applicable": True,
+                "model_version": "fallback-v1",
+                "decision_source": "KEYWORD_FALLBACK",
+                "shadow": True,
+                "current": True,
+            }
+        }
+    )
+    assert keyword["label"] == "影子管线 · 关键词回退 · 优先复核"
+    assert keyword["confidence"] == ""
+    assert keyword["model_version"] == ""
+    assert "不是训练模型输出" in keyword["explanation"]
+
+    unknown = public_event_risk_assessment(
+        {
+            "risk_assessment": {
+                "route": "ABSTAIN",
+                "confidence": 0.75,
+                "confidence_applicable": True,
+                "decision_source": "MODEL",
+                "shadow": True,
+                "current": True,
+            }
+        }
+    )
+    assert unknown["label"] == "影子管线 · 研判来源未标明 · 暂不判断"
+    assert unknown["confidence"] == ""
+    assert "无法把这次路由归因为训练模型" in unknown["explanation"]
+    assert "影子模型" not in unknown["label"]
+
+
+def test_public_feed_calls_rule_gate_output_automatic_routing_not_model_judgment() -> None:
+    row = event_feed_row(
+        {
+            "event_id": "evidence-gated",
+            "status": "candidate",
+            "evidence_posture": "SOURCE_CAPTURED",
+            "captured_source_count": 1,
+            "risk_assessment": {
+                "route": "ABSTAIN",
+                "confidence_applicable": False,
+                "decision_source": "DETERMINISTIC_EVIDENCE_GATE",
+                "shadow": True,
+                "current": True,
+            },
+        },
+        public=True,
+    )
+    assert "自动风险分流：影子管线 · 证据规则门 · 自动弃权" in row
+    assert "模型研判：" not in row
+    assert "影子模型" not in row
+
+
+def test_public_card_uses_legacy_state_only_for_exceptional_disposition() -> None:
+    ordinary = event_feed_row(
+        {
+            "event_id": "legacy-verified",
+            "status": "verified",
+            "public_state": "verified",
+            "evidence_posture": "SOURCE_CAPTURED",
+            "captured_source_count": 1,
+        },
+        public=True,
+    )
+    assert "仅捕获来源" in ordinary
+    assert ">已核验<" not in ordinary
+
+    excluded = event_feed_row(
+        {
+            "event_id": "legacy-excluded",
+            "status": "rejected",
+            "public_state": "excluded",
+            "evidence_posture": "NO_SOURCE",
+        },
+        public=True,
+    )
+    assert "尚无来源" in excluded
+    assert "异常处置：已排除" in excluded
+
+
+def test_public_event_quality_requires_subject_fact_and_citable_passage() -> None:
+    event = {
+        "company_name": "Example Ltd.",
+        "facts": {
+            "public_fact_summary": "交易所公告称该公司收到上市合规通知并说明了整改期限。",
+            "claim_subject": "Example Ltd.",
+            "claim_action": "listing_compliance_notice",
+            "claim_stage": "DISCLOSED",
+            "known_at": "2026-08-20T01:02:03+00:00",
+        },
+    }
+    evidence = [
+        {
+            "evidence_url": "https://example.test/original",
+            "evidence_passage": "The exchange notice names Example Ltd. and states the exact compliance deadline.",
+            "evidence_status": "machine_extracted_unreviewed",
+            "relation_status": "SCOPED_MATCH",
+            "subject_match": 1,
+            "event_claim_supported": 1,
+            "date_coherent": 1,
+            "authority_tier": "P0_official",
+            "reader_eligible": 1,
+        }
+    ]
+
+    quality = public_event_quality(event, evidence)
+
+    assert quality["reader_ready"] is True
+    assert quality["gaps"] == []
+    assert quality["citable_evidence_count"] == 1
+
+
+def test_public_event_quality_requires_strict_dual_human_receipt() -> None:
+    event = {
+        "company_name": "Example Ltd.",
+        "facts": {
+            "public_fact_summary": "Example Ltd. disclosed that its chief financial officer resigned.",
+            "claim_subject": "Example Ltd.",
+            "claim_action": "chief financial officer resigned",
+            "claim_stage": "DISCLOSED",
+            "known_at": "2026-08-20T01:02:03+00:00",
+        },
+    }
+    evidence = {
+        "evidence_url": "https://www.sec.gov/example",
+        "evidence_passage": (
+            "Example Ltd. disclosed that its chief financial officer resigned "
+            "effective immediately."
+        ),
+        "evidence_status": "accepted_dual_human_primary_evidence",
+        "relation_status": "HUMAN_CONFIRMED",
+        "subject_match": 1,
+        "event_claim_supported": 1,
+        "date_coherent": 1,
+        "authority_tier": "P0",
+        "dual_human_receipt_consistent": 1,
+        "reader_eligible": 1,
+    }
+
+    assert public_event_quality(event, [evidence])["reader_ready"] is True
+    evidence["dual_human_receipt_consistent"] = 0
+    quality = public_event_quality(event, [evidence])
+    assert quality["reader_ready"] is False
+    assert quality["citable_evidence_count"] == 0
 
 
 def test_public_event_row_labels_its_distinct_time_clocks() -> None:
@@ -195,8 +532,9 @@ def test_public_event_row_labels_its_distinct_time_clocks() -> None:
         public=True,
     )
 
-    for label in ("最后更新", "事件日", "系统发现", "核验记录"):
+    for label in ("最后更新", "事件日", "系统发现"):
         assert label in row
+    assert "人工复核记录" not in row
     assert "2026-08-02" in row
 
 
@@ -384,7 +722,7 @@ def test_market_horizons_distinguish_observed_pending_and_missed() -> None:
         "market_metrics": [
             {
                 "stable_id": "asset-1",
-                "metric_name": "observer_return_t_plus_5m_pct__ETHUSDT",
+                "metric_name": "reaction_return_t_plus_5m_pct__ETHUSDT",
                 "metric_value": "5.123456",
             }
         ],
@@ -393,10 +731,13 @@ def test_market_horizons_distinguish_observed_pending_and_missed() -> None:
     assert [(item["label"], item["value"]) for item in items] == [
         ("T+5M", "+5.12%"),
         ("T+30M", "PENDING"),
+        ("T+2H", "NOT SCHEDULED"),
+        ("下个收盘", "NOT SCHEDULED"),
         ("T+1D", "MISSED"),
+        ("T+5D", "NOT SCHEDULED"),
     ]
     assert items[0]["state"] == "evidence"
-    assert items[2]["state"] == "risk"
+    assert items[4]["state"] == "risk"
 
 
 def test_adjacent_event_navigation_is_bounded_and_recovers_unknown_current() -> None:

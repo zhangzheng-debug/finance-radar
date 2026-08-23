@@ -31,6 +31,7 @@ DEFAULT_CATEGORIES = ("macro", "ai", "web3")
 SEMANTIC_ITEM_FIELDS = {
     "news": (
         "title",
+        "content",
         "summary_zh",
         "summary_en",
         "link",
@@ -161,7 +162,12 @@ def collect_category(
             observation_id=observation_id,
             job_type="extract_live_event_candidate",
             priority=priority,
-            payload={"source": "opennews_free", "category": category, "kind": kind},
+            payload={
+                "source": "opennews_free",
+                "category": category,
+                "kind": kind,
+                "source_content_sha256": content_hash,
+            },
         ):
             counts["jobs"] += 1
     connection.commit()

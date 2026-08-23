@@ -16,6 +16,8 @@ from app.services.light_verification import (
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = ROOT / "config" / "owner_intent_policy_v1.json"
 DOCTRINE_PATH = ROOT / "docs" / "OWNER_INTENT_AND_SYSTEM_DOCTRINE.md"
+PUBLIC_EVENT_CONTRACT_PATH = ROOT / "docs" / "PUBLIC_READER_EVENT_QUALITY_GATE.md"
+SOURCE_RECOVERY_PATH = ROOT / "docs" / "SOURCE_CAPTURE_AND_EVIDENCE_RECOVERY.md"
 
 EXPECTED_FORBIDDEN_OUTPUTS = {
     "LONG",
@@ -40,6 +42,8 @@ MANDATORY_HARD_GATE_IDS = {
     "FR-EVD-001",
     "FR-EVD-004",
     "FR-EVD-008",
+    "FR-EVD-009",
+    "FR-EVD-010",
     "FR-EVT-005",
     "FR-GRADE-005",
     "FR-LOCAL-002",
@@ -50,10 +54,12 @@ MANDATORY_HARD_GATE_IDS = {
     "FR-MKT-004",
     "FR-NOTIFY-002",
     "FR-PROD-001",
+    "FR-PROD-008",
     "FR-REL-006",
     "FR-REV-002",
     "FR-REV-006",
     "FR-REV-007",
+    "FR-REV-013",
     "FR-ROLE-001",
     "FR-ROLE-002",
     "FR-SEC-001",
@@ -134,6 +140,73 @@ def test_policy_keeps_status_namespaces_distinct_and_matches_label_contract() ->
     }
 
 
+def test_public_contract_keeps_visibility_citation_evidence_and_risk_separate() -> None:
+    contract = _policy()["public_event_contract"]
+
+    assert contract["canonical_visibility"] == "ALL"
+    assert set(contract["visibility_gates_forbidden"]) == {
+        "canonical_status",
+        "public_state",
+        "rough_review",
+        "light_verification",
+        "dual_human_review",
+        "citation_ready",
+    }
+    assert contract["citation_ready"] == {
+        "kind": "deterministic_current_version_projection",
+        "manual_approval": False,
+        "visibility_gate": False,
+        "formal_claim_gate": True,
+    }
+    assert contract["evidence_postures"] == [
+        "PRIMARY_SUPPORTED",
+        "PRIMARY_SOURCE_AVAILABLE",
+        "SOURCE_CAPTURED",
+        "NO_SOURCE",
+    ]
+    assert set(contract["evidence_gap_codes"]) == {
+        "MISSING_SUBJECT",
+        "MISSING_FACT_SUMMARY",
+        "MISSING_CITABLE_EVIDENCE",
+        "NO_CAPTURED_SOURCE",
+    }
+    assert set(contract["public_risk_assessment_fields"]) == {
+        "route",
+        "confidence",
+        "confidence_applicable",
+        "model_version",
+        "decision_source",
+        "evidence_state",
+        "evaluated_at",
+        "shadow",
+        "current",
+    }
+    assert contract["workflow_status_public_semantics"] == "prohibited"
+    assert contract["legacy_public_state_role"] == (
+        "compatibility_disposition_only"
+    )
+
+
+def test_public_event_documents_do_not_restore_the_old_reader_ready_gate() -> None:
+    public_contract = PUBLIC_EVENT_CONTRACT_PATH.read_text(encoding="utf-8")
+    source_recovery = SOURCE_RECOVERY_PATH.read_text(encoding="utf-8")
+
+    assert "Every canonical event is browseable" in public_contract
+    assert "not a per-event publication queue" in public_contract
+    assert all(
+        posture in public_contract
+        for posture in (
+            "PRIMARY_SUPPORTED",
+            "PRIMARY_SOURCE_AVAILABLE",
+            "SOURCE_CAPTURED",
+            "NO_SOURCE",
+        )
+    )
+    assert "默认事件主流仍只展示 `reader_ready`" not in source_recovery
+    assert "所有 canonical 事件进入同一个可浏览事件流" in source_recovery
+    assert "`citation_ready` 是当前版本的自动派生属性" in source_recovery
+
+
 def test_light_review_policy_matches_runtime_formalization_contract() -> None:
     review = _policy()["review_levels"]
     rough = review["rough_review"]
@@ -175,6 +248,15 @@ def test_light_review_policy_matches_runtime_formalization_contract() -> None:
 def test_formal_label_policy_requires_real_independent_blind_humans() -> None:
     formal = _policy()["review_levels"]["formal_training_label"]
 
+    assert set(formal["purposes"]) == {
+        "training_gold_set",
+        "evaluation_gold_set",
+        "threshold_calibration",
+        "accuracy_sampling",
+        "drift_monitoring",
+        "disagreement_and_high_risk_exception_review",
+    }
+    assert formal["per_event_publication_gate"] is False
     assert formal["human_only"] is True
     assert formal["independent_reviewers"] == 2
     assert formal["reviewer_identities_must_differ"] is True

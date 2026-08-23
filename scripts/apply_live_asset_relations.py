@@ -17,15 +17,29 @@ DEFAULT_CONFIG = ROOT / "config" / "live_asset_relations.json"
 DEFAULT_REPORT = ROOT / "reports" / "live_asset_relations_latest.md"
 
 
-def apply_relations(connection: Any, events: list[dict[str, Any]]) -> dict[str, int]:
-    result = {"events": 0, "entities": 0, "asset_impacts": 0, "market_enabled": 0}
+def apply_relations(connection: Any, events: list[dict[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "events": 0,
+        "entities": 0,
+        "asset_impacts": 0,
+        "market_enabled": 0,
+        "stale_event_definitions": 0,
+        "stale_event_ids": [],
+    }
     now = utc_now()
     for definition in events:
         event = connection.execute(
             "SELECT * FROM canonical_events WHERE event_id=?", (definition["event_id"],)
         ).fetchone()
         if event is None:
-            raise ValueError(f"Unknown event_id: {definition['event_id']}")
+            # Canonical quality recovery can intentionally delete an event
+            # after a reviewed relation config was published.  The relation
+            # is then stale input, not a reason to fail an otherwise healthy
+            # collection cycle.  Keep the omission explicit in the report so
+            # operators can remove the obsolete config entry.
+            result["stale_event_definitions"] += 1
+            result["stale_event_ids"].append(str(definition["event_id"]))
+            continue
         result["events"] += 1
         for entity in definition.get("entities", []):
             entity_id = stable_id(
@@ -138,7 +152,7 @@ def apply_relations(connection: Any, events: list[dict[str, Any]]) -> dict[str, 
     return result
 
 
-def write_report(path: Path, events: list[dict[str, Any]], result: dict[str, int]) -> None:
+def write_report(path: Path, events: list[dict[str, Any]], result: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "# Live Entity and Asset Relations",
@@ -147,6 +161,7 @@ def write_report(path: Path, events: list[dict[str, Any]], result: dict[str, int
         f"- New entity links: `{result['entities']}`",
         f"- Asset relations processed: `{result['asset_impacts']}`",
         f"- Market-observation relations: `{result['market_enabled']}`",
+        f"- Stale event definitions skipped: `{result['stale_event_definitions']}`",
         "- Direction policy: all M1 relations are `ABSTAIN`; observations are descriptive, not recommendations.",
         "- Candidate events cannot start market observation.",
         "",

@@ -13,6 +13,8 @@ BACKUP_RESTORE_TMPDIR="$BASE/shared/data/.backup-restore-tmp"
 MANAGED_UNIT_PATHS=(
     /etc/systemd/system/finance-radar.slice
     /etc/systemd/system/finance-radar-api.service
+    /etc/systemd/system/finance-radar-overview-snapshot.service
+    /etc/systemd/system/finance-radar-overview-snapshot.timer
     /etc/systemd/system/finance-radar-web.service
     /etc/systemd/system/finance-radar-admin.service
     /etc/systemd/system/finance-radar-reviewer.service
@@ -31,6 +33,8 @@ MANAGED_CONFIG_PATHS=(
 MANAGED_RUNTIME_UNITS=(
     finance-radar-backup.timer
     finance-radar-backup.service
+    finance-radar-overview-snapshot.timer
+    finance-radar-overview-snapshot.service
     finance-radar-evidence-llm.service
     finance-radar-worker.service
     finance-radar-admin.service
@@ -41,6 +45,8 @@ MANAGED_RUNTIME_UNITS=(
 )
 MANAGED_ENABLEMENT_UNITS=(
     finance-radar-api.service
+    finance-radar-overview-snapshot.service
+    finance-radar-overview-snapshot.timer
     finance-radar-web.service
     finance-radar-worker.service
     finance-radar-backup.timer
@@ -414,6 +420,8 @@ EOF
 for unit in \
     finance-radar.slice \
     finance-radar-api.service \
+    finance-radar-overview-snapshot.service \
+    finance-radar-overview-snapshot.timer \
     finance-radar-web.service \
     finance-radar-admin.service \
     finance-radar-reviewer.service \
@@ -436,6 +444,16 @@ BACKUP_QUIESCE_WRAPPER="$BASE/current/deployment/systemd/run_backup_quiesced.sh"
 }
 install -D -m 0750 -o root -g root \
     "$BACKUP_QUIESCE_WRAPPER" /usr/local/libexec/finance-radar/run_backup_quiesced.sh
+
+# The versioned backup unit writes its root-only verified-backup attestation
+# here.  A freshly restored host will not have the directory from the old
+# machine, so create it before systemd starts the backup timer.
+if [ -e /var/lib/finance-radar ] && \
+   { [ -L /var/lib/finance-radar ] || [ ! -d /var/lib/finance-radar ]; }; then
+    printf 'unsafe root backup attestation path after recovery\n' >&2
+    exit 6
+fi
+install -d -m 0700 -o root -g root /var/lib/finance-radar
 
 assert_public_web_identity_and_boundary() {
     local user group protect_proc proc_subset
@@ -478,15 +496,24 @@ if systemctl is-active --quiet finance-radar-evidence-llm.service || \
     printf 'evidence LLM must remain stopped and disabled after recovery\n' >&2
     exit 6
 fi
+systemctl start finance-radar-overview-snapshot.service
+systemctl enable finance-radar-overview-snapshot.service
 systemctl enable --now finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer
+systemctl enable --now finance-radar-overview-snapshot.timer
 
-for _ in $(seq 1 30); do
+# A restored production ledger performs the same synchronous overview
+# precomputation as an ordinary deployment. Match the installer's measured
+# cold-start allowance so restore activation does not reject a healthy API.
+for _ in $(seq 1 90); do
     curl -fsS http://127.0.0.1:18000/api/v1/health >/dev/null && break
     sleep 1
 done
 curl -fsS http://127.0.0.1:18000/api/v1/health >/dev/null
+curl -fsS http://127.0.0.1:18000/api/v1/overview >/dev/null
 curl -fsS http://127.0.0.1:18501/radar/_stcore/health >/dev/null
 systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer
+systemctl is-active --quiet finance-radar-overview-snapshot.timer
+test "$(systemctl show finance-radar-overview-snapshot.service -p Result --value)" = success
 assert_public_web_identity_and_boundary || {
     printf 'public Web identity or private-path isolation is not effective after recovery\n' >&2
     exit 6

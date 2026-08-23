@@ -10,6 +10,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _reviewer_principals_payload() -> str:
     """Load reviewer principals from one unambiguous secret source.
 
@@ -75,6 +82,10 @@ class Settings:
     artifact_dir: Path = ROOT / "artifacts"
     evidence_object_dir: Path = ROOT / "data" / "evidence_objects"
     replay_dir: Path = ROOT / "replay" / "cases"
+    # Production publishes the expensive overview projection as an atomic data
+    # artifact from a separate systemd process.  Local development and unit
+    # tests leave this unset and retain the lightweight in-process fallback.
+    overview_snapshot_path: Path | None = None
     demo_mode: str = "RECENT_CAPTURE"
     admin_token: str | None = None
     reviewer_token: str | None = None
@@ -89,6 +100,69 @@ class Settings:
     evidence_llm_model: str = "qwen2.5-0.5b-instruct-q4_k_m"
     evidence_llm_timeout_seconds: float = 30.0
     evidence_llm_max_tokens: int = 900
+    capture_llm_enabled: bool = False
+    capture_llm_provider: str = "disabled"
+    capture_llm_model: str = ""
+    capture_llm_base_url: str = ""
+    capture_llm_timeout_seconds: float = 45.0
+    capture_llm_max_tokens: int = 700
+    capture_llm_daily_usd_cap: float = 0.0
+    capture_llm_daily_cny_cap: float = 0.0
+    # A zero daily cap means unlimited. The worker still has bounded batches,
+    # leases, retry counts, timeouts and output tokens.
+    capture_llm_daily_request_cap: int = 0
+
+    def __post_init__(self) -> None:
+        """Fail closed when scoped credentials can impersonate one another.
+
+        Personal reviewer identity is derived from the credential presented to
+        the API.  Reusing an Admin, shared Reviewer or Operator secret as a
+        personal token would therefore let a shared role masquerade as a named
+        human.  Validate direct test/local construction as well as environment
+        loading so no startup path can create that ambiguity.
+        """
+
+        fingerprints: dict[str, str] = {}
+        for scope, token in (
+            ("admin", self.admin_token),
+            ("shared_reviewer", self.reviewer_token),
+            ("operator", self.operator_token),
+        ):
+            normalized = str(token or "").strip()
+            if not normalized:
+                continue
+            fingerprint = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+            previous = fingerprints.get(fingerprint)
+            if previous is not None:
+                raise ValueError(
+                    f"internal credentials must be distinct across scopes: {previous} and {scope}"
+                )
+            fingerprints[fingerprint] = scope
+
+        seen_ids: set[str] = set()
+        for principal_id, role, token in self.reviewer_principals:
+            normalized_id = str(principal_id or "").strip().casefold()
+            normalized_role = str(role or "").strip().upper()
+            normalized_token = str(token or "").strip()
+            if (
+                len(normalized_id) < 3
+                or normalized_role not in {"REVIEWER", "ARBITER"}
+                or len(normalized_token) < 24
+            ):
+                raise ValueError(
+                    "reviewer principal requires principal_id, role and a 24+ character token"
+                )
+            if normalized_id in seen_ids:
+                raise ValueError("reviewer principal IDs must be unique")
+            seen_ids.add(normalized_id)
+            fingerprint = hashlib.sha256(normalized_token.encode("utf-8")).hexdigest()
+            previous = fingerprints.get(fingerprint)
+            if previous is not None:
+                raise ValueError(
+                    "personal reviewer credentials must be distinct from every shared role "
+                    f"and other principal (collision with {previous})"
+                )
+            fingerprints[fingerprint] = f"principal:{normalized_id}"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -100,6 +174,11 @@ class Settings:
                 os.getenv("FINANCE_RADAR_EVIDENCE_OBJECT_DIR", cls.evidence_object_dir)
             ).resolve(),
             replay_dir=Path(os.getenv("FINANCE_RADAR_REPLAY_DIR", cls.replay_dir)).resolve(),
+            overview_snapshot_path=(
+                Path(os.environ["FINANCE_RADAR_OVERVIEW_SNAPSHOT_PATH"]).resolve()
+                if os.getenv("FINANCE_RADAR_OVERVIEW_SNAPSHOT_PATH")
+                else None
+            ),
             demo_mode=os.getenv("FINANCE_RADAR_DEMO_MODE", "RECENT_CAPTURE").upper(),
             admin_token=os.getenv("FINANCE_RADAR_ADMIN_TOKEN") or None,
             reviewer_token=os.getenv("FINANCE_RADAR_REVIEWER_TOKEN") or None,
@@ -135,6 +214,37 @@ class Settings:
             evidence_llm_max_tokens=max(
                 128,
                 int(os.getenv("FINANCE_RADAR_EVIDENCE_LLM_MAX_TOKENS", "900")),
+            ),
+            capture_llm_enabled=_env_flag("FINANCE_RADAR_CAPTURE_LLM_ENABLED", False),
+            capture_llm_provider=os.getenv(
+                "FINANCE_RADAR_CAPTURE_LLM_PROVIDER", "disabled"
+            ).strip().lower(),
+            capture_llm_model=os.getenv("FINANCE_RADAR_CAPTURE_LLM_MODEL", "").strip(),
+            capture_llm_base_url=os.getenv(
+                "FINANCE_RADAR_CAPTURE_LLM_BASE_URL", ""
+            ).strip(),
+            capture_llm_timeout_seconds=max(
+                1.0,
+                float(os.getenv("FINANCE_RADAR_CAPTURE_LLM_TIMEOUT_SECONDS", "45")),
+            ),
+            capture_llm_max_tokens=max(
+                128,
+                min(
+                    1200,
+                    int(os.getenv("FINANCE_RADAR_CAPTURE_LLM_MAX_TOKENS", "700")),
+                ),
+            ),
+            capture_llm_daily_usd_cap=max(
+                0.0,
+                float(os.getenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_USD_CAP", "0")),
+            ),
+            capture_llm_daily_cny_cap=max(
+                0.0,
+                float(os.getenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_CNY_CAP", "0")),
+            ),
+            capture_llm_daily_request_cap=max(
+                0,
+                int(os.getenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_REQUEST_CAP", "0")),
             ),
         )
 

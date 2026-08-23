@@ -29,6 +29,47 @@ def test_rate_limit_capacity_cannot_be_disabled_by_zero(monkeypatch) -> None:
     assert Settings.from_env().api_rate_limit_max_clients == 1
 
 
+def test_capture_llm_is_fail_closed_until_provider_key_and_budget_are_configured(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("FINANCE_RADAR_CAPTURE_LLM_ENABLED", raising=False)
+    monkeypatch.delenv("FINANCE_RADAR_CAPTURE_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("FINANCE_RADAR_CAPTURE_LLM_MODEL", raising=False)
+    monkeypatch.delenv("FINANCE_RADAR_CAPTURE_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_USD_CAP", raising=False)
+    monkeypatch.delenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_CNY_CAP", raising=False)
+    settings = Settings.from_env()
+    assert settings.capture_llm_enabled is False
+    assert settings.capture_llm_provider == "disabled"
+    assert settings.capture_llm_model == ""
+    assert settings.capture_llm_base_url == ""
+    assert settings.capture_llm_timeout_seconds == 45.0
+    assert settings.capture_llm_max_tokens == 700
+    assert settings.capture_llm_daily_usd_cap == 0.0
+    assert settings.capture_llm_daily_cny_cap == 0.0
+    assert settings.capture_llm_daily_request_cap == 0
+
+    monkeypatch.setenv("FINANCE_RADAR_CAPTURE_LLM_ENABLED", "true")
+    monkeypatch.setenv("FINANCE_RADAR_CAPTURE_LLM_PROVIDER", "future-provider")
+    monkeypatch.setenv("FINANCE_RADAR_CAPTURE_LLM_MODEL", "future-model")
+    monkeypatch.setenv("FINANCE_RADAR_CAPTURE_LLM_BASE_URL", "https://example.test")
+    monkeypatch.setenv("FINANCE_RADAR_CAPTURE_LLM_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("FINANCE_RADAR_CAPTURE_LLM_MAX_TOKENS", "9999")
+    monkeypatch.setenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_USD_CAP", "-5")
+    monkeypatch.setenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_CNY_CAP", "-2")
+    monkeypatch.setenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_REQUEST_CAP", "-1")
+    enabled = Settings.from_env()
+    assert enabled.capture_llm_enabled is True
+    assert enabled.capture_llm_provider == "future-provider"
+    assert enabled.capture_llm_model == "future-model"
+    assert enabled.capture_llm_base_url == "https://example.test"
+    assert enabled.capture_llm_timeout_seconds == 1.0
+    assert enabled.capture_llm_max_tokens == 1200
+    assert enabled.capture_llm_daily_usd_cap == 0.0
+    assert enabled.capture_llm_daily_cny_cap == 0.0
+    assert enabled.capture_llm_daily_request_cap == 0
+
+
 def test_scoped_internal_tokens_are_loaded_independently(monkeypatch) -> None:
     monkeypatch.setenv("FINANCE_RADAR_REVIEWER_TOKEN", "review-secret")
     monkeypatch.setenv("FINANCE_RADAR_OPERATOR_TOKEN", "operate-secret")
@@ -68,3 +109,42 @@ def test_reviewer_principals_reject_ambiguous_secret_sources(monkeypatch, tmp_pa
 
     with pytest.raises(ValueError, match="either environment JSON or a systemd credential"):
         Settings.from_env()
+
+
+def test_internal_and_personal_credentials_must_be_distinct(monkeypatch) -> None:
+    import pytest
+
+    shared = "same-secret-must-not-cross-role-boundaries-001"
+    monkeypatch.setenv("FINANCE_RADAR_ADMIN_TOKEN", shared)
+    monkeypatch.setenv("FINANCE_RADAR_REVIEWER_TOKEN", shared)
+    with pytest.raises(ValueError, match="distinct across scopes"):
+        Settings.from_env()
+
+    monkeypatch.setenv("FINANCE_RADAR_REVIEWER_TOKEN", "separate-shared-reviewer-secret-002")
+    monkeypatch.setenv(
+        "FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON",
+        json.dumps(
+            [
+                {
+                    "principal_id": "reviewer-a",
+                    "role": "REVIEWER",
+                    "token": shared,
+                }
+            ]
+        ),
+    )
+    with pytest.raises(ValueError, match="personal reviewer credentials must be distinct"):
+        Settings.from_env()
+
+
+def test_direct_settings_construction_rejects_duplicate_personal_credentials() -> None:
+    import pytest
+
+    duplicate = "duplicate-personal-reviewer-secret-000001"
+    with pytest.raises(ValueError, match="other principal"):
+        Settings(
+            reviewer_principals=(
+                ("reviewer-a", "REVIEWER", duplicate),
+                ("reviewer-b", "REVIEWER", duplicate),
+            )
+        )

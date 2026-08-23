@@ -11,6 +11,7 @@ import re
 import sys
 import urllib.parse
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from event_ledger import open_ledger, stable_id, stable_json, utc_now
 
 DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
 DEFAULT_REPORT = ROOT / "reports" / "live_candidate_extraction_latest.md"
+DISCOVERY_ADMISSION_CONTRACT = "event-admission-v1"
 
 
 @dataclass(frozen=True)
@@ -134,6 +136,22 @@ ENTITY_PATTERNS = (
     ("binance", re.compile(r"\bbinance\b", re.I)),
     ("coinbase", re.compile(r"\bcoinbase\b", re.I)),
 )
+ENTITY_DISPLAY_NAMES = {
+    "ostium": "Ostium",
+    "sk_hynix": "SK Hynix",
+    "openai": "OpenAI",
+    "hugging_face": "Hugging Face",
+    "iran": "Iran",
+    "russia": "Russia",
+    "ecb": "European Central Bank",
+    "federal_reserve": "Federal Reserve",
+    "binance": "Binance",
+    "coinbase": "Coinbase",
+}
+LEGAL_COMPANY_NAME = re.compile(
+    r"\b([A-Z][A-Za-z0-9&.'’/-]*(?:\s+[A-Z][A-Za-z0-9&.'’/-]*){0,7}\s+"
+    r"(?:Corporation|Corp\.?|Incorporated|Inc\.?|Limited|Ltd\.?|LLC|PLC|Holdings?|Group))\b"
+)
 CROSS_SOURCE_CLUSTER_ENTITIES = {"ostium", "binance", "coinbase"}
 CANDIDATE_CLUSTER_ENTITIES = {"ostium", "sk_hynix", "openai", "hugging_face"}
 
@@ -166,10 +184,14 @@ OPENNEWS_LIVE_OR_ROUNDUP = re.compile(
     re.I,
 )
 OPENNEWS_MONETARY_ACTION = re.compile(
-    r"\b(?:rate\s+(?:cut|hike|decision)|cuts?|raise[sd]?|hikes?|holds?|keeps?)\s+"
-    r"(?:the\s+)?(?:(?:policy|interest)\s+)?rates?\b|\b(?:policy\s+meeting|meeting\s+minutes|"
-    r"quantitative\s+(?:easing|tightening)|bond\s+purchases?|reserve\s+requirement)\b|"
-    r"降息|加息|利率决议|会议纪要",
+    r"\b(?:cuts?|raise[sd]?|hikes?|holds?|keeps?|maintains?)\s+"
+    r"(?:the\s+)?(?:(?:policy|interest)\s+)?rates?\b|"
+    r"\b(?:released?|published?|issued?)\b.{0,80}\b(?:policy\s+meeting|meeting\s+minutes)\b|"
+    r"\b(?:announc(?:e[sd]?|ing)|beg(?:an|ins)|end(?:s|ed|ing))\b.{0,80}"
+    r"\b(?:quantitative\s+(?:easing|tightening)|bond\s+purchases?)\b|"
+    r"\b(?:change[sd]?|raise[sd]?|cut|reduce[sd]?)\b.{0,80}\breserve\s+requirement\b|"
+    r"(?:宣布|决定|实施|维持|上调|下调).{0,40}(?:降息|加息|利率|准备金)|"
+    r"(?:发布|公布).{0,40}会议纪要",
     re.I,
 )
 OPENNEWS_FINANCIAL_TRANSMISSION = re.compile(
@@ -189,6 +211,21 @@ OPENNEWS_OPERATIONAL_SECURITY = re.compile(
     re.I,
 )
 OPENNEWS_INVALID_ASSET_TAGS = {"OPENAI"}
+MACRO_ASSET_PSEUDO_SUBJECTS = {
+    "BTC",
+    "BITCOIN",
+    "ETH",
+    "ETHEREUM",
+    "GOLD",
+    "XAU",
+    "SILVER",
+    "OIL",
+    "CRUDE OIL",
+    "SP500",
+    "S&P 500",
+    "NASDAQ",
+    "DOW",
+}
 OPENNEWS_ASSET_ALIASES = {
     "BTC": ("bitcoin",),
     "ETH": ("ethereum", "ether"),
@@ -217,10 +254,11 @@ def opennews_admission(row: Any, matched: EventRule) -> DiscoveryAdmission:
         return DiscoveryAdmission(False, "REJECT_NOISE", ("not_a_headline_event",))
     if OPENNEWS_LIVE_OR_ROUNDUP.search(discovery_text):
         return DiscoveryAdmission(False, "REJECT_NOISE", ("live_or_roundup_genre",))
-    scope = assess_risk_scope(discovery_text)
+    analysis_text = opennews_analysis_text(row) or discovery_text
+    scope = assess_risk_scope(analysis_text)
     if scope.decision == "REJECT_NOISE":
         return DiscoveryAdmission(False, scope.decision, tuple(scope.reason_codes))
-    if matched.event_type == "monetary_policy" and not OPENNEWS_MONETARY_ACTION.search(discovery_text):
+    if matched.event_type == "monetary_policy" and not OPENNEWS_MONETARY_ACTION.search(analysis_text):
         return DiscoveryAdmission(False, "REJECT_NOISE", ("central_bank_mention_without_policy_action",))
     if matched.event_type == "conflict_or_blockade" and not OPENNEWS_FINANCIAL_TRANSMISSION.search(discovery_text):
         return DiscoveryAdmission(False, "ADMIT_CONTEXT", ("geopolitical_story_without_financial_transmission",))
@@ -253,6 +291,35 @@ def opennews_discovery_text(row: Any) -> str | None:
     return headline[:800]
 
 
+def opennews_analysis_text(row: Any) -> str | None:
+    """Return all provider text useful for classification, never provider scores.
+
+    The headline remains the genre/quality anchor, while source-provided
+    summaries may contain the named actor or concrete action.  Ranking labels,
+    signals and coin tags are deliberately excluded from semantic admission.
+    """
+
+    try:
+        payload = json.loads(row["raw_json"])
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    item = payload.get("item") if isinstance(payload, dict) else None
+    values: list[str] = [str(row["title"] or ""), str(row["summary"] or "")]
+    if isinstance(item, dict):
+        values.extend(
+            str(item.get(key) or "")
+            for key in ("title", "content", "summary_zh", "summary_en")
+        )
+    unique: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = " ".join(html.unescape(re.sub(r"<br\s*/?>", "\n", value, flags=re.I)).split())
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            unique.append(cleaned)
+    return "\n".join(unique)[:4000] or None
+
+
 def recognized_entity(text: str) -> str | None:
     return next((name for name, pattern in ENTITY_PATTERNS if pattern.search(text)), None)
 
@@ -275,7 +342,8 @@ def classify_observation(row: Any) -> EventRule | None:
 
     if source_id == "opennews_free":
         discovery_text = opennews_discovery_text(row)
-        return classify(discovery_text) if discovery_text else None
+        analysis_text = opennews_analysis_text(row)
+        return classify(analysis_text) if discovery_text and analysis_text else None
 
     if source_id == "cftc_enforcement":
         return CFTC_ENFORCEMENT_RULE if CFTC_ENFORCEMENT_TRIGGER.search(text) else None
@@ -360,6 +428,80 @@ def canonicalize_url(value: str | None) -> str | None:
         host = "x.com"
     path = re.sub(r"/+$", "", parsed.path) or "/"
     return urllib.parse.urlunsplit((parsed.scheme.casefold(), host, path, "", ""))
+
+
+def observation_known_at(source_published_at: str | None, local_received_at: str) -> str:
+    values: list[datetime] = []
+    for value in (source_published_at, local_received_at):
+        if not value:
+            continue
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        values.append(parsed.astimezone(timezone.utc))
+    if not values:
+        raise ValueError("observation requires a published or received timestamp")
+    return max(values).isoformat()
+
+
+def record_sec_discovery_lead(connection: Any, row: Any, matched: EventRule, *, now: str) -> str:
+    """Keep an SEC filing as a lead until its documents support a scoped event.
+
+    A filing index proves that a document was filed.  It does not by itself
+    prove earnings deterioration, a management change, distress, a transaction,
+    or any other event predicate.
+    """
+
+    lead_id = stable_id("LEAD", str(row["observation_id"]))
+    event_date = (row["source_published_at"] or row["local_received_at"])[:10]
+    company_name = extract_company(str(row["raw_json"] or ""))
+    ticker = extract_symbol(
+        str(row["raw_json"] or ""),
+        f"{row['title']}\n{row['summary']}",
+    )
+    connection.execute(
+        """
+        INSERT INTO discovery_leads(
+            lead_id,observation_id,source_id,status,proposed_event_family,
+            proposed_event_type,company_name,ticker_at_event,event_date,known_at,
+            claim_action,claim_stage,claim_summary,evidence_url,evidence_passage,
+            evidence_status,source_content_sha256,matched_keywords_json,
+            admission_reasons_json,admission_contract_version,canonical_event_id,
+            created_at,updated_at,no_trading
+        ) VALUES (?,?,?,'PENDING_ENRICHMENT',?,?,?,?,?,?,NULL,NULL,NULL,?,NULL,
+                  'link_only_no_relevant_passage',?,'[]',?,?,NULL,?,?,1)
+        ON CONFLICT(observation_id) DO UPDATE SET
+            proposed_event_family=excluded.proposed_event_family,
+            proposed_event_type=excluded.proposed_event_type,
+            company_name=COALESCE(excluded.company_name,discovery_leads.company_name),
+            ticker_at_event=COALESCE(excluded.ticker_at_event,discovery_leads.ticker_at_event),
+            event_date=excluded.event_date,
+            known_at=excluded.known_at,
+            evidence_url=excluded.evidence_url,
+            source_content_sha256=excluded.source_content_sha256,
+            admission_reasons_json=excluded.admission_reasons_json,
+            admission_contract_version=excluded.admission_contract_version,
+            updated_at=excluded.updated_at
+        """,
+        (
+            lead_id,
+            row["observation_id"],
+            row["source_id"],
+            matched.event_family,
+            matched.event_type,
+            company_name,
+            ticker,
+            event_date,
+            observation_known_at(row["source_published_at"], row["local_received_at"]),
+            canonicalize_url(row["canonical_url"]) or "",
+            str(row["content_sha256"] or ""),
+            stable_json(["SEC_REQUIRES_DOCUMENT_SEMANTIC_MATCH"]),
+            DISCOVERY_ADMISSION_CONTRACT,
+            now,
+            now,
+        ),
+    )
+    return lead_id
 
 
 def normalized_title(value: str) -> str:
@@ -659,6 +801,49 @@ def extract_company(raw_json: str) -> str | None:
     return str(item.get("company") or "").strip() or None
 
 
+def extract_canonical_subject(
+    row: Any,
+    matched: EventRule | None = None,
+) -> tuple[str | None, str | None]:
+    """Return a displayable subject only when the source text identifies it.
+
+    Provider metadata may omit a dedicated company field.  A conservative
+    legal-name pattern and the existing bounded entity dictionary recover
+    obvious subjects without turning arbitrary headline nouns into issuers.
+    If both values remain empty, the observation stays preserved but must not
+    enter the canonical event ledger.
+    """
+
+    source_text = (
+        opennews_analysis_text(row)
+        or opennews_discovery_text(row)
+        or f"{str(row['title'] or '')}\n{str(row['summary'] or '')}"
+    )
+    ticker = extract_symbol(str(row["raw_json"] or ""), source_text)
+    company = extract_company(str(row["raw_json"] or ""))
+    if not company:
+        legal_name = LEGAL_COMPANY_NAME.search(html.unescape(source_text))
+        company = legal_name.group(1).strip() if legal_name else None
+    if not company:
+        entity = recognized_entity(source_text)
+        company = ENTITY_DISPLAY_NAMES.get(str(entity or ""))
+    if matched and matched.event_family in {"macro_policy", "macro_data", "geopolitical"}:
+        # GOLD/BTC/index tags are affected assets in macro/geopolitical stories,
+        # not the actor who made a policy decision or caused an event.
+        provider_assets = {
+            symbol.removeprefix("XYZ-")
+            for symbol in _opennews_coin_tags(str(row["raw_json"] or ""))
+        }
+        if company and (
+            company.strip().upper() in provider_assets
+            or company.strip().upper() in MACRO_ASSET_PSEUDO_SUBJECTS
+        ):
+            actor = recognized_entity(source_text)
+            company = ENTITY_DISPLAY_NAMES.get(str(actor or ""))
+        ticker = None
+    return company, ticker
+
+
 def provisional_grade_cap(authority_tier: str) -> str:
     if authority_tier.startswith("P0"):
         return "A_P0_official_candidate"
@@ -898,7 +1083,7 @@ def process_pending(
     rows = connection.execute(
         """
         SELECT j.*,r.source_id,r.source_published_at,r.local_received_at,r.title,r.summary,
-               r.canonical_url,r.raw_json,s.authority_tier
+               r.canonical_url,r.content_sha256,r.raw_json,s.authority_tier
         FROM observation_jobs j
         JOIN latest_source_content r ON r.observation_id=j.observation_id
         JOIN sources s ON s.source_id=r.source_id
@@ -916,8 +1101,10 @@ def process_pending(
     result: dict[str, Any] = {
         "processed": 0,
         "candidates": 0,
+        "discovery_leads": 0,
         "no_candidate": 0,
         "scope_filtered": 0,
+        "subject_filtered": 0,
         "backpressure_filtered": 0,
         "new_events": 0,
         "linked_observations": 0,
@@ -941,6 +1128,30 @@ def process_pending(
                 (now, row["job_id"]),
             )
             result["no_candidate"] += 1
+            continue
+
+        if str(row["source_id"]) == "sec_current_filings":
+            record_sec_discovery_lead(connection, row, matched, now=now)
+            connection.execute(
+                """UPDATE observation_jobs
+                   SET status='COMPLETED_DISCOVERY_LEAD',attempts=attempts+1,
+                       last_error='sec_parse_before_canonical',updated_at=?
+                   WHERE job_id=?""",
+                (now, row["job_id"]),
+            )
+            result["discovery_leads"] += 1
+            continue
+
+        company_name, ticker_at_event = extract_canonical_subject(row, matched)
+        if not company_name and not ticker_at_event:
+            connection.execute(
+                """UPDATE observation_jobs
+                   SET status='COMPLETED_SUBJECT_FILTERED',attempts=attempts+1,
+                       last_error='subject_unresolved_not_canonical',updated_at=?
+                   WHERE job_id=?""",
+                (now, row["job_id"]),
+            )
+            result["subject_filtered"] += 1
             continue
 
         is_p2 = not str(row["authority_tier"]).startswith(("P0", "P1"))
@@ -991,6 +1202,17 @@ def process_pending(
             "auto_verification_allowed": False,
             "no_trading": True,
         }
+        if str(row["source_id"]) == "opennews_free":
+            affected_assets = sorted(
+                {
+                    symbol.removeprefix("XYZ-")
+                    for symbol in _opennews_coin_tags(str(row["raw_json"] or ""))
+                    if symbol.removeprefix("XYZ-")
+                    and symbol.removeprefix("XYZ-") not in OPENNEWS_INVALID_ASSET_TAGS
+                }
+            )
+            if affected_assets:
+                facts["affected_assets"] = affected_assets
         connection.execute(
             """
             INSERT OR IGNORE INTO canonical_events(
@@ -1006,11 +1228,8 @@ def process_pending(
                 event_date,
                 row["local_received_at"],
                 now,
-                extract_symbol(
-                    row["raw_json"],
-                    opennews_discovery_text(row) or f"{row['title']}\n{row['summary']}",
-                ),
-                extract_company(row["raw_json"]),
+                ticker_at_event,
+                company_name,
                 grade_cap,
                 row["source_id"],
             ),
@@ -1085,6 +1304,7 @@ def write_report(path: Path, result: dict[str, Any], connection: Any) -> None:
         f"- Candidate observations: `{result['candidates']}`",
         f"- Unique candidate events this run: `{result['unique_events']}`",
         f"- No-rule observations: `{result['no_candidate']}`",
+        f"- Subject-unresolved observations kept outside canonical events: `{result.get('subject_filtered', 0)}`",
         f"- Retracted stale aggregated-discovery reviews: `{result.get('retracted_events', 0)}`",
         f"- Aggregated duplicates attached to verified events: `{result.get('duplicate_events_reconciled', 0)}`",
         "- Safety: every automatic output remains `candidate`; even P0 official discovery does not auto-verify severity.",

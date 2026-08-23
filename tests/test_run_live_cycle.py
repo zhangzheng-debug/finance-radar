@@ -252,8 +252,12 @@ class LiveCycleLeaseTests(unittest.TestCase):
             self.assertEqual(result["already_run"], 1)
             self.assertEqual(result["stale_or_legacy_rerun"], 0)
             self.assertEqual(result["by_job_type"], {"light_verification_followup": 1})
-            self.assertEqual(statuses["light-followup"], "PENDING_HUMAN_REVIEW")
+            self.assertEqual(statuses["light-followup"], "COMPLETED_NEEDS_EVIDENCE")
             self.assertEqual(statuses["unrelated-evidence-job"], "PENDING_EVIDENCE_REVIEW")
+            workflow = connection.execute(
+                "SELECT workflow_state FROM event_fact_workflow WHERE event_id='evt-light'"
+            ).fetchone()
+            self.assertEqual(workflow["workflow_state"], "NEEDS_EVIDENCE")
             canonical = connection.execute(
                 "SELECT status,label_status FROM canonical_events WHERE event_id='evt-light'"
             ).fetchone()
@@ -335,7 +339,11 @@ class LiveCycleLeaseTests(unittest.TestCase):
                 status = connection.execute(
                     "SELECT status FROM pipeline_jobs WHERE job_id='job-current'"
                 ).fetchone()[0]
-                self.assertEqual(status, "PENDING_HUMAN_REVIEW")
+                self.assertEqual(status, "COMPLETED_NEEDS_EVIDENCE")
+                workflow = connection.execute(
+                    "SELECT workflow_state FROM event_fact_workflow WHERE event_id='evt-current'"
+                ).fetchone()
+                self.assertEqual(workflow["workflow_state"], "NEEDS_EVIDENCE")
                 connection.close()
 
     def test_continuous_cycle_has_no_legacy_config_write_authority(self) -> None:

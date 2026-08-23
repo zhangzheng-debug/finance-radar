@@ -7,6 +7,8 @@ import argparse
 import base64
 import os
 import secrets
+import shutil
+import tempfile
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -65,7 +67,10 @@ def encrypt_file(source: str | Path, destination: str | Path, passphrase: str) -
 
 
 def decrypt_file(source: str | Path, destination: str | Path, passphrase: str) -> dict[str, int | str]:
-    source_path, destination_path, temporary = _paths(source, destination)
+    source_path, destination_path, _ = _paths(source, destination)
+    temporary = destination_path.with_name(
+        f"{destination_path.name}.partial-{secrets.token_hex(8)}"
+    )
     minimum = len(MAGIC) + SALT_BYTES + NONCE_BYTES + TAG_BYTES
     if source_path.stat().st_size < minimum:
         raise ValueError("encrypted backup is truncated")
@@ -84,14 +89,36 @@ def decrypt_file(source: str | Path, destination: str | Path, passphrase: str) -
         decryptor.authenticate_additional_data(header)
         remaining = ciphertext_bytes
         try:
-            with temporary.open("wb") as destination_handle:
+            # GCM authenticates only at finalize().  Do not stream those
+            # unauthenticated bytes into a named destination-side .partial
+            # file.  TemporaryFile is anonymous on supported POSIX systems
+            # (and delete-on-close elsewhere); only after authentication
+            # succeeds is a named 0600 staging file created for atomic replace.
+            with tempfile.TemporaryFile(
+                mode="w+b",
+                dir=destination_path.parent,
+            ) as authenticated_plaintext:
                 while remaining:
                     chunk = source_handle.read(min(CHUNK_BYTES, remaining))
                     if not chunk:
                         raise ValueError("encrypted backup is truncated")
                     remaining -= len(chunk)
-                    destination_handle.write(decryptor.update(chunk))
-                destination_handle.write(decryptor.finalize())
+                    authenticated_plaintext.write(decryptor.update(chunk))
+                authenticated_plaintext.write(decryptor.finalize())
+                authenticated_plaintext.seek(0)
+                descriptor = os.open(
+                    temporary,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                )
+                with os.fdopen(descriptor, "wb") as destination_handle:
+                    shutil.copyfileobj(
+                        authenticated_plaintext,
+                        destination_handle,
+                        length=CHUNK_BYTES,
+                    )
+                    destination_handle.flush()
+                    os.fsync(destination_handle.fileno())
             os.replace(temporary, destination_path)
         except Exception:
             temporary.unlink(missing_ok=True)

@@ -34,11 +34,15 @@ TasksMax=128
 MemoryAccounting=true
 OOMPolicy=stop
 OOMScoreAdjust=700
-TimeoutStartSec=45min
+# Production recovery bundles now include the evidence tree as well as both
+# SQLite databases.  On the 1-GiB host, the bounded full write + hash + two
+# isolated restore drills can legitimately exceed 45 minutes.  Keep a finite
+# ceiling, but leave enough room for the verified job to finish.
+TimeoutStartSec=90min
 TimeoutStopSec=2min
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/finance-radar/shared/data
+ReadWritePaths=/opt/finance-radar/shared/data /var/lib/finance-radar

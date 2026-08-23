@@ -81,8 +81,21 @@ def assess(data: dict[str, Any], endpoint: str) -> dict[str, Any]:
             providers.get("ibkr_tws_readonly", {}).get("status") == "LOCAL_PROBE_ONLY"
             and providers.get("ibkr_tws_readonly", {}).get("deployment") == "OPERATOR_DESKTOP"
         ),
-        "observer_relative_horizons_declared": horizon_policy.get("windows")
-        == ["t_plus_5m", "t_plus_30m", "t_plus_1d"],
+        "reaction_anchor_horizons_declared": horizon_policy.get("windows")
+        == [
+            "t_plus_5m",
+            "t_plus_30m",
+            "t_plus_2h",
+            "next_close",
+            "t_plus_1d",
+            "t_plus_5d",
+        ],
+        "event_anchor_contract_declared": (
+            horizon_policy.get("baseline") == "version_bound_exact_event_anchor"
+            and horizon_policy.get("anchor_contract") == "market-anchor-v1"
+            and horizon_policy.get("known_at_rule")
+            == "max_source_published_at_local_received_at"
+        ),
         "missed_windows_never_backfilled": horizon_policy.get("missed_window_behavior")
         == "record_MISSED_WINDOW_without_latest_quote_substitution",
         "horizon_metrics_post_event_only": horizon_policy.get("return_metric_scope")

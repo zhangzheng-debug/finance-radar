@@ -4,6 +4,7 @@ import json
 import inspect
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -86,6 +87,9 @@ class ProductLayerTests(unittest.TestCase):
             replay_dir=ROOT / "replay" / "cases",
             demo_mode="RECENT_CAPTURE",
             admin_token="test-secret",
+            reviewer_principals=(
+                ("student-reviewer", "REVIEWER", "student-reviewer-personal-token-000001"),
+            ),
             api_base_url="http://testserver",
             web_base_url="http://testserver",
         )
@@ -96,7 +100,7 @@ class ProductLayerTests(unittest.TestCase):
     def test_repository_exposes_evidence_linked_event(self) -> None:
         repository = LedgerRepository(self.ledger_path)
         health = repository.health()
-        self.assertEqual(health["schema_version"], 12)
+        self.assertEqual(health["schema_version"], 14)
         self.assertEqual(health["audit"]["trading_boundary_violations"], 0)
         detail = repository.event_detail("evt-1")
         self.assertEqual(detail["event"]["no_trading"], 1)
@@ -239,7 +243,18 @@ class ProductLayerTests(unittest.TestCase):
         self.assertTrue(all(not item["order_endpoints_present"] for item in providers.values()))
         self.assertEqual(
             capabilities["horizon_policy"]["windows"],
-            ["t_plus_5m", "t_plus_30m", "t_plus_1d"],
+            [
+                "t_plus_5m",
+                "t_plus_30m",
+                "t_plus_2h",
+                "next_close",
+                "t_plus_1d",
+                "t_plus_5d",
+            ],
+        )
+        self.assertEqual(
+            capabilities["horizon_policy"]["baseline"],
+            "version_bound_exact_event_anchor",
         )
         self.assertFalse(capabilities["horizon_policy"]["continuous_quote_feed"])
 
@@ -281,10 +296,17 @@ class ProductLayerTests(unittest.TestCase):
             facets = client.get("/api/v1/events/facets")
             self.assertEqual(facets.status_code, 200)
             self.assertTrue(facets.json()["data"]["read_only"])
-            filtered = client.get("/api/v1/events", params={"source": "test"})
+            filtered = client.get(
+                "/api/v1/events",
+                params={"source": "test"},
+                headers={"X-Admin-Token": "test-secret"},
+            )
             self.assertEqual(filtered.status_code, 200)
             self.assertEqual(filtered.json()["data"]["total"], 1)
-            detail = client.get("/api/v1/events/evt-1")
+            detail = client.get(
+                "/api/v1/events/evt-1",
+                headers={"X-Admin-Token": "test-secret"},
+            )
             self.assertEqual(detail.status_code, 200)
             self.assertTrue(detail.json()["data"]["model_shadow_output"]["no_trading"])
             self.assertTrue(
@@ -374,9 +396,8 @@ class ProductLayerTests(unittest.TestCase):
 
             override = client.post(
                 "/api/v1/events/evt-1/human-override",
-                headers={"X-Admin-Token": "test-secret"},
+                headers={"X-Reviewer-Token": "student-reviewer-personal-token-000001"},
                 json={
-                    "actor": "student-reviewer",
                     "reason": "Verified SEC 8-K Item 1.03 passage against the incident summary.",
                     "review_status": "REVIEWED_NO_CHANGE",
                     "reviewer_attestation": True,
@@ -384,6 +405,8 @@ class ProductLayerTests(unittest.TestCase):
             )
             self.assertEqual(override.status_code, 200)
             self.assertTrue(override.json()["data"]["no_trading"])
+            self.assertTrue(override.json()["data"]["credential_bound"])
+            self.assertTrue(override.json()["data"]["reviewer_principal"].startswith("human-"))
             trace = client.get(
                 "/api/v1/events/evt-1/trace",
                 headers={"X-Admin-Token": "test-secret"},
@@ -405,9 +428,8 @@ class ProductLayerTests(unittest.TestCase):
         with TestClient(create_app(self.settings)) as client:
             response = client.post(
                 "/api/v1/events/evt-1/human-override",
-                headers={"X-Admin-Token": "test-secret"},
+                headers={"X-Reviewer-Token": "student-reviewer-personal-token-000001"},
                 json={
-                    "actor": "student-reviewer",
                     "reason": "No agent decision exists yet",
                     "review_status": "HUMAN_REVIEW",
                     "reviewer_attestation": True,
@@ -435,9 +457,8 @@ class ProductLayerTests(unittest.TestCase):
 
             response = client.post(
                 "/api/v1/events/evt-1/human-override",
-                headers={"X-Admin-Token": "test-secret"},
+                headers={"X-Reviewer-Token": "student-reviewer-personal-token-000001"},
                 json={
-                    "actor": "student-reviewer",
                     "reason": "Reviewed the revised SEC passage against the current incident summary.",
                     "review_status": "HUMAN_REVIEW",
                     "reviewer_attestation": True,
@@ -482,45 +503,41 @@ class ProductLayerTests(unittest.TestCase):
                 "EVIDENCE_CHANGE_CONFIRMATION_REQUIRED",
             )
 
-    def test_human_override_rejects_placeholder_attribution(self) -> None:
+    def test_human_override_rejects_admin_or_body_supplied_attribution(self) -> None:
         with TestClient(create_app(self.settings)) as client:
-            response = client.post(
+            admin_response = client.post(
                 "/api/v1/events/evt-1/human-override",
                 headers={"X-Admin-Token": "test-secret"},
                 json={
-                    "actor": "defense-reviewer",
                     "reason": "Verified the exact primary-source passage",
                     "review_status": "REVIEWED_NO_CHANGE",
                     "reviewer_attestation": True,
                 },
             )
-            self.assertEqual(response.status_code, 422)
+            self.assertEqual(admin_response.status_code, 403)
             self.assertEqual(
-                response.json()["error"]["code"], "SPECIFIC_REVIEWER_ID_REQUIRED"
+                admin_response.json()["error"]["code"], "BOUND_REVIEWER_PRINCIPAL_REQUIRED"
             )
 
-    def test_human_override_rejects_whitespace_only_normalized_attribution(self) -> None:
-        with TestClient(create_app(self.settings)) as client:
-            blank_actor = client.post(
+            body_actor = client.post(
                 "/api/v1/events/evt-1/human-override",
-                headers={"X-Admin-Token": "test-secret"},
+                headers={"X-Reviewer-Token": "student-reviewer-personal-token-000001"},
                 json={
-                    "actor": "   ",
-                    "reason": "A reviewer checked the current evidence for this specific event.",
+                    "actor": "another-person",
+                    "reason": "Verified the exact primary-source passage for the current event.",
                     "review_status": "REVIEWED_NO_CHANGE",
                     "reviewer_attestation": True,
                 },
             )
-            self.assertEqual(blank_actor.status_code, 422)
-            self.assertEqual(
-                blank_actor.json()["error"]["code"], "SPECIFIC_REVIEWER_ID_REQUIRED"
-            )
+            self.assertEqual(body_actor.status_code, 422)
+            self.assertEqual(body_actor.json()["error"]["code"], "VALIDATION_ERROR")
 
+    def test_human_override_rejects_whitespace_only_normalized_rationale(self) -> None:
+        with TestClient(create_app(self.settings)) as client:
             blank_reason = client.post(
                 "/api/v1/events/evt-1/human-override",
-                headers={"X-Admin-Token": "test-secret"},
+                headers={"X-Reviewer-Token": "student-reviewer-personal-token-000001"},
                 json={
-                    "actor": "student-reviewer",
                     "reason": "                    ",
                     "review_status": "REVIEWED_NO_CHANGE",
                     "reviewer_attestation": True,
@@ -694,28 +711,55 @@ class ProductLayerTests(unittest.TestCase):
         operations = OperationsRepository(self.settings.operations_db)
         replay = ReplayService(
             self.settings.replay_dir,
-            RiskRouter(Path(self.temp_dir.name) / "missing.joblib"),
+            RiskRouter(
+                ROOT / "artifacts" / "risk_router.joblib",
+                ROOT / "artifacts" / "risk_router_model_card.json",
+            ),
             operations,
         )
         results = [replay.run(case["case_id"]) for case in replay.cases()]
         self.assertEqual(len(results), 4)
         self.assertTrue(all(result["expectation_met"] for result in results))
         self.assertTrue(all(not result["external_network_used"] for result in results))
+        self.assertTrue(
+            all(
+                step["evidence_state"]["version"] == "structured-evidence-gate-v1"
+                for result in results
+                for step in result["steps"]
+            )
+        )
         risk_case = next(result for result in results if result["case_id"] == "sec_bankruptcy_verified")
         self.assertEqual(risk_case["steps"][0]["shadow_decision"]["label"], "ABSTAIN")
         self.assertFalse(risk_case["steps"][0]["shadow_decision"]["alert_eligible"])
+        self.assertEqual(risk_case["steps"][0]["evidence_state"]["state"], "DISCOVERY_ONLY")
+        self.assertEqual(
+            risk_case["steps"][1]["evidence_state"]["state"],
+            "PRIMARY_SUPPORTED_REVIEWED",
+        )
         self.assertTrue(risk_case["steps"][1]["shadow_decision"]["alert_eligible"])
         correction_case = next(
             result for result in results if result["case_id"] == "sec_filing_corrected_abstain"
         )
         self.assertTrue(correction_case["steps"][0]["shadow_decision"]["alert_eligible"])
-        self.assertEqual(correction_case["steps"][1]["evidence_state"]["status"], "CONFLICT_REVIEW")
+        self.assertEqual(correction_case["steps"][1]["evidence_state"]["state"], "CONFLICTED")
         self.assertEqual(correction_case["steps"][1]["shadow_decision"]["label"], "ABSTAIN")
         self.assertFalse(correction_case["steps"][1]["shadow_decision"]["alert_eligible"])
         self.assertEqual(correction_case["steps"][1]["observation"]["revision_kind"], "CORRECTION")
         self.assertEqual(correction_case["steps"][1]["observation"]["supersedes_step"], 1)
         self.assertEqual(len(operations.replay_runs()), 4)
         self.assertTrue(all(run["status"] == "COMPLETED" for run in operations.replay_runs()))
+
+    def test_replay_rejects_lookalike_primary_authority_tiers(self) -> None:
+        adapted = ReplayService._router_evidence(
+            [
+                {
+                    "source": "malformed-tier-fixture",
+                    "authority_tier": "P00",
+                    "passage": "A quoted passage must not become primary evidence through a prefix match.",
+                }
+            ]
+        )
+        self.assertEqual(adapted[0]["evidence_status"], "candidate_passage")
 
     def test_online_backup_and_isolated_restore_drill(self) -> None:
         operations = OperationsRepository(self.settings.operations_db)
@@ -891,6 +935,72 @@ class ProductLayerTests(unittest.TestCase):
             self.assertEqual(status, "FAILED")
             self.assertNotIn("finished_at", result)
             self.assertFalse(report_path.exists())
+        finally:
+            if prior is None:
+                report_path.unlink(missing_ok=True)
+            else:
+                report_path.write_bytes(prior)
+
+    @patch("app.workers.continuous.subprocess.run")
+    def test_worker_timeout_preserves_stage_and_releases_only_owned_lease(self, run_mock) -> None:
+        report_path = ROOT / "reports" / "live_cycle_latest.json"
+        prior = report_path.read_bytes() if report_path.exists() else None
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def timed_out(command, **kwargs):
+            token = command[command.index("--lease-token") + 1]
+            with closing(sqlite3.connect(self.settings.ledger_db)) as connection:
+                connection.execute(
+                    """INSERT INTO runtime_leases(
+                           lease_name,lease_token,acquired_at,expires_at
+                       ) VALUES ('live_cycle',?,?,?)""",
+                    (
+                        token,
+                        "2026-08-22T00:00:00+00:00",
+                        "2099-08-22T00:00:00+00:00",
+                    ),
+                )
+                connection.commit()
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "started_at": "2026-08-22T00:00:00+00:00",
+                        "official_sources": {"sec_current_filings": {"items": 10}},
+                        "progress": {
+                            "stage": "shadow_routing",
+                            "updated_at": "2026-08-22T00:09:00+00:00",
+                            "complete": False,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            raise subprocess.TimeoutExpired(
+                command,
+                kwargs["timeout"],
+                output="partial stdout",
+                stderr="",
+            )
+
+        run_mock.side_effect = timed_out
+        try:
+            operations = OperationsRepository(self.settings.operations_db)
+            status, result = execute_cycle(
+                self.settings,
+                operations,
+                send=False,
+                timeout=1,
+                health_only=False,
+            )
+            self.assertEqual(status, "DEGRADED")
+            self.assertEqual(result["progress"]["stage"], "shadow_routing")
+            self.assertTrue(result["process"]["timed_out"])
+            self.assertTrue(result["process"]["owned_lease_released"])
+            with closing(sqlite3.connect(self.settings.ledger_db)) as connection:
+                remaining = connection.execute(
+                    "SELECT COUNT(*) FROM runtime_leases WHERE lease_name='live_cycle'"
+                ).fetchone()[0]
+            self.assertEqual(remaining, 0)
         finally:
             if prior is None:
                 report_path.unlink(missing_ok=True)

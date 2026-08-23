@@ -8,7 +8,11 @@ from typing import Any
 
 import joblib
 
-from .evidence_policy import is_conflicting_evidence_status
+from app.evidence_policy import (
+    is_conflicting_evidence_status,
+    is_primary_authority_tier,
+    is_strict_dual_human_evidence,
+)
 from .risk_scope_gate import GATE_VERSION, assess_risk_scope
 from .semantic_policy_gate import SEMANTIC_POLICY_VERSION, assess_semantic_policy
 
@@ -46,6 +50,9 @@ def derive_evidence_context(evidence: list[dict[str, Any]]) -> dict[str, Any]:
     if any(is_conflicting_evidence_status(status) for status in statuses):
         state = "CONFLICTED"
         reasons = ["contradictory_primary_evidence"]
+    elif any(is_strict_dual_human_evidence(item) for item in evidence):
+        state = "PRIMARY_SUPPORTED_REVIEWED"
+        reasons = ["dual_human_primary_exact_passage"]
     elif statuses & {"confirmed_primary", "accepted_manual_primary_evidence"}:
         state = "PRIMARY_SUPPORTED_REVIEWED"
         reasons = ["reviewed_primary_exact_passage"]
@@ -55,7 +62,7 @@ def derive_evidence_context(evidence: list[dict[str, Any]]) -> dict[str, Any]:
     elif any(
         str(item.get("evidence_status") or "") == "machine_extracted_unreviewed"
         and str(item.get("source_id") or "") in MACHINE_PRIMARY_SOURCES
-        and str(item.get("authority_tier") or "").startswith(("P0", "P1"))
+        and is_primary_authority_tier(item.get("authority_tier"))
         and 60 <= len(" ".join(str(item.get("evidence_passage") or "").split())) <= 6000
         for item in evidence
     ):

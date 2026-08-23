@@ -1,6 +1,6 @@
 [Unit]
 Description=Finance Radar aggregate resource budget
-Before=finance-radar-api.service finance-radar-web.service finance-radar-worker.service finance-radar-backup.service finance-radar-admin.service finance-radar-reviewer.service finance-radar-operator.service finance-radar-evidence-llm.service
+Before=finance-radar-api.service finance-radar-overview-snapshot.service finance-radar-web.service finance-radar-worker.service finance-radar-backup.service finance-radar-admin.service finance-radar-reviewer.service finance-radar-operator.service finance-radar-evidence-llm.service
 
 [Slice]
 # The production host has about 1 GiB of RAM.  This is an aggregate guardrail,

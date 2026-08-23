@@ -1,0 +1,54 @@
+[Unit]
+Description=Finance Radar advisory capture interpretation worker
+After=network-online.target finance-radar-worker.service
+Wants=network-online.target
+ConditionPathExists=/etc/finance-radar/deepseek-api-key
+
+[Service]
+Type=oneshot
+User=finance-radar
+Group=finance-radar
+WorkingDirectory=/opt/finance-radar/current
+# Keep this external provider worker independent from the shared private
+# runtime environment.  In particular it must never receive or be able to read
+# the administrator, reviewer or operator credentials carried there.
+Environment=PYTHONUNBUFFERED=1
+Environment=OMP_NUM_THREADS=1
+Environment=FINANCE_RADAR_DB=/opt/finance-radar/shared/data/finance_radar.sqlite3
+Environment=FINANCE_RADAR_OPS_DB=/opt/finance-radar/shared/data/finance_radar_operations.sqlite3
+Environment=FINANCE_RADAR_CAPTURE_LLM_ENABLED=1
+Environment=FINANCE_RADAR_CAPTURE_LLM_PROVIDER=deepseek
+Environment=FINANCE_RADAR_CAPTURE_LLM_MODEL=deepseek-v4-flash
+Environment=FINANCE_RADAR_CAPTURE_LLM_BASE_URL=https://api.deepseek.com
+Environment=FINANCE_RADAR_CAPTURE_LLM_TIMEOUT_SECONDS=45
+Environment=FINANCE_RADAR_CAPTURE_LLM_MAX_TOKENS=700
+Environment=FINANCE_RADAR_CAPTURE_LLM_DAILY_CNY_CAP=0
+Environment=FINANCE_RADAR_CAPTURE_LLM_DAILY_REQUEST_CAP=0
+UnsetEnvironment=DEEPSEEK_API_KEY FINANCE_RADAR_ADMIN_TOKEN FINANCE_RADAR_REVIEWER_TOKEN FINANCE_RADAR_OPERATOR_TOKEN FINANCE_RADAR_REVIEWER_PRINCIPALS_JSON
+LoadCredential=deepseek_api_key:/etc/finance-radar/deepseek-api-key
+ExecStartPre=/usr/bin/test -s %d/deepseek_api_key
+ExecStart=/opt/finance-radar/venv/bin/python -B scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 100000 --workers 3
+NoNewPrivileges=true
+UMask=0077
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryHigh=220M
+MemoryMax=320M
+TasksMax=32
+ReadWritePaths=/opt/finance-radar/shared/data
+InaccessiblePaths=-/etc/finance-radar.env -/etc/finance-radar-public.env -/etc/finance-radar-reviewer-principals.json -/opt/finance-radar/current/.env -/opt/finance-radar/current/.env.local -/opt/finance-radar/shared/reports
+
+[Install]
+WantedBy=multi-user.target

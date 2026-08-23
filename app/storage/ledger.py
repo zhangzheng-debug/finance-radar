@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from contextlib import closing
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from app.evidence_policy import register_sqlite_integrity_functions
 
 
 EVIDENCE_SNAPSHOT_SOURCE_IDS = (
@@ -29,8 +32,517 @@ EVIDENCE_SNAPSHOT_SOURCE_IDS = (
 )
 
 
-PUBLIC_EVENT_STATE_CTE = """
-WITH ranked_rough_reviews AS (
+_CURRENT_SOURCE_CONTENT_CTES = """
+ranked_source_revisions AS (
+    SELECT sr.*,
+           ROW_NUMBER() OVER (
+               PARTITION BY sr.observation_id
+               ORDER BY sr.revision_no DESC
+           ) AS source_revision_rank
+    FROM source_revisions sr
+),
+current_source_content AS (
+    SELECT r.observation_id,
+           r.source_id,
+           r.external_id,
+           CASE
+             WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.published_at')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.created_at')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.posted_at')),''),
+               r.source_published_at
+             )
+             ELSE r.source_published_at
+           END AS source_published_at,
+           r.local_received_at,
+           COALESCE(sr.title,r.title) AS title,
+           COALESCE(sr.summary,r.summary) AS summary,
+           CASE
+             WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.link')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.url')),''),
+               r.canonical_url
+             )
+             ELSE r.canonical_url
+           END AS canonical_url,
+           COALESCE(sr.content_sha256,r.content_sha256) AS content_sha256,
+           COALESCE(sr.raw_json,r.raw_json) AS raw_json,
+           CASE WHEN sr.revision_kind='delete'
+                THEN 'deleted' ELSE r.observation_status END AS observation_status,
+           COALESCE(sr.revision_no,0) AS latest_revision_no,
+           COALESCE(sr.revision_kind,'new') AS latest_revision_kind,
+           COALESCE(sr.revision_at,r.local_received_at) AS latest_revision_at
+    FROM raw_observations r
+    LEFT JOIN ranked_source_revisions sr
+      ON sr.observation_id=r.observation_id
+     AND sr.source_revision_rank=1
+)
+""".strip()
+
+
+_DUAL_HUMAN_RECEIPT_MATCH_SQL = """
+json_valid(current_version.facts_json)
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.contract_version'
+    )='dual-human-selected-evidence-receipt-v2'
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.contract_version'
+    )='event-fact-review-v2'
+AND json_extract(
+      current_version.facts_json,
+      '$.human_fact_claim.contract_version'
+    )='human-fact-claim-v1'
+AND json_sha256(json_remove(
+      json_extract(
+        current_version.facts_json,
+        '$.dual_human_fact_review.selected_evidence_receipt'
+      ),
+      '$.receipt_sha256'
+    ))=LOWER(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.receipt_sha256'
+    ))
+AND json_sha256(json_remove(
+      json_extract(current_version.facts_json,'$.human_fact_claim'),
+      '$.canonical_claim_sha256',
+      '$.public_fact_summary',
+      '$.public_fact_summary_sha256'
+    ))=LOWER(json_extract(
+      current_version.facts_json,'$.human_fact_claim.canonical_claim_sha256'
+    ))
+AND text_sha256(json_extract(
+      current_version.facts_json,'$.human_fact_claim.public_fact_summary'
+    ))=LOWER(json_extract(
+      current_version.facts_json,'$.human_fact_claim.public_fact_summary_sha256'
+    ))
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.target_status'
+    )='verified'
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_id'
+    )=ev.evidence_id
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.event_id'
+    )=ev.event_id
+AND CAST(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.event_version'
+    ) AS INTEGER)=rel.event_version
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.evidence_id'
+    )=ev.evidence_id
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.evidence_status_after'
+    )=ev.evidence_status
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.evidence_url'
+    )=TRIM(ev.evidence_url)
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.evidence_passage'
+    )=ev.evidence_passage
+AND LOWER(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_content_sha256'
+    ))=LOWER(ro.content_sha256)
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_id'
+    )=ro.source_id
+AND UPPER(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_authority_tier'
+    ))=UPPER(src.authority_tier)
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_observation_status'
+    )=ro.observation_status
+AND CAST(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_revision_no'
+    ) AS INTEGER)=ro.latest_revision_no
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_revision_kind'
+    )=ro.latest_revision_kind
+AND CAST(json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.source_passage_currently_proven'
+    ) AS INTEGER)=CASE
+      WHEN ro.latest_revision_kind NOT IN ('edit','delete') THEN 1
+      WHEN INSTR(
+        COALESCE(ro.title,'') || CHAR(10) || COALESCE(ro.summary,'') || CHAR(10) ||
+        COALESCE(ro.raw_json,''),TRIM(ev.evidence_passage)
+      )>0 THEN 1 ELSE 0 END
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.evidence_fingerprint_before'
+    )=rel.evidence_fingerprint
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.canonical_claim_sha256'
+    )=json_extract(
+      current_version.facts_json,
+      '$.human_fact_claim.canonical_claim_sha256'
+    )
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.canonical_claim_sha256'
+    )=json_extract(
+      current_version.facts_json,
+      '$.human_fact_claim.canonical_claim_sha256'
+    )
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.public_fact_summary_sha256'
+    )=json_extract(
+      current_version.facts_json,
+      '$.human_fact_claim.public_fact_summary_sha256'
+    )
+AND json_extract(
+      current_version.facts_json,
+      '$.dual_human_fact_review.selected_evidence_receipt.public_fact_summary_sha256'
+    )=json_extract(
+      current_version.facts_json,
+      '$.human_fact_claim.public_fact_summary_sha256'
+    )
+AND json_extract(
+      current_version.facts_json,'$.public_fact_summary'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.public_fact_summary'
+    )
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.predicate'
+    )=ce.event_type
+AND json_extract(
+      current_version.facts_json,'$.claim_subject'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject'
+    )
+AND json_extract(
+      current_version.facts_json,'$.claim_action'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.action_quote'
+    )
+AND json_extract(
+      current_version.facts_json,'$.claim_stage'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.stage'
+    )
+AND UPPER(json_extract(
+      current_version.facts_json,'$.human_fact_claim.stage'
+    )) IN ('FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED')
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.modality'
+    )='REALIZED'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject'
+    ) IN (TRIM(ce.company_name),TRIM(ce.ticker_at_event))
+AND INSTR(
+      ev.evidence_passage,
+      json_extract(current_version.facts_json,'$.human_fact_claim.action_quote')
+    )>0
+AND INSTR(
+      ev.evidence_passage,
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote')
+    )>0
+AND INSTR(
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.action_quote')
+    )>0
+AND (
+      LENGTH(json_extract(
+        current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'
+      ))-LENGTH(REPLACE(
+        json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'),
+        json_extract(current_version.facts_json,'$.human_fact_claim.action_quote'),
+        ''
+      ))
+    )/LENGTH(json_extract(
+      current_version.facts_json,'$.human_fact_claim.action_quote'
+    ))=1
+AND (
+      COALESCE(json_extract(
+        current_version.facts_json,'$.human_fact_claim.object_quote'
+      ),'')=''
+      OR (
+        INSTR(ev.evidence_passage,json_extract(
+          current_version.facts_json,'$.human_fact_claim.object_quote'
+        ))>0
+        AND INSTR(json_extract(
+          current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'
+        ),json_extract(
+          current_version.facts_json,'$.human_fact_claim.object_quote'
+        ))>0
+      )
+    )
+AND (
+      COALESCE(json_extract(
+        current_version.facts_json,'$.human_fact_claim.event_date_or_effective_date'
+      ),'')=''
+      OR INSTR(ev.evidence_passage,json_extract(
+        current_version.facts_json,'$.human_fact_claim.event_date_or_effective_date'
+      ))>0
+    )
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_basis'
+    )='EXACT_IN_PASSAGE'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_binding_contract'
+    )='minimal-subject-action-clause-v1'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.realized_language_gate_contract'
+    )='realized-language-fail-closed-v1'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.realized_action_head_contract'
+    )='realized-action-head-allowlist-v1'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.fact_predicate_contract'
+    )='human-fact-predicate-map-v1'
+AND human_fact_predicate_compatible(
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_predicate'),
+      ce.event_type,
+      ce.event_family,
+      json_extract(current_version.facts_json,'$.human_fact_claim.action_quote'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.object_quote')
+    )=1
+AND text_sha256(ev.evidence_passage)=LOWER(json_extract(
+      current_version.facts_json,'$.human_fact_claim.evidence_passage_sha256'
+    ))
+AND fact_quote_context_valid(
+      ev.evidence_passage,
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_start'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_end')
+    )=1
+AND realized_claim_language_safe(
+      json_extract(current_version.facts_json,'$.human_fact_claim.action_quote'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'),
+      json_extract(current_version.facts_json,'$.human_fact_claim.subject_surface_quote'),
+      ev.evidence_passage
+    )=1
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_surface_quote'
+    ) IN (
+      json_extract(current_version.facts_json,'$.human_fact_claim.subject'),
+      '$' || json_extract(current_version.facts_json,'$.human_fact_claim.subject')
+    )
+AND LENGTH(json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_gap_quote'
+    ))>0
+AND SUBSTR(json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_gap_quote'
+    ),1,1) NOT GLOB '[A-Za-z0-9]'
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_prefix_quote'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_surface_quote'
+    ) || json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_gap_quote'
+    ) || json_extract(
+      current_version.facts_json,'$.human_fact_claim.action_quote'
+    )
+AND SUBSTR(
+      LTRIM(
+        json_extract(current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'),
+        ' ' || CHAR(9) || CHAR(10) || CHAR(13)
+      ),
+      1,
+      LENGTH(json_extract(
+        current_version.facts_json,'$.human_fact_claim.subject_action_prefix_quote'
+      ))
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_prefix_quote'
+    )
+AND LOWER(TRIM(
+      json_extract(
+        current_version.facts_json,'$.human_fact_claim.subject_action_gap_quote'
+      ),
+      ' ' || CHAR(9) || CHAR(10) || CHAR(13) || ',;:()[]-–—'
+    ))=json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+    )
+AND (
+      json_extract(
+        current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+      )=''
+      OR json_extract(
+        current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+      ) IN (
+        'has','had','have','is','was','were','are','did','does','do',
+        'formally','officially','successfully','voluntarily','immediately','now','also'
+      )
+      OR (
+        SUBSTR(
+          json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),
+          1,
+          INSTR(json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),' ')-1
+        ) IN ('has','had','have','is','was','were','are','did','does','do')
+        AND SUBSTR(
+          json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),
+          INSTR(json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),' ')+1
+        ) IN ('formally','officially','successfully','voluntarily','immediately','now','also')
+        AND INSTR(SUBSTR(
+          json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),
+          INSTR(json_extract(
+            current_version.facts_json,'$.human_fact_claim.subject_action_gap_normalized'
+          ),' ')+1
+        ),' ')=0
+      )
+    )
+AND json_extract(
+      current_version.facts_json,'$.human_fact_claim.public_fact_summary'
+    )=json_extract(
+      current_version.facts_json,'$.human_fact_claim.subject'
+    ) || '：' || json_extract(
+      current_version.facts_json,'$.human_fact_claim.fact_sentence_quote'
+    )
+AND rel.contract_version='event-fact-review-v2'
+""".strip()
+
+
+_CURRENT_EVIDENCE_PASSAGE_MATCH_SQL = """
+ro.observation_status!='deleted'
+AND (
+  ro.latest_revision_kind NOT IN ('edit','delete')
+  OR INSTR(
+       COALESCE(ro.title,'') || CHAR(10) ||
+       COALESCE(ro.summary,'') || CHAR(10) ||
+       COALESCE(ro.raw_json,''),
+       TRIM(ev.evidence_passage)
+     )>0
+)
+""".strip()
+
+
+_SEC_CURRENT_SUPPORTED_FACT_SLOT_CTE = """
+sec_current_supported_fact_slots AS (
+    SELECT current_version.event_id,current_version.version
+    FROM event_versions current_version
+    JOIN canonical_events slot_event
+      ON slot_event.event_id=current_version.event_id
+     AND slot_event.current_version=current_version.version
+    JOIN event_evidence slot_evidence
+      ON slot_evidence.event_id=current_version.event_id
+     AND slot_evidence.evidence_id=json_extract(
+           current_version.facts_json,'$.evidence_id'
+         )
+    JOIN json_each(
+      CASE WHEN json_valid(current_version.facts_json)
+           THEN current_version.facts_json ELSE '{}' END,
+      '$.claim_fact_slots.facts'
+    ) slot
+    WHERE LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.predicate'),'')))>0
+      AND CAST(json_extract(slot.value,'$.event_type_compatible') AS INTEGER)=1
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.action_text'),'')))>0
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.object'),'')))>0
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.evidence_sentence'),'')))>=20
+      AND LOWER(json_extract(
+            current_version.facts_json,'$.claim_fact_slots.event_type'
+          ))=LOWER(TRIM(slot_event.event_type))
+      AND INSTR(slot_evidence.evidence_passage,json_extract(
+            slot.value,'$.evidence_sentence'
+          ))>0
+      AND INSTR(json_extract(
+            current_version.facts_json,'$.public_fact_summary'
+          ),json_extract(slot.value,'$.action_text'))>0
+      AND INSTR(json_extract(
+            current_version.facts_json,'$.public_fact_summary'
+          ),json_extract(slot.value,'$.object'))>0
+      AND (
+        (
+          json_extract(slot.value,'$.subject_binding') IN (
+            'EXPLICIT_ISSUER','EXPLICIT_ISSUER_CONTEXT'
+          )
+          AND CAST(json_extract(
+                slot.value,'$.issuer_name_explicit_in_passage'
+              ) AS INTEGER)=1
+          AND LOWER(TRIM(json_extract(slot.value,'$.subject')))=LOWER(TRIM(
+                json_extract(current_version.facts_json,'$.claim_subject')
+              ))
+        )
+      )
+    GROUP BY current_version.event_id,current_version.version
+)
+""".strip()
+
+
+_SEC_CURRENT_FACT_SLOT_MATCH_SQL = """
+json_valid(current_version.facts_json)
+AND json_extract(
+      current_version.facts_json,
+      '$.admission_contract_version'
+    )='event-admission-v3'
+AND json_extract(
+      current_version.facts_json,
+      '$.fact_slot_contract_version'
+    )='deterministic-evidence-fact-slots-v2'
+AND json_extract(
+      current_version.facts_json,
+      '$.claim_fact_slots.contract_version'
+    )='deterministic-evidence-fact-slots-v2'
+AND LOWER(json_extract(
+      current_version.facts_json,
+      '$.claim_fact_slots.event_type'
+    ))=LOWER(TRIM(ce.event_type))
+AND LOWER(json_extract(
+      current_version.facts_json,
+      '$.claim_action'
+    ))=LOWER(TRIM(ce.event_type))
+AND LENGTH(json_extract(
+      current_version.facts_json,
+      '$.claim_fact_slots.passage_sha256'
+    ))=64
+AND LENGTH(json_extract(
+      current_version.facts_json,
+      '$.claim_fact_slots.canonical_passage_sha256'
+    ))=64
+AND CAST(json_extract(
+      current_version.facts_json,
+      '$.claim_fact_slots.compatible_fact_count'
+    ) AS INTEGER)>0
+AND LENGTH(json_extract(
+      current_version.facts_json,
+      '$.fact_slot_receipt_sha256'
+    ))=64
+AND json_extract(current_version.facts_json,'$.evidence_id')=ev.evidence_id
+AND json_extract(
+      current_version.facts_json,
+      '$.source_observation_id'
+    )=ev.observation_id
+AND LOWER(json_extract(
+      current_version.facts_json,
+      '$.source_content_sha256'
+    ))=LOWER(ro.content_sha256)
+AND ro.observation_status!='deleted'
+AND sec_slot.event_id IS NOT NULL
+""".strip()
+
+
+PUBLIC_EVENT_STATE_CTE = f"""
+WITH {_CURRENT_SOURCE_CONTENT_CTES},
+{_SEC_CURRENT_SUPPORTED_FACT_SLOT_CTE},
+ranked_rough_reviews AS (
     SELECT job_id,event_id,payload_json,updated_at,
            ROW_NUMBER() OVER (
                PARTITION BY event_id
@@ -48,6 +560,55 @@ ranked_light_followups AS (
     FROM pipeline_jobs
     WHERE job_type='light_verification_followup'
       AND status IN ('PENDING_EVIDENCE_REVIEW','PENDING_HUMAN_REVIEW')
+),
+event_reader_evidence AS (
+    SELECT ev.event_id,
+           COUNT(*) AS citable_evidence_count
+    FROM event_evidence ev
+    JOIN canonical_events ce ON ce.event_id=ev.event_id
+    JOIN event_evidence_relations rel
+      ON rel.event_id=ev.event_id
+     AND rel.evidence_id=ev.evidence_id
+     AND rel.event_version=ce.current_version
+    JOIN current_source_content ro ON ro.observation_id=ev.observation_id
+    JOIN sources src ON src.source_id=ro.source_id
+    JOIN event_versions current_version
+      ON current_version.event_id=ce.event_id
+     AND current_version.version=ce.current_version
+    LEFT JOIN sec_current_supported_fact_slots sec_slot
+      ON sec_slot.event_id=ce.event_id
+     AND sec_slot.version=ce.current_version
+    WHERE TRIM(COALESCE(ev.evidence_url,''))!=''
+      AND LENGTH(TRIM(COALESCE(ev.evidence_passage,'')))>=40
+      AND (
+        (
+          ev.evidence_status IN (
+            'machine_extracted_unreviewed','candidate_passage',
+            'confirmed_primary','accepted_manual_primary_evidence',
+            'accepted_light_primary_evidence'
+          )
+          AND rel.relation_status IN ('SCOPED_MATCH','HUMAN_CONFIRMED')
+          AND {_SEC_CURRENT_FACT_SLOT_MATCH_SQL}
+          AND rel.contract_version='event-admission-v3'
+          AND rel.evidence_fingerprint=json_extract(
+                current_version.facts_json,'$.evidence_fingerprint'
+              )
+        ) OR (
+          ev.evidence_status='accepted_dual_human_primary_evidence'
+          AND rel.relation_status='HUMAN_CONFIRMED'
+          AND {_DUAL_HUMAN_RECEIPT_MATCH_SQL}
+        )
+      )
+      AND rel.subject_match=1
+      AND rel.event_claim_supported=1
+      AND rel.date_coherent=1
+      AND {_CURRENT_EVIDENCE_PASSAGE_MATCH_SQL}
+      AND (
+        UPPER(src.authority_tier) IN ('P0','P1')
+        OR UPPER(src.authority_tier) GLOB 'P0_*'
+        OR UPPER(src.authority_tier) GLOB 'P1_*'
+      )
+    GROUP BY ev.event_id
 ),
 event_public AS (
     SELECT canonical.*,
@@ -78,13 +639,391 @@ event_public AS (
              CASE WHEN json_valid(rough.payload_json)
                THEN json_extract(rough.payload_json,'$.rough_review.reviewed_at')
              END,
-             rough.updated_at
-           ) AS reviewed_at
+              rough.updated_at
+           ) AS reviewed_at,
+           COALESCE(reader_evidence.citable_evidence_count,0) AS citable_evidence_count,
+           CASE WHEN json_valid(current_version.facts_json)
+             THEN NULLIF(TRIM(json_extract(
+               current_version.facts_json,'$.public_fact_summary'
+             )),'')
+           END AS public_fact_summary,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_subject')
+            END AS claim_subject,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_action')
+            END AS claim_action,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_stage')
+            END AS claim_stage,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.known_at')
+            END AS known_at,
+           CASE WHEN COALESCE(
+             NULLIF(TRIM(canonical.company_name),''),
+             NULLIF(TRIM(canonical.ticker_at_event),''),
+             ''
+           )!=''
+             THEN 1 ELSE 0
+           END AS reader_has_subject,
+           CASE WHEN json_valid(current_version.facts_json) AND LENGTH(COALESCE(
+             NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
+             ''
+            ))>=20
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_subject'),''
+              )))>=2
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_action'),''
+              )))>=3
+              AND UPPER(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_stage'),''
+              ))) IN ('PROPOSED','FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED')
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.known_at'),''
+              )))>=20
+              THEN 1 ELSE 0 END AS reader_has_fact_summary,
+           CASE WHEN
+             COALESCE(
+               NULLIF(TRIM(canonical.company_name),''),
+               NULLIF(TRIM(canonical.ticker_at_event),''),
+               ''
+             )!=''
+             AND COALESCE(reader_evidence.citable_evidence_count,0)>0
+             AND json_valid(current_version.facts_json)
+              AND LENGTH(COALESCE(
+               NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
+               ''
+              ))>=20
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_subject'),''
+              )))>=2
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_action'),''
+              )))>=3
+              AND UPPER(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_stage'),''
+              ))) IN ('PROPOSED','FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED')
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.known_at'),''
+              )))>=20
+              THEN 1 ELSE 0
+           END AS reader_ready
     FROM canonical_events canonical
     LEFT JOIN ranked_rough_reviews rough
       ON rough.event_id=canonical.event_id AND rough.rough_rank=1
     LEFT JOIN ranked_light_followups light
       ON light.event_id=canonical.event_id AND light.followup_rank=1
+    LEFT JOIN event_reader_evidence reader_evidence
+      ON reader_evidence.event_id=canonical.event_id
+    LEFT JOIN event_versions current_version
+      ON current_version.event_id=canonical.event_id
+     AND current_version.version=canonical.current_version
+)
+""".strip()
+
+
+def _page_scoped_public_event_state_cte(*, where_sql: str, sort_sql: str) -> str:
+    """Build the public event projection after bounding work to one page.
+
+    ``PUBLIC_EVENT_STATE_CTE`` intentionally remains the authoritative full-ledger
+    query for reviewer-only ``reader_ready`` filtering.  Public browsing does not
+    filter on that derived field, so evaluating its evidence-integrity contract for
+    every canonical event before ``LIMIT`` is wasted work.  This equivalent
+    projection first selects the canonical page and then evaluates source revisions,
+    fact slots and citable evidence only for those bounded event ids.
+    """
+
+    return f"""
+WITH paged_canonical AS (
+    SELECT e.*
+    FROM canonical_events e
+    {where_sql}
+    ORDER BY {sort_sql}
+    LIMIT ? OFFSET ?
+),
+page_evidence_observations AS (
+    SELECT DISTINCT ev.observation_id
+    FROM paged_canonical page
+    JOIN event_evidence ev ON ev.event_id=page.event_id
+),
+ranked_source_revisions AS (
+    SELECT sr.*,
+           ROW_NUMBER() OVER (
+               PARTITION BY sr.observation_id
+               ORDER BY sr.revision_no DESC
+           ) AS source_revision_rank
+    FROM page_evidence_observations page_observation
+    CROSS JOIN source_revisions sr
+    WHERE sr.observation_id=page_observation.observation_id
+),
+current_source_content AS (
+    SELECT r.observation_id,
+           r.source_id,
+           r.external_id,
+           CASE
+             WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.published_at')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.created_at')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.posted_at')),''),
+               r.source_published_at
+             )
+             ELSE r.source_published_at
+           END AS source_published_at,
+           r.local_received_at,
+           COALESCE(sr.title,r.title) AS title,
+           COALESCE(sr.summary,r.summary) AS summary,
+           CASE
+             WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.link')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.url')),''),
+               r.canonical_url
+             )
+             ELSE r.canonical_url
+           END AS canonical_url,
+           COALESCE(sr.content_sha256,r.content_sha256) AS content_sha256,
+           COALESCE(sr.raw_json,r.raw_json) AS raw_json,
+           CASE WHEN sr.revision_kind='delete'
+                THEN 'deleted' ELSE r.observation_status END AS observation_status,
+           COALESCE(sr.revision_no,0) AS latest_revision_no,
+           COALESCE(sr.revision_kind,'new') AS latest_revision_kind,
+           COALESCE(sr.revision_at,r.local_received_at) AS latest_revision_at
+    FROM page_evidence_observations page_observation
+    CROSS JOIN raw_observations r
+    LEFT JOIN ranked_source_revisions sr
+      ON sr.observation_id=r.observation_id
+     AND sr.source_revision_rank=1
+    WHERE r.observation_id=page_observation.observation_id
+),
+sec_current_supported_fact_slots AS (
+    SELECT current_version.event_id,current_version.version
+    FROM paged_canonical slot_event
+    JOIN event_versions current_version
+      ON current_version.event_id=slot_event.event_id
+     AND current_version.version=slot_event.current_version
+    JOIN event_evidence slot_evidence
+      ON slot_evidence.event_id=current_version.event_id
+     AND slot_evidence.evidence_id=json_extract(
+           current_version.facts_json,'$.evidence_id'
+         )
+    JOIN json_each(
+      CASE WHEN json_valid(current_version.facts_json)
+           THEN current_version.facts_json ELSE '{{}}' END,
+      '$.claim_fact_slots.facts'
+    ) slot
+    WHERE LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.predicate'),'')))>0
+      AND CAST(json_extract(slot.value,'$.event_type_compatible') AS INTEGER)=1
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.action_text'),'')))>0
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.object'),'')))>0
+      AND LENGTH(TRIM(COALESCE(json_extract(slot.value,'$.evidence_sentence'),'')))>=20
+      AND LOWER(json_extract(
+            current_version.facts_json,'$.claim_fact_slots.event_type'
+          ))=LOWER(TRIM(slot_event.event_type))
+      AND INSTR(slot_evidence.evidence_passage,json_extract(
+            slot.value,'$.evidence_sentence'
+          ))>0
+      AND INSTR(json_extract(
+            current_version.facts_json,'$.public_fact_summary'
+          ),json_extract(slot.value,'$.action_text'))>0
+      AND INSTR(json_extract(
+            current_version.facts_json,'$.public_fact_summary'
+          ),json_extract(slot.value,'$.object'))>0
+      AND (
+        json_extract(slot.value,'$.subject_binding') IN (
+          'EXPLICIT_ISSUER','EXPLICIT_ISSUER_CONTEXT'
+        )
+        AND CAST(json_extract(
+              slot.value,'$.issuer_name_explicit_in_passage'
+            ) AS INTEGER)=1
+        AND LOWER(TRIM(json_extract(slot.value,'$.subject')))=LOWER(TRIM(
+              json_extract(current_version.facts_json,'$.claim_subject')
+            ))
+      )
+    GROUP BY current_version.event_id,current_version.version
+),
+ranked_rough_reviews AS (
+    SELECT job.job_id,job.event_id,job.payload_json,job.updated_at,
+           ROW_NUMBER() OVER (
+               PARTITION BY job.event_id
+               ORDER BY job.updated_at DESC,job.job_id DESC
+           ) AS rough_rank
+    FROM paged_canonical page
+    CROSS JOIN pipeline_jobs job
+    WHERE job.event_id=page.event_id
+      AND job.status='COMPLETED_AUTHORIZED_ROUGH_REVIEW'
+),
+ranked_light_followups AS (
+    SELECT job.job_id,job.event_id,job.status,job.payload_json,job.updated_at,
+           ROW_NUMBER() OVER (
+               PARTITION BY job.event_id
+               ORDER BY job.updated_at DESC,job.job_id DESC
+           ) AS followup_rank
+    FROM paged_canonical page
+    CROSS JOIN pipeline_jobs job
+    WHERE job.event_id=page.event_id
+      AND job.job_type='light_verification_followup'
+      AND job.status IN ('PENDING_EVIDENCE_REVIEW','PENDING_HUMAN_REVIEW')
+),
+event_reader_evidence AS (
+    SELECT ev.event_id,
+           COUNT(*) AS citable_evidence_count
+    FROM paged_canonical ce
+    JOIN event_evidence ev ON ev.event_id=ce.event_id
+    JOIN event_evidence_relations rel
+      ON rel.event_id=ev.event_id
+     AND rel.evidence_id=ev.evidence_id
+     AND rel.event_version=ce.current_version
+    JOIN current_source_content ro ON ro.observation_id=ev.observation_id
+    JOIN sources src ON src.source_id=ro.source_id
+    JOIN event_versions current_version
+      ON current_version.event_id=ce.event_id
+     AND current_version.version=ce.current_version
+    LEFT JOIN sec_current_supported_fact_slots sec_slot
+      ON sec_slot.event_id=ce.event_id
+     AND sec_slot.version=ce.current_version
+    WHERE TRIM(COALESCE(ev.evidence_url,''))!=''
+      AND LENGTH(TRIM(COALESCE(ev.evidence_passage,'')))>=40
+      AND (
+        (
+          ev.evidence_status IN (
+            'machine_extracted_unreviewed','candidate_passage',
+            'confirmed_primary','accepted_manual_primary_evidence',
+            'accepted_light_primary_evidence'
+          )
+          AND rel.relation_status IN ('SCOPED_MATCH','HUMAN_CONFIRMED')
+          AND {_SEC_CURRENT_FACT_SLOT_MATCH_SQL}
+          AND rel.contract_version='event-admission-v3'
+          AND rel.evidence_fingerprint=json_extract(
+                current_version.facts_json,'$.evidence_fingerprint'
+              )
+        ) OR (
+          ev.evidence_status='accepted_dual_human_primary_evidence'
+          AND rel.relation_status='HUMAN_CONFIRMED'
+          AND {_DUAL_HUMAN_RECEIPT_MATCH_SQL}
+        )
+      )
+      AND rel.subject_match=1
+      AND rel.event_claim_supported=1
+      AND rel.date_coherent=1
+      AND {_CURRENT_EVIDENCE_PASSAGE_MATCH_SQL}
+      AND (
+        UPPER(src.authority_tier) IN ('P0','P1')
+        OR UPPER(src.authority_tier) GLOB 'P0_*'
+        OR UPPER(src.authority_tier) GLOB 'P1_*'
+      )
+    GROUP BY ev.event_id
+),
+event_public AS (
+    SELECT canonical.*,
+           light.status AS light_followup_status,
+           light.updated_at AS light_followup_updated_at,
+           CASE WHEN json_valid(light.payload_json)
+             THEN json_extract(light.payload_json,'$.light_verification_followup.expected_next_action')
+           END AS light_followup_next_action,
+           CASE
+             WHEN canonical.status='rejected' THEN 'excluded'
+             WHEN light.job_id IS NOT NULL AND canonical.status!='weak' THEN 'pending_verification'
+             WHEN canonical.status='verified' THEN 'verified'
+             WHEN canonical.status='weak' OR (
+               rough.job_id IS NOT NULL
+               AND CASE WHEN json_valid(rough.payload_json)
+                 THEN COALESCE(
+                   json_extract(rough.payload_json,'$.rough_review.outcome'),
+                   CASE WHEN UPPER(COALESCE(
+                     json_extract(rough.payload_json,'$.rough_review.decision_status'),''
+                   ))='INSUFFICIENT' THEN 'ROUGH_INSUFFICIENT' END
+                 )
+               END='ROUGH_INSUFFICIENT'
+             ) THEN 'insufficient'
+             WHEN canonical.status='candidate' AND rough.job_id IS NOT NULL THEN 'rough_reviewed'
+             ELSE 'pending_verification'
+           END AS public_state,
+           COALESCE(
+             CASE WHEN json_valid(rough.payload_json)
+               THEN json_extract(rough.payload_json,'$.rough_review.reviewed_at')
+             END,
+              rough.updated_at
+           ) AS reviewed_at,
+           COALESCE(reader_evidence.citable_evidence_count,0) AS citable_evidence_count,
+           CASE WHEN json_valid(current_version.facts_json)
+             THEN NULLIF(TRIM(json_extract(
+               current_version.facts_json,'$.public_fact_summary'
+             )),'')
+           END AS public_fact_summary,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_subject')
+            END AS claim_subject,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_action')
+            END AS claim_action,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.claim_stage')
+            END AS claim_stage,
+            CASE WHEN json_valid(current_version.facts_json)
+              THEN json_extract(current_version.facts_json,'$.known_at')
+            END AS known_at,
+           CASE WHEN COALESCE(
+             NULLIF(TRIM(canonical.company_name),''),
+             NULLIF(TRIM(canonical.ticker_at_event),''),
+             ''
+           )!=''
+             THEN 1 ELSE 0
+           END AS reader_has_subject,
+           CASE WHEN json_valid(current_version.facts_json) AND LENGTH(COALESCE(
+             NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
+             ''
+            ))>=20
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_subject'),''
+              )))>=2
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_action'),''
+              )))>=3
+              AND UPPER(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_stage'),''
+              ))) IN ('PROPOSED','FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED')
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.known_at'),''
+              )))>=20
+              THEN 1 ELSE 0 END AS reader_has_fact_summary,
+           CASE WHEN
+             COALESCE(
+               NULLIF(TRIM(canonical.company_name),''),
+               NULLIF(TRIM(canonical.ticker_at_event),''),
+               ''
+             )!=''
+             AND COALESCE(reader_evidence.citable_evidence_count,0)>0
+             AND json_valid(current_version.facts_json)
+              AND LENGTH(COALESCE(
+               NULLIF(TRIM(json_extract(current_version.facts_json,'$.public_fact_summary')),''),
+               ''
+              ))>=20
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_subject'),''
+              )))>=2
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_action'),''
+              )))>=3
+              AND UPPER(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.claim_stage'),''
+              ))) IN ('PROPOSED','FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED')
+              AND LENGTH(TRIM(COALESCE(
+                  json_extract(current_version.facts_json,'$.known_at'),''
+              )))>=20
+              THEN 1 ELSE 0
+           END AS reader_ready
+    FROM paged_canonical canonical
+    LEFT JOIN ranked_rough_reviews rough
+      ON rough.event_id=canonical.event_id AND rough.rough_rank=1
+    LEFT JOIN ranked_light_followups light
+      ON light.event_id=canonical.event_id AND light.followup_rank=1
+    LEFT JOIN event_reader_evidence reader_evidence
+      ON reader_evidence.event_id=canonical.event_id
+    LEFT JOIN event_versions current_version
+      ON current_version.event_id=canonical.event_id
+     AND current_version.version=canonical.current_version
 )
 """.strip()
 
@@ -117,6 +1056,7 @@ class LedgerRepository:
             timeout=5,
         )
         connection.row_factory = sqlite3.Row
+        register_sqlite_integrity_functions(connection)
         connection.execute("PRAGMA query_only=ON")
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=5000")
@@ -188,6 +1128,188 @@ class LedgerRepository:
             "audit": audit,
         }
 
+    def capture_source_generation(self) -> dict[str, Any]:
+        """Return a cheap watermark for receipt-bound capture interpretation.
+
+        The interpretation worker uses this only after it has exhausted the
+        historical backlog.  An unchanged watermark means no observation was
+        added or revised, so rebuilding the much heavier recovery plan would
+        be wasted work.
+        """
+
+        with closing(self.connect()) as connection:
+            observations = connection.execute(
+                "SELECT COUNT(*) AS n,MAX(local_received_at) AS latest FROM raw_observations"
+            ).fetchone()
+            revisions = connection.execute(
+                "SELECT COUNT(*) AS n,MAX(revision_at) AS latest FROM source_revisions"
+            ).fetchone()
+        return {
+            "observation_count": int(observations["n"] or 0),
+            "latest_observation_at": observations["latest"],
+            "revision_count": int(revisions["n"] or 0),
+            "latest_revision_at": revisions["latest"],
+        }
+
+    def capture_interpretation_context(
+        self,
+        event_id: str,
+        observation_id: str,
+    ) -> dict[str, Any] | None:
+        """Load only the fields admitted to the receipt-bound LLM contract.
+
+        This deliberately bypasses the public-reader CTE.  A retained capture
+        is discovery data, not a public conclusion, and interpreting it should
+        not require recomputing reader eligibility for the entire ledger.
+        """
+
+        with closing(self.connect()) as connection:
+            event_row = connection.execute(
+                "SELECT * FROM canonical_events WHERE event_id=?",
+                (event_id,),
+            ).fetchone()
+            if event_row is None:
+                return None
+            capture_row = connection.execute(
+                f"""WITH {_CURRENT_SOURCE_CONTENT_CTES}
+                    SELECT eo.relation_type,eo.linked_at,
+                           r.observation_id,r.source_id,r.external_id,
+                           r.source_published_at,r.local_received_at,
+                           r.title,r.summary,r.canonical_url,r.content_sha256,
+                           r.raw_json,
+                           r.observation_status,r.latest_revision_no,
+                           r.latest_revision_kind,r.latest_revision_at,
+                           s.name AS source_name,s.source_type,s.authority_tier
+                    FROM event_observations eo
+                    JOIN current_source_content r
+                      ON r.observation_id=eo.observation_id
+                    JOIN sources s ON s.source_id=r.source_id
+                    WHERE eo.event_id=? AND r.observation_id=?
+                    LIMIT 1""",
+                (event_id, observation_id),
+            ).fetchone()
+        if capture_row is None:
+            return None
+        capture = dict(capture_row)
+        raw_payload = str(capture.pop("raw_json", "") or "")
+        raw_payload_sha256 = hashlib.sha256(raw_payload.encode("utf-8")).hexdigest()
+        receipt_payload = {
+            "source_id": capture.get("source_id"),
+            "external_id": capture.get("external_id"),
+            "semantic_content_sha256": capture.get("content_sha256"),
+            "canonical_url": capture.get("canonical_url"),
+            "source_published_at": capture.get("source_published_at"),
+            "local_received_at": capture.get("local_received_at"),
+            "latest_revision_no": capture.get("latest_revision_no"),
+            "latest_revision_kind": capture.get("latest_revision_kind"),
+            "raw_payload_sha256": raw_payload_sha256,
+        }
+        capture["raw_payload_sha256"] = raw_payload_sha256
+        capture["capture_receipt_sha256"] = hashlib.sha256(
+            json.dumps(
+                receipt_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        capture["semantic_content_sha256"] = capture.pop("content_sha256", None)
+        return {"event": dict(event_row), "capture": capture}
+
+    def shadow_batch(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        """Load recent shadow-router inputs with two bounded SQL queries.
+
+        The old implementation called the full public-reader CTE once for the
+        page and again for every event.  On the production ledger that made a
+        bounded shadow batch take longer than the whole worker deadline.
+        """
+
+        limit = max(1, min(int(limit), 200))
+        with closing(self.connect()) as connection:
+            event_rows = connection.execute(
+                f"""WITH {_CURRENT_SOURCE_CONTENT_CTES},
+                    ranked_source AS (
+                      SELECT eo.event_id,r.title,r.summary,r.source_id,
+                             r.source_published_at,r.local_received_at,
+                             ROW_NUMBER() OVER (
+                               PARTITION BY eo.event_id
+                               ORDER BY r.local_received_at DESC,r.observation_id DESC
+                             ) AS source_rank
+                      FROM event_observations eo
+                      JOIN current_source_content r
+                        ON r.observation_id=eo.observation_id
+                      WHERE eo.relation_type!='filtered_aggregated_noise'
+                        AND r.observation_status!='deleted'
+                    )
+                    SELECT ce.*,v.facts_json,
+                           rs.title AS source_title,rs.summary AS source_summary,
+                           rs.source_id AS preferred_source_id,
+                           rs.source_published_at,rs.local_received_at
+                    FROM canonical_events ce
+                    JOIN event_versions v
+                      ON v.event_id=ce.event_id AND v.version=ce.current_version
+                    LEFT JOIN ranked_source rs
+                      ON rs.event_id=ce.event_id AND rs.source_rank=1
+                    ORDER BY ce.last_updated_at DESC,ce.event_id DESC
+                    LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            event_ids = [str(row["event_id"]) for row in event_rows]
+            evidence_by_event: dict[str, list[dict[str, Any]]] = {
+                event_id: [] for event_id in event_ids
+            }
+            if event_ids:
+                placeholders = ",".join("?" for _ in event_ids)
+                evidence_rows = connection.execute(
+                    f"""WITH {_CURRENT_SOURCE_CONTENT_CTES},
+                        ranked_evidence AS (
+                          SELECT ev.*,r.source_id,src.authority_tier,
+                                 ROW_NUMBER() OVER (
+                                   PARTITION BY ev.event_id
+                                   ORDER BY ev.passage_score DESC,
+                                            ev.updated_at DESC,ev.evidence_id
+                                 ) AS evidence_rank
+                          FROM event_evidence ev
+                          JOIN current_source_content r
+                            ON r.observation_id=ev.observation_id
+                          JOIN sources src ON src.source_id=r.source_id
+                          WHERE ev.event_id IN ({placeholders})
+                            AND r.observation_status!='deleted'
+                        )
+                        SELECT * FROM ranked_evidence
+                        WHERE evidence_rank<=5
+                        ORDER BY event_id,evidence_rank""",
+                    event_ids,
+                ).fetchall()
+                for row in evidence_rows:
+                    item = dict(row)
+                    item.pop("evidence_rank", None)
+                    evidence_by_event[str(item["event_id"])].append(item)
+
+        result: list[dict[str, Any]] = []
+        for row in event_rows:
+            item = dict(row)
+            facts = _json(item.pop("facts_json"), {})
+            event_id = str(item["event_id"])
+            preferred_source = {
+                "title": item.pop("source_title", None),
+                "summary": item.pop("source_summary", None),
+                "source_id": item.pop("preferred_source_id", None),
+                "source_published_at": item.pop("source_published_at", None),
+                "local_received_at": item.pop("local_received_at", None),
+            }
+            result.append(
+                {
+                    "detail": {
+                        "event": item,
+                        "current_version": {"facts": facts},
+                        "preferred_source": preferred_source,
+                    },
+                    "evidence": evidence_by_event[event_id],
+                }
+            )
+        return result
+
     def overview(self, recent_limit: int = 12, *, run_integrity_check: bool = True) -> dict[str, Any]:
         health = self.health(run_integrity_check=run_integrity_check)
         with closing(self.connect()) as connection:
@@ -197,17 +1319,23 @@ class LedgerRepository:
                     "SELECT status, COUNT(*) AS n FROM pipeline_jobs GROUP BY status"
                 )
             }
-            review_queue = connection.execute(
-                """SELECT COUNT(DISTINCT j.event_id)
+            review_counts = connection.execute(
+                PUBLIC_EVENT_STATE_CTE
+                + """
+                   SELECT COUNT(DISTINCT j.event_id) AS review_queue,
+                          COUNT(DISTINCT CASE WHEN e.reader_ready=1 THEN j.event_id END)
+                            AS reader_review_queue
                    FROM pipeline_jobs j
-                   JOIN canonical_events e ON e.event_id=j.event_id
+                   JOIN event_public e ON e.event_id=j.event_id
                    WHERE e.status IN ('candidate','weak')
                      AND j.status IN (
                          'PENDING_PRIMARY_EVIDENCE',
                          'PENDING_EVIDENCE_REVIEW',
                          'PENDING_HUMAN_REVIEW'
                      )"""
-            ).fetchone()[0]
+            ).fetchone()
+            review_queue = int(review_counts["review_queue"] or 0)
+            reader_review_queue = int(review_counts["reader_review_queue"] or 0)
             alert_status = {
                 row["status"]: row["n"]
                 for row in connection.execute(
@@ -215,14 +1343,66 @@ class LedgerRepository:
                 )
             }
             public_funnel = self._public_funnel(connection)
+            reader_quality = self._reader_quality(connection)
         return {
             **health,
             "public_funnel": public_funnel,
+            "reader_funnel": reader_quality["reader_funnel"],
+            "reader_quality": reader_quality,
             "review_queue": review_queue,
+            "reader_review_queue": reader_review_queue,
+            "non_citation_ready_inventory": int(
+                reader_quality["non_citation_ready_inventory"]
+            ),
+            # Deprecated numeric aliases retained for older clients.  These
+            # records remain browseable in Public; the value only measures
+            # which current event versions cannot yet support a formal claim.
+            "reader_hidden_inventory": int(
+                reader_quality["non_citation_ready_inventory"]
+            ),
+            "discovery_backlog": int(
+                reader_quality["non_citation_ready_inventory"]
+            ),
+            "inventory_contract": {
+                "non_citation_ready_inventory": {
+                    "authoritative": True,
+                    "definition": (
+                        "all canonical events whose current version is not citation-ready; "
+                        "they remain browseable in the public event feed"
+                    ),
+                },
+                "reader_hidden_inventory": {
+                    "deprecated": True,
+                    "replacement": "non_citation_ready_inventory",
+                    "definition": (
+                        "legacy numeric alias; these events are not hidden from Public"
+                    ),
+                },
+                "discovery_backlog": {
+                    "deprecated": True,
+                    "replacement": "non_citation_ready_inventory",
+                    "definition": (
+                        "legacy numeric alias; it includes every non-citation-ready canonical event, "
+                        "not only discovery-stage leads"
+                    ),
+                },
+            },
+            "review_queue_non_citation_ready": max(
+                0, review_queue - reader_review_queue
+            ),
+            # Deprecated alias: citation readiness is not a Public visibility
+            # gate, so the historical name no longer describes the value.
+            "review_queue_hidden_by_reader_gate": max(
+                0, review_queue - reader_review_queue
+            ),
             "rough_reviewed": int(job_status.get("COMPLETED_AUTHORIZED_ROUGH_REVIEW", 0)),
             "job_status": job_status,
             "alert_status": alert_status,
-            "recent_events": self.list_events(status="verified", limit=recent_limit)["items"],
+            "recent_events": self.list_events(
+                status="verified",
+                reader_ready=True,
+                limit=recent_limit,
+            )["items"],
             "source_health": self.list_source_health(),
         }
 
@@ -567,6 +1747,105 @@ class LedgerRepository:
             },
         }
 
+    @staticmethod
+    def _reader_quality(connection: sqlite3.Connection) -> dict[str, Any]:
+        """Measure formal-claim citation quality across the canonical ledger.
+
+        Citation readiness requires a named subject, a structured statement of
+        what happened, and a citable source passage.  A false value limits how
+        the claim may be presented; it never hides the event from Public.
+        """
+
+        rows = connection.execute(
+            PUBLIC_EVENT_STATE_CTE
+            + """
+               SELECT public_state,
+                      COUNT(*) AS total,
+                      SUM(reader_ready) AS reader_ready,
+                      SUM(CASE WHEN reader_has_subject=0 THEN 1 ELSE 0 END)
+                        AS missing_subject,
+                      SUM(CASE WHEN reader_has_fact_summary=0 THEN 1 ELSE 0 END)
+                        AS missing_fact_summary,
+                      SUM(CASE WHEN citable_evidence_count=0 THEN 1 ELSE 0 END)
+                        AS missing_citable_evidence
+               FROM event_public
+               GROUP BY public_state"""
+        ).fetchall()
+        state_counts = {
+            "verified": 0,
+            "excluded": 0,
+            "insufficient": 0,
+            "pending_verification": 0,
+            "rough_reviewed": 0,
+        }
+        total = 0
+        ready = 0
+        missing_subject = 0
+        missing_fact_summary = 0
+        missing_citable_evidence = 0
+        for row in rows:
+            state = str(row["public_state"])
+            state_ready = int(row["reader_ready"] or 0)
+            if state in state_counts:
+                state_counts[state] = state_ready
+            total += int(row["total"] or 0)
+            ready += state_ready
+            missing_subject += int(row["missing_subject"] or 0)
+            missing_fact_summary += int(row["missing_fact_summary"] or 0)
+            missing_citable_evidence += int(row["missing_citable_evidence"] or 0)
+        non_citation_ready_inventory = max(0, total - ready)
+        return {
+            "schema_version": 1,
+            "definition": (
+                "named subject + subject-action-stage-known_at fact + current supported P0/P1 passage"
+            ),
+            "total": total,
+            "citation_ready": ready,
+            "non_citation_ready_inventory": non_citation_ready_inventory,
+            # Deprecated aliases retained for clients migrating from the
+            # former reader-gate vocabulary.
+            "reader_ready": ready,
+            "discovery_only": non_citation_ready_inventory,
+            "inventory_contract": {
+                "citation_ready": {
+                    "authoritative": True,
+                    "definition": (
+                        "canonical events whose current version may support a formal claim"
+                    ),
+                },
+                "non_citation_ready_inventory": {
+                    "authoritative": True,
+                    "definition": (
+                        "canonical events whose current version is not citation-ready; "
+                        "they remain publicly browseable"
+                    ),
+                },
+                "reader_ready": {
+                    "deprecated": True,
+                    "replacement": "citation_ready",
+                },
+                "discovery_only": {
+                    "deprecated": True,
+                    "replacement": "non_citation_ready_inventory",
+                },
+            },
+            "gap_counts_nonexclusive": {
+                "missing_subject": missing_subject,
+                "missing_fact_summary": missing_fact_summary,
+                "missing_citable_evidence": missing_citable_evidence,
+            },
+            "reader_funnel": {
+                "schema_version": 1,
+                "total": ready,
+                **state_counts,
+                "partition_total": sum(state_counts.values()),
+                "partition_complete": sum(state_counts.values()) == ready,
+                "definition": "current-version evidence-supported reader subset of the canonical ledger",
+            },
+            "read_only": True,
+            "canonical_mutation": False,
+        }
+
     def list_source_health(self) -> list[dict[str, Any]]:
         with closing(self.connect()) as connection:
             sources = [dict(row) for row in connection.execute("SELECT * FROM sources ORDER BY authority_tier, name")]
@@ -612,6 +1891,8 @@ class LedgerRepository:
         query: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
+        reader_ready: bool | None = None,
+        captured_source_required: bool = False,
         sort: str = "event_date",
         limit: int = 50,
         offset: int = 0,
@@ -669,18 +1950,94 @@ class LedgerRepository:
         if date_to:
             where.append("e.event_date<=?")
             params.append(date_to)
+        if reader_ready is not None:
+            where.append("e.reader_ready=?")
+            params.append(int(reader_ready))
+        if captured_source_required:
+            where.append(
+                "EXISTS (SELECT 1 FROM event_observations ceo "
+                "JOIN latest_source_content csr ON csr.observation_id=ceo.observation_id "
+                "WHERE ceo.event_id=e.event_id AND csr.observation_status!='deleted')"
+            )
         if query:
+            source_relation_filter = (
+                "" if captured_source_required else "AND qeo.relation_type!='filtered_aggregated_noise' "
+            )
             where.append(
                 "(LOWER(COALESCE(e.company_name,'') || ' ' || COALESCE(e.ticker_at_event,'') || ' ' || "
                 "e.event_type || ' ' || COALESCE(e.event_family,'') || ' ' || "
                 "COALESCE(e.discovery_source,'') || ' ' || e.event_id) LIKE ? OR EXISTS ("
                 "SELECT 1 FROM event_observations qeo JOIN latest_source_content qr "
                 "ON qr.observation_id=qeo.observation_id WHERE qeo.event_id=e.event_id "
-                "AND qeo.relation_type!='filtered_aggregated_noise' "
+                f"{source_relation_filter}"
                 "AND LOWER(COALESCE(qr.title,'') || ' ' || COALESCE(qr.summary,'')) LIKE ?))"
             )
             params.extend([f"%{query.lower()}%", f"%{query.lower()}%"])
         where_sql = " WHERE " + " AND ".join(where) if where else ""
+
+        if public_state is None and reader_ready is None:
+            page_state_cte = _page_scoped_public_event_state_cte(
+                where_sql=where_sql,
+                sort_sql=sort_orders[sort],
+            )
+            page_query = (
+                page_state_cte
+                + f"""
+                SELECT e.*,
+                       (SELECT COUNT(*) FROM event_evidence x WHERE x.event_id=e.event_id) AS evidence_count,
+                       (SELECT COUNT(*) FROM event_observations xeo
+                        JOIN latest_source_content xr ON xr.observation_id=xeo.observation_id
+                        WHERE xeo.event_id=e.event_id AND xr.observation_status!='deleted')
+                         AS captured_source_count,
+                       (SELECT severity_grade FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS severity_grade,
+                       (SELECT credibility_tier FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS credibility_tier,
+                       (SELECT evidence_passage FROM event_evidence x WHERE x.event_id=e.event_id AND evidence_passage IS NOT NULL ORDER BY passage_score DESC, updated_at DESC LIMIT 1) AS evidence_excerpt,
+                       (SELECT r.title FROM event_observations eo
+                        JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                        WHERE eo.event_id=e.event_id
+                          AND eo.relation_type!='filtered_aggregated_noise'
+                        ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_title,
+                       (SELECT r.summary FROM event_observations eo
+                        JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                        WHERE eo.event_id=e.event_id
+                          AND eo.relation_type!='filtered_aggregated_noise'
+                        ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_summary
+                FROM event_public e
+                ORDER BY {sort_orders[sort]}
+                """
+            )
+            with closing(self.connect()) as connection:
+                # Keep count and items on one SQLite read snapshot.  The worker may
+                # append events concurrently while the public page is loading.
+                connection.execute("BEGIN")
+                try:
+                    total = int(
+                        connection.execute(
+                            f"SELECT COUNT(*) FROM canonical_events e {where_sql}",
+                            params,
+                        ).fetchone()[0]
+                    )
+                    rows = connection.execute(
+                        page_query,
+                        [*params, limit, offset],
+                    ).fetchall()
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+            return {
+                "items": [dict(row) for row in rows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "public_state": public_state,
+                "date_from": date_from,
+                "date_to": date_to,
+                "reader_ready": reader_ready,
+                "captured_source_required": captured_source_required,
+                "sort": sort,
+            }
+
         paged_query = (
             PUBLIC_EVENT_STATE_CTE
             + f"""
@@ -693,6 +2050,10 @@ class LedgerRepository:
             )
             SELECT e.*,
                    (SELECT COUNT(*) FROM event_evidence x WHERE x.event_id=e.event_id) AS evidence_count,
+                   (SELECT COUNT(*) FROM event_observations xeo
+                    JOIN latest_source_content xr ON xr.observation_id=xeo.observation_id
+                    WHERE xeo.event_id=e.event_id AND xr.observation_status!='deleted')
+                     AS captured_source_count,
                    (SELECT severity_grade FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS severity_grade,
                    (SELECT credibility_tier FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS credibility_tier,
                    (SELECT evidence_passage FROM event_evidence x WHERE x.event_id=e.event_id AND evidence_passage IS NOT NULL ORDER BY passage_score DESC, updated_at DESC LIMIT 1) AS evidence_excerpt,
@@ -734,46 +2095,73 @@ class LedgerRepository:
             "public_state": public_state,
             "date_from": date_from,
             "date_to": date_to,
+            "reader_ready": reader_ready,
+            "captured_source_required": captured_source_required,
             "sort": sort,
         }
 
-    def event_facets(self) -> dict[str, Any]:
+    def event_facets(self, *, reader_ready: bool | None = None) -> dict[str, Any]:
         """Return bounded, live filter suggestions without exposing event content."""
+        source_table = "canonical_events" if reader_ready is None else "event_public"
+        where = "" if reader_ready is None else " AND reader_ready=?"
+        params: tuple[Any, ...] = () if reader_ready is None else (int(reader_ready),)
         with closing(self.connect()) as connection:
             families = [
                 {"value": row["value"], "count": int(row["n"])}
                 for row in connection.execute(
-                    """SELECT event_family AS value, COUNT(*) AS n
-                       FROM canonical_events
+                    ((PUBLIC_EVENT_STATE_CTE + " ") if reader_ready is not None else "")
+                    + f"""SELECT event_family AS value, COUNT(*) AS n
+                       FROM {source_table}
                        WHERE event_family IS NOT NULL AND TRIM(event_family) != ''
+                       {where}
                        GROUP BY event_family
                        ORDER BY n DESC, value ASC
-                       LIMIT 100"""
+                       LIMIT 100""",
+                    params,
                 )
             ]
             sources = [
                 {"value": row["value"], "count": int(row["n"])}
                 for row in connection.execute(
-                    """SELECT discovery_source AS value, COUNT(*) AS n
-                       FROM canonical_events
+                    ((PUBLIC_EVENT_STATE_CTE + " ") if reader_ready is not None else "")
+                    + f"""SELECT discovery_source AS value, COUNT(*) AS n
+                       FROM {source_table}
                        WHERE discovery_source IS NOT NULL AND TRIM(discovery_source) != ''
+                       {where}
                        GROUP BY discovery_source
                        ORDER BY n DESC, value ASC
-                       LIMIT 100"""
+                       LIMIT 100""",
+                    params,
                 )
             ]
         return {
             "families": families,
             "sources": sources,
+            "reader_ready": reader_ready,
             "read_only": True,
             "no_trading": True,
         }
 
     def event_detail(self, event_id: str) -> dict[str, Any] | None:
         with closing(self.connect()) as connection:
-            event = _dict(connection.execute("SELECT * FROM canonical_events WHERE event_id=?", (event_id,)).fetchone())
+            event = _dict(
+                connection.execute(
+                    PUBLIC_EVENT_STATE_CTE
+                    + " SELECT * FROM event_public WHERE event_id=?",
+                    (event_id,),
+                ).fetchone()
+            )
             if event is None:
                 return None
+            event["captured_source_count"] = int(
+                connection.execute(
+                    """SELECT COUNT(*) FROM event_observations eo
+                       JOIN latest_source_content r
+                         ON r.observation_id=eo.observation_id
+                       WHERE eo.event_id=? AND r.observation_status!='deleted'""",
+                    (event_id,),
+                ).fetchone()[0]
+            )
             rough_row = connection.execute(
                 """SELECT payload_json,updated_at
                    FROM pipeline_jobs
@@ -864,13 +2252,29 @@ class LedgerRepository:
             market_jobs = [
                 dict(row)
                 for row in connection.execute(
-                    """SELECT market_job_id,event_id,asset_id,provider,observation_window,
-                              status,scheduled_at,completed_at,attempts,last_error,no_trading
-                       FROM market_jobs WHERE event_id=?
-                       ORDER BY asset_id,scheduled_at,observation_window""",
+                    """SELECT j.market_job_id,j.event_id,j.asset_id,j.provider,
+                              j.observation_window,j.status,j.scheduled_at,j.completed_at,
+                              j.attempts,j.last_error,j.no_trading,
+                              anchor.event_version AS anchor_event_version,
+                              anchor.declared_anchor_kind,anchor.reaction_anchor_at,
+                              anchor.known_at,anchor.timestamp_precision,
+                              anchor.anchor_status,anchor.reason_code AS anchor_reason_code,
+                              anchor.unsupported_windows_json,
+                              link.offset_seconds,link.window_contract_version
+                       FROM market_jobs j
+                       LEFT JOIN market_job_anchor_links link
+                         ON link.market_job_id=j.market_job_id
+                       LEFT JOIN market_event_anchors anchor
+                         ON anchor.anchor_id=link.anchor_id
+                       WHERE j.event_id=?
+                       ORDER BY j.asset_id,j.scheduled_at,j.observation_window""",
                     (event_id,),
                 )
             ]
+            for job in market_jobs:
+                job["unsupported_windows"] = _json(
+                    job.pop("unsupported_windows_json"), []
+                )
             preferred_source = _dict(
                 connection.execute(
                     """SELECT r.title,r.summary,r.source_id,r.source_published_at,
@@ -893,6 +2297,63 @@ class LedgerRepository:
             "market_jobs": market_jobs,
             "preferred_source": preferred_source,
         }
+
+    def captured_sources(self, event_id: str) -> list[dict[str, Any]]:
+        """Return every retained discovery capture, including filtered edges.
+
+        These records explain what the collector actually received.  They are
+        deliberately separate from ``event_evidence`` and never imply that a
+        source supports the canonical event claim.
+        """
+
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                f"""WITH {_CURRENT_SOURCE_CONTENT_CTES}
+                    SELECT eo.relation_type,eo.linked_at,
+                           r.observation_id,r.source_id,r.external_id,
+                           r.source_published_at,r.local_received_at,
+                           r.title,r.summary,r.canonical_url,r.content_sha256,
+                           r.raw_json,r.observation_status,r.latest_revision_no,
+                           r.latest_revision_kind,r.latest_revision_at,
+                           s.name AS source_name,s.source_type,s.authority_tier
+                    FROM event_observations eo
+                    JOIN current_source_content r
+                      ON r.observation_id=eo.observation_id
+                    JOIN sources s ON s.source_id=r.source_id
+                    WHERE eo.event_id=?
+                    ORDER BY CASE WHEN r.observation_status='deleted' THEN 1 ELSE 0 END,
+                             r.local_received_at DESC,r.observation_id DESC""",
+                (event_id,),
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            raw_payload = str(item.get("raw_json") or "")
+            item["raw_payload_sha256"] = hashlib.sha256(
+                raw_payload.encode("utf-8")
+            ).hexdigest()
+            receipt_payload = {
+                "source_id": item.get("source_id"),
+                "external_id": item.get("external_id"),
+                "semantic_content_sha256": item.get("content_sha256"),
+                "canonical_url": item.get("canonical_url"),
+                "source_published_at": item.get("source_published_at"),
+                "local_received_at": item.get("local_received_at"),
+                "latest_revision_no": item.get("latest_revision_no"),
+                "latest_revision_kind": item.get("latest_revision_kind"),
+                "raw_payload_sha256": item["raw_payload_sha256"],
+            }
+            item["capture_receipt_sha256"] = hashlib.sha256(
+                json.dumps(
+                    receipt_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            item["semantic_content_sha256"] = item.pop("content_sha256", None)
+            result.append(item)
+        return result
 
     def market_capabilities(self) -> dict[str, Any]:
         """Summarize observed read-only providers without exposing credentials."""
@@ -1031,8 +2492,17 @@ class LedgerRepository:
                 "ibkr": "local_capability_probe_only",
             },
             "horizon_policy": {
-                "baseline": "first_real_observer_snapshot",
-                "windows": ["t_plus_5m", "t_plus_30m", "t_plus_1d"],
+                "baseline": "version_bound_exact_event_anchor",
+                "anchor_contract": "market-anchor-v1",
+                "known_at_rule": "max_source_published_at_local_received_at",
+                "windows": [
+                    "t_plus_5m",
+                    "t_plus_30m",
+                    "t_plus_2h",
+                    "next_close",
+                    "t_plus_1d",
+                    "t_plus_5d",
+                ],
                 "missed_window_behavior": "record_MISSED_WINDOW_without_latest_quote_substitution",
                 "return_metric_scope": "post_event_audit_only",
                 "continuous_quote_feed": False,
@@ -1069,14 +2539,77 @@ class LedgerRepository:
     def event_evidence(self, event_id: str) -> list[dict[str, Any]]:
         with closing(self.connect()) as connection:
             rows = connection.execute(
-                """SELECT ev.*, o.title AS observation_title, o.summary AS observation_summary,
-                          o.source_published_at, o.local_received_at, s.source_id, s.name AS source_name,
-                          s.authority_tier, s.source_type
-                   FROM event_evidence ev
-                   JOIN raw_observations o ON o.observation_id=ev.observation_id
-                   JOIN sources s ON s.source_id=o.source_id
-                   WHERE ev.event_id=?
-                   ORDER BY ev.passage_score DESC, ev.updated_at DESC""",
+                f"""WITH {_CURRENT_SOURCE_CONTENT_CTES},
+                    {_SEC_CURRENT_SUPPORTED_FACT_SLOT_CTE}
+                    SELECT ev.*, ro.title AS observation_title, ro.summary AS observation_summary,
+                           ro.source_published_at,ro.local_received_at,ro.content_sha256,
+                           ro.observation_status,ro.latest_revision_no,ro.latest_revision_kind,
+                           src.source_id,src.name AS source_name,
+                           src.authority_tier,src.source_type,
+                           rel.event_version AS relation_event_version,
+                           rel.relation_status,rel.subject_match,rel.event_claim_supported,
+                           rel.date_coherent,rel.modality,rel.evidence_fingerprint,
+                           rel.contract_version AS relation_contract_version,
+                           CASE WHEN ev.evidence_status='accepted_dual_human_primary_evidence'
+                                  AND rel.relation_status='HUMAN_CONFIRMED'
+                                  AND {_DUAL_HUMAN_RECEIPT_MATCH_SQL}
+                                THEN 1 ELSE 0 END AS dual_human_receipt_consistent,
+                           CASE WHEN
+                             (
+                               (
+                                 ev.evidence_status IN (
+                                   'machine_extracted_unreviewed','candidate_passage',
+                                   'confirmed_primary','accepted_manual_primary_evidence',
+                                   'accepted_light_primary_evidence'
+                                 )
+                                 AND rel.relation_status IN ('SCOPED_MATCH','HUMAN_CONFIRMED')
+                                 AND {_SEC_CURRENT_FACT_SLOT_MATCH_SQL}
+                                 AND rel.contract_version='event-admission-v3'
+                                 AND rel.evidence_fingerprint=json_extract(
+                                       current_version.facts_json,'$.evidence_fingerprint'
+                                     )
+                               ) OR (
+                                 ev.evidence_status='accepted_dual_human_primary_evidence'
+                                 AND rel.relation_status='HUMAN_CONFIRMED'
+                                 AND {_DUAL_HUMAN_RECEIPT_MATCH_SQL}
+                               )
+                             )
+                             AND rel.subject_match=1
+                             AND rel.event_claim_supported=1
+                             AND rel.date_coherent=1
+                             AND rel.event_version=ce.current_version
+                             AND {_CURRENT_EVIDENCE_PASSAGE_MATCH_SQL}
+                             AND TRIM(COALESCE(ev.evidence_url,''))!=''
+                             AND LENGTH(TRIM(COALESCE(ev.evidence_passage,'')))>=40
+                             AND (
+                               UPPER(src.authority_tier) IN ('P0','P1')
+                               OR UPPER(src.authority_tier) GLOB 'P0_*'
+                               OR UPPER(src.authority_tier) GLOB 'P1_*'
+                             )
+                           THEN 1 ELSE 0 END AS reader_eligible
+                    FROM event_evidence ev
+                    JOIN current_source_content ro ON ro.observation_id=ev.observation_id
+                    JOIN sources src ON src.source_id=ro.source_id
+                    LEFT JOIN canonical_events ce ON ce.event_id=ev.event_id
+                    LEFT JOIN event_versions current_version
+                      ON current_version.event_id=ce.event_id
+                     AND current_version.version=ce.current_version
+                    LEFT JOIN sec_current_supported_fact_slots sec_slot
+                      ON sec_slot.event_id=ce.event_id
+                     AND sec_slot.version=ce.current_version
+                    LEFT JOIN event_evidence_relations rel
+                      ON rel.event_id=ev.event_id AND rel.evidence_id=ev.evidence_id
+                     AND rel.event_version=ce.current_version
+                    WHERE ev.event_id=?
+                   ORDER BY reader_eligible DESC,
+                            CASE
+                              WHEN UPPER(src.authority_tier)='P0'
+                                OR UPPER(src.authority_tier) GLOB 'P0_*' THEN 0
+                              WHEN UPPER(src.authority_tier)='P1'
+                                OR UPPER(src.authority_tier) GLOB 'P1_*' THEN 1
+                              ELSE 9
+                            END,
+                            ev.passage_score DESC,ev.updated_at DESC,ev.evidence_id""",
                 (event_id,),
             ).fetchall()
         return [dict(row) for row in rows]

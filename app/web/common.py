@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import hashlib
+import ipaddress
 import re
 import time
 from collections import OrderedDict
@@ -266,6 +267,62 @@ def require_admin_ui() -> None:
     require_ui_role("admin")
 
 
+def _normalized_public_ip(value: object) -> str | None:
+    """Return one usable visitor address, never a proxy/local placeholder."""
+    try:
+        address = ipaddress.ip_address(str(value or "").strip())
+    except ValueError:
+        return None
+    if address.is_loopback or address.is_unspecified:
+        return None
+    return str(address)
+
+
+def _context_header_values(headers: object, name: str) -> list[str]:
+    """Read a possibly repeated Streamlit context header without ambiguity."""
+    get_all = getattr(headers, "get_all", None)
+    if callable(get_all):
+        try:
+            raw_values = get_all(key=name)
+        except TypeError:  # pragma: no cover - compatibility with mapping adapters
+            raw_values = get_all(name)
+        return [str(value).strip() for value in raw_values if str(value).strip()]
+    get = getattr(headers, "get", None)
+    value = get(name) if callable(get) else None
+    return [str(value).strip()] if value not in (None, "") else []
+
+
+def public_visitor_ip_for_api() -> str | None:
+    """Return the public visitor IP that the loopback API may trust.
+
+    A direct Streamlit peer address is preferred.  Behind production Nginx the
+    peer is loopback (and ``st.context.ip_address`` is therefore unavailable),
+    so accept the proxy headers only when Nginx's three overwritten values are
+    present, singular and mutually consistent.  Internal role processes never
+    forward browser-supplied address metadata.
+    """
+    if UI_ROLE != "public":
+        return None
+    try:
+        direct = _normalized_public_ip(st.context.ip_address)
+    except (AttributeError, RuntimeError):
+        direct = None
+    if direct:
+        return direct
+    try:
+        headers = st.context.headers
+    except (AttributeError, RuntimeError):
+        return None
+    real_values = _context_header_values(headers, "X-Real-IP")
+    forwarded_values = _context_header_values(headers, "X-Forwarded-For")
+    proto_values = _context_header_values(headers, "X-Forwarded-Proto")
+    if len(real_values) != 1 or len(forwarded_values) != 1 or proto_values != ["https"]:
+        return None
+    real_ip = _normalized_public_ip(real_values[0])
+    forwarded_ip = _normalized_public_ip(forwarded_values[0])
+    return real_ip if real_ip is not None and real_ip == forwarded_ip else None
+
+
 def restore_deep_link(page_slug: str) -> None:
     """Restore query parameters captured by Home's fresh deep-link bootstrap."""
     transfer = st.session_state.get(DEEP_LINK_STATE_KEY)
@@ -367,6 +424,9 @@ def api_request(
                 else "当前界面角色不允许此写入请求"
             )
     headers = {"Accept": "application/json"}
+    public_visitor_ip = public_visitor_ip_for_api()
+    if public_visitor_ip is not None:
+        headers["X-Real-IP"] = public_visitor_ip
     if reviewer_credential is not None:
         if UI_ROLE not in {"reviewer", "admin"}:
             raise ApiError("当前界面角色不允许使用人工审核凭据")
