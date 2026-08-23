@@ -83,4 +83,3 @@ def test_subjectless_cleanup_removes_event_projection_but_preserves_source(tmp_p
     assert connection.execute("SELECT COUNT(*) FROM raw_observations").fetchone()[0] == 2
     assert connection.execute("SELECT COUNT(*) FROM pipeline_jobs").fetchone()[0] == 1
     connection.close()
-

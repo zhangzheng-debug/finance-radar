@@ -153,7 +153,10 @@ def test_code_only_contract_rejects_storage_or_deployment_changes(tmp_path: Path
     assert "deployment/systemd/new.service" in deployment_result.stderr
 
 
-@pytest.mark.skipif(os.name == "nt", reason="root ownership/mode semantics require POSIX")
+@pytest.mark.skipif(
+    os.name == "nt" or getattr(os, "geteuid", lambda: -1)() != 0,
+    reason="root ownership/mode semantics require a root POSIX test process",
+)
 def test_code_only_backup_requires_unchanged_root_attested_bundle(tmp_path: Path) -> None:
     operations = tmp_path / "operations.sqlite3"
     backup_root = tmp_path / "operational_backups"
