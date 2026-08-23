@@ -282,6 +282,13 @@ def test_operations_store_is_idempotent_advisory_and_receipt_bound(tmp_path: Pat
         )
         is None
     )
+    bulk = operations.latest_capture_interpretations(
+        str(event["event_id"]),
+        [str(capture["capture_receipt_sha256"]), "c" * 64, ""],
+    )
+    assert set(bulk) == {str(capture["capture_receipt_sha256"])}
+    assert bulk[str(capture["capture_receipt_sha256"])]["interpretation_id"] == run_id
+    assert bulk[str(capture["capture_receipt_sha256"])]["output"] == latest["output"]
 
     tampered = dict(output)
     tampered["capture_receipt_sha256"] = "0" * 64
@@ -291,6 +298,53 @@ def test_operations_store_is_idempotent_advisory_and_receipt_bound(tmp_path: Pat
             tampered,
             guardrails={},
         )
+
+
+def test_bulk_capture_interpretations_preserve_external_then_newest_preference(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    event = _event(event_id="FR-LIVE-bulk")
+    capture = _capture(
+        observation_id="obs-bulk",
+        capture_receipt_sha256="d" * 64,
+    )
+    normalized = normalized_capture_input(event, capture)
+    created: dict[str, str] = {}
+    for provider, model_snapshot, external_call in (
+        ("deterministic", "capture-rules-v1", False),
+        ("deepseek", "deepseek-chat", True),
+    ):
+        run_id, inserted = operations.enqueue_capture_interpretation(
+            str(event["event_id"]),
+            "obs-bulk",
+            normalized,
+            contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+            prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+            prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+            provider=provider,
+            model_snapshot=model_snapshot,
+            external_call=external_call,
+        )
+        assert inserted is True
+        output = deterministic_interpretation(event, capture)
+        output["one_line_zh"] = f"selected-{provider}"
+        operations.complete_capture_interpretation(
+            run_id,
+            output,
+            guardrails={"canonical_mutation": False},
+        )
+        created[provider] = run_id
+
+    selected = operations.latest_capture_interpretations(
+        str(event["event_id"]),
+        ["d" * 64, "d" * 64],
+    )
+
+    assert set(selected) == {"d" * 64}
+    assert selected["d" * 64]["interpretation_id"] == created["deepseek"]
+    assert selected["d" * 64]["external_call"] == 1
+    assert selected["d" * 64]["output"]["one_line_zh"] == "selected-deepseek"
 
 
 def _enqueue_external(operations: OperationsRepository, suffix: str) -> str:

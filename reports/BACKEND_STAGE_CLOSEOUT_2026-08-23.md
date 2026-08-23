@@ -2,9 +2,9 @@
 
 Status: local release candidate; production deployment and live verification pending
 
-Target version: `2026.08.23.5`
+Target version: `2026.08.23.6`
 
-Branch: `codex/event-quality-recovery`
+Branch: `codex/dossier-performance`
 
 ## Outcome
 
@@ -72,6 +72,20 @@ The core product model is now:
 - Model cards show real run and frozen external-blind evidence, not a fabricated
   “coverage” percentage.
 
+### Event dossier performance
+
+- Replaced the global source-revision window scan in `captured_sources` with an
+  event-scoped latest-revision lookup over the existing composite index.
+- Replaced one operations-database connection and query per capture with one
+  event-scoped bulk interpretation lookup while preserving external-first,
+  newest-update selection.
+- Production read-only profiling isolated the previous cold-path cost: event
+  detail about 0.17 seconds, evidence about 0.005 seconds, interpretation about
+  0.02 seconds, but captured sources about 17.7 seconds for one capture. The
+  equivalent event-scoped SQL measured about 0.0012 seconds on its first run
+  and below the timer resolution on four immediate repeats. End-to-end cold,
+  warm and concurrent dossier acceptance remains a live deployment gate.
+
 ### Secret, recovery and deployment safety
 
 - The DeepSeek worker no longer receives the shared privileged environment. It
@@ -89,9 +103,10 @@ The core product model is now:
 
 ## Verification evidence
 
-- Final full repository run after the API boundary and deployment-transaction
-  fixes: `1058 passed, 6 skipped`.
-- Post-patch public/API/component targeted run: `96 passed`.
+- Final full repository run after the dossier query fix:
+  `1060 passed, 6 skipped`.
+- Dossier, source revision, capture interpretation and public-semantics targeted
+  run: `33 passed`.
 - Security, systemd, backup, configuration, principal and launcher targeted run:
   `95 passed`.
 - `python -m compileall -q app scripts tests`: PASS.

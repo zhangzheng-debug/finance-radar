@@ -2306,23 +2306,64 @@ class LedgerRepository:
         source supports the canonical event claim.
         """
 
+        # This is deliberately event-scoped instead of reusing
+        # ``_CURRENT_SOURCE_CONTENT_CTES``.  The shared CTE ranks every source
+        # revision in the ledger before the outer event filter can run.  On a
+        # production ledger that turns a one-capture dossier read into a
+        # full-table window scan.  The correlated MAX lookup below uses the
+        # existing ``(observation_id, revision_no)`` index and preserves the
+        # exact latest-revision projection without touching unrelated events.
         with closing(self.connect()) as connection:
             rows = connection.execute(
-                f"""WITH {_CURRENT_SOURCE_CONTENT_CTES}
-                    SELECT eo.relation_type,eo.linked_at,
-                           r.observation_id,r.source_id,r.external_id,
-                           r.source_published_at,r.local_received_at,
-                           r.title,r.summary,r.canonical_url,r.content_sha256,
-                           r.raw_json,r.observation_status,r.latest_revision_no,
-                           r.latest_revision_kind,r.latest_revision_at,
-                           s.name AS source_name,s.source_type,s.authority_tier
-                    FROM event_observations eo
-                    JOIN current_source_content r
-                      ON r.observation_id=eo.observation_id
-                    JOIN sources s ON s.source_id=r.source_id
-                    WHERE eo.event_id=?
-                    ORDER BY CASE WHEN r.observation_status='deleted' THEN 1 ELSE 0 END,
-                             r.local_received_at DESC,r.observation_id DESC""",
+                """SELECT eo.relation_type,eo.linked_at,
+                          r.observation_id,r.source_id,r.external_id,
+                          CASE
+                            WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+                            THEN COALESCE(
+                              NULLIF(TRIM(json_extract(sr.raw_json,'$.item.published_at')),''),
+                              NULLIF(TRIM(json_extract(sr.raw_json,'$.item.created_at')),''),
+                              NULLIF(TRIM(json_extract(sr.raw_json,'$.item.posted_at')),''),
+                              r.source_published_at
+                            )
+                            ELSE r.source_published_at
+                          END AS source_published_at,
+                          r.local_received_at,
+                          COALESCE(sr.title,r.title) AS title,
+                          COALESCE(sr.summary,r.summary) AS summary,
+                          CASE
+                            WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+                            THEN COALESCE(
+                              NULLIF(TRIM(json_extract(sr.raw_json,'$.item.link')),''),
+                              NULLIF(TRIM(json_extract(sr.raw_json,'$.item.url')),''),
+                              r.canonical_url
+                            )
+                            ELSE r.canonical_url
+                          END AS canonical_url,
+                          COALESCE(sr.content_sha256,r.content_sha256) AS content_sha256,
+                          COALESCE(sr.raw_json,r.raw_json) AS raw_json,
+                          CASE WHEN sr.revision_kind='delete'
+                               THEN 'deleted' ELSE r.observation_status END
+                            AS observation_status,
+                          COALESCE(sr.revision_no,0) AS latest_revision_no,
+                          COALESCE(sr.revision_kind,'new') AS latest_revision_kind,
+                          COALESCE(sr.revision_at,r.local_received_at) AS latest_revision_at,
+                          s.name AS source_name,s.source_type,s.authority_tier
+                   FROM event_observations eo
+                   JOIN raw_observations r
+                     ON r.observation_id=eo.observation_id
+                   LEFT JOIN source_revisions sr
+                     ON sr.observation_id=r.observation_id
+                    AND sr.revision_no=(
+                          SELECT MAX(sr2.revision_no)
+                          FROM source_revisions sr2
+                          WHERE sr2.observation_id=r.observation_id
+                        )
+                   JOIN sources s ON s.source_id=r.source_id
+                   WHERE eo.event_id=?
+                   ORDER BY CASE WHEN sr.revision_kind='delete'
+                                      OR r.observation_status='deleted'
+                                 THEN 1 ELSE 0 END,
+                            r.local_received_at DESC,r.observation_id DESC""",
                 (event_id,),
             ).fetchall()
         result: list[dict[str, Any]] = []

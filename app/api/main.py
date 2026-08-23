@@ -1231,12 +1231,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> list[dict[str, Any]]:
         """Build advisory interpretations from one already-loaded capture set."""
 
+        visible_captures = [
+            capture
+            for capture in captures
+            if include_deleted or capture.get("observation_status") != "deleted"
+        ]
+        receipts = [
+            str(capture.get("capture_receipt_sha256") or "")
+            for capture in visible_captures
+        ]
+        persisted_runs = operations.latest_capture_interpretations(
+            str(event.get("event_id") or ""),
+            receipts,
+        )
         items: list[dict[str, Any]] = []
-        for capture in captures:
-            if not include_deleted and capture.get("observation_status") == "deleted":
-                continue
+        for capture in visible_captures:
             receipt = str(capture.get("capture_receipt_sha256") or "")
-            run = operations.latest_capture_interpretation(event.get("event_id"), receipt) if receipt else None
+            run = persisted_runs.get(receipt)
             output = dict((run or {}).get("output") or {})
             try:
                 if output:
