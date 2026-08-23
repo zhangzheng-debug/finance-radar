@@ -551,6 +551,16 @@ CREATE INDEX IF NOT EXISTS idx_event_chain_members_chain
     ON event_chain_members(chain_id, chain_role);
 CREATE INDEX IF NOT EXISTS idx_events_status_date
     ON canonical_events(status, event_date);
+CREATE INDEX IF NOT EXISTS idx_events_public_latest
+    ON canonical_events(last_updated_at DESC, event_date DESC, event_id DESC);
+CREATE INDEX IF NOT EXISTS idx_events_public_event_date
+    ON canonical_events(event_date DESC, last_updated_at DESC, event_id DESC);
+CREATE INDEX IF NOT EXISTS idx_events_public_subject
+    ON canonical_events(
+        LOWER(COALESCE(company_name,ticker_at_event,event_id)),
+        event_date DESC,
+        event_id ASC
+    );
 CREATE INDEX IF NOT EXISTS idx_events_stable_id
     ON canonical_events(stable_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_event
@@ -569,6 +579,8 @@ CREATE INDEX IF NOT EXISTS idx_market_snapshots_event
     ON market_snapshots(event_id, captured_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_status_priority
     ON pipeline_jobs(status, priority DESC, available_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_event_status_updated
+    ON pipeline_jobs(event_id, status, updated_at DESC, job_id DESC);
 CREATE INDEX IF NOT EXISTS idx_observation_jobs_status_priority
     ON observation_jobs(status, priority DESC, available_at);
 CREATE INDEX IF NOT EXISTS idx_market_metrics_event

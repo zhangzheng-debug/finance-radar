@@ -723,7 +723,12 @@ event_public AS (
 """.strip()
 
 
-def _page_scoped_public_event_state_cte(*, where_sql: str, sort_sql: str) -> str:
+def _page_scoped_public_event_state_cte(
+    *,
+    where_sql: str,
+    sort_sql: str,
+    source_excerpt_chars: int | None = None,
+) -> str:
     """Build the public event projection after bounding work to one page.
 
     ``PUBLIC_EVENT_STATE_CTE`` intentionally remains the authoritative full-ledger
@@ -733,6 +738,17 @@ def _page_scoped_public_event_state_cte(*, where_sql: str, sort_sql: str) -> str
     projection first selects the canonical page and then evaluates source revisions,
     fact slots and citable evidence only for those bounded event ids.
     """
+
+    excerpt_limit = (
+        max(64, min(int(source_excerpt_chars), 4096))
+        if source_excerpt_chars is not None
+        else None
+    )
+    source_title_sql = "COALESCE(revision.title,raw.title)"
+    source_summary_sql = "COALESCE(revision.summary,raw.summary)"
+    if excerpt_limit is not None:
+        source_title_sql = f"SUBSTR({source_title_sql},1,{excerpt_limit})"
+        source_summary_sql = f"SUBSTR({source_summary_sql},1,{excerpt_limit})"
 
     return f"""
 WITH paged_canonical AS (
@@ -745,7 +761,8 @@ WITH paged_canonical AS (
 page_evidence_observations AS (
     SELECT DISTINCT ev.observation_id
     FROM paged_canonical page
-    JOIN event_evidence ev ON ev.event_id=page.event_id
+    CROSS JOIN event_evidence ev
+    WHERE ev.event_id=page.event_id
 ),
 ranked_source_revisions AS (
     SELECT sr.*,
@@ -796,6 +813,45 @@ current_source_content AS (
       ON sr.observation_id=r.observation_id
      AND sr.source_revision_rank=1
     WHERE r.observation_id=page_observation.observation_id
+),
+page_event_sources AS MATERIALIZED (
+    SELECT source_link.event_id,
+           raw.observation_id,raw.local_received_at,
+           {source_title_sql} AS title,
+           {source_summary_sql} AS summary,
+           CASE WHEN revision.revision_kind='delete'
+                THEN 'deleted' ELSE raw.observation_status END AS observation_status,
+           source_link.relation_type
+    FROM paged_canonical page
+    CROSS JOIN event_observations source_link
+    CROSS JOIN raw_observations raw
+    LEFT JOIN source_revisions revision
+      ON revision.observation_id=raw.observation_id
+     AND revision.revision_no=(
+           SELECT MAX(latest_revision.revision_no)
+           FROM source_revisions latest_revision
+           WHERE latest_revision.observation_id=raw.observation_id
+         )
+    WHERE source_link.event_id=page.event_id
+      AND raw.observation_id=source_link.observation_id
+),
+ranked_event_sources AS (
+    SELECT source.event_id,
+           source.observation_id,source.local_received_at,
+           source.title,source.summary,source.observation_status,
+           ROW_NUMBER() OVER (
+               PARTITION BY source.event_id
+               ORDER BY source.local_received_at DESC,source.observation_id DESC
+           ) AS source_rank
+    FROM page_event_sources source
+    WHERE source.relation_type!='filtered_aggregated_noise'
+),
+event_source_rollup AS (
+    SELECT source.event_id,
+           SUM(CASE WHEN source.observation_status!='deleted' THEN 1 ELSE 0 END)
+             AS captured_source_count
+    FROM page_event_sources source
+    GROUP BY source.event_id
 ),
 sec_current_supported_fact_slots AS (
     SELECT current_version.event_id,current_version.version
@@ -1893,6 +1949,7 @@ class LedgerRepository:
         date_to: str | None = None,
         reader_ready: bool | None = None,
         captured_source_required: bool = False,
+        source_excerpt_chars: int | None = None,
         sort: str = "event_date",
         limit: int = 50,
         offset: int = 0,
@@ -1979,29 +2036,25 @@ class LedgerRepository:
             page_state_cte = _page_scoped_public_event_state_cte(
                 where_sql=where_sql,
                 sort_sql=sort_orders[sort],
+                source_excerpt_chars=source_excerpt_chars,
             )
             page_query = (
                 page_state_cte
                 + f"""
                 SELECT e.*,
                        (SELECT COUNT(*) FROM event_evidence x WHERE x.event_id=e.event_id) AS evidence_count,
-                       (SELECT COUNT(*) FROM event_observations xeo
-                        JOIN latest_source_content xr ON xr.observation_id=xeo.observation_id
-                        WHERE xeo.event_id=e.event_id AND xr.observation_status!='deleted')
-                         AS captured_source_count,
+                       COALESCE((
+                         SELECT rollup.captured_source_count
+                         FROM event_source_rollup rollup
+                         WHERE rollup.event_id=e.event_id
+                       ),0) AS captured_source_count,
                        (SELECT severity_grade FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS severity_grade,
                        (SELECT credibility_tier FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS credibility_tier,
                        (SELECT evidence_passage FROM event_evidence x WHERE x.event_id=e.event_id AND evidence_passage IS NOT NULL ORDER BY passage_score DESC, updated_at DESC LIMIT 1) AS evidence_excerpt,
-                       (SELECT r.title FROM event_observations eo
-                        JOIN latest_source_content r ON r.observation_id=eo.observation_id
-                        WHERE eo.event_id=e.event_id
-                          AND eo.relation_type!='filtered_aggregated_noise'
-                        ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_title,
-                       (SELECT r.summary FROM event_observations eo
-                        JOIN latest_source_content r ON r.observation_id=eo.observation_id
-                        WHERE eo.event_id=e.event_id
-                          AND eo.relation_type!='filtered_aggregated_noise'
-                        ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_summary
+                       (SELECT r.title FROM ranked_event_sources r
+                        WHERE r.event_id=e.event_id AND r.source_rank=1) AS source_title,
+                       (SELECT r.summary FROM ranked_event_sources r
+                        WHERE r.event_id=e.event_id AND r.source_rank=1) AS source_summary
                 FROM event_public e
                 ORDER BY {sort_orders[sort]}
                 """

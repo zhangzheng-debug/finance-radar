@@ -13,6 +13,16 @@ Releases use the same version prefixed by `v`.
   candidate is validated and prepared. The worker now stops only for the short
   atomic activation window, and the fast path no longer recursively changes
   ownership across existing shared data.
+- Add ordered public-browse indexes for latest, event-date and subject order,
+  plus an event/status job index. Deep numbered pages now walk the canonical
+  sort index instead of sorting and discarding every preceding full row.
+- Scope captured-source count and preferred-source selection to the already
+  bounded public page and materialize that projection once. Deleted captures
+  remain excluded from the count, while filtered aggregate noise remains
+  ineligible to supply the card excerpt.
+- Bound public feed source title/summary reads before they leave SQLite; the UI
+  still receives its existing 360-character excerpt, while authenticated and
+  repository-default reads retain the complete source text.
 
 ## 2026.08.23.6
 
