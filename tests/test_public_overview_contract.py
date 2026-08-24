@@ -1518,6 +1518,37 @@ def test_public_state_query_materializes_latest_rough_once_without_correlated_jo
     assert "ranked_rough_reviews" in details
 
 
+def test_event_detail_bounds_public_state_projection_to_selected_event() -> None:
+    class TracingRepository(LedgerRepository):
+        statements: list[str]
+
+        def __init__(self, path: Path) -> None:
+            super().__init__(path)
+            self.statements = []
+
+        def connect(self):
+            connection = super().connect()
+            connection.set_trace_callback(self.statements.append)
+            return connection
+
+    with tempfile.TemporaryDirectory() as directory:
+        ledger_path = _populated_ledger(Path(directory))
+        repository = TracingRepository(ledger_path)
+
+        detail = repository.event_detail("rough-insufficient-00")
+
+    assert detail is not None
+    state_query = next(
+        statement
+        for statement in repository.statements
+        if "SELECT * FROM event_public" in statement
+    )
+    assert "WITH paged_canonical AS" in state_query
+    assert "WHERE e.event_id=" in state_query
+    assert "FROM paged_canonical canonical" in state_query
+    assert "FROM canonical_events canonical" not in state_query
+
+
 def test_large_public_state_page_has_bounded_query_work() -> None:
     class CountingRepository(LedgerRepository):
         progress_callbacks = 0
