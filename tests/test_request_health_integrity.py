@@ -199,7 +199,10 @@ def test_root_health_receipt_proves_fresh_protected_backup_without_opening_bundl
         assert latest is not None
         _write_health_receipt(receipt_path, latest)
 
-        with patch(
+        # The fixture is owned by the unprivileged CI runner on POSIX.  This
+        # test exercises receipt-to-ledger validation; production root-owner
+        # enforcement is independent and must not depend on the CI uid.
+        with patch("app.api.main.os.name", "nt"), patch(
             "app.api.main._backup_artifact_visibility",
             return_value=(None, "protected"),
         ):
@@ -248,7 +251,7 @@ def test_tampered_or_mismatched_health_receipt_remains_fail_closed() -> None:
         assert latest is not None
         _write_health_receipt(receipt_path, latest, backup_id="wrong-backup")
 
-        with patch(
+        with patch("app.api.main.os.name", "nt"), patch(
             "app.api.main._backup_artifact_visibility",
             return_value=(None, "protected"),
         ):
