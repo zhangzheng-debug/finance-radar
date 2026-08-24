@@ -138,6 +138,12 @@ def test_code_only_mode_skips_expensive_recovery_and_dependency_work_fail_closed
     assert 'expected_bundle_files = set(manifest_paths) | {"manifest.json"}' in backup_wrapper
     assert "latest-verified-backup.json" in source
     assert "/var/lib/finance-radar" in backup_unit
+    assert "/var/lib/finance-radar-health" in backup_unit
+    assert "bridge backup ExecStart does not use the root wrapper" in source
+    assert "bridge backup cannot publish the root-owned health receipt" in source
+    assert "remove_legacy_backup_retention_dropin" in source
+    assert "legacy_backup_retention_override=RETIRED" in source
+    assert "/etc/systemd/system/finance-radar-backup.service.d/retention.conf" in source
     assert 'PREDEPLOY_BACKUP_RUN_ID=""' in source
     assert "predeploy_backup_run_id=%s" in source
     assert 'ACTIVATION_PENDING="$RELEASE_RECORDS/.ACTIVATION.pending.$$"' in source

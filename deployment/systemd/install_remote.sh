@@ -563,15 +563,17 @@ capture_fresh_verified_backup_receipt() {
 assert_bounded_backup_unit() {
     local properties
     properties="$(systemctl show finance-radar-backup.service \
-        -p User -p Slice -p MemoryHigh -p MemoryMax -p MemorySwapMax -p TasksMax)" || return 1
-    python3 - "$properties" <<'PY'
+        -p User -p Slice -p MemoryHigh -p MemoryMax -p MemorySwapMax -p TasksMax \
+        -p ExecStart -p ReadWritePaths)" || return 1
+    python3 - "$properties" "$BACKUP_QUIESCE_WRAPPER_TARGET" <<'PY'
 from __future__ import annotations
 
 import re
 import sys
 
+properties, wrapper_path = sys.argv[1:]
 values = {}
-for line in sys.argv[1].splitlines():
+for line in properties.splitlines():
     if "=" in line:
         key, value = line.split("=", 1)
         values[key] = value
@@ -595,6 +597,11 @@ if values.get("User") != "root":
     raise SystemExit(f"bridge backup must use the root quiesce wrapper: {values.get('User')!r}")
 if values.get("Slice") != "finance-radar.slice":
     raise SystemExit(f"bridge backup is outside finance-radar.slice: {values.get('Slice')!r}")
+exec_start = values.get("ExecStart", "")
+if f"path={wrapper_path}" not in exec_start or f"argv[]={wrapper_path}" not in exec_start:
+    raise SystemExit(f"bridge backup ExecStart does not use the root wrapper: {exec_start!r}")
+if "/var/lib/finance-radar-health" not in values.get("ReadWritePaths", "").split():
+    raise SystemExit("bridge backup cannot publish the root-owned health receipt")
 for key, minimum in expected.items():
     raw = values.get(key, "")
     actual = int(raw) if key == "TasksMax" and raw.isdigit() else bytes_value(raw)
@@ -1137,6 +1144,7 @@ LEGACY_MANAGED_PROPERTY_DROPINS=(
     /etc/systemd/system.control/finance-radar-admin.service.d/50-MemorySwapMax.conf
     /etc/systemd/system.control/finance-radar-admin.service.d/50-TasksMax.conf
 )
+LEGACY_BACKUP_RETENTION_DROPIN=/etc/systemd/system/finance-radar-backup.service.d/retention.conf
 ROLLBACK_SERVICE_UNITS=(
     finance-radar-api
     finance-radar-overview-snapshot.service
@@ -1180,6 +1188,7 @@ ROLLBACK_PATHS=(
     /etc/letsencrypt/renewal-hooks/deploy/finance-radar-reload-nginx.sh
     "$LEGACY_STATIC_INDEX"
     "$PUBLIC_RELEASE_MARKER"
+    "$LEGACY_BACKUP_RETENTION_DROPIN"
     "${LEGACY_MANAGED_PROPERTY_DROPINS[@]}"
 )
 
@@ -1520,6 +1529,26 @@ remove_legacy_managed_property_dropins() {
         fi
         rm -f -- "$path" || return
     done
+}
+
+remove_legacy_backup_retention_dropin() {
+    local path="$LEGACY_BACKUP_RETENTION_DROPIN"
+    [ -e "$path" ] || return 0
+    [ -f "$path" ] && [ ! -L "$path" ] || {
+        printf 'refusing unexpected legacy backup retention override: %s\n' "$path" >&2
+        return 1
+    }
+    if ! awk '
+        /^[[:space:]]*$/ || /^[[:space:]]*#/ || /^[[:space:]]*\[Service\][[:space:]]*$/ { next }
+        /^[[:space:]]*ExecStart=[[:space:]]*$/ { next }
+        /^[[:space:]]*ExecStart=\/opt\/finance-radar\/venv\/bin\/python -m app[.]ops[.]backup backup --retention 1 --weekly-retention 0[[:space:]]*$/ { next }
+        { exit 1 }
+    ' "$path"; then
+        printf 'refusing to remove unrecognized backup retention override: %s\n' "$path" >&2
+        return 1
+    fi
+    rm -f -- "$path"
+    printf 'legacy_backup_retention_override=RETIRED path=%s\n' "$path"
 }
 
 create_predeploy_backup_hold_physical_copy() {
@@ -2492,6 +2521,8 @@ install -m 0644 "$RELEASE/deployment/systemd/finance-radar-capture-interpretatio
     /etc/systemd/system/
 remove_legacy_managed_property_dropins || \
     abort_cutover 'refusing to replace an unrecognized Finance Radar memory override' 4
+remove_legacy_backup_retention_dropin || \
+    abort_cutover 'refusing to replace an unrecognized Finance Radar backup override' 4
 systemctl daemon-reload
 assert_bounded_backup_unit || \
     abort_cutover 'candidate backup service memory budget is not effective' 4
