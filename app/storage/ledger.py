@@ -2366,11 +2366,19 @@ class LedgerRepository:
 
     def event_detail(self, event_id: str) -> dict[str, Any] | None:
         with closing(self.connect()) as connection:
+            # A detail read must not evaluate the public evidence contract for
+            # every event in the ledger.  The public feed already uses this
+            # page-scoped projection; bounding it to one canonical row keeps a
+            # cold dossier read proportional to the selected event instead of
+            # the full production history.
+            event_state_cte = _page_scoped_public_event_state_cte(
+                where_sql="WHERE e.event_id=?",
+                sort_sql="e.event_id ASC",
+            )
             event = _dict(
                 connection.execute(
-                    PUBLIC_EVENT_STATE_CTE
-                    + " SELECT * FROM event_public WHERE event_id=?",
-                    (event_id,),
+                    event_state_cte + " SELECT * FROM event_public",
+                    (event_id, 1, 0),
                 ).fetchone()
             )
             if event is None:

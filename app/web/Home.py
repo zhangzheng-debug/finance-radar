@@ -778,52 +778,85 @@ if preview_event_id:
         preview_sources: list[dict[str, object]] = []
         preview_interpretations: list[dict[str, object]] = []
         preview_knowledge: dict[str, object] = {}
+        preview_load_error: Exception | None = None
+        preview_cache_stale = False
         preview_sources_error: Exception | None = None
         preview_interpretations_error: Exception | None = None
         if UI_ROLE != "admin":
             try:
-                dossier = api_request(f"/api/v1/events/{preview_event_path_id}/dossier")
-            except Exception:
-                # Keep a compatibility path during rolling/local development;
-                # production releases expose the single-read dossier endpoint.
-                preview_detail = api_request(f"/api/v1/events/{preview_event_path_id}")
-                preview_evidence = sorted(
-                    api_request(f"/api/v1/events/{preview_event_path_id}/evidence")["items"],
-                    key=public_evidence_sort_key,
+                dossier, dossier_cache = cached_api_get(
+                    f"/api/v1/events/{preview_event_path_id}/dossier",
+                    ttl_seconds=60,
+                    stale_if_error_seconds=900,
+                    timeout_seconds=20,
                 )
-                try:
-                    knowledge_response = api_request(
-                        f"/api/v1/events/{preview_event_path_id}/knowledge"
+                preview_cache_stale = dossier_cache.stale
+            except Exception as dossier_exc:
+                # A timeout or service failure is not evidence that the legacy
+                # endpoints will be healthier.  Retrying four sequential reads
+                # used to turn one 20-second timeout into a much longer wait and
+                # then replace the selected event with a global outage card.
+                # Keep the compatibility path only for an old deployment (404)
+                # and for local test doubles that do not expose the dossier.
+                message = str(dossier_exc)
+                use_legacy_endpoints = "API 404" in message or not message.startswith("API ")
+                if not use_legacy_endpoints:
+                    feed_preview = next(
+                        (
+                            dict(item)
+                            for item in live_feed
+                            if str(item.get("event_id") or "") == preview_event_id
+                        ),
+                        None,
                     )
-                    if isinstance(knowledge_response, dict):
-                        preview_knowledge = knowledge_response
-                except Exception:
-                    preview_knowledge = {}
-                try:
-                    source_response = api_request(
-                        f"/api/v1/events/{preview_event_path_id}/sources"
+                    if feed_preview is None:
+                        raise
+                    preview_load_error = dossier_exc
+                    preview_sources_error = dossier_exc
+                    preview_detail = {
+                        "event": feed_preview,
+                        "current_version": {"facts": {}},
+                    }
+                    preview_evidence = []
+                else:
+                    preview_detail = api_request(f"/api/v1/events/{preview_event_path_id}")
+                    preview_evidence = sorted(
+                        api_request(f"/api/v1/events/{preview_event_path_id}/evidence")["items"],
+                        key=public_evidence_sort_key,
                     )
-                    source_items = source_response.get("items", [])
-                    if isinstance(source_items, list):
-                        preview_sources = [
-                            item for item in source_items if isinstance(item, dict)
-                        ]
-                except Exception as exc:
-                    preview_sources_error = exc
-                if preview_sources:
                     try:
-                        interpretation_response = api_request(
-                            f"/api/v1/events/{preview_event_path_id}/source-interpretations"
+                        knowledge_response = api_request(
+                            f"/api/v1/events/{preview_event_path_id}/knowledge"
                         )
-                        interpretation_items = interpretation_response.get("items", [])
-                        if isinstance(interpretation_items, list):
-                            preview_interpretations = [
-                                item
-                                for item in interpretation_items
-                                if isinstance(item, dict)
+                        if isinstance(knowledge_response, dict):
+                            preview_knowledge = knowledge_response
+                    except Exception:
+                        preview_knowledge = {}
+                    try:
+                        source_response = api_request(
+                            f"/api/v1/events/{preview_event_path_id}/sources"
+                        )
+                        source_items = source_response.get("items", [])
+                        if isinstance(source_items, list):
+                            preview_sources = [
+                                item for item in source_items if isinstance(item, dict)
                             ]
                     except Exception as exc:
-                        preview_interpretations_error = exc
+                        preview_sources_error = exc
+                    if preview_sources:
+                        try:
+                            interpretation_response = api_request(
+                                f"/api/v1/events/{preview_event_path_id}/source-interpretations"
+                            )
+                            interpretation_items = interpretation_response.get("items", [])
+                            if isinstance(interpretation_items, list):
+                                preview_interpretations = [
+                                    item
+                                    for item in interpretation_items
+                                    if isinstance(item, dict)
+                                ]
+                        except Exception as exc:
+                            preview_interpretations_error = exc
             else:
                 preview_detail = dossier.get("detail") or {}
                 preview_evidence = sorted(
@@ -943,6 +976,13 @@ if preview_event_id:
                 if UI_ROLE != "admin"
                 else "留在态势总览 · 需要时再进入人工复核",
             )
+            if preview_load_error is not None and UI_ROLE != "admin":
+                st.warning(
+                    "事件详情读取超时；当前先展示事件流中已经加载的摘要。"
+                    "系统没有用旧证据或猜测内容补位，请稍后重试原始证据。"
+                )
+            elif preview_cache_stale and UI_ROLE != "admin":
+                st.caption("详情刷新暂时失败；当前展示最近一次成功读取的只读快照。")
             if UI_ROLE == "admin":
                 st.markdown(
                     '<div class="home-event-preview">'
