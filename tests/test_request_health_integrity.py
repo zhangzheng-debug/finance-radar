@@ -6,11 +6,16 @@ import json
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from app.api.main import _backup_artifact_visibility, create_app
+from app.api.main import (
+    _backup_artifact_visibility,
+    _unsafe_backup_health_receipt_permissions,
+    create_app,
+)
 from app.config import Settings
 from app.storage import LedgerRepository, OperationsRepository
 from event_ledger import open_ledger
@@ -82,6 +87,38 @@ def test_operations_repository_can_defer_request_time_integrity_scan() -> None:
     assert health["status"] == "ok"
     assert health["quick_check"] == "deferred"
     assert health["integrity_check_source"] == "not_run"
+
+
+def test_backup_health_receipt_permissions_require_root_and_locked_modes() -> None:
+    locked_root = SimpleNamespace(st_uid=0, st_mode=0o100644)
+    locked_root_dir = SimpleNamespace(st_uid=0, st_mode=0o40755)
+    non_root = SimpleNamespace(st_uid=1000, st_mode=0o100644)
+    writable = SimpleNamespace(st_uid=0, st_mode=0o100666)
+
+    assert (
+        _unsafe_backup_health_receipt_permissions(
+            locked_root_dir,
+            locked_root,
+            platform_name="posix",
+        )
+        is None
+    )
+    assert (
+        _unsafe_backup_health_receipt_permissions(
+            locked_root_dir,
+            non_root,
+            platform_name="posix",
+        )
+        == "non_root_owner"
+    )
+    assert (
+        _unsafe_backup_health_receipt_permissions(
+            locked_root_dir,
+            writable,
+            platform_name="posix",
+        )
+        == "writable_by_non_root"
+    )
 
 
 def test_api_health_defers_operations_integrity_to_verified_backup_workflow() -> None:
@@ -201,8 +238,11 @@ def test_root_health_receipt_proves_fresh_protected_backup_without_opening_bundl
 
         # The fixture is owned by the unprivileged CI runner on POSIX.  This
         # test exercises receipt-to-ledger validation; production root-owner
-        # enforcement is independent and must not depend on the CI uid.
-        with patch("app.api.main.os.name", "nt"), patch(
+        # enforcement is covered by its own helper and remains fail closed.
+        with patch(
+            "app.api.main._unsafe_backup_health_receipt_permissions",
+            return_value=None,
+        ), patch(
             "app.api.main._backup_artifact_visibility",
             return_value=(None, "protected"),
         ):
@@ -251,7 +291,10 @@ def test_tampered_or_mismatched_health_receipt_remains_fail_closed() -> None:
         assert latest is not None
         _write_health_receipt(receipt_path, latest, backup_id="wrong-backup")
 
-        with patch("app.api.main.os.name", "nt"), patch(
+        with patch(
+            "app.api.main._unsafe_backup_health_receipt_permissions",
+            return_value=None,
+        ), patch(
             "app.api.main._backup_artifact_visibility",
             return_value=(None, "protected"),
         ):

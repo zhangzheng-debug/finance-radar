@@ -120,6 +120,23 @@ def _stable_json_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def _unsafe_backup_health_receipt_permissions(
+    parent_stat: os.stat_result,
+    receipt_stat: os.stat_result,
+    *,
+    platform_name: str | None = None,
+) -> str | None:
+    """Return the POSIX ownership/mode violation for a public root receipt."""
+
+    if (platform_name or os.name) != "posix":
+        return None
+    if parent_stat.st_uid != 0 or receipt_stat.st_uid != 0:
+        return "non_root_owner"
+    if parent_stat.st_mode & 0o022 or receipt_stat.st_mode & 0o022:
+        return "writable_by_non_root"
+    return None
+
+
 def _read_backup_health_receipt(
     receipt_path: Path | None,
     latest_backup: dict[str, Any],
@@ -143,11 +160,12 @@ def _read_backup_health_receipt(
         return None, "unsafe_parent_type"
     if receipt_stat.st_size <= 0 or receipt_stat.st_size > BACKUP_HEALTH_RECEIPT_MAX_BYTES:
         return None, "invalid_size"
-    if os.name == "posix":
-        if parent_stat.st_uid != 0 or receipt_stat.st_uid != 0:
-            return None, "non_root_owner"
-        if parent_stat.st_mode & 0o022 or receipt_stat.st_mode & 0o022:
-            return None, "writable_by_non_root"
+    permission_violation = _unsafe_backup_health_receipt_permissions(
+        parent_stat,
+        receipt_stat,
+    )
+    if permission_violation is not None:
+        return None, permission_violation
     try:
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
         descriptor = os.open(receipt_path, flags)
