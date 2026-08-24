@@ -5,6 +5,17 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+- Close a bypass in the code-only fast-path schema guard. The mutation scan
+  only matched a bare `CREATE|ALTER|DROP TABLE|INDEX|TRIGGER|VIEW`, so the
+  qualified SQLite forms `CREATE UNIQUE INDEX`, `CREATE VIRTUAL TABLE` and
+  `CREATE TEMP`/`TEMPORARY TABLE` passed the contract and could ship as a
+  code-only release. `CREATE UNIQUE INDEX IF NOT EXISTS` is already an idiom
+  in this repository's schema owners, and `app/storage/ledger.py` is fast-path
+  eligible. The installer's before/after live schema receipt did not cover the
+  gap: it is taken while the Worker is still stopped, so a mutation on a
+  worker-only or lazily executed path was observed by neither control. No file
+  in the current tree changes eligibility as a result of the tighter pattern.
+
 ## 2026.08.24.4
 
 - Keep production backup bundles and the private restore attestation root-only,

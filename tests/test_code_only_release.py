@@ -243,6 +243,46 @@ def test_code_only_contract_rejects_schema_owner_or_new_schema_sql(tmp_path: Pat
     assert "database schema mutation SQL" in embedded_schema.stderr
 
 
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "ALTER TABLE canonical_events ADD COLUMN unsafe TEXT",
+        "CREATE TABLE unsafe(event_id TEXT PRIMARY KEY)",
+        "CREATE UNIQUE INDEX idx_unsafe ON canonical_events(event_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_unsafe ON canonical_events(event_id)",
+        "CREATE VIRTUAL TABLE unsafe_fts USING fts5(body)",
+        "CREATE TEMP TABLE unsafe_tmp(event_id TEXT)",
+        "CREATE TEMPORARY TABLE unsafe_tmp(event_id TEXT)",
+        "DROP INDEX idx_canonical_events_event_id",
+        "PRAGMA user_version=99",
+    ],
+)
+def test_code_only_contract_rejects_qualified_schema_mutation_sql(
+    tmp_path: Path,
+    statement: str,
+) -> None:
+    """Qualified DDL mutates the live schema exactly like the bare form.
+
+    ``CREATE UNIQUE INDEX``/``VIRTUAL``/``TEMP`` forms must not reach the fast
+    path: the installer's before/after live schema receipt is taken while the
+    worker is still stopped, so a mutation on a worker-only or lazily executed
+    code path would not be observed by that second control.
+    """
+
+    previous = _release(tmp_path / "previous", "same")
+    candidate = _release(tmp_path / "candidate", "same")
+    (candidate / "app/services").mkdir(parents=True, exist_ok=True)
+    (candidate / "app/services/lazy_schema.py").write_text(
+        f"def migrate(connection):\n    connection.execute({statement!r})\n",
+        encoding="utf-8",
+    )
+
+    result = _contract(previous, candidate)
+
+    assert result.returncode != 0, result.stdout
+    assert "database schema mutation SQL" in result.stderr
+
+
 def test_code_only_schema_receipt_changes_only_when_sqlite_schema_changes(tmp_path: Path) -> None:
     ledger = tmp_path / "ledger.sqlite3"
     operations = tmp_path / "operations.sqlite3"

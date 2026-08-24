@@ -74,8 +74,14 @@ FORBIDDEN_CHANGE_FILES = {
     "requirements-dev.txt",
     "requirements-dev.lock",
 }
+# SQLite allows qualifiers between the verb and the object type
+# (``CREATE UNIQUE INDEX``, ``CREATE VIRTUAL TABLE``, ``CREATE TEMP TABLE``).
+# They must be matched too: a qualified form is exactly as schema-mutating as
+# the bare one, and ``CREATE UNIQUE INDEX IF NOT EXISTS`` is an idiom already
+# used by this codebase's schema owners.
 SCHEMA_MUTATION_PATTERN = re.compile(
-    rb"\b(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|TRIGGER|VIEW)\b"
+    rb"\b(?:CREATE|ALTER|DROP)\s+(?:(?:UNIQUE|TEMP|TEMPORARY|VIRTUAL)\s+){0,2}"
+    rb"(?:TABLE|INDEX|TRIGGER|VIEW)\b"
     rb"|\bPRAGMA\s+(?:user_version|schema_version)\b",
     re.IGNORECASE,
 )
