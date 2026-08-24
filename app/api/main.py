@@ -34,6 +34,7 @@ from app.models import RiskRouter, derive_evidence_context
 from app.services import (
     CAPTURE_INTERPRETATION_CONTRACT,
     CAPTURE_INTERPRETATION_PROMPT_SHA256,
+    DEEPSEEK_CHEAP_TEXT_MODEL,
     AdjudicationService,
     EvidenceAgent,
     LocalEvidenceModelProvider,
@@ -54,7 +55,7 @@ from app.services.replay import ReplayCaseNotFound
 from app.storage import EvidenceObjectStore, LedgerRepository, OperationsRepository
 
 
-API_SCHEMA_VERSION = "1.2"
+API_SCHEMA_VERSION = "1.3"
 LOGGER = logging.getLogger(__name__)
 BACKUP_SNAPSHOT_MAX_AGE_SECONDS = 36 * 60 * 60
 BACKUP_HEALTH_RECEIPT_FORMAT = "finance-radar-backup-health-receipt-v1"
@@ -1353,14 +1354,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         event: dict[str, Any],
         captures: list[dict[str, Any]],
         *,
+        eligibility: dict[str, Any] | None = None,
         include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
-        """Build advisory interpretations from one already-loaded capture set."""
+        """Return only current, persisted external explanations.
 
+        Deterministic previews are an internal debugging aid.  They must never
+        be dressed as external AI on the public surface, and an event with any
+        evidence row is categorically outside this feature's boundary.
+        """
+
+        eligibility = eligibility or ledger.capture_interpretation_eligibility(
+            str(event.get("event_id") or "")
+        )
+        if not eligibility.get("eligible"):
+            return []
+
+        eligible_observation_ids = set(
+            eligibility.get("eligible_observation_ids") or []
+        )
         visible_captures = [
             capture
             for capture in captures
-            if include_deleted or capture.get("observation_status") != "deleted"
+            if (include_deleted or capture.get("observation_status") != "deleted")
+            and str(capture.get("observation_id") or "")
+            in eligible_observation_ids
         ]
         receipts = [
             str(capture.get("capture_receipt_sha256") or "")
@@ -1376,20 +1394,141 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             run = persisted_runs.get(receipt)
             output = dict((run or {}).get("output") or {})
             try:
-                if output:
-                    validate_interpretation_result(output, capture_source_text(capture))
-                else:
-                    output = deterministic_interpretation(event, capture)
+                if not output:
+                    continue
+                validate_interpretation_result(output, capture_source_text(capture))
+                if str((run or {}).get("status") or "") != "COMPLETED":
+                    continue
+                if int((run or {}).get("external_call") or 0) != 1:
+                    continue
+                if str((run or {}).get("provider") or "") != "deepseek":
+                    continue
+                if str((run or {}).get("contract_version") or "") != (
+                    CAPTURE_INTERPRETATION_CONTRACT
+                ):
+                    continue
+                if str((run or {}).get("prompt_version") or "") != (
+                    CAPTURE_INTERPRETATION_PROMPT_VERSION
+                ):
+                    continue
+                if str((run or {}).get("prompt_sha256") or "") != (
+                    CAPTURE_INTERPRETATION_PROMPT_SHA256
+                ):
+                    continue
+                if str((run or {}).get("model_snapshot") or "") != (
+                    DEEPSEEK_CHEAP_TEXT_MODEL
+                ):
+                    continue
+                if output.get("status") != "READY" or output.get("mode") != "LLM_ASSISTED":
+                    continue
+                if output.get("persisted") is not True:
+                    continue
+                if output.get("external_generation_state") != "COMPLETED":
+                    continue
+                if str(output.get("event_id") or "") != str(event.get("event_id") or ""):
+                    continue
+                if int(output.get("bound_event_version") or 0) != int(
+                    eligibility.get("current_event_version") or 0
+                ):
+                    continue
+                if str(output.get("capture_receipt_sha256") or "") != receipt:
+                    continue
+                if int(output.get("source_revision_no") or 0) != int(
+                    capture.get("latest_revision_no") or 0
+                ):
+                    continue
+                if str(output.get("bound_content_sha256") or "") != str(
+                    capture.get("semantic_content_sha256") or ""
+                ):
+                    continue
+                if str(output.get("input_sha256") or "") != str(
+                    (run or {}).get("input_sha256") or ""
+                ):
+                    continue
+                if output.get("prompt_version") != CAPTURE_INTERPRETATION_PROMPT_VERSION:
+                    continue
             except Exception:
-                output = deterministic_interpretation(event, capture)
-                output["status"] = "FAILED"
-                output["one_line_zh"] = (
-                    "缓存解读未通过当前合同；原始捕获仍可阅读，正式状态保持不变。"
-                )
-                output["persisted"] = False
-                output["external_generation_state"] = "FAILED_VALIDATION"
+                continue
             items.append(public_capture_interpretation(output))
         return items
+
+    def public_capture_explanation(
+        event_id: str,
+        *,
+        event_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Project the cache-only public state of zero-evidence AI explanation."""
+
+        event_data = event_data or event_or_404(event_id, require_reader_ready=False)
+        event = dict(event_data.get("event") or {})
+        eligibility = ledger.capture_interpretation_eligibility(event_id)
+        result: dict[str, Any] = {
+            "display": bool(eligibility.get("display")),
+            "reason_code": eligibility.get("reason_code"),
+            "state": "NOT_APPLICABLE",
+            "generation_path": "BACKGROUND_CACHE_ONLY",
+            "item": None,
+            "source": None,
+            "boundary": {
+                "enabled_only_when_event_has_zero_evidence": True,
+                "captured_text_is_not_evidence": True,
+                "does_not_confirm_event_truth": True,
+                "canonical_mutation_allowed": False,
+                "used_as_model_feature": False,
+                "changes_materiality_or_polarity": False,
+                "no_trading": True,
+            },
+        }
+        if not eligibility.get("eligible"):
+            result["state"] = {
+                "REFETCH_PRIMARY_SOURCE": "REFETCH_PRIMARY_SOURCE",
+                "NO_CAPTURE_TEXT": "NO_CAPTURE_TEXT",
+                "CAPTURE_NOT_FOUND": "NO_CAPTURE_TEXT",
+                "EVENT_NOT_FOUND": "NOT_APPLICABLE",
+                "EVIDENCE_PRESENT": "NOT_APPLICABLE",
+            }.get(str(eligibility.get("reason_code") or ""), "NOT_APPLICABLE")
+            return result
+
+        eligible_ids = set(eligibility.get("eligible_observation_ids") or [])
+        captures = [
+            item
+            for item in ledger.captured_sources(event_id)
+            if item.get("observation_status") != "deleted"
+            and str(item.get("observation_id") or "") in eligible_ids
+        ]
+        if captures:
+            result["source"] = public_captured_source(captures[0])
+        items = public_source_interpretation_items(
+            event,
+            captures,
+            eligibility=eligibility,
+        )
+        if items:
+            result["state"] = "READY"
+            result["item"] = items[0]
+            return result
+
+        receipts = {
+            str(item.get("capture_receipt_sha256") or "")
+            for item in captures
+            if str(item.get("capture_receipt_sha256") or "")
+        }
+        latest_run = next(
+            (
+                run
+                for run in operations.capture_interpretation_runs(event_id, limit=200)
+                if str(run.get("capture_receipt_sha256") or "") in receipts
+            ),
+            None,
+        )
+        run_status = str((latest_run or {}).get("status") or "")
+        if run_status == "RUNNING":
+            result["state"] = "RUNNING"
+        elif run_status in {"FAILED"}:
+            result["state"] = "FAILED_RETRYING"
+        else:
+            result["state"] = "PENDING"
+        return result
 
     @application.get("/")
     def root(request: Request):
@@ -1707,12 +1846,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/api/v1/events/{event_id}/dossier")
     def public_event_dossier(request: Request, event_id: str):
-        """Return the complete public event dossier with one bounded API read.
+        """Return the public core dossier without optional capture explanation.
 
         The previous page made five sequential loopback requests and reopened
-        the same event/evidence/source rows repeatedly.  This projection loads
-        each repository object once and keeps the exact same public redaction
-        boundary as the individual endpoints.
+        the same event/evidence/source rows repeatedly.  A later revision then
+        bundled optional source and AI cache reads back into this critical
+        path.  Keep the evidence-backed core bounded here; capture explanation
+        is a separate cache-only endpoint and can never delay the event body.
         """
 
         def read_dossier() -> dict[str, Any]:
@@ -1729,13 +1869,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             data["no_trading_banner"] = (
                 "Intelligence and review only. No execution capability is present."
             )
-            captures = [
-                item
-                for item in ledger.captured_sources(event_id)
-                if item.get("observation_status") != "deleted"
-            ]
             event = dict(data.get("event") or {})
             risk_runs = current_risk_runs([event])
+            explanation_eligibility = ledger.capture_interpretation_eligibility(
+                event_id
+            )
             return {
                 "detail": public_event_detail(
                     data,
@@ -1747,25 +1885,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     str(event.get("event_family") or ""),
                     str(event.get("event_type") or ""),
                 ),
-                "sources": {
-                    "items": [public_captured_source(item) for item in captures],
-                    "contract": {
-                        "captured_source_is_not_evidence": True,
-                        "canonical_state_unchanged": True,
-                        "no_trading": True,
-                    },
-                },
-                "source_interpretations": {
-                    "items": public_source_interpretation_items(event, captures),
-                    "contract": {
-                        "version": CAPTURE_INTERPRETATION_CONTRACT,
-                        "advisory_only": True,
-                        "canonical_mutation_allowed": False,
-                        "used_as_model_feature": False,
-                        "public_requests_are_cached_or_deterministic": True,
-                        "external_provider_configured": False,
-                        "no_trading": True,
-                    },
+                "capture_explanation": {
+                    "display": bool(explanation_eligibility.get("display")),
+                    "reason_code": explanation_eligibility.get("reason_code"),
+                    "state": (
+                        "DEFERRED"
+                        if explanation_eligibility.get("eligible")
+                        else "NOT_APPLICABLE"
+                    ),
+                    "generation_path": "BACKGROUND_CACHE_ONLY",
                 },
                 "contract": {
                     "public_projection": True,
@@ -1776,7 +1904,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         return envelope(
             request,
-            cached_read(f"public-event-dossier-v2:{event_id}", 20.0, read_dossier),
+            cached_read(f"public-event-dossier-v3:{event_id}", 20.0, read_dossier),
         )
 
     @application.get("/api/v1/events/{event_id}")
@@ -1908,9 +2036,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         event = dict(event_data.get("event") or {})
         captures = ledger.captured_sources(event_id)
+        eligibility = ledger.capture_interpretation_eligibility(event_id)
         items = public_source_interpretation_items(
             event,
             captures,
+            eligibility=eligibility,
             include_deleted=internal_reader,
         )
         return envelope(
@@ -1922,12 +2052,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "advisory_only": True,
                     "canonical_mutation_allowed": False,
                     "used_as_model_feature": False,
-                    "public_requests_are_cached_or_deterministic": True,
-                    "external_provider_configured": False,
+                    "public_requests_are_cache_only": True,
+                    "enabled_only_when_event_has_zero_evidence": True,
                     "no_trading": True,
                 },
             },
         )
+
+    @application.get("/api/v1/events/{event_id}/capture-explanation")
+    def event_capture_explanation(request: Request, event_id: str):
+        return envelope(request, public_capture_explanation(event_id))
 
     @application.post(
         "/api/v1/events/{event_id}/sources/{observation_id}/interpret",
@@ -1940,6 +2074,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         payload: CaptureInterpretationRunRequest,
     ):
         event_data = event_or_404(event_id)
+        eligibility = ledger.capture_interpretation_eligibility(
+            event_id,
+            observation_id=observation_id,
+        )
+        if not eligibility.get("eligible"):
+            raise HTTPException(
+                422,
+                {
+                    "code": "CAPTURE_INTERPRETATION_NOT_ELIGIBLE",
+                    "message": str(eligibility.get("reason_code") or "UNKNOWN"),
+                },
+            )
         event = dict(event_data.get("event") or {})
         capture = next(
             (

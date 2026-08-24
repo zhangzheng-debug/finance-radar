@@ -106,6 +106,16 @@ def run(args: argparse.Namespace) -> int:
     ledger = LedgerRepository(settings.ledger_db)
     operations = OperationsRepository(settings.operations_db)
 
+    eligibility = ledger.capture_interpretation_eligibility(
+        args.event_id,
+        observation_id=args.observation_id,
+    )
+    if not eligibility.get("eligible"):
+        raise RuntimeError(
+            "CAPTURE_INTERPRETATION_NOT_ELIGIBLE:"
+            + str(eligibility.get("reason_code") or "UNKNOWN")
+        )
+
     context = ledger.capture_interpretation_context(
         args.event_id,
         args.observation_id,

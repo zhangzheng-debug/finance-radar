@@ -5,6 +5,28 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+- Restrict the public DeepSeek capture explanation to one explicit boundary:
+  the event must have zero evidence relations, no P0/P1 URL awaiting refetch,
+  and readable P2/raw capture text. Evidence arrival hides cached AI output and
+  prevents new calls. Public requests are cache-only, load after the event core,
+  and never render the old deterministic preview as if it were external AI.
+- Bind successful interpretation terminal keys and public cache validation to
+  the current event version, capture receipt, source revision/content hash,
+  contract, prompt and fixed model generation. Run the bounded background timer
+  every minute and expose 24-hour queue-wait/provider-latency percentiles.
+- Scope event evidence revision expansion to the requested event before ranking
+  source history, removing a whole-ledger scan from the event detail path.
+- Close a bypass in the code-only fast-path schema guard. The mutation scan
+  only matched a bare `CREATE|ALTER|DROP TABLE|INDEX|TRIGGER|VIEW`, so the
+  qualified SQLite forms `CREATE UNIQUE INDEX`, `CREATE VIRTUAL TABLE` and
+  `CREATE TEMP`/`TEMPORARY TABLE` passed the contract and could ship as a
+  code-only release. `CREATE UNIQUE INDEX IF NOT EXISTS` is already an idiom
+  in this repository's schema owners, and `app/storage/ledger.py` is fast-path
+  eligible. The installer's before/after live schema receipt did not cover the
+  gap: it is taken while the Worker is still stopped, so a mutation on a
+  worker-only or lazily executed path was observed by neither control. No file
+  in the current tree changes eligibility as a result of the tighter pattern.
+
 ## 2026.08.24.4
 
 - Keep production backup bundles and the private restore attestation root-only,

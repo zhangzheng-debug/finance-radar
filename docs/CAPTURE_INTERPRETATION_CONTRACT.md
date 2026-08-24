@@ -8,18 +8,21 @@
 
 ## 当前实现
 
-- `GET /api/v1/events/{event_id}/source-interpretations` 为公开只读接口。
-- 页面优先读取与当前 `capture_receipt_sha256` 精确匹配的已缓存结果；没有缓存时，只返回零费用的确定性边界说明。
-- `POST /api/v1/events/{event_id}/sources/{observation_id}/interpret` 仅 Operator 可调用，当前只生成并缓存确定性预览。
-- 普通页面请求不会排队、不会调用外部服务、不会产生费用。
-- 输出与来源 revision、语义内容哈希、事件版本、提示词哈希绑定；任一输入变化，旧结果不再命中。
+- `GET /api/v1/events/{event_id}/capture-explanation` 是 Public 页面使用的只读、缓存型接口；旧 `/source-interpretations` 仅保留兼容性。
+- 外部 AI 只在事件 **完全没有任何 `event_evidence` 关系**、没有可优先重抓的 P0/P1 URL、且仍有可读 P2/raw 捕获文本时启用。只要出现一条证据关系，面板立即隐藏，后台单条运行器也拒绝调用。
+- 页面明确说明“因为事件完全没有证据，所以启动 AI 自动解释”；它只解释系统捕获到的 API 标题/摘要，不证明事件、不改变状态、重大性、极性、风险路由、价格审计或交易。
+- Public 首屏先加载事件与证据核心；AI 使用独立端点在局部区域轮询后台缓存。无缓存时显示短暂的本地等待状态，不显示伪造的“确定性 AI 预览”，也不阻塞事件正文。
+- `POST /api/v1/events/{event_id}/sources/{observation_id}/interpret` 仅 Operator 可调用并服从同一资格门；其确定性结果仅供内部诊断，Public 永不把它当作 DeepSeek 输出展示。
+- 普通页面请求不会排队、不会调用外部服务、不会产生费用。外部调用只由后台定时器或明确的 Operator 操作执行。
+- 输出与来源 revision、语义内容哈希、采集收据、事件版本、合同版本、提示词哈希和固定模型代际绑定；任一输入变化，旧结果不再展示，后台会为当前版本创建新作业。
 - Operations Schema 9 分开保存作业与每次供应商尝试，包含原子费用预留、请求计数、租约、退避、失败用量和不可变幂等键。
 - 后台单条运行器和有界批处理 Worker 可以使用 DeepSeek 生成 `LLM_ASSISTED` 缓存；两者都不接在 Public 请求路径上。
 - 并发 Worker 通过 `BEGIN IMMEDIATE` 在同一事务中完成“记录用量预留、取得租约”；若将来重新设置日上限，也不能由并发任务分别越过该上限。
 - 供应商返回了 token 用量但随后合同校验失败时，用量仍会落账；完全拿不到用量时按每次 0.02 元人民币预留值记录估算费用。
 - 可重试故障最多 4 次并带退避；过期租约会回收。合同拒绝和不可恢复错误进入失败终态，不会无限烧费。
-- 首次启用时，Worker 会遍历全部符合条件的历史采集收据，并把当前模型代际、来源水位、候选数和剩余数持久化到 Operations 数据库。历史收据达到终态后不再逐条查库或调用供应商。
+- 首次启用时，Worker 会遍历全部符合条件的历史采集收据，并把当前模型代际、来源水位、候选数和剩余数持久化到 Operations 数据库。成功终态按事件版本区分；事件版本变化后必须重新解释。历史不可恢复失败保留通配终态，避免无限重试烧费。
 - 历史回填完成后，每次定时运行先比较 `raw_observations/source_revisions` 水位；水位不变时直接返回 `SOURCE_GENERATION_UNCHANGED`。只有新增或修订后产生新 `capture_receipt_sha256` 的内容才会进入新调用。
+- 生产定时器每 60 秒运行一次有界 Worker，单轮最多 20 条、并发 3；Operations 健康信息记录最近 24 小时排队等待和供应商延迟的 p50/p95。
 
 ## DeepSeek 供应商合同（2026-08-21 核验）
 
@@ -96,6 +99,6 @@ python scripts/run_capture_interpretation_deepseek.py `
 python scripts/run_capture_interpretation_worker.py --limit 20 --scan-limit 100000 --workers 3
 ```
 
-仓库同时提供 `finance-radar-capture-interpretation.service/.timer`，部署安装器只安装、不启用。生产启用前必须把服务专用密钥放入 root-only 的 `/etc/finance-radar/deepseek-api-key`，由 systemd `LoadCredential=` 注入；不得把通用密钥复制进 `/etc/finance-radar.env`。
+仓库同时提供 `finance-radar-capture-interpretation.service/.timer`。生产启用前必须把服务专用密钥放入 root-only 的 `/etc/finance-radar/deepseek-api-key`，由 systemd `LoadCredential=` 注入；不得把通用密钥复制进 `/etc/finance-radar.env`。安装器只在凭据校验通过且部署前该定时器原本已启用时恢复其运行状态，不擅自扩大外部调用授权。
 
-历史回填只创建独立、可追踪的解读数据，不会批量覆盖确定性结果。仓库测试证明的是合同与失败路径，不是生产供应商的长期可用性；页面在没有与当前收据精确匹配的合格缓存时，仍明确显示“外部模型待接入”。
+历史回填只创建独立、可追踪的解读数据，不会批量覆盖确定性结果。仓库测试证明的是合同与失败路径，不是生产供应商的长期可用性；页面没有合格缓存时只显示“正在等待后台自动解释”，绝不显示旧模板、规则预览或虚假的 DeepSeek 分析。

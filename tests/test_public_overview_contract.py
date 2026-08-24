@@ -886,6 +886,9 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
         captured_at = "2026-08-19T08:09:23+00:00"
         connection = open_ledger(ledger_path)
         connection.execute(
+            "UPDATE sources SET authority_tier='P2' WHERE source_id='src'"
+        )
+        connection.execute(
             """INSERT INTO raw_observations(
                observation_id,source_id,external_id,source_published_at,local_received_at,
                title,summary,canonical_url,content_sha256,raw_json,observation_status
@@ -939,6 +942,9 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
             interpretations = client.get(
                 "/api/v1/events/excluded-0/source-interpretations"
             )
+            explanation = client.get(
+                "/api/v1/events/excluded-0/capture-explanation"
+            )
             dossier = client.get("/api/v1/events/excluded-0/dossier")
             public_mutation = client.post(
                 "/api/v1/events/excluded-0/sources/excluded-capture/interpret",
@@ -961,6 +967,25 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
             internal_sources = client.get(
                 "/api/v1/events/excluded-0/sources",
                 headers={"X-Reviewer-Token": "review-secret"},
+            )
+            evidence_connection = open_ledger(ledger_path)
+            evidence_connection.execute(
+                """INSERT INTO event_evidence VALUES (
+                   'excluded-evidence','excluded-0','excluded-capture',
+                   'https://example.test/discovery',NULL,NULL,NULL,
+                   'A retained passage now associated with this event for review.',
+                   NULL,10,'candidate_passage',0,?,?)""",
+                (captured_at, captured_at),
+            )
+            evidence_connection.commit()
+            evidence_connection.close()
+            evidence_backed_explanation = client.get(
+                "/api/v1/events/excluded-0/capture-explanation"
+            )
+            evidence_backed_operator_call = client.post(
+                "/api/v1/events/excluded-0/sources/excluded-capture/interpret",
+                headers={"X-Operator-Token": "operator-secret"},
+                json={"audit_write_confirmed": True},
             )
 
         assert default_feed.status_code == 200
@@ -1027,22 +1052,44 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
             "advisory_only": True,
             "canonical_mutation_allowed": False,
             "used_as_model_feature": False,
-            "public_requests_are_cached_or_deterministic": True,
-            "external_provider_configured": False,
+            "public_requests_are_cache_only": True,
+            "enabled_only_when_event_has_zero_evidence": True,
             "no_trading": True,
         }
-        assert len(interpretation_data["items"]) == 1
+        assert interpretation_data["items"] == []
+        assert explanation.status_code == 200
+        explanation_data = explanation.json()["data"]
+        assert explanation_data["display"] is True
+        assert explanation_data["reason_code"] == "NO_EVENT_EVIDENCE"
+        assert explanation_data["state"] == "PENDING"
+        assert explanation_data["generation_path"] == "BACKGROUND_CACHE_ONLY"
+        assert explanation_data["source"]["source_title"] == (
+            "Markets await central-bank minutes while gold rises"
+        )
+        assert evidence_backed_explanation.status_code == 200
+        assert evidence_backed_explanation.json()["data"]["display"] is False
+        assert evidence_backed_explanation.json()["data"]["reason_code"] == (
+            "EVIDENCE_PRESENT"
+        )
+        assert evidence_backed_explanation.json()["data"]["item"] is None
+        assert evidence_backed_explanation.json()["data"]["source"] is None
+        assert evidence_backed_operator_call.status_code == 422
+        assert (
+            evidence_backed_operator_call.json()["error"]["message"]
+            == "EVIDENCE_PRESENT"
+        )
         assert dossier.status_code == 200
         dossier_data = dossier.json()["data"]
         assert dossier_data["detail"] == detail.json()["data"]
         assert dossier_data["evidence"] == evidence.json()["data"]
-        assert dossier_data["sources"] == public_sources
-        assert dossier_data["source_interpretations"]["contract"] == interpretation_data[
-            "contract"
-        ]
-        assert dossier_data["source_interpretations"]["items"][0]["one_line_zh"] == (
-            interpretation_data["items"][0]["one_line_zh"]
-        )
+        assert "sources" not in dossier_data
+        assert "source_interpretations" not in dossier_data
+        assert dossier_data["capture_explanation"] == {
+            "display": True,
+            "reason_code": "NO_EVENT_EVIDENCE",
+            "state": "DEFERRED",
+            "generation_path": "BACKGROUND_CACHE_ONLY",
+        }
         assert dossier_data["contract"] == {
             "public_projection": True,
             "consistency_scope": "bounded_multi_read_best_effort",
@@ -1051,13 +1098,6 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
         dossier_payload = json.dumps(dossier_data, ensure_ascii=False)
         assert "MUST_NOT_LEAK" not in dossier_payload
         assert "market_jobs" not in dossier_payload
-        preview = interpretation_data["items"][0]
-        assert preview["mode"] == "DETERMINISTIC"
-        assert preview["persisted"] is False
-        assert preview["external_generation_state"] == "NOT_CONFIGURED"
-        assert preview["safety"]["formal_status_mutated"] is False
-        assert preview["safety"]["used_as_model_feature"] is False
-        assert "confidence" not in preview
         assert public_mutation.status_code in {403, 503}
         assert persisted.status_code == 200
         assert persisted.json()["data"]["created"] is True
@@ -1065,9 +1105,7 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
         assert persisted.json()["data"]["estimated_usd"] == 0
         assert persisted_retry.status_code == 200
         assert persisted_retry.json()["data"]["created"] is False
-        cached = interpretations_after.json()["data"]["items"][0]
-        assert cached["persisted"] is True
-        assert cached["external_generation_state"] == "NOT_CONFIGURED"
+        assert interpretations_after.json()["data"]["items"] == []
         with closing(sqlite3.connect(root / "operations.sqlite3")) as operations_connection:
             operations_connection.row_factory = sqlite3.Row
             rows = operations_connection.execute(
@@ -1516,6 +1554,37 @@ def test_public_state_query_materializes_latest_rough_once_without_correlated_jo
     details = "\n".join(str(row[3]) for row in plan)
     assert "CORRELATED SCALAR SUBQUERY" not in details
     assert "ranked_rough_reviews" in details
+
+
+def test_event_detail_bounds_public_state_projection_to_selected_event() -> None:
+    class TracingRepository(LedgerRepository):
+        statements: list[str]
+
+        def __init__(self, path: Path) -> None:
+            super().__init__(path)
+            self.statements = []
+
+        def connect(self):
+            connection = super().connect()
+            connection.set_trace_callback(self.statements.append)
+            return connection
+
+    with tempfile.TemporaryDirectory() as directory:
+        ledger_path = _populated_ledger(Path(directory))
+        repository = TracingRepository(ledger_path)
+
+        detail = repository.event_detail("rough-insufficient-00")
+
+    assert detail is not None
+    state_query = next(
+        statement
+        for statement in repository.statements
+        if "SELECT * FROM event_public" in statement
+    )
+    assert "WITH paged_canonical AS" in state_query
+    assert "WHERE e.event_id=" in state_query
+    assert "FROM paged_canonical canonical" in state_query
+    assert "FROM canonical_events canonical" not in state_query
 
 
 def test_large_public_state_page_has_bounded_query_work() -> None:
