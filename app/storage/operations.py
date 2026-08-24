@@ -1122,6 +1122,47 @@ class OperationsRepository:
                 + " GROUP BY status ORDER BY status",
                 params,
             ).fetchall()
+            recent_where = list(where)
+            recent_params = list(params)
+            recent_where.append("created_at>=?")
+            recent_params.append(
+                (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+            )
+            recent_rows = connection.execute(
+                """SELECT r.created_at,r.updated_at,r.latency_ms,
+                          (SELECT MIN(a.started_at)
+                           FROM capture_interpretation_attempts a
+                           WHERE a.interpretation_id=r.interpretation_id) AS first_claimed_at
+                   FROM capture_interpretation_runs r WHERE """
+                + " AND ".join(recent_where)
+                + " AND r.status='COMPLETED' ORDER BY r.created_at",
+                recent_params,
+            ).fetchall()
+
+        def percentile(values: list[float], fraction: float) -> float | None:
+            if not values:
+                return None
+            ordered = sorted(values)
+            index = max(0, min(len(ordered) - 1, int((len(ordered) - 1) * fraction)))
+            return round(ordered[index], 3)
+
+        provider_latencies = [
+            float(row["latency_ms"])
+            for row in recent_rows
+            if row["latency_ms"] is not None
+        ]
+        queue_waits: list[float] = []
+        for row in recent_rows:
+            try:
+                if not row["first_claimed_at"]:
+                    continue
+                created = datetime.fromisoformat(str(row["created_at"]))
+                claimed = datetime.fromisoformat(
+                    str(row["first_claimed_at"])
+                )
+            except (TypeError, ValueError):
+                continue
+            queue_waits.append(max(0.0, (claimed - created).total_seconds()))
         by_status = {str(row["status"]): int(row["count"]) for row in rows}
         oldest_pending = next(
             (str(row["oldest"]) for row in rows if row["status"] in {"PENDING", "BUDGET_BLOCKED"}),
@@ -1131,6 +1172,13 @@ class OperationsRepository:
             "provider": provider,
             "by_status": by_status,
             "oldest_pending_at": oldest_pending,
+            "last_24h_latency": {
+                "completed": len(recent_rows),
+                "queue_wait_seconds_p50": percentile(queue_waits, 0.50),
+                "queue_wait_seconds_p95": percentile(queue_waits, 0.95),
+                "provider_latency_ms_p50": percentile(provider_latencies, 0.50),
+                "provider_latency_ms_p95": percentile(provider_latencies, 0.95),
+            },
             "daily": self.capture_interpretation_daily_usage(provider),
         }
 
@@ -1255,17 +1303,19 @@ class OperationsRepository:
         prompt_version: str,
         prompt_sha256: str,
         model_snapshot: str,
-    ) -> dict[tuple[str, str], str]:
+    ) -> dict[tuple[str, str, int], str]:
         """Bulk-load immutable terminal receipts for one model generation.
 
         The scheduler previously opened a new SQLite connection for every
         historical capture.  Loading the complete terminal key set once keeps
         backlog discovery linear and makes completed history a zero-call cache.
+        Event version is part of the key so a canonical revision cannot reuse
+        an interpretation generated for an older event meaning.
         """
 
         with closing(self.connect()) as connection:
             rows = connection.execute(
-                """SELECT event_id,capture_receipt_sha256,status,updated_at
+                """SELECT event_id,capture_receipt_sha256,status,updated_at,output_json
                    FROM capture_interpretation_runs
                    WHERE provider=? AND contract_version=? AND prompt_version=?
                      AND prompt_sha256=? AND model_snapshot=?
@@ -1279,9 +1329,24 @@ class OperationsRepository:
                     model_snapshot,
                 ),
             ).fetchall()
-        result: dict[tuple[str, str], str] = {}
+        result: dict[tuple[str, str, int], str] = {}
         for row in rows:
-            key = (str(row["event_id"]), str(row["capture_receipt_sha256"]))
+            output = _safe_json(row["output_json"], {})
+            if str(row["status"]) == "FAILED":
+                # Historical failed rows predate event-version persistence.
+                # Keep them terminal through a dedicated wildcard without
+                # allowing an old successful answer to satisfy a new version.
+                event_version = -1
+            else:
+                try:
+                    event_version = int(output.get("bound_event_version") or 0)
+                except (AttributeError, TypeError, ValueError):
+                    event_version = 0
+            key = (
+                str(row["event_id"]),
+                str(row["capture_receipt_sha256"]),
+                event_version,
+            )
             result.setdefault(key, str(row["status"]))
         return result
 

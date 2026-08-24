@@ -82,6 +82,66 @@ current_source_content AS (
 """.strip()
 
 
+_EVENT_SCOPED_SOURCE_CONTENT_CTES = """
+selected_event_evidence AS (
+    SELECT * FROM event_evidence WHERE event_id=?
+),
+selected_evidence_observations AS (
+    SELECT DISTINCT observation_id FROM selected_event_evidence
+),
+ranked_source_revisions AS (
+    SELECT sr.*,
+           ROW_NUMBER() OVER (
+               PARTITION BY sr.observation_id
+               ORDER BY sr.revision_no DESC
+           ) AS source_revision_rank
+    FROM source_revisions sr
+    JOIN selected_evidence_observations selected
+      ON selected.observation_id=sr.observation_id
+),
+current_source_content AS (
+    SELECT r.observation_id,
+           r.source_id,
+           r.external_id,
+           CASE
+             WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.published_at')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.created_at')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.posted_at')),''),
+               r.source_published_at
+             )
+             ELSE r.source_published_at
+           END AS source_published_at,
+           r.local_received_at,
+           COALESCE(sr.title,r.title) AS title,
+           COALESCE(sr.summary,r.summary) AS summary,
+           CASE
+             WHEN r.source_id='opennews_free' AND json_valid(sr.raw_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.link')),''),
+               NULLIF(TRIM(json_extract(sr.raw_json,'$.item.url')),''),
+               r.canonical_url
+             )
+             ELSE r.canonical_url
+           END AS canonical_url,
+           COALESCE(sr.content_sha256,r.content_sha256) AS content_sha256,
+           COALESCE(sr.raw_json,r.raw_json) AS raw_json,
+           CASE WHEN sr.revision_kind='delete'
+                THEN 'deleted' ELSE r.observation_status END AS observation_status,
+           COALESCE(sr.revision_no,0) AS latest_revision_no,
+           COALESCE(sr.revision_kind,'new') AS latest_revision_kind,
+           COALESCE(sr.revision_at,r.local_received_at) AS latest_revision_at
+    FROM raw_observations r
+    JOIN selected_evidence_observations selected
+      ON selected.observation_id=r.observation_id
+    LEFT JOIN ranked_source_revisions sr
+      ON sr.observation_id=r.observation_id
+     AND sr.source_revision_rank=1
+)
+""".strip()
+
+
 _CAPTURE_INTERPRETATION_CANDIDATE_CTES = """
 live_interpretation_capture AS (
     SELECT eo.event_id,r.observation_id,r.source_id,r.external_id,
@@ -102,7 +162,7 @@ live_interpretation_capture AS (
     WHERE r.observation_status!='deleted'
 ),
 interpretation_event_bucket AS (
-    SELECT ce.event_id,
+    SELECT ce.event_id,ce.current_version,
            CASE
              WHEN MAX(CASE WHEN c.oversized_sec_capture=1
                                   AND TRIM(COALESCE(c.canonical_url,''))!=''
@@ -126,10 +186,10 @@ interpretation_event_bucket AS (
     WHERE NOT EXISTS (
       SELECT 1 FROM event_evidence ee WHERE ee.event_id=ce.event_id
     )
-    GROUP BY ce.event_id
+    GROUP BY ce.event_id,ce.current_version
 ),
 eligible_interpretation_capture AS (
-    SELECT b.bucket,c.*
+    SELECT b.bucket,b.current_version,c.*
     FROM interpretation_event_bucket b
     JOIN live_interpretation_capture c ON c.event_id=b.event_id
     WHERE b.bucket IN ('NO_URL_RAW_ONLY','P2_CAPTURE_ONLY')
@@ -544,6 +604,13 @@ sec_current_supported_fact_slots AS (
     GROUP BY current_version.event_id,current_version.version
 )
 """.strip()
+
+_EVENT_SCOPED_SEC_CURRENT_SUPPORTED_FACT_SLOT_CTE = (
+    _SEC_CURRENT_SUPPORTED_FACT_SLOT_CTE.replace(
+        "JOIN event_evidence slot_evidence",
+        "JOIN selected_event_evidence slot_evidence",
+    )
+)
 
 
 _SEC_CURRENT_FACT_SLOT_MATCH_SQL = """
@@ -1305,7 +1372,7 @@ class LedgerRepository:
         with closing(self.connect()) as connection:
             rows = connection.execute(
                 f"""WITH {_CAPTURE_INTERPRETATION_CANDIDATE_CTES}
-                    SELECT bucket,event_id,observation_id,source_id,external_id,
+                    SELECT bucket,current_version,event_id,observation_id,source_id,external_id,
                            source_published_at,local_received_at,canonical_url,
                            content_sha256,raw_json,latest_revision_no,
                            latest_revision_kind
@@ -1336,6 +1403,7 @@ class LedgerRepository:
             candidates.append(
                 {
                     "event_id": str(item["event_id"]),
+                    "event_version": int(item.get("current_version") or 0),
                     "observation_id": str(item["observation_id"]),
                     "capture_receipt_sha256": hashlib.sha256(
                         json.dumps(
@@ -1349,6 +1417,132 @@ class LedgerRepository:
                 }
             )
         return candidates
+
+    def capture_interpretation_eligibility(
+        self,
+        event_id: str,
+        *,
+        observation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the single fail-closed gate for external capture explanation.
+
+        External AI is intentionally narrower than public event visibility. An
+        event remains browsable regardless of this result, but an explanation
+        may be generated or displayed only while the canonical event has no
+        evidence rows at all and a current non-deleted raw/P2 capture contains
+        text.  A current official URL wins over AI and is routed to refetch.
+        """
+
+        with closing(self.connect()) as connection:
+            event_row = connection.execute(
+                "SELECT event_id,current_version FROM canonical_events WHERE event_id=?",
+                (event_id,),
+            ).fetchone()
+            evidence_count = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM event_evidence WHERE event_id=?",
+                    (event_id,),
+                ).fetchone()[0]
+            )
+        if event_row is None:
+            return {
+                "display": False,
+                "eligible": False,
+                "reason_code": "EVENT_NOT_FOUND",
+                "current_event_version": None,
+                "evidence_count": evidence_count,
+                "eligible_observation_ids": [],
+            }
+
+        event_version = int(event_row["current_version"] or 0)
+        if evidence_count > 0:
+            return {
+                "current_event_version": event_version,
+                "evidence_count": evidence_count,
+                "capture_count": None,
+                "eligible_observation_ids": [],
+                "display": False,
+                "eligible": False,
+                "reason_code": "EVIDENCE_PRESENT",
+            }
+
+        captures = [
+            item
+            for item in self.captured_sources(event_id)
+            if item.get("observation_status") != "deleted"
+        ]
+        selected = (
+            next(
+                (
+                    item
+                    for item in captures
+                    if str(item.get("observation_id") or "") == observation_id
+                ),
+                None,
+            )
+            if observation_id
+            else None
+        )
+        base = {
+            "current_event_version": event_version,
+            "evidence_count": evidence_count,
+            "capture_count": len(captures),
+            "eligible_observation_ids": [],
+        }
+        if observation_id and selected is None:
+            return {
+                **base,
+                "display": False,
+                "eligible": False,
+                "reason_code": "CAPTURE_NOT_FOUND",
+            }
+        official_refetch = any(
+            str(item.get("canonical_url") or "").strip()
+            and (
+                str(item.get("authority_tier") or "").upper() in {"P0", "P1"}
+                or str(item.get("authority_tier") or "").upper().startswith(("P0_", "P1_"))
+            )
+            for item in captures
+        )
+        if official_refetch:
+            return {
+                **base,
+                "display": False,
+                "eligible": False,
+                "reason_code": "REFETCH_PRIMARY_SOURCE",
+            }
+
+        text_captures = [
+            item
+            for item in captures
+            if str(item.get("title") or "").strip()
+            or str(item.get("summary") or "").strip()
+        ]
+        if not text_captures or (observation_id and selected not in text_captures):
+            return {
+                **base,
+                "display": False,
+                "eligible": False,
+                "reason_code": "NO_CAPTURE_TEXT",
+            }
+        eligible_ids = [
+            str(item.get("observation_id") or "")
+            for item in text_captures
+            if str(item.get("observation_id") or "")
+        ]
+        bucket = (
+            "P2_CAPTURE_ONLY"
+            if any(str(item.get("canonical_url") or "").strip() for item in captures)
+            else "NO_URL_RAW_ONLY"
+        )
+        return {
+            **base,
+            "display": True,
+            "eligible": True,
+            "reason_code": "NO_EVENT_EVIDENCE",
+            "bucket": bucket,
+            "eligible_observation_ids": eligible_ids,
+        }
 
     def capture_interpretation_context(
         self,
@@ -2810,8 +3004,8 @@ class LedgerRepository:
     def event_evidence(self, event_id: str) -> list[dict[str, Any]]:
         with closing(self.connect()) as connection:
             rows = connection.execute(
-                f"""WITH {_CURRENT_SOURCE_CONTENT_CTES},
-                    {_SEC_CURRENT_SUPPORTED_FACT_SLOT_CTE}
+                f"""WITH {_EVENT_SCOPED_SOURCE_CONTENT_CTES},
+                    {_EVENT_SCOPED_SEC_CURRENT_SUPPORTED_FACT_SLOT_CTE}
                     SELECT ev.*, ro.title AS observation_title, ro.summary AS observation_summary,
                            ro.source_published_at,ro.local_received_at,ro.content_sha256,
                            ro.observation_status,ro.latest_revision_no,ro.latest_revision_kind,
@@ -2858,7 +3052,7 @@ class LedgerRepository:
                                OR UPPER(src.authority_tier) GLOB 'P1_*'
                              )
                            THEN 1 ELSE 0 END AS reader_eligible
-                    FROM event_evidence ev
+                    FROM selected_event_evidence ev
                     JOIN current_source_content ro ON ro.observation_id=ev.observation_id
                     JOIN sources src ON src.source_id=ro.source_id
                     LEFT JOIN canonical_events ce ON ce.event_id=ev.event_id
@@ -2871,7 +3065,6 @@ class LedgerRepository:
                     LEFT JOIN event_evidence_relations rel
                       ON rel.event_id=ev.event_id AND rel.evidence_id=ev.evidence_id
                      AND rel.event_version=ce.current_version
-                    WHERE ev.event_id=?
                    ORDER BY reader_eligible DESC,
                             CASE
                               WHEN UPPER(src.authority_tier)='P0'

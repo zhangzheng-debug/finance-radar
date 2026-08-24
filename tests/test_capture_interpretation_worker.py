@@ -5,7 +5,10 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import scripts.run_capture_interpretation_worker as worker
+import scripts.run_capture_interpretation_deepseek as single_job
 from app.services.capture_interpretation import (
     CAPTURE_INTERPRETATION_CONTRACT,
     CAPTURE_INTERPRETATION_PROMPT_SHA256,
@@ -115,6 +118,7 @@ def test_worker_advances_a_bounded_inventory_and_then_uses_generation_shortcut(
     items = [
         {
             "event_id": f"event-{index}",
+            "event_version": 1,
             "observation_id": f"obs-{index}",
             "capture_receipt_sha256": str(index) * 64,
             "bucket": "P2_CAPTURE_ONLY",
@@ -138,7 +142,7 @@ def test_worker_advances_a_bounded_inventory_and_then_uses_generation_shortcut(
     class FakeOperations:
         def __init__(self) -> None:
             self.state = {}
-            self.terminal: set[tuple[str, str]] = set()
+            self.terminal: set[tuple[str, str, int]] = set()
 
         def get_state(self, key, default=None):
             return self.state.get(key, default)
@@ -171,7 +175,11 @@ def test_worker_advances_a_bounded_inventory_and_then_uses_generation_shortcut(
 
     def complete(selected, env_file, *, workers):
         operations.terminal.update(
-            (item["event_id"], item["capture_receipt_sha256"])
+            (
+                item["event_id"],
+                item["capture_receipt_sha256"],
+                int(item["event_version"]),
+            )
             for item in selected
         )
         return ["COMPLETED"] * len(selected)
@@ -198,3 +206,46 @@ def test_worker_advances_a_bounded_inventory_and_then_uses_generation_shortcut(
     assert worker.run(args) == 0
     assert ledger.calls == calls_before_idle
     assert len(operations.terminal) == 3
+
+
+def test_single_job_rejects_evidence_event_before_provider_or_enqueue(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(single_job, "load_local_env", lambda path: None)
+    monkeypatch.setattr(single_job, "_credential", lambda: "test-only")
+    monkeypatch.setattr(
+        single_job.Settings,
+        "from_env",
+        classmethod(
+            lambda cls: SimpleNamespace(
+                capture_llm_enabled=True,
+                capture_llm_provider="deepseek",
+                capture_llm_model=DEEPSEEK_CHEAP_TEXT_MODEL,
+                capture_llm_base_url="https://api.deepseek.com",
+                ledger_db=tmp_path / "ledger.sqlite3",
+                operations_db=tmp_path / "operations.sqlite3",
+            )
+        ),
+    )
+
+    class EvidenceLedger:
+        def capture_interpretation_eligibility(self, event_id, *, observation_id=None):
+            return {"eligible": False, "reason_code": "EVIDENCE_PRESENT"}
+
+    monkeypatch.setattr(single_job, "LedgerRepository", lambda path: EvidenceLedger())
+    monkeypatch.setattr(single_job, "OperationsRepository", lambda path: object())
+    monkeypatch.setattr(
+        single_job,
+        "DeepSeekCaptureInterpretationProvider",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("provider must not start")),
+    )
+
+    with pytest.raises(RuntimeError, match="EVIDENCE_PRESENT"):
+        single_job.run(
+            SimpleNamespace(
+                env_file=Path(tmp_path / "capture.env"),
+                event_id="event-with-evidence",
+                observation_id="obs-1",
+            )
+        )

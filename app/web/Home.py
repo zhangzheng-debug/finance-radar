@@ -169,6 +169,120 @@ def public_capture_url(sources: list[dict[str, object]]) -> str | None:
     return value if parsed.scheme in {"http", "https"} and parsed.netloc else None
 
 
+def render_capture_explanation_payload(payload: dict[str, object]) -> None:
+    """Render the compact zero-evidence boundary without the legacy AI template."""
+
+    if not payload.get("display"):
+        return
+    source = payload.get("source")
+    source = source if isinstance(source, dict) else {}
+    source_title = " ".join(
+        str(source.get("source_title") or "已捕获一条 API 来源文本").split()
+    )
+    source_excerpt = " ".join(
+        str(source.get("source_excerpt") or "来源没有提供更多摘要。").split()
+    )
+    if len(source_excerpt) > 900:
+        source_excerpt = source_excerpt[:897].rstrip() + "…"
+    st.markdown(
+        '<section class="capture-ai-boundary" aria-label="无证据事件的自动解释">'
+        '<div class="capture-ai-boundary-head">'
+        '<span>AI 自动解释（仅在无证据时启用）</span>'
+        '<strong>AI 阅读辅助 · 非证据</strong>'
+        '</div>'
+        '<p>因为该事件目前完全没有关联证据，系统才启动外部 AI，对已捕获的 API '
+        '标题、摘要或正文片段进行自动解释。该内容只帮助理解来源文本，不证明事件真实发生，'
+        '不改变事件状态、重大性、极性、风险分流或价格审计，也不会触发交易。</p>'
+        '<div class="capture-ai-source">'
+        '<small>系统捕获文本 · 不是 P0/P1 原始证据</small>'
+        f'<h3>{escape(source_title)}</h3>'
+        f'<p>{escape(source_excerpt)}</p>'
+        '</div>'
+        '</section>',
+        unsafe_allow_html=True,
+    )
+    source_url = public_capture_url([source]) if source else None
+    if source_url:
+        st.link_button(
+            "查看这条发现来源（非核验证据）",
+            source_url,
+            width="stretch",
+        )
+
+    state = str(payload.get("state") or "PENDING")
+    interpretation = payload.get("item")
+    interpretation = interpretation if isinstance(interpretation, dict) else None
+    if state == "READY" and interpretation:
+        st.markdown("#### AI 对捕获文本的解释")
+        st.markdown(str(interpretation.get("one_line_zh") or "自动解释已完成。"))
+        claims = interpretation.get("what_source_says") or []
+        if claims:
+            st.markdown("**捕获文本明确表达**")
+            for claim in claims[:4]:
+                if not isinstance(claim, dict):
+                    continue
+                st.markdown(
+                    f"- {escape(str(claim.get('text_zh') or ''))}  "
+                    f"\n  原文：{escape(str(claim.get('quote') or ''))}"
+                )
+        missing = interpretation.get("missing_to_change_state_zh") or []
+        if missing:
+            st.markdown("**仍缺少什么**")
+            for item in missing[:3]:
+                st.markdown(f"- {escape(str(item))}")
+        st.caption("完整结果已通过引文、数字、版本和提示词合同校验后一次性展示。")
+    elif state == "FAILED_RETRYING":
+        st.warning("AI 自动解释暂不可用；原始捕获仍保留，系统不会用猜测内容替代。")
+    else:
+        st.info("事件主体和捕获文本已加载；AI 自动解释正在后台生成，不影响其他内容阅读。")
+
+
+@st.fragment(run_every="2s")
+def render_capture_explanation_fragment(
+    event_path_id: str,
+    event_id: str,
+    initial_payload: dict[str, object],
+) -> None:
+    """Poll only the cache-only explanation panel for at most thirty seconds."""
+
+    final_key = f"capture_explanation_final:{event_id}"
+    started_key = f"capture_explanation_started:{event_id}"
+    payload = st.session_state.get(final_key)
+    if not isinstance(payload, dict):
+        started = st.session_state.get(started_key)
+        if not isinstance(started, datetime):
+            started = datetime.now(timezone.utc)
+            st.session_state[started_key] = started
+        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+        if elapsed > 30:
+            payload = {
+                "display": True,
+                "state": "PENDING",
+                "source": None,
+                "item": None,
+            }
+        else:
+            try:
+                payload = api_request(
+                    f"/api/v1/events/{event_path_id}/capture-explanation",
+                    timeout_seconds=3,
+                )
+            except Exception:
+                payload = dict(initial_payload)
+                payload["display"] = True
+                payload["state"] = "FAILED_RETRYING"
+                payload.setdefault("item", None)
+        if str(payload.get("state") or "") in {
+            "READY",
+            "FAILED_RETRYING",
+            "NOT_APPLICABLE",
+            "NO_CAPTURE_TEXT",
+            "REFETCH_PRIMARY_SOURCE",
+        }:
+            st.session_state[final_key] = payload
+    render_capture_explanation_payload(payload)
+
+
 def public_evidence_sort_key(item: dict[str, object]) -> tuple[int, int, float, str]:
     eligibility_rank = 0 if int(item.get("reader_eligible") or 0) == 1 else 1
     authority = str(item.get("authority_tier") or "P9").upper()
@@ -776,12 +890,11 @@ if preview_event_id:
     )
     try:
         preview_sources: list[dict[str, object]] = []
-        preview_interpretations: list[dict[str, object]] = []
         preview_knowledge: dict[str, object] = {}
+        preview_capture_explanation: dict[str, object] = {}
         preview_load_error: Exception | None = None
         preview_cache_stale = False
         preview_sources_error: Exception | None = None
-        preview_interpretations_error: Exception | None = None
         if UI_ROLE != "admin":
             try:
                 dossier, dossier_cache = cached_api_get(
@@ -845,18 +958,18 @@ if preview_event_id:
                         preview_sources_error = exc
                     if preview_sources:
                         try:
-                            interpretation_response = api_request(
-                                f"/api/v1/events/{preview_event_path_id}/source-interpretations"
+                            explanation_response = api_request(
+                                f"/api/v1/events/{preview_event_path_id}/capture-explanation",
+                                timeout_seconds=3,
                             )
-                            interpretation_items = interpretation_response.get("items", [])
-                            if isinstance(interpretation_items, list):
-                                preview_interpretations = [
-                                    item
-                                    for item in interpretation_items
-                                    if isinstance(item, dict)
-                                ]
-                        except Exception as exc:
-                            preview_interpretations_error = exc
+                            if isinstance(explanation_response, dict):
+                                preview_capture_explanation = explanation_response
+                        except Exception:
+                            preview_capture_explanation = {
+                                "display": not bool(preview_evidence),
+                                "state": "PENDING",
+                                "source": preview_sources[0],
+                            }
             else:
                 preview_detail = dossier.get("detail") or {}
                 preview_evidence = sorted(
@@ -866,18 +979,9 @@ if preview_event_id:
                 knowledge_response = dossier.get("knowledge") or {}
                 if isinstance(knowledge_response, dict):
                     preview_knowledge = knowledge_response
-                source_items = (dossier.get("sources") or {}).get("items", [])
-                if isinstance(source_items, list):
-                    preview_sources = [
-                        item for item in source_items if isinstance(item, dict)
-                    ]
-                interpretation_items = (
-                    dossier.get("source_interpretations") or {}
-                ).get("items", [])
-                if isinstance(interpretation_items, list):
-                    preview_interpretations = [
-                        item for item in interpretation_items if isinstance(item, dict)
-                    ]
+                explanation_state = dossier.get("capture_explanation") or {}
+                if isinstance(explanation_state, dict):
+                    preview_capture_explanation = explanation_state
             preview_evidence = [
                 item
                 for item in preview_evidence
@@ -908,18 +1012,6 @@ if preview_event_id:
                     ]
             except Exception as exc:
                 preview_sources_error = exc
-            if preview_sources:
-                try:
-                    interpretation_response = api_request(
-                        f"/api/v1/events/{preview_event_path_id}/source-interpretations"
-                    )
-                    interpretation_items = interpretation_response.get("items", [])
-                    if isinstance(interpretation_items, list):
-                        preview_interpretations = [
-                            item for item in interpretation_items if isinstance(item, dict)
-                        ]
-                except Exception as exc:
-                    preview_interpretations_error = exc
     except Exception as exc:
         render_api_error(exc)
     else:
@@ -1100,7 +1192,7 @@ if preview_event_id:
                         '</div>',
                         unsafe_allow_html=True,
                     )
-            if preview_sources:
+            if preview_sources and UI_ROLE == "admin":
                 source = preview_sources[0]
                 source_title = " ".join(
                     str(
@@ -1118,17 +1210,8 @@ if preview_event_id:
                 )
                 if len(source_excerpt) > 900:
                     source_excerpt = source_excerpt[:897].rstrip() + "…"
-                receipt = str(source.get("capture_receipt_sha256") or "")
-                interpretation = next(
-                    (
-                        item
-                        for item in preview_interpretations
-                        if str(item.get("capture_receipt_sha256") or "") == receipt
-                    ),
-                    preview_interpretations[0] if preview_interpretations else None,
-                )
                 with st.expander(
-                    "查看来源捕获与内容解读（非正式证据）",
+                    "查看来源捕获（非正式证据）",
                     expanded=not bool(preview_evidence),
                 ):
                     st.markdown(
@@ -1147,85 +1230,18 @@ if preview_event_id:
                         '</div>',
                         unsafe_allow_html=True,
                     )
-                    if interpretation:
-                        one_line = escape(
-                            str(
-                                interpretation.get("one_line_zh")
-                                or "当前没有可展示的解读。"
-                            )
-                        )
-                        mode = str(interpretation.get("mode") or "DETERMINISTIC")
-                        status = str(interpretation.get("status") or "PARTIAL")
-                        label = (
-                            "AI 辅助解读 · 来源捕获 · 非正式证据"
-                            if mode == "LLM_ASSISTED"
-                            else "确定性预览 · 外部模型待接入"
-                        )
-                        claim_items = interpretation.get("what_source_says") or []
-                        claim_markup = "".join(
-                            '<li><span>'
-                            + escape(str(item.get("text_zh") or ""))
-                            + '</span><small>原文：'
-                            + escape(str(item.get("quote") or ""))
-                            + '</small></li>'
-                            for item in claim_items[:4]
-                            if isinstance(item, dict)
-                        )
-                        missing_items = interpretation.get("missing_to_change_state_zh") or []
-                        missing_markup = "".join(
-                            f'<li>{escape(str(item))}</li>' for item in missing_items[:3]
-                        )
-                        not_proven_items = (
-                            interpretation.get("what_source_does_not_prove_zh") or []
-                        )
-                        not_proven_markup = "".join(
-                            f'<li>{escape(str(item))}</li>' for item in not_proven_items[:3]
-                        )
-                        assets = ", ".join(
-                            escape(str(item))
-                            for item in (interpretation.get("affected_assets") or [])[:8]
-                        )
-                        st.markdown(
-                            '<section class="capture-interpretation" aria-label="API发现内容解读">'
-                            '<div class="capture-interpretation-head">'
-                            f'<span>{escape(label)}</span>'
-                            f'<small>{escape(status)} · {escape(str(interpretation.get("coverage") or ""))}</small>'
-                            '</div>'
-                            '<h4>一句话看懂</h4>'
-                            f'<p class="capture-interpretation-summary">{one_line}</p>'
-                            + (
-                                '<h4>原文明确表达</h4><ul class="capture-claim-list">'
-                                + claim_markup
-                                + '</ul>'
-                                if claim_markup
-                                else ''
-                            )
-                            + (
-                                f'<p class="capture-assets"><strong>受影响资产：</strong>{assets}</p>'
-                                if assets
-                                else ''
-                            )
-                            + '<div class="capture-interpretation-grid">'
-                            '<article><h4>仅凭这段来源捕获仍不能确认</h4><ul>'
-                            + not_proven_markup
-                            + '</ul></article>'
-                            '<article><h4>要改变当前结论，还需要</h4><ul>'
-                            + missing_markup
-                            + '</ul></article>'
-                            '</div>'
-                            f'<p class="capture-disposition">{escape(str(interpretation.get("why_current_state_zh") or ""))}</p>'
-                            '<small class="capture-boundary">解释只绑定当前捕获版本；来源修订后自动失效。'
-                            '它不进入正式事实、风险路由、价格判断或交易流程。</small>'
-                            '</section>',
-                            unsafe_allow_html=True,
-                        )
-                    elif preview_interpretations_error:
-                        st.warning(
-                            "内容解读暂时不可用；原始捕获仍可阅读，事件正式状态没有改变。"
-                        )
-            elif preview_sources_error:
+            elif preview_sources_error and UI_ROLE == "admin":
                 st.warning(
                     "采集来源记录暂时无法读取；这不表示原始输入为空，也不改变事件状态。"
+                )
+            if (
+                UI_ROLE != "admin"
+                and preview_capture_explanation.get("display") is True
+            ):
+                render_capture_explanation_fragment(
+                    preview_event_path_id,
+                    preview_event_id,
+                    preview_capture_explanation,
                 )
             if preview_knowledge.get("covered"):
                 with st.expander("金融专业规则与核验清单", expanded=False):

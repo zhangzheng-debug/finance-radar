@@ -2,10 +2,10 @@
 Description=Run bounded Finance Radar capture interpretation
 
 [Timer]
-OnBootSec=15min
-OnUnitActiveSec=5min
-RandomizedDelaySec=30s
-AccuracySec=30s
+OnBootSec=2min
+OnUnitActiveSec=60s
+RandomizedDelaySec=5s
+AccuracySec=5s
 Persistent=true
 Unit=finance-radar-capture-interpretation.service
 

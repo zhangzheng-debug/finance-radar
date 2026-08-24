@@ -35,12 +35,14 @@ Finance Radar 不是交易终端，也不是自动事实裁判。系统收集并
 - Public、Reviewer、Operator 与 Admin 使用不同导航、环境令牌和 API 权限；三种内部 UI 互斥启动。
 - Telegram 默认只做 dry-run；真实外发必须单独、显式授权并使用 `--send`。
 - Evidence Agent 的本地 LLM 是可选、回环、advisory-only 服务；部署和恢复不会默认启用它。
+- DeepSeek 捕获解释是另一条独立的后台路径：只在事件完全没有证据关系、且没有应优先重抓的 P0/P1 原始来源时解释 P2/raw API 文本。Public 请求只读缓存，不会触发调用；结果不进入事实、风险路由、价格或交易。
 - 本机备份策略为每天一次、仅在新备份完成隔离恢复验证后替换上一份；事件账本和原文证据不按该保留策略删除。
 
 ## 当前能力边界
 
 - 风险路由模型保持 `SHADOW`。legacy external-blind-v1/v2 的失败永久保留；后续 v4 AI-rubric blind-v3 即使达到 `QUALIFIED_SHADOW`，也只表示可继续做咨询式复核路由。V3 authentic-human blind-v2 尚未冻结，因此它不是事实裁判、提醒许可或交易模型。
 - Evidence Agent 只能生成结构化建议与摘要；claim、证据充分性和最终状态仍由确定性规则和人工复核决定。
+- 本地 Qwen Evidence Agent 与外部 DeepSeek 不是同一个模型：前者为可选的回环证据建议服务，默认不启用；后者由独立 systemd 定时器后台处理无证据捕获，生产是否工作必须分别查看服务、凭据、队列和最新成功记录。
 - Telegram 的 outbox、幂等和深链已实现，但默认未启用持续外发。当前产品应理解为 **Web-first，Telegram optional/off by default**。
 - GitHub 最新已标记的恢复版本、当前源码分支和生产运行状态是三种不同事实。请以带时间戳的 [CURRENT_STATE.md](CURRENT_STATE.md) 为入口，不要从历史报告推断实时状态。
 

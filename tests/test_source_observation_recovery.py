@@ -259,6 +259,41 @@ def test_incremental_interpretation_inventory_matches_recovery_buckets_and_recei
         ]
 
 
+def test_capture_interpretation_eligibility_is_zero_evidence_and_refetch_first() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        ledger_path = _seed(Path(directory))
+        repository = LedgerRepository(ledger_path)
+
+        assert repository.capture_interpretation_eligibility("e-p2")["reason_code"] == (
+            "NO_EVENT_EVIDENCE"
+        )
+        assert repository.capture_interpretation_eligibility("e-raw")["eligible"] is True
+        assert repository.capture_interpretation_eligibility("e-official")[
+            "reason_code"
+        ] == "REFETCH_PRIMARY_SOURCE"
+        assert repository.capture_interpretation_eligibility("e-empty")[
+            "reason_code"
+        ] == "NO_CAPTURE_TEXT"
+
+        connection = open_ledger(ledger_path)
+        now = "2026-08-21T04:00:00+00:00"
+        connection.execute(
+            """INSERT INTO event_evidence VALUES (
+               'evidence-p2','e-p2','obs-p2','https://news.test/a',NULL,NULL,NULL,
+               'A retained passage that now counts as associated evidence.',NULL,10,
+               'candidate_passage',0,?,?)""",
+            (now, now),
+        )
+        connection.commit()
+        connection.close()
+
+        after_evidence = repository.capture_interpretation_eligibility("e-p2")
+        assert after_evidence["eligible"] is False
+        assert after_evidence["display"] is False
+        assert after_evidence["reason_code"] == "EVIDENCE_PRESENT"
+        assert after_evidence["evidence_count"] == 1
+
+
 def test_cli_builds_manifest_records_and_hashes() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
