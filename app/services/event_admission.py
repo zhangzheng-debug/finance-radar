@@ -506,6 +506,78 @@ def _management_role_subject(
     return None, "MISSING", False
 
 
+def _management_appointment_subject(
+    sentence: str,
+    expected_subject: str,
+    *,
+    action: re.Match[str],
+) -> tuple[str | None, str, bool]:
+    """Bind an issuer's explicitly named governing body to an appointment.
+
+    SEC appointment prose normally makes the board, rather than the issuer
+    itself, the grammatical actor (``the Board of Directors of Issuer
+    appointed ...``).  Treat that as issuer context only when the same
+    sentence contains the exact canonical issuer name and the governing-body
+    phrase is locally attached to the action.  A filing-level issuer identity
+    or a bare ``the Board`` is deliberately insufficient.
+    """
+
+    direct = _subject_from_sentence(
+        sentence,
+        expected_subject,
+        action_start=action.start(),
+    )
+    expected = _clean(expected_subject)
+    if direct[1] != "MISSING" and not (
+        direct[1] == "OTHER_NAMED_ENTITY"
+        and _clean(direct[0]).casefold() == expected.casefold()
+    ):
+        return direct
+    if not expected:
+        return direct
+    prefix = sentence[: action.start()]
+    expected_matches = _expected_subject_matches(sentence, expected)
+    for match in reversed([item for item in expected_matches if item.end() <= action.start()]):
+        local_prefix = prefix[max(0, match.start() - 100) :]
+        after_subject = prefix[match.end() :]
+
+        # ``the Board of Directors of Example Corp (...) appointed`` and
+        # ``Example Corp's Board appointed`` are explicit local bindings.
+        board_of_issuer = re.search(
+            r"\b(?:board(?:\s+of\s+directors)?|directors?)\b[^.;:]{0,55}\bof\s+$",
+            local_prefix[: match.start() - max(0, match.start() - 100)],
+            re.I,
+        )
+        issuer_board = re.fullmatch(
+            r"(?:['’]s)?\s+(?:board(?:\s+of\s+directors)?|directors?)"
+            r"(?:\s*\([^)]{0,60}\))?[\s,]*(?:has|had)?\s*",
+            after_subject,
+            re.I,
+        )
+        if board_of_issuer or issuer_board:
+            return match.group(0), "EXPLICIT_ISSUER_CONTEXT", True
+
+        # A same-sentence alias is also bounded: the exact issuer name must
+        # define ``the Company`` before ``the board ... of the Company``.
+        alias_definition = re.match(
+            r"[^.;:]{0,180}(?:\(“[^)”]{0,80}(?:the\s+)?“Company”[^)]*\)|"
+            r"\([^)]{0,80}(?:the\s+)?[\"“]Company[\"”][^)]*\)|"
+            r"\(\s*the\s+Company\s*\))",
+            after_subject,
+            re.I,
+        )
+        alias_tail = prefix[(match.end() + alias_definition.end()) :] if alias_definition else ""
+        if alias_definition and re.fullmatch(
+            r"[^.;:]{0,180}\b(?:board(?:\s+of\s+directors)?|directors?)\b"
+            r"[^.;:]{0,80}\bof\s+the\s+Company\b"
+            r"(?:\s*\([^)]{0,60}\))?[\s,]*(?:has|had)?\s*",
+            alias_tail,
+            re.I,
+        ):
+            return match.group(0), "EXPLICIT_ISSUER_CONTEXT", True
+    return direct
+
+
 def _listing_subject(
     sentence: str,
     expected_subject: str,
@@ -1043,6 +1115,12 @@ def _extract_management_facts(
                     role_owner.group("company"),
                     "OTHER_NAMED_ENTITY",
                     False,
+                )
+            if subject_override is None:
+                subject_override = _management_appointment_subject(
+                    sentence,
+                    expected_subject,
+                    action=action,
                 )
             _append_fact(
                 facts,

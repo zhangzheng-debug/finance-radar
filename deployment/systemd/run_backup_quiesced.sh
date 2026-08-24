@@ -188,9 +188,12 @@ if [ "$PREDEPLOY_BRIDGE" = 0 ] && \
    [ "${FINANCE_RADAR_SKIP_ROOT_BACKUP_ATTESTATION:-0}" != 1 ]; then
     ATTESTATION_DIR=/var/lib/finance-radar
     ATTESTATION_PATH="$ATTESTATION_DIR/latest-verified-backup.json"
+    HEALTH_RECEIPT_DIR=/var/lib/finance-radar-health
+    HEALTH_RECEIPT_PATH="$HEALTH_RECEIPT_DIR/latest.json"
     install -d -m 0700 -o root -g root "$ATTESTATION_DIR"
+    install -d -m 0755 -o root -g root "$HEALTH_RECEIPT_DIR"
     python3 - "$OPERATIONS_DB" \
-        "$ATTESTATION_PATH" <<'PY'
+        "$ATTESTATION_PATH" "$HEALTH_RECEIPT_PATH" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -200,9 +203,11 @@ from pathlib import Path, PurePosixPath
 import sqlite3
 import sys
 import tempfile
+from datetime import datetime, timezone
 
 operations_path = Path(sys.argv[1])
 attestation_path = Path(sys.argv[2])
+health_receipt_path = Path(sys.argv[3])
 uri = f"file:{operations_path.as_posix()}?mode=ro"
 with sqlite3.connect(uri, uri=True) as connection:
     connection.row_factory = sqlite3.Row
@@ -328,8 +333,52 @@ try:
 finally:
     if os.path.exists(temporary_name):
         os.unlink(temporary_name)
+
+health_receipt = {
+    "format": "finance-radar-backup-health-receipt-v1",
+    "status": "VERIFIED",
+    "backup_id": str(record["backup_id"]),
+    "verified_at": str(record["verified_at"]),
+    "quick_check": str(record["quick_check"]),
+    "snapshot_kind": str(record["snapshot_kind"]),
+    "source_bytes": int(record["source_bytes"] or 0),
+    "backup_bytes": int(record["backup_bytes"] or 0),
+    "manifest_name": manifest_path.name,
+    "manifest_sha256": attestation["manifest_sha256"],
+    "issued_at": datetime.now(timezone.utc).isoformat(),
+}
+stable = json.dumps(
+    health_receipt,
+    ensure_ascii=False,
+    sort_keys=True,
+    separators=(",", ":"),
+).encode("utf-8")
+health_receipt["payload_sha256"] = hashlib.sha256(stable).hexdigest()
+descriptor, temporary_name = tempfile.mkstemp(
+    prefix=".latest.", dir=health_receipt_path.parent
+)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(
+            health_receipt,
+            handle,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary_name, 0o644)
+    os.replace(temporary_name, health_receipt_path)
+finally:
+    if os.path.exists(temporary_name):
+        os.unlink(temporary_name)
 PY
     chown root:root "$ATTESTATION_PATH"
     chmod 0600 "$ATTESTATION_PATH"
+    chown root:root "$HEALTH_RECEIPT_PATH"
+    chmod 0644 "$HEALTH_RECEIPT_PATH"
     printf 'backup_root_attestation=PASS path=%s\n' "$ATTESTATION_PATH"
+    printf 'backup_health_receipt=PASS path=%s\n' "$HEALTH_RECEIPT_PATH"
 fi

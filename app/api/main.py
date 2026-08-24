@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import ipaddress
 import hashlib
+import json
 import logging
+import os
 import secrets
 import sqlite3
+import stat
 import time
 import uuid
 from copy import deepcopy
@@ -54,6 +57,8 @@ from app.storage import EvidenceObjectStore, LedgerRepository, OperationsReposit
 API_SCHEMA_VERSION = "1.2"
 LOGGER = logging.getLogger(__name__)
 BACKUP_SNAPSHOT_MAX_AGE_SECONDS = 36 * 60 * 60
+BACKUP_HEALTH_RECEIPT_FORMAT = "finance-radar-backup-health-receipt-v1"
+BACKUP_HEALTH_RECEIPT_MAX_BYTES = 64 * 1024
 OVERVIEW_SNAPSHOT_REFRESH_SECONDS = 30.0
 OVERVIEW_PUBLISHED_SNAPSHOT_REFRESH_SECONDS = 5 * 60.0
 GENERIC_REVIEW_REASONS = frozenset(
@@ -104,6 +109,115 @@ def _backup_artifact_visibility(path: Path) -> tuple[bool | None, str]:
     except OSError:
         return None, "unavailable"
     return True, "visible"
+
+
+def _stable_json_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _unsafe_backup_health_receipt_permissions(
+    parent_stat: os.stat_result,
+    receipt_stat: os.stat_result,
+    *,
+    platform_name: str | None = None,
+) -> str | None:
+    """Return the POSIX ownership/mode violation for a public root receipt."""
+
+    if (platform_name or os.name) != "posix":
+        return None
+    if parent_stat.st_uid != 0 or receipt_stat.st_uid != 0:
+        return "non_root_owner"
+    if parent_stat.st_mode & 0o022 or receipt_stat.st_mode & 0o022:
+        return "writable_by_non_root"
+    return None
+
+
+def _read_backup_health_receipt(
+    receipt_path: Path | None,
+    latest_backup: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str]:
+    """Validate a bounded root receipt without opening the backup tree."""
+
+    if receipt_path is None:
+        return None, "not_configured"
+    try:
+        parent_stat = receipt_path.parent.stat(follow_symlinks=False)
+        receipt_stat = receipt_path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return None, "missing"
+    except PermissionError:
+        return None, "unreadable"
+    except OSError:
+        return None, "unavailable"
+    if receipt_path.is_symlink() or not stat.S_ISREG(receipt_stat.st_mode):
+        return None, "unsafe_file_type"
+    if not stat.S_ISDIR(parent_stat.st_mode):
+        return None, "unsafe_parent_type"
+    if receipt_stat.st_size <= 0 or receipt_stat.st_size > BACKUP_HEALTH_RECEIPT_MAX_BYTES:
+        return None, "invalid_size"
+    permission_violation = _unsafe_backup_health_receipt_permissions(
+        parent_stat,
+        receipt_stat,
+    )
+    if permission_violation is not None:
+        return None, permission_violation
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        descriptor = os.open(receipt_path, flags)
+        try:
+            opened_stat = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or opened_stat.st_size != receipt_stat.st_size
+                or opened_stat.st_size > BACKUP_HEALTH_RECEIPT_MAX_BYTES
+            ):
+                return None, "changed_while_opening"
+            chunks: list[bytes] = []
+            remaining = BACKUP_HEALTH_RECEIPT_MAX_BYTES + 1
+            while remaining > 0:
+                chunk = os.read(descriptor, remaining)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            raw = b"".join(chunks)
+        finally:
+            os.close(descriptor)
+        if len(raw) != receipt_stat.st_size:
+            return None, "changed_while_reading"
+        receipt = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None, "invalid_json"
+    if not isinstance(receipt, dict) or receipt.get("format") != BACKUP_HEALTH_RECEIPT_FORMAT:
+        return None, "invalid_contract"
+    digest = str(receipt.get("payload_sha256") or "")
+    unsigned = dict(receipt)
+    unsigned.pop("payload_sha256", None)
+    if len(digest) != 64 or not secrets.compare_digest(
+        digest,
+        hashlib.sha256(_stable_json_bytes(unsigned)).hexdigest(),
+    ):
+        return None, "invalid_digest"
+    expected = {
+        "backup_id": str(latest_backup.get("backup_id") or ""),
+        "verified_at": str(latest_backup.get("verified_at") or ""),
+        "quick_check": str(latest_backup.get("quick_check") or ""),
+        "snapshot_kind": str(latest_backup.get("snapshot_kind") or ""),
+        "source_bytes": int(latest_backup.get("source_bytes") or 0),
+        "backup_bytes": int(latest_backup.get("backup_bytes") or 0),
+        "manifest_name": Path(str(latest_backup.get("manifest_path") or "")).name,
+    }
+    for key, value in expected.items():
+        if receipt.get(key) != value:
+            return None, f"record_mismatch:{key}"
+    if receipt.get("status") != "VERIFIED" or receipt.get("quick_check") != "ok":
+        return None, "not_verified"
+    return receipt, "validated"
 
 
 class HumanOverrideRequest(BaseModel):
@@ -672,6 +786,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             backup_quick_check = latest_backup.get("quick_check") or "unknown"
             backup_path = Path(str(latest_backup.get("backup_path") or ""))
             path_available, artifact_visibility = _backup_artifact_visibility(backup_path)
+            health_receipt, health_receipt_status = _read_backup_health_receipt(
+                settings.backup_health_receipt_path,
+                latest_backup,
+            )
             # A PermissionError proves only that this identity cannot inspect
             # the protected path.  It cannot distinguish an existing bundle
             # from a bundle deleted behind an untraversable parent directory,
@@ -680,7 +798,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 backup_quick_check == "ok"
                 and age_seconds is not None
                 and age_seconds <= BACKUP_SNAPSHOT_MAX_AGE_SECONDS
-                and artifact_visibility == "visible"
+                and (
+                    artifact_visibility == "visible"
+                    or health_receipt_status == "validated"
+                )
             )
             if fresh:
                 snapshot_status = "FRESH"
@@ -702,14 +823,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "snapshot_kind": latest_backup.get("snapshot_kind"),
                 "path_available": path_available,
                 "artifact_visibility": artifact_visibility,
+                "health_receipt_status": health_receipt_status,
                 "artifact_verification_source": (
                     "live_path_stat_and_latest_verified_backup_record"
                     if artifact_visibility == "visible"
+                    else "root_verified_recovery_receipt"
+                    if health_receipt_status == "validated"
                     else "unprivileged_path_probe_inconclusive"
                     if artifact_visibility == "protected"
                     else "latest_verified_backup_record"
                 ),
             }
+            if health_receipt is not None:
+                backup_snapshot["health_receipt_issued_at"] = health_receipt.get("issued_at")
         result["backup_snapshot"] = backup_snapshot
         # These three legacy fields remain for the existing public dashboard,
         # while ``current_db_liveness`` / ``backup_snapshot`` make the scope

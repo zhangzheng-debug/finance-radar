@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import tempfile
+import hashlib
+import json
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from app.api.main import _backup_artifact_visibility, create_app
+from app.api.main import (
+    _backup_artifact_visibility,
+    _unsafe_backup_health_receipt_permissions,
+    create_app,
+)
 from app.config import Settings
 from app.storage import LedgerRepository, OperationsRepository
 from event_ledger import open_ledger
@@ -33,6 +40,35 @@ def _settings(root: Path) -> Settings:
     )
 
 
+def _write_health_receipt(path: Path, backup: dict[str, object], **changes: object) -> None:
+    payload = {
+        "format": "finance-radar-backup-health-receipt-v1",
+        "status": "VERIFIED",
+        "backup_id": str(backup["backup_id"]),
+        "verified_at": str(backup["verified_at"]),
+        "quick_check": str(backup["quick_check"]),
+        "snapshot_kind": str(backup["snapshot_kind"]),
+        "source_bytes": int(backup["source_bytes"]),
+        "backup_bytes": int(backup["backup_bytes"]),
+        "manifest_name": Path(str(backup["manifest_path"])).name,
+        "manifest_sha256": "a" * 64,
+        "issued_at": datetime.now(timezone.utc).isoformat(),
+    }
+    payload.update(changes)
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    payload["payload_sha256"] = hashlib.sha256(encoded).hexdigest()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_repository_can_defer_request_time_integrity_scan() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         settings = _settings(Path(temp_dir))
@@ -51,6 +87,38 @@ def test_operations_repository_can_defer_request_time_integrity_scan() -> None:
     assert health["status"] == "ok"
     assert health["quick_check"] == "deferred"
     assert health["integrity_check_source"] == "not_run"
+
+
+def test_backup_health_receipt_permissions_require_root_and_locked_modes() -> None:
+    locked_root = SimpleNamespace(st_uid=0, st_mode=0o100644)
+    locked_root_dir = SimpleNamespace(st_uid=0, st_mode=0o40755)
+    non_root = SimpleNamespace(st_uid=1000, st_mode=0o100644)
+    writable = SimpleNamespace(st_uid=0, st_mode=0o100666)
+
+    assert (
+        _unsafe_backup_health_receipt_permissions(
+            locked_root_dir,
+            locked_root,
+            platform_name="posix",
+        )
+        is None
+    )
+    assert (
+        _unsafe_backup_health_receipt_permissions(
+            locked_root_dir,
+            non_root,
+            platform_name="posix",
+        )
+        == "non_root_owner"
+    )
+    assert (
+        _unsafe_backup_health_receipt_permissions(
+            locked_root_dir,
+            writable,
+            platform_name="posix",
+        )
+        == "writable_by_non_root"
+    )
 
 
 def test_api_health_defers_operations_integrity_to_verified_backup_workflow() -> None:
@@ -135,6 +203,109 @@ def test_health_bounds_inventory_but_does_not_claim_protected_artifact_is_fresh(
     assert summary["retained_daily_files"] is None
     assert summary["retained_daily_files_observable"] is False
     assert summary["protected_daily_records"] == 1
+
+
+def test_root_health_receipt_proves_fresh_protected_backup_without_opening_bundle() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        receipt_path = root / "health" / "latest.json"
+        base_settings = _settings(root)
+        settings = Settings(
+            **{**base_settings.__dict__, "backup_health_receipt_path": receipt_path}
+        )
+        application = create_app(settings)
+        backup_path = root / "protected" / "manifest.json"
+        backup_path.parent.mkdir()
+        backup_path.write_text("{}", encoding="utf-8")
+        backup_id = application.state.operations.create_backup_run(
+            backup_path,
+            source_bytes=123,
+            manifest_path=backup_path,
+            snapshot_kind="recovery_bundle",
+        )
+        application.state.operations.finish_backup_run(
+            backup_id,
+            backup_bytes=456,
+            quick_check="ok",
+            counts={},
+            manifest_path=backup_path,
+            components={},
+            snapshot_kind="recovery_bundle",
+        )
+        latest = application.state.operations.latest_verified_backup()
+        assert latest is not None
+        _write_health_receipt(receipt_path, latest)
+
+        # The fixture is owned by the unprivileged CI runner on POSIX.  This
+        # test exercises receipt-to-ledger validation; production root-owner
+        # enforcement is covered by its own helper and remains fail closed.
+        with patch(
+            "app.api.main._unsafe_backup_health_receipt_permissions",
+            return_value=None,
+        ), patch(
+            "app.api.main._backup_artifact_visibility",
+            return_value=(None, "protected"),
+        ):
+            response = TestClient(application).get("/api/v1/health")
+
+    assert response.status_code == 200
+    health = response.json()["data"]
+    assert health["status"] == "ok"
+    snapshot = health["ledger"]["backup_snapshot"]
+    assert snapshot["status"] == "FRESH"
+    assert snapshot["fresh"] is True
+    assert snapshot["path_available"] is None
+    assert snapshot["artifact_visibility"] == "protected"
+    assert snapshot["health_receipt_status"] == "validated"
+    assert snapshot["artifact_verification_source"] == "root_verified_recovery_receipt"
+
+
+def test_tampered_or_mismatched_health_receipt_remains_fail_closed() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        receipt_path = root / "health" / "latest.json"
+        base_settings = _settings(root)
+        settings = Settings(
+            **{**base_settings.__dict__, "backup_health_receipt_path": receipt_path}
+        )
+        application = create_app(settings)
+        backup_path = root / "protected" / "manifest.json"
+        backup_path.parent.mkdir()
+        backup_path.write_text("{}", encoding="utf-8")
+        backup_id = application.state.operations.create_backup_run(
+            backup_path,
+            source_bytes=123,
+            manifest_path=backup_path,
+            snapshot_kind="recovery_bundle",
+        )
+        application.state.operations.finish_backup_run(
+            backup_id,
+            backup_bytes=456,
+            quick_check="ok",
+            counts={},
+            manifest_path=backup_path,
+            components={},
+            snapshot_kind="recovery_bundle",
+        )
+        latest = application.state.operations.latest_verified_backup()
+        assert latest is not None
+        _write_health_receipt(receipt_path, latest, backup_id="wrong-backup")
+
+        with patch(
+            "app.api.main._unsafe_backup_health_receipt_permissions",
+            return_value=None,
+        ), patch(
+            "app.api.main._backup_artifact_visibility",
+            return_value=(None, "protected"),
+        ):
+            response = TestClient(application).get("/api/v1/health")
+
+    health = response.json()["data"]
+    assert health["status"] == "degraded"
+    snapshot = health["ledger"]["backup_snapshot"]
+    assert snapshot["status"] == "UNVERIFIABLE_PROTECTED"
+    assert snapshot["fresh"] is False
+    assert snapshot["health_receipt_status"] == "record_mismatch:backup_id"
 
 
 def test_overview_uses_timestamped_verified_backup_integrity() -> None:

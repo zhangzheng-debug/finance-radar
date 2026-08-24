@@ -5,6 +5,34 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.24.4
+
+- Keep production backup bundles and the private restore attestation root-only,
+  while publishing a bounded, root-owned, non-secret verification receipt that
+  the low-privilege API can validate against the operations ledger. A protected
+  but freshly verified backup no longer makes `/health` falsely degraded;
+  missing, stale, mismatched, writable or symlinked receipts still fail closed.
+- Expand the fail-closed code-only deployment path from public Web assets to
+  schema-neutral API, Web, Worker, service and script changes. Deployment and
+  recovery machinery, dependency locks, schema owners and any changed Python
+  containing schema-mutation SQL still require a full release. The installer
+  now proves the live SQLite schema is byte-for-byte unchanged across a fast
+  cutover before restarting collection.
+- Add an authorization-bound historical primary-source re-admission workflow.
+  It replays current P0/P1 passages through the current deterministic fact
+  extractor, creates immutable candidate/weak versions with scoped evidence
+  relations, and never claims human verification, changes labels or enables
+  trading. Exact plan, target ledger, independent backup and event scope are
+  checked again inside the write transaction.
+- Recognize issuer-bound management appointments made by that issuer's board,
+  including exact `Board of Directors of <issuer>` and locally defined
+  `the Company` grammar, without accepting a bare or unrelated board.
+- Make the internal launcher open the read-only Admin owner overview by
+  default. Add a one-click Windows entry that stores only SSH connection
+  parameters under `D:\\FinanceRadar`; tokens remain process-local.
+- Bind the new recovery, admission, hotfix and owner-entry files into the
+  release integrity manifest and regression suite.
+
 ## 2026.08.24.3
 
 - Scope Shadow-router source and evidence revision work to the already selected

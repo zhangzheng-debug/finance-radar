@@ -86,6 +86,10 @@ class Settings:
     # artifact from a separate systemd process.  Local development and unit
     # tests leave this unset and retain the lightweight in-process fallback.
     overview_snapshot_path: Path | None = None
+    # The recovery bundle itself remains root-only. Production may publish a
+    # bounded, root-owned receipt containing no backup payload or secret so the
+    # unprivileged API can distinguish a protected bundle from a missing drill.
+    backup_health_receipt_path: Path | None = None
     demo_mode: str = "RECENT_CAPTURE"
     admin_token: str | None = None
     reviewer_token: str | None = None
@@ -177,6 +181,11 @@ class Settings:
             overview_snapshot_path=(
                 Path(os.environ["FINANCE_RADAR_OVERVIEW_SNAPSHOT_PATH"]).resolve()
                 if os.getenv("FINANCE_RADAR_OVERVIEW_SNAPSHOT_PATH")
+                else None
+            ),
+            backup_health_receipt_path=(
+                Path(os.environ["FINANCE_RADAR_BACKUP_HEALTH_RECEIPT_PATH"]).resolve()
+                if os.getenv("FINANCE_RADAR_BACKUP_HEALTH_RECEIPT_PATH")
                 else None
             ),
             demo_mode=os.getenv("FINANCE_RADAR_DEMO_MODE", "RECENT_CAPTURE").upper(),

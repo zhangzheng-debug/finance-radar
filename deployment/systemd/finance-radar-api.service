@@ -11,6 +11,7 @@ WorkingDirectory=/opt/finance-radar/current
 Slice=finance-radar.slice
 EnvironmentFile=/etc/finance-radar.env
 Environment=FINANCE_RADAR_OVERVIEW_SNAPSHOT_PATH=/opt/finance-radar/shared/data/overview_snapshot_v1.json
+Environment=FINANCE_RADAR_BACKUP_HEALTH_RECEIPT_PATH=/var/lib/finance-radar-health/latest.json
 LoadCredential=reviewer-principals.json:/etc/finance-radar-reviewer-principals.json
 ExecStartPre=/usr/bin/test -s /opt/finance-radar/shared/data/overview_snapshot_v1.json
 ExecStart=/opt/finance-radar/venv/bin/python -m uvicorn app.api.main:app --host 127.0.0.1 --port 18000 --workers 1
