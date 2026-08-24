@@ -1,0 +1,6505 @@
+{
+  "schema_version": 1,
+  "contract_version": "human-gold-offline-v1",
+  "batch_id": "HGR-20260820-720",
+  "reviewer_slot": "B",
+  "review_role": "REVIEWER",
+  "reviewer_token": "NXazUbk6vEobBPIoY8ltGhN0mamf0OUY2_OVFxnW9S0",
+  "assignment_sha256": "c80f6dffabb65c48eb278b358412df3a68b4b62fb7f647f2d439c5c21d63fc83",
+  "attestations": {
+    "human_only": false,
+    "independent_judgment": false,
+    "no_ai_assistance": false,
+    "no_model_output": false,
+    "no_market_outcome": false,
+    "no_old_label": false
+  },
+  "peer_answers_hidden": true,
+  "exported_at": "2026-08-24T09:37:14.806Z",
+  "complete": false,
+  "results": [
+    {
+      "sample_token": "HG-c15b1d80633576a8fda4",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是法律文本，内容是中性的，证据是一手法律文件",
+      "reviewed_at": "2026-08-21T03:54:01.165Z",
+      "duration_seconds": 1865
+    },
+    {
+      "sample_token": "HG-c221c042de4462c6439c",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "Aurelion公司2026 年 6 月 30 日止季度经营亏损2440万美元，主要原因是本季度金价下跌，导致所持 XAUt 产生公允价值损失；证据是该公司一手财报",
+      "reviewed_at": "2026-08-21T03:59:20.291Z",
+      "duration_seconds": 2184
+    },
+    {
+      "sample_token": "HG-5b980a6c69e187bd0349",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是债券契约法律文件，证据来源于法律文本",
+      "reviewed_at": "2026-08-21T04:00:56.313Z",
+      "duration_seconds": 2280
+    },
+    {
+      "sample_token": "HG-e2e9f0bd9d0132e57748",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "DISCOVERY_ONLY",
+      "rationale": "这是某公司美股财报，会计准则术语，未能从段落中获取公司信息",
+      "reviewed_at": "2026-08-21T04:12:26.213Z",
+      "duration_seconds": 2970
+    },
+    {
+      "sample_token": "HG-53326f773171dfef012a",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是两家矿业上市公司的公告，两家公司达成合作，是正面影响，证据为一手文件",
+      "reviewed_at": "2026-08-21T05:39:45.271Z",
+      "duration_seconds": 8209
+    },
+    {
+      "sample_token": "HG-6f052b27f4d69b4d49d8",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这只是一份用来公告公司已经完成资产处置，同时报送对应的模拟备考财务报表。",
+      "reviewed_at": "2026-08-21T05:44:24.738Z",
+      "duration_seconds": 8488
+    },
+    {
+      "sample_token": "HG-7f914cf59a7bfe73a065",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是一笔子公司股权出售交易，没有明显利好或利空",
+      "reviewed_at": "2026-08-21T05:59:02.675Z",
+      "duration_seconds": 9366
+    },
+    {
+      "sample_token": "HG-602fb47cf79333feccea",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是Southern Company 可转换高级票据私募发行公告，没有明确倾向",
+      "reviewed_at": "2026-08-21T06:07:27.129Z",
+      "duration_seconds": 9871
+    },
+    {
+      "sample_token": "HG-ca169f9a0f81781059af",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "DISCOVERY_ONLY",
+      "rationale": "这是 Can‑Fite 生物公司新闻稿片段，介绍管线候选药物",
+      "reviewed_at": "2026-08-21T06:12:41.969Z",
+      "duration_seconds": 10213
+    },
+    {
+      "sample_token": "HG-63a56f48550aad7b4d4d",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是MercadoLibre 财报片段，没有明显倾向",
+      "reviewed_at": "2026-08-21T06:18:21.576Z",
+      "duration_seconds": 10532
+    },
+    {
+      "sample_token": "HG-9f5e179cc62220bed6ea",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "DISCOVERY_ONLY",
+      "rationale": "这是FDIC 发布 2026 年 5 月执法处罚令的公告，没有详细内容",
+      "reviewed_at": "2026-08-21T06:23:29.933Z",
+      "duration_seconds": 10834
+    },
+    {
+      "sample_token": "HG-fdd4e888a6e26706e81c",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是Pro‑forma 模拟报表，没有明显倾向",
+      "reviewed_at": "2026-08-21T07:16:46.103Z",
+      "duration_seconds": 14030
+    },
+    {
+      "sample_token": "HG-054f9d25333dd5a01ae6",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "发展势头很猛，该公司还获得了美军方资助，",
+      "reviewed_at": "2026-08-21T07:22:42.907Z",
+      "duration_seconds": 14387
+    },
+    {
+      "sample_token": "HG-6e364408203fccd5674a",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "MULTI_SOURCE_SUPPORTED",
+      "rationale": "SBA Communications发行期限更长的高级票据（2030‑2033 到期），替换掉原有担保定期贷 + 循环贷，无明显倾向",
+      "reviewed_at": "2026-08-21T07:28:41.033Z",
+      "duration_seconds": 14745
+    },
+    {
+      "sample_token": "HG-4f4dc769a28292026015",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "MULTI_SOURCE_SUPPORTED",
+      "rationale": "这是一则法院文件，只是法院对Michael Forster进行处罚",
+      "reviewed_at": "2026-08-21T07:33:13.977Z",
+      "duration_seconds": 15018
+    },
+    {
+      "sample_token": "HG-7e31b7664faceac93ec1",
+      "materiality": "UNCLEAR",
+      "polarity": "UNCLEAR",
+      "evidence_state": "INSUFFICIENT",
+      "rationale": "这是一则新闻稿片段，无有价值信息，看不出什么",
+      "reviewed_at": "2026-08-21T07:35:46.074Z",
+      "duration_seconds": 15170
+    },
+    {
+      "sample_token": "HG-35d651e0728175065b8c",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "事实性或程序性更新，没有明显方向。中性。",
+      "reviewed_at": "2026-08-21T09:10:52.645Z",
+      "duration_seconds": 20876
+    },
+    {
+      "sample_token": "HG-11ad1d2025708b21533b",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "MULTI_SOURCE_SUPPORTED",
+      "rationale": "该医疗器械有严重安全风险，被要求召回整改，是极度负面的",
+      "reviewed_at": "2026-08-21T09:14:56.296Z",
+      "duration_seconds": 21120
+    },
+    {
+      "sample_token": "HG-2e0e682fb46c802a3e69",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是ASX 澳交所股票回购公告，是事实性或程序性更新，没有明显方向。",
+      "reviewed_at": "2026-08-21T09:16:21.586Z",
+      "duration_seconds": 21205
+    },
+    {
+      "sample_token": "HG-2205992af431ff66d888",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是员工购股计划 ESPP 协议文本，事实性或程序性更新，没有明显方向。",
+      "reviewed_at": "2026-08-21T09:21:38.884Z",
+      "duration_seconds": 21523
+    },
+    {
+      "sample_token": "HG-536e91b0445b799e9322",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "临床试验安全性数据，DT120 ODT 迷幻类药物 Voyage 研究",
+      "reviewed_at": "2026-08-21T09:40:19.318Z",
+      "duration_seconds": 22643
+    },
+    {
+      "sample_token": "HG-2b8119a2ac427010593c",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "该条款是很多美股 IPO 公司常见设置，强化董事会控制权，削弱中小股东行动能力。",
+      "reviewed_at": "2026-08-21T09:42:34.479Z",
+      "duration_seconds": 22778
+    },
+    {
+      "sample_token": "HG-9b4d1066a46abdcf0d2b",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "仅是条款写进财报，条款属实无法造成负面影响",
+      "reviewed_at": "2026-08-21T09:50:03.454Z",
+      "duration_seconds": 23227
+    },
+    {
+      "sample_token": "HG-55681d1d2e428f56f3ba",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是一份业绩快报披露公告，不会有什么影响",
+      "reviewed_at": "2026-08-21T09:55:59.554Z",
+      "duration_seconds": 23583
+    },
+    {
+      "sample_token": "HG-5f320607ad77cf61a1b0",
+      "materiality": "UNCLEAR",
+      "polarity": "NEUTRAL",
+      "evidence_state": "INSUFFICIENT",
+      "rationale": "截取信息有限，主体为附注3，缺少信托 2025 年 12 月 31 日财年 10‑K 年报所载财务报表",
+      "reviewed_at": "2026-08-24T01:22:14.788Z",
+      "duration_seconds": 251958
+    },
+    {
+      "sample_token": "HG-462901c00bb4511a15f4",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "MIXED",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "材料涉及 SSL Sparti LLC 和 Sparti Merger 子公司的并购，影响有利有弊",
+      "reviewed_at": "2026-08-24T01:42:22.634Z",
+      "duration_seconds": 253166
+    },
+    {
+      "sample_token": "HG-1040a36d86b1c763ce9b",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是纳斯达克向 SEC 报送的法定退市启动凭证，属于私有化合并交割完成之后的标准配套文件。",
+      "reviewed_at": "2026-08-24T01:48:05.841Z",
+      "duration_seconds": 253509
+    },
+    {
+      "sample_token": "HG-5c2337e21addc4d53843",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "文本写明该公司大量亏损，是重大不利的情况",
+      "reviewed_at": "2026-08-24T03:25:52.700Z",
+      "duration_seconds": 259376
+    },
+    {
+      "sample_token": "HG-85850cb1f9e2993e3938",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "公司该季度产生了不少利润，是非重大不利，",
+      "reviewed_at": "2026-08-24T03:36:28.109Z",
+      "duration_seconds": 260012
+    },
+    {
+      "sample_token": "HG-b53ed4710cfe8059f4dc",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这份 6‑K 大概率是**审计师发生聘任 / 解聘变更时的法定强制披露**。",
+      "reviewed_at": "2026-08-24T03:52:47.935Z",
+      "duration_seconds": 260992
+    },
+    {
+      "sample_token": "HG-6d2cfcd28358856525b4",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "属于诉讼和解的风险预案，没什么影响的倾向",
+      "reviewed_at": "2026-08-24T04:00:48.285Z",
+      "duration_seconds": 261472
+    },
+    {
+      "sample_token": "HG-7eeb4edf3059086dd6f2",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是一份标准人事类 8‑K：公司新选举两名符合纳斯达克标准的独立董事，错开任期分别到 2027、2028 股东年会到期",
+      "reviewed_at": "2026-08-24T05:24:13.701Z",
+      "duration_seconds": 266477
+    },
+    {
+      "sample_token": "HG-68382755dc5bbfd85c4f",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "临床结果正向，对目标主题确实是正面影响。",
+      "reviewed_at": "2026-08-24T05:39:10.597Z",
+      "duration_seconds": 267374
+    },
+    {
+      "sample_token": "HG-05ea03d49205c5c66339",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "INSUFFICIENT",
+      "rationale": "这是 6‑K 归档的交易附件里的陈述与保证章节节选，但全是全部是公司单方面的书面声明，不等同第三方独立确认。",
+      "reviewed_at": "2026-08-24T05:43:15.469Z",
+      "duration_seconds": 267619
+    },
+    {
+      "sample_token": "HG-4a26b18c8c8243ac3b05",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是一份高风险预警级别的 6‑K，审计师确认财务报告内部控制存在重大缺陷，并已撤回原 20‑F 年报审计意见",
+      "reviewed_at": "2026-08-24T05:49:20.961Z",
+      "duration_seconds": 267985
+    },
+    {
+      "sample_token": "HG-00f7f16fc11652f5d137",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "该片段是20‑F 年报的 Exhibit 附件清单，属于 SPAC 并购完成归档材料",
+      "reviewed_at": "2026-08-24T05:51:10.749Z",
+      "duration_seconds": 268094
+    },
+    {
+      "sample_token": "HG-01208de3d8eee17070b7",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是雅宝 10‑Q 季度报告公允价值附注片段，本片段只是常规附注，不属于利好或利空",
+      "reviewed_at": "2026-08-24T06:02:07.085Z",
+      "duration_seconds": 268751
+    },
+    {
+      "sample_token": "HG-91f43fb5995551ade3dc",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "INSUFFICIENT",
+      "rationale": "FTC × Caremark 这份和解是美国 PBM 行业一次标志性反垄断结果",
+      "reviewed_at": "2026-08-24T06:09:18.170Z",
+      "duration_seconds": 269182
+    },
+    {
+      "sample_token": "HG-357cf4363d9f655a003f",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "老股东稀释程度很高，大额净亏损 5063.5 万美元，大幅吞噬股东权益",
+      "reviewed_at": "2026-08-24T06:32:24.280Z",
+      "duration_seconds": 270568
+    },
+    {
+      "sample_token": "HG-9ef50697e8ad9233ab08",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是一份程序性 8‑K 申报，没有太大影响",
+      "reviewed_at": "2026-08-24T06:43:59.202Z",
+      "duration_seconds": 271263
+    },
+    {
+      "sample_token": "HG-2af7fc51cf5720779867",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "公司管理层书面确认存在持续经营重大疑虑，公司必须获取新债务或股权融资才能活下去；融资失败则面临债务违约、破产、普通股价值受损风险",
+      "reviewed_at": "2026-08-24T06:45:36.517Z",
+      "duration_seconds": 271360
+    },
+    {
+      "sample_token": "HG-d09ddac675e115eeead1",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是 FDA MedWatch 发布的I 类（最高严重等级）医疗器械安全更正通知，造成重大不利影响",
+      "reviewed_at": "2026-08-24T06:55:28.899Z",
+      "duration_seconds": 271953
+    },
+    {
+      "sample_token": "HG-73cd9fe65bb224cea898",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "本次只是新增债务工具发行的程序性 8‑K 披露；本身不代表信用恶化，只是融资操作。",
+      "reviewed_at": "2026-08-24T06:56:46.540Z",
+      "duration_seconds": 272030
+    },
+    {
+      "sample_token": "HG-e88799c5b11421e781f3",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "INSUFFICIENT",
+      "rationale": "这份 8‑K 披露 CFO 因个人原因辞职，声明与公司不存在会计、经营方面的分歧",
+      "reviewed_at": "2026-08-24T07:00:48.399Z",
+      "duration_seconds": 272272
+    },
+    {
+      "sample_token": "HG-548cd98ae2b447096d22",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "本文件仅为股本月度统计，不反映经营好坏、偿债压力，属于港交所强制月度股份披露",
+      "reviewed_at": "2026-08-24T07:03:54.416Z",
+      "duration_seconds": 272458
+    },
+    {
+      "sample_token": "HG-4e63e4a8353156dc13ce",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "ERENA‑6 III 期中期数据显示相比现有标准方案，进展或死亡风险下降 56%，中位 PFS 由 9.2 个月提升至 16.0 个月；是该耐药患者群体重要治疗突破，属于正面商业化里程碑。",
+      "reviewed_at": "2026-08-24T07:05:43.690Z",
+      "duration_seconds": 272567
+    },
+    {
+      "sample_token": "HG-c6ca607727d689dd58e4",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "纯融资公告，不涉及退市风险。整体呈现中性",
+      "reviewed_at": "2026-08-24T07:07:09.182Z",
+      "duration_seconds": 272653
+    },
+    {
+      "sample_token": "HG-a6b287cd2dbf21288d86",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "业绩层面本季度表现亮眼，形成了正面影响。",
+      "reviewed_at": "2026-08-24T07:09:52.882Z",
+      "duration_seconds": 272817
+    },
+    {
+      "sample_token": "HG-4c1a3485ef4a9724beef",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "审计师出具持续经营重大不确定性（going‑concern）警示",
+      "reviewed_at": "2026-08-24T07:11:07.163Z",
+      "duration_seconds": 272891
+    },
+    {
+      "sample_token": "HG-163d112280429864fe8f",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "交割之后短短一个月，American Woodmark 营收 1.255 亿，但直接产生 2890 万净亏损，被收购标的短期盈利能力偏弱。",
+      "reviewed_at": "2026-08-24T07:15:36.569Z",
+      "duration_seconds": 273160
+    },
+    {
+      "sample_token": "HG-e1e525b61057375da9cf",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "本段仅为现金流量表片段，**没有持续经营风险提示，也不涉及退市相关表述**。",
+      "reviewed_at": "2026-08-24T07:32:40.556Z",
+      "duration_seconds": 274184
+    },
+    {
+      "sample_token": "HG-9ea2b184a7462215cce1",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "本段仅会计政策披露，**无持续经营疑虑、无退市风险**",
+      "reviewed_at": "2026-08-24T07:34:30.314Z",
+      "duration_seconds": 274294
+    },
+    {
+      "sample_token": "HG-c869d55922ac80a1934c",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "生物医药公司 6‑K 公告，披露**SCENESSE® 治疗深色皮肤白癜风的 III 期临床进展、试验终点、后续注册关键试验与 EMA 监管沟通**。",
+      "reviewed_at": "2026-08-24T07:44:07.171Z",
+      "duration_seconds": 274871
+    },
+    {
+      "sample_token": "HG-559159cdae7d18af1a2a",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "DISCOVERY_ONLY",
+      "rationale": "这份 8‑K 只是**财报新闻稿的报备公告，本身不含详细财务数字**",
+      "reviewed_at": "2026-08-24T07:45:22.221Z",
+      "duration_seconds": 274946
+    },
+    {
+      "sample_token": "HG-c1b373819079a9ff07ce",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "美股季度报告附注片段，围绕**可转债、上限看涨期权 (capped call)、反稀释、稀释 EPS 计算、公允价值层级、拉比信托资产、收购或有对价**。",
+      "reviewed_at": "2026-08-24T07:48:39.790Z",
+      "duration_seconds": 275143
+    },
+    {
+      "sample_token": "HG-c0b824cba2b4008ebd9c",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "主体：PAAU 属于 ETF 信托产品，不是上市公司股票；属于**杠杆 ETF 主动清盘退市**，不是经营失败强制退市。",
+      "reviewed_at": "2026-08-24T07:50:30.946Z",
+      "duration_seconds": 275255
+    },
+    {
+      "sample_token": "HG-8424c2b61aaf04178e7e",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "公司开展评估：综合各项条件与事件，判断**是否存在重大疑虑，质疑公司在本财务报表出具日后 12 个月内的持续经营能力**。",
+      "reviewed_at": "2026-08-24T07:52:50.328Z",
+      "duration_seconds": 275394
+    },
+    {
+      "sample_token": "HG-16da0e4c9a603d007745",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "Netcapital Inc. 提交 8‑K Item3.01：公司首轮纳斯达克 1 美元股价宽限期（截止 2026‑08‑03）到期未达标；纳斯达克批准给予第二轮 180 自然日宽限期，整改截止**2027‑02‑01**；在此之前若不能实现连续 10 个交易日收盘价≥1 美元，将会面临摘牌风险。",
+      "reviewed_at": "2026-08-24T08:06:37.914Z",
+      "duration_seconds": 276222
+    },
+    {
+      "sample_token": "HG-fb46fb981ec89565c709",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "文本为债务契约的术语定义章节。无明显倾向",
+      "reviewed_at": "2026-08-24T08:08:00.170Z",
+      "duration_seconds": 276304
+    },
+    {
+      "sample_token": "HG-6587e6d478d2b56fecda",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "MIXED",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "整体：**绝大多数信号偏向利好，但也存在隐性压力**",
+      "reviewed_at": "2026-08-24T08:13:56.319Z",
+      "duration_seconds": 276660
+    },
+    {
+      "sample_token": "HG-75f3dd93a1bf5371a033",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "对公众股东**整体偏利好**：一方面二级市场回购流通股份增厚股东收益；另一方面花钱收回部分创始人超级投票权，缓解双层股权结构带来的治理失衡。但公司身处场外 OTC 市场，回购消耗现金是客观代价。",
+      "reviewed_at": "2026-08-24T08:15:41.361Z",
+      "duration_seconds": 276765
+    },
+    {
+      "sample_token": "HG-7bd3ef1d2a58b9a49528",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "仅就这张资产质量表片段：**没有暴雷，但商业地产的次级、可疑贷款是核心风险隐患；当期仅小额核销，尚未发生大规模信用损失，需要看拨备水平做完整判断。**",
+      "reviewed_at": "2026-08-24T08:18:01.659Z",
+      "duration_seconds": 276905
+    },
+    {
+      "sample_token": "HG-e351ef681c7c894531e7",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "**月度净亏损 3.66 亿美元**，原油价格下行直接造成基金资产大幅缩水；USO 产品本身就自带期货展期损耗风险（升水市场损耗净值）。",
+      "reviewed_at": "2026-08-24T08:19:47.927Z",
+      "duration_seconds": 277012
+    },
+    {
+      "sample_token": "HG-e5115714b4d5990386a7",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "业务呈现**分化格局**：英澳是核心增长引擎；德国、美国联邦政府业务、芬波波罗的海出现利润承压；整体利息负担明显加重。",
+      "reviewed_at": "2026-08-24T08:22:51.720Z",
+      "duration_seconds": 277195
+    },
+    {
+      "sample_token": "HG-64263b52b9d70ca007db",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "Imunon 公司薪酬委员会及董事会批准部分高管薪酬方案：\n高管可自主选择，将**一部分基本工资改为普通股股票发放**；选择以股票领薪的高管，还可额外获得追加普通股奖励。偏利好，但具有稀释代价",
+      "reviewed_at": "2026-08-24T08:27:31.272Z",
+      "duration_seconds": 277475
+    },
+    {
+      "sample_token": "HG-be3bc0bd4169806ceae8",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "整体偏正面：公司经营造血 + 多渠道融资带来充沛现金，能够稳定派息，同时建立商品对冲机制管理油价波动风险；唯一报表关注点是原料采购合约表外披露，需要去附注看承诺采购金额。",
+      "reviewed_at": "2026-08-24T08:28:35.254Z",
+      "duration_seconds": 277539
+    },
+    {
+      "sample_token": "HG-68cf1776eb19d50c9e2f",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是**私有化交割完成的收尾法律文件**。文件本身没有好坏，代表上市公司身份正式终结。",
+      "reviewed_at": "2026-08-24T08:29:59.511Z",
+      "duration_seconds": 277623
+    },
+    {
+      "sample_token": "HG-60ff084e12f6da0fae39",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "MULTI_SOURCE_SUPPORTED",
+      "rationale": "美国 CFTC 公开的**大宗商品基金欺诈执法案例**：管理人对外虚假宣传收益，真实账户持续爆亏，骗取 60 余名投资者合计 1400 万美金。",
+      "reviewed_at": "2026-08-24T08:31:08.468Z",
+      "duration_seconds": 277692
+    },
+    {
+      "sample_token": "HG-80ed0f1ab1c228b27c99",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "DISCOVERY_ONLY",
+      "rationale": "矿业特许权公司 6‑K 披露：一方面跟踪出事的 Eagle 金矿的处置进展；另一方面说明自身 “股权 + 流矿权” 投资模式，2026Q1 斥资 1000 万做股权投资，并通过协议修订拿到合作方股权。核心风险来自 Eagle 金矿接管处置结果；同时公司权益仓位可随时变动，财报会受金价与被投矿企双重影响。",
+      "reviewed_at": "2026-08-24T08:34:50.430Z",
+      "duration_seconds": 277925
+    },
+    {
+      "sample_token": "HG-05706b923dac8393b974",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "SPAC 特殊目的收购公司季报，核心披露**持续经营重大不确定性（Going‑concern）**",
+      "reviewed_at": "2026-08-24T08:35:52.354Z",
+      "duration_seconds": 277976
+    },
+    {
+      "sample_token": "HG-81e45c5f98d76b215414",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "INSUFFICIENT",
+      "rationale": "季报延期申报通知，程序性延期通知，非利空预警。",
+      "reviewed_at": "2026-08-24T08:40:24.309Z",
+      "duration_seconds": 278248
+    },
+    {
+      "sample_token": "HG-eb358f31467114933537",
+      "materiality": "UNCLEAR",
+      "polarity": "UNCLEAR",
+      "evidence_state": "INSUFFICIENT",
+      "rationale": "这一段是**模板化免责收尾文本，不含新业务、财务、交易实质信息**。",
+      "reviewed_at": "2026-08-24T08:41:51.755Z",
+      "duration_seconds": 278352
+    },
+    {
+      "sample_token": "HG-e2bdd33a8c39aa19345f",
+      "materiality": "UNCLEAR",
+      "polarity": "UNCLEAR",
+      "evidence_state": "INSUFFICIENT",
+      "rationale": "SPAC 的信托账户托管法律协议，属于 IPO 整套文件的关键一环，规定 IPO 募资资金如何隔离存放、受益归属、承销递延佣金的兑付条件。仅看该片段看不到 SPAC 是否已经锁定并购标的，该文本为设立信托的基础法律框架。",
+      "reviewed_at": "2026-08-24T08:44:11.153Z",
+      "duration_seconds": 278475
+    },
+    {
+      "sample_token": "HG-dc9f781d3afd878eb1fe",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "美国区域性银行控股公司季报；片段为**BOH 收购交易的未经审计模拟（pro‑forma）财务信息说明 + 简表数据**",
+      "reviewed_at": "2026-08-24T08:45:44.385Z",
+      "duration_seconds": 278568
+    },
+    {
+      "sample_token": "HG-b91c31a66f2ed6a2eb8a",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "季报附注公允价值计量表格 + 退休福利计划终止的说明。公司在新财季出售专项储备证券，一次性了结历史遗留非合格退休计划，解除长期应付福利负债；公允价值资产无三级主观估值资产。",
+      "reviewed_at": "2026-08-24T08:48:41.071Z",
+      "duration_seconds": 278745
+    },
+    {
+      "sample_token": "HG-b8178b6643434ed38ccd",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "**常年经营亏损、经营性现金持续流出，仅一个季度盈利**。",
+      "reviewed_at": "2026-08-24T08:49:36.559Z",
+      "duration_seconds": 278800
+    },
+    {
+      "sample_token": "HG-0d3ec77214ddbb5a905c",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "MULTI_SOURCE_SUPPORTED",
+      "rationale": "1. 非农新增仅 5.7 万，新增岗位偏弱；失业率下行，但伴随劳动参与率明显回落，说明部分人退出劳动力市场，不能单纯解读为劳动力市场走强。\n2. 薪资同比 3.5%，薪资粘性仍存，对通胀有支撑。\n3. 休闲酒店行业大幅裁员，服务行业开始显现降温迹象。",
+      "reviewed_at": "2026-08-24T08:51:50.311Z",
+      "duration_seconds": 278934
+    },
+    {
+      "sample_token": "HG-70a09fa998053f42992a",
+      "materiality": "UNCLEAR",
+      "polarity": "UNCLEAR",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "**NT 10‑Q（延期申报通知）**，并非正式季报，是向 SEC 提交的季报延迟提交告知文件",
+      "reviewed_at": "2026-08-24T08:55:38.406Z",
+      "duration_seconds": 279162
+    },
+    {
+      "sample_token": "HG-81065a6529434ce02047",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "纽约梅隆银行启动 N 系列优先股存托股公开发行，发行 50 万份存托股份，底层对应 N 系列优先股。联合多家头部投行担任承销团。",
+      "reviewed_at": "2026-08-24T08:56:40.758Z",
+      "duration_seconds": 279224
+    },
+    {
+      "sample_token": "HG-bc52d79b07fcd6315f73",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "临床进展：两项临床试验入组完毕，2026Q4 揭盲；计划开展 CVID 适应症注册 III 期，是 leniolisib 拓展新适应症的关键一步；扩大用药的真实临床观察数据表现积极。",
+      "reviewed_at": "2026-08-24T08:59:31.032Z",
+      "duration_seconds": 279395
+    },
+    {
+      "sample_token": "HG-8ed2bb18098b0e61e959",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "MULTI_SOURCE_SUPPORTED",
+      "rationale": "Ostium 因预言机漏洞遭数百万美元攻击，暂停全部交易",
+      "reviewed_at": "2026-08-24T09:00:32.747Z",
+      "duration_seconds": 279456
+    },
+    {
+      "sample_token": "HG-fcdd13d707f34187e010",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这份 8‑K 主要提交**模拟备考资产负债表**，模拟两大事件的综合财务效果：①ACT 对公司普通股投资 170 万美元；②ACT 续签技术许可开发合同，确认 148.5 万收入。",
+      "reviewed_at": "2026-08-24T09:04:27.347Z",
+      "duration_seconds": 279691
+    },
+    {
+      "sample_token": "HG-6a03f81edb972d1d5384",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "融资：2025 年的分期私募融资触发监管里程碑，第二轮最多再拿 5000 万美元，合计最高 1 亿美元；多家知名生物医药机构参与，资金全部投向 CMP‑002 与管线。",
+      "reviewed_at": "2026-08-24T09:09:12.183Z",
+      "duration_seconds": 279976
+    },
+    {
+      "sample_token": "HG-e380a43007fd73a661dc",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "该 ETF 因莱特币市价下行，形成浮亏累计",
+      "reviewed_at": "2026-08-24T09:10:25.459Z",
+      "duration_seconds": 280049
+    },
+    {
+      "sample_token": "HG-6752b1190ff674ded316",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "1. 公司披露两套杠杆：GAAP 口径债务权益比 4.4 倍；剔除无形资产之后的非 GAAP**债务‑有形权益比上升至 4.9 倍**，体现实际杠杆水平更高。\n2. 无形资产规模 3463.4 万美元，对权益口径有明显影响；金融服务行业看重有形权益，用于评估偿债缓冲、资本充足度。\n3. 重要风险提示：非 GAAP 为管理层自用辅助指标，不同公司调整口径不一致，跨公司对比需要留意调节项差异，不能直接拿来横向比较。",
+      "reviewed_at": "2026-08-24T09:13:31.466Z",
+      "duration_seconds": 280235
+    },
+    {
+      "sample_token": "HG-4a64dafe71d2c120e7b2",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "该函属于合规缺陷告知，**并非立即退市通知**；整体判断：**偏负面，但不是马上退市，属于风险预警状态**",
+      "reviewed_at": "2026-08-24T09:16:04.526Z",
+      "duration_seconds": 280388
+    },
+    {
+      "sample_token": "HG-0342deee458195b8b7b5",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "**整体显著偏利空**。最大风险是持续经营存疑，叠加多笔股权稀释，属于高风险标的。",
+      "reviewed_at": "2026-08-24T09:16:58.894Z",
+      "duration_seconds": 280443
+    },
+    {
+      "sample_token": "HG-a0c5679c1ef10186f35f",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "MULTI_SOURCE_SUPPORTED",
+      "rationale": "1. 主体被美国消费者监管机构 FTC 正式处罚，罚金 75 万美金，同时绑定长期行为禁令；\n2. 核心问题：增高产品宣传缺乏证据、刷虚假好评，属于消费欺诈类处罚；\n3. 禁令会约束公司未来所有营销，后续一旦再出现同类虚假宣传，会面临更高额民事罚款。",
+      "reviewed_at": "2026-08-24T09:18:03.578Z",
+      "duration_seconds": 280507
+    },
+    {
+      "sample_token": "HG-e9734e54515a23703634",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "仅内审负责人**临时岗位轮换报备**，属于正常公司人事变动公告，没有披露舞弊、违规、调查等负面背景。",
+      "reviewed_at": "2026-08-24T09:19:01.290Z",
+      "duration_seconds": 280565
+    },
+    {
+      "sample_token": "HG-78f8d155c7130bf2648b",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "这是美股标准流程：**发布季度业绩新闻稿，同步递交 8‑K 对外披露业绩公告文本**。",
+      "reviewed_at": "2026-08-24T09:20:01.272Z",
+      "duration_seconds": 280625
+    },
+    {
+      "sample_token": "HG-401bf421faeed8119afa",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "INSUFFICIENT",
+      "rationale": "属于美股标准化披露动作，**8‑K 只是申报外壳，不包含具体营收利润数据**；利好或利空完全要看附件 99.1 新闻稿内部的季度业绩。",
+      "reviewed_at": "2026-08-24T09:20:33.101Z",
+      "duration_seconds": 280657
+    },
+    {
+      "sample_token": "HG-be146c95f7ecbffadb53",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "持续执行股票回购，仍有**25.34 亿美金回购剩余额度**，体现现金流充裕；",
+      "reviewed_at": "2026-08-24T09:21:29.279Z",
+      "duration_seconds": 280713
+    },
+    {
+      "sample_token": "HG-15126c892b8a76299e93",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "属于常规核心高管人事更迭公告：PT 板块总裁 & CEO Ken West 将于 8 月 31 日离任，同时任命继任高管。",
+      "reviewed_at": "2026-08-24T09:22:06.422Z",
+      "duration_seconds": 280750
+    },
+    {
+      "sample_token": "HG-85a3aa606894dd7b9285",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "标准美股 BDC（业务发展公司）的董事会人事披露：**扩编董事会，新增一名独立董事，同时进入全部三大关键委员会**。",
+      "reviewed_at": "2026-08-24T09:24:55.313Z",
+      "duration_seconds": 280919
+    },
+    {
+      "sample_token": "HG-dedab45ad3bef0c467db",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "1. CFO David Wilson 直接终止雇佣，未披露离职具体原因；\n2. 新上任高管履历丰富，既有上市公司 CFO、CEO 实操经验，同时还有加密资产相关上市公司审计委员会主席经历；",
+      "reviewed_at": "2026-08-24T09:27:31.706Z",
+      "duration_seconds": 281075
+    },
+    {
+      "sample_token": "HG-8952511d01cbff93566f",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "新董事拥有多家生命科学上市公司 CFO 完整履历，会计专业背景，直接补强审计委员会，满足 SEC 财务专家的治理要求；",
+      "reviewed_at": "2026-08-24T09:28:05.399Z",
+      "duration_seconds": 281109
+    },
+    {
+      "sample_token": "HG-5a1950f88a55fd139d85",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "本季度全部份额均取得正收益，Global 系列两类份额回报表现最优（3.04%/2.91%）；A/B 类份额总回报相对偏低。",
+      "reviewed_at": "2026-08-24T09:29:32.317Z",
+      "duration_seconds": 281196
+    },
+    {
+      "sample_token": "HG-de80365632211157e10e",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "属于标准董事会扩编，新增资深产业背景独立董事；",
+      "reviewed_at": "2026-08-24T09:30:07.709Z",
+      "duration_seconds": 281231
+    },
+    {
+      "sample_token": "HG-cc7984cde6a2f4dcbc5b",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "财务指标**边际好转，但高负债的核心风险并未消除，报表调节口径需要警惕**。",
+      "reviewed_at": "2026-08-24T09:32:15.550Z",
+      "duration_seconds": 281359
+    },
+    {
+      "sample_token": "HG-fafc0047dec7cf4d7aab",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "整体属于**无会计冲突背景下的正常审计师轮换，不属于财务风险预警信号**；但审计机构更迭客观带来短期交接不确定性。",
+      "reviewed_at": "2026-08-24T09:33:49.302Z",
+      "duration_seconds": 281453
+    },
+    {
+      "sample_token": "HG-a657daf67b7fbbf19255",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "NEUTRAL",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "属于集团内部岗位调整，非冲突式离职；设置长过渡期，业务连续性有保障；双 CEO 架构改为单一 CEO，权责更加明晰，整体中性，无明确重大风险信号。",
+      "reviewed_at": "2026-08-24T09:34:20.119Z",
+      "duration_seconds": 281484
+    },
+    {
+      "sample_token": "HG-17ae5b7fed6d53f4861d",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "重大利好信号：该 Solana 质押 ETF 正式落地质押收益分红机制；但公告片段不全，分红具体规则、限制条件需要查阅完整附件，不能简单理解为稳定现金分红产品。",
+      "reviewed_at": "2026-08-24T09:35:05.228Z",
+      "duration_seconds": 281529
+    },
+    {
+      "sample_token": "HG-cb1555e57a01084befb4",
+      "materiality": "MATERIAL_ADVERSE",
+      "polarity": "ADVERSE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "利空事件，触发纳斯达克 1 美元股价退市预警；拥有半年多的保壳时间，但保壳压力较大，存在未来摘牌风险。",
+      "reviewed_at": "2026-08-24T09:36:05.245Z",
+      "duration_seconds": 281589
+    },
+    {
+      "sample_token": "HG-b93f63c95b1719fd9506",
+      "materiality": "NOT_MATERIAL_ADVERSE",
+      "polarity": "POSITIVE",
+      "evidence_state": "PRIMARY_SUPPORTED",
+      "rationale": "业务层面重大利好，锁定超大规模 AI 数据中心资源、绑定下游租户；但附带**千亿美元级表外担保或有风险**，属于高风险的商业兜底承诺，需要高度关注行业周期下行情景下的潜在赔付风险。",
+      "reviewed_at": "2026-08-24T09:37:13.547Z",
+      "duration_seconds": 281657
+    },
+    {
+      "sample_token": "HG-65e89172797640271b1e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-356fafb10c67a03d5965",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ce87b769dec5da19d34e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a29c332e2a21c9374dcd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ac37501c24e80d67a17c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5010b1f2d57418b464a0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7e664d438a66e6230644",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-42f3654bcd9f64a1c95a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-891eb350e4cb9a962302",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-94079c24eed7114fb40e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f79d01c54b76dc2656d6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d1983541cba81bd57d39",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a6d7f4d61b988c27e54a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5a5e20af5a3775d7894b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-88c8cc6d26646ac65d22",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-534cb51a5eba485d76a7",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-409628983e941f81a84a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fb19fa5e0e0cbe8bebac",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e28faf68976b0afc9fa9",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-24cac2e82311d73d815a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-073ebd2280643226453e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-49af176306b3cfe2de13",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-881030e526cb9c4d6200",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-08aa80bac5cfd1fdc2ea",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-cf21d49b6f0d3e4adb98",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-128a80cdad38096699d3",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6d681e284641820e8f17",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7fc74db7d612a2c30d55",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d6f982791baee19d4419",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-dea7fdb19862d4ef4c45",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3cae1fee156e89748d06",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-74dc5308eeeafd7caa89",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d6b2cd04980be3eef4e7",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6ac7f6b61d7c7d708105",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-16d53454b05755f7897c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f0525be70040ececbfbd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6a9bd844d5094e03025e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d7c10e47e0f2577cefb5",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-afe1166be38552ac81e6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6a68cb13b812312f6160",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0ce1de657698f0e0441d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-de23737e0598cef66975",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1c168332221bbe6b98ba",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1e10df55c4c43bd0ca43",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-da153a380b746f203a24",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-27ed824cb97d11943f41",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c76c50aed21b3bc19171",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4a26ca8b3409c393ef00",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-71d1beffd609c44bf93d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4dda6d0110f3d21ecf99",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c8b4e1c3cc31b96af236",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-986b2a0a72473805819e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9b9f99eb9f3749c8a724",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e5e8b0b0a6de5ba4550c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-cc9ab4ea92df4bec375d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-55c83756e47eec89d6a6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-83bff050c42006f5eadd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e9a4018e38faa036c6ff",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-459545e97d610581b9bd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0a2ee27d4ba4a01c156f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ccd62855eb027c47e926",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4730b2ac5675556fcc11",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fca22b0ea78790963407",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2059fb0df465cd82bf0b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ee4b4705cd4448839336",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fba84543b510ce38ec58",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-053a2a51d57e63ddaa51",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-dd26d68009ac8d3fd29f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2717f78e4299cc88e5bd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-749464d91763db6d9e94",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c7293fbfcb845104a907",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b5f6424ac916d19cd168",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-47b9d734aed39e6027f8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-36f3c7a5eecb2ab6b56e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1a7070a7a046939cfc21",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-24927634d6abf4febda0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-729ea6fd8c65026a1131",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-419ef19bd2d19cbb55e3",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6aa88a01e0b0cb7fd8ad",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-48bc969e9a910da99fe4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-49ff93abe25e962ee497",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7e6274412559b2d09862",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4b01f381c793734cfada",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5becfca7e10bd81d7423",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3c3e038901f96d6743b5",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bce210d9dd51e17815dd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6e065f4f3306e3cca2da",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1a41ed419724043e4eb6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-38de08d5fefac9d6b1e8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b59388b7fd8973f519a9",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ad8e1ec6894ec2b0f78c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9a395e394b6e49a68b2f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2bf868a33b1a510e04d4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2aef2b5c2a512c4da248",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-37bcf658006b7cbc5760",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8ff58e82eb281d1f0e2d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-58f6cf066b04da12d628",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6d02e1f7ceedc9edb704",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5cf6e5da18fb98992e7b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-87f3e8fac817a03cb5b4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fee2817ccaa842fed57e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d55ce684f11b583ea4aa",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f3e7f5b8be717c9aae02",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-32b44d882ca9637a7dd1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-51eb292793cbfc74714b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0e7399ab78707acc8e47",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-05f90d0a655cefe31dab",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-97e60bff7e65f69e3a28",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f6155234425608ac7cae",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-de31bca209cbfa29aa72",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-07d731a9f9bbd77cbb99",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-94f2979826d32fac677a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-057d74a970b71639fe1e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b7717d89f5eac6a4e63c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-259131d3e236baa5b118",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-41ede45137d7a8fabcf4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-21acaaf986d665f39e1f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e647b1194e199da18687",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-71f9872f20a9d19d58cf",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0961e940cfe9970068c8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-aa5a6d2072b2c6d584c1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1940952b70f3a8a77117",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b201c69b7a6df3945691",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-02743d89dbef5e4ddbfc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d7b0c8ff90a55d9dd18e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7afd79fff365a63be606",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d240e6626e67fbf10bec",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fc246891e842696f36a7",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3a9569d201d9a3020050",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-495460b01044d4456d3b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-acedc54e2ff36ab8b7ab",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-64b46ca5fb129b56cfb8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-13045f5ee51795379fab",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-621449880e54bc79a848",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c93e82f7422af65590b0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-24ee68dc3fdc6516f9ee",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ab8ea515950cb5470392",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-28e11c45c87b859f98ad",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-cfa0488eca9c98b0f048",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-28e4d504da8e5fb37bd2",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-99965f77809a1c4249bc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8829644b4637eacf25ab",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-efcd341693cc7f909958",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-486800cc689b8d6ea175",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b46b5c15662cd97acea5",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6e6aae3473d03279a541",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-93d2b95dd42087432d48",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bec1b621890adfe4084b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-71d59a00ef275f32262a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fd5b23043c64dd9a1ba0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bac33d96240eb31c886a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6ec623dd170d29429cb6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3c294da50a304fc8364e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-90b0e9e006c15b16d0b5",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-74a60a93814242355f36",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b7dc5982d06d72f4d586",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2895aba3e2332590d3a6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9e00082f7363b733c549",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-645eb299bd89c5570215",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-764b4b2168ea0356fe27",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-af2243ac42274cbc0dc7",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-42780c017af24c231f25",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c39a3c264ff3d0c18051",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f24cbde2e0b5b212c5db",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8a4520e3a0b84b915ee1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-67070f9c1a2fc7cab5a2",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-67cedc053b3b9323a567",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f040e037388c6e3fa039",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e1e3f89bdcc73667f345",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e551146594318b90005a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3ee3485f1b2f9a909711",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a0283d3c3ee114cd4dfc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-71014e25c2f3c2e8fb09",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f8903e8f9527397c8491",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ed279573943663894c35",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ef4ef9aeee8f2f854007",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2fce3766ec32f4412348",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-696fd98e59bfca566dcb",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6b08547e758ee0acd42a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-85b2bd97b08ebc8f4bfc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-68f5cdbdc43e6c0e2b6c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-89a9115c038df1f05789",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b4af318e2175d3dcf6f0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8be23bd49b7e1453ed6d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f09734b1f2248005b3f1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9434042f782015c1b86e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ba7af3cc73f0b99f32e4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ddfd4e5a8d457b03d7fe",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.806Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4f0357eec03558ef84f5",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e15e61723eceb34220ca",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-23ebc7abbce4e0b9bf84",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9825784d5c08f3147782",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-667c711d2c18e04d04fc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-22182cb7817d6fbe16b6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-646a8f2e262a6e0ce16c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-09aac43119cfc8a25b52",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4bd8f909e9b8fcbfad70",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9a05ab774ff7b5092a34",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d3f94c8621a6b400c224",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8a7d5b192591b4554469",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6ff76a7cd334fbe48d72",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d8bb382de2ff38b96f66",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-19a5ea84e7363fd80402",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6b1e437e48e3905567d4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1e6706179938f045ea06",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-31e13e2b77cf3bd66191",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-05308b8e066163401381",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-129eef2ba467801317be",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bf50136b2a13dc72bbe1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fbbbee9c258f9d602239",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d77e2c6984d407b93aeb",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9c4a4476d76bba51dd52",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7066d4d2d9aa5daee76a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0e3f252b821c2a723658",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e7eb11f76274f3d3689e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-57390f15521b34b83875",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3417d35efa96adff8898",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0a8799c34827c0e3e547",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-27f16821593704cc608d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-997b92e25daade42776f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0be886f386e6eb7af2cd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-72917eb7074de85c27a8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3ab39cedfb6cd5097d6b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6d0df643a4e101a07712",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-67765ce43ad0ed08281a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7e0ba56d4a7a34f1dfd6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e7b3bca170d6b61e7d74",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3b1b7cd45a02cfd0e27b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3a9ebc92c0164d4730ab",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-20c0e367713f16001a2e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-980f91038caf929f3476",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-879d1309b8dce357c514",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-63fa419694947bca0f1c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7f47d6350fc25f316b3d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f21fe6f95bb951a5e86c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3a4d43a9172aadae3440",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a67c32d835b27fa68ae3",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-40d285abdc2bd1eda0a3",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d774f37050c8bc75a542",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bdad2256896d183d66b0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-03a5858a99818d0ef2ba",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fac4e6761f66417f552b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a02cfe974bb1ff1b067c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-88ebca8d017a6e2c7142",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-990da4b2f33d7169ef81",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4e5665415d5b3e7cf39d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f1ea517b411ceac42999",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-66916158751a58ce9bb0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-617ad13edcf565df1fc1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-aac344ca328a7db01faf",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f859d9536ff55c2a5ec8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7836edfc9b2e2481b870",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2e80a200054980e8122e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-eb1ed64c387dea1e47d1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-93c6fd2d0b43e47ff03f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5063f94226a06552a362",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2a27de4a391afe3c2f36",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2b44264d4748f8ea6e64",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-63264e4bdfa44dbd5396",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e65afb1d36cc349083d3",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-275c43cbe1f0aa61db5d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ccb7d6bb1f88d29d8c6e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bae014a63d9b7d514cd9",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b62b482803c227d9eb37",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-829854a89350c609236b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-884fe439a246ff656d2f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6ac47f389896e8316d3f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d7de85fbce47513e3468",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a2e4f5485ec25a7d2716",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1951f9dc41a3c98aa093",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2ba6226af18b7b07b358",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f4835a0eede433634f52",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-420296a5ef1d7743d4dc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-06e5cf95dbfeb74a6cd3",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-05e2a2e830cc1c2eb8db",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a668e727bd72c87ed545",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-04817f0bd3e2206c1bd0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3d6fecb4c94ed69a9e26",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f3760bce9711336859ca",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-998e7d0d9509e6866a89",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-39a21b8bb87cf2dcda2d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bfec9f95a7dcf56d9cd2",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-35dd5027ae4b507bf51b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d5397ed1ada2b7b5244a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-79eed85071e5a1e3a921",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0440036c1bfbfda726da",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-16d30d8c4a252b0b87ff",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fd4b68a446b827a21191",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-38d883aa68ee4e9c9463",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-819ddc8955a27b51204a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3ba16dde6af8c67ca4cc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9c4d9120a32e94001664",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a0c4d03bb5d2cf029fbf",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-04039139aa29e7ce6db7",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d18123487964485d64b1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-27c36b4babbceb49c732",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-531e6d44e8a98fc11512",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e205753ab7fb011bfd3a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a02f527ab8bd028b45b5",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-204989cf85a4092a6f6f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1080798fe05cd3cb5d67",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-89fa032787f88b76c781",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f3c00915620fbde930ee",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-001fa9721d5732625931",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4532fda5edca8515c5b8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f023f519e8135b388333",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fdfadc82e06a014f263a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-93067f92c0786d9e1fb0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d3b7d676abf3ea00819e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-630afe2a275f76b125d4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-513da7ab7379d1ba9280",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e73e06ba0448c7858ac8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6fd888589d9861cca258",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b4ccb3c6b6e7223b286c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-58c2728a68f5720a1b78",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-976726d5129641eff88f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bf539547a9025b3b4fbe",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b30b7ee732e3722c48c3",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-efc96ad2b2b5f6a8d671",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d673895303674f537cab",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8df535be81a57666fb32",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6aaa3e4f8919906c10c8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fa63337ef9b0b2a20046",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-672ee523fc04ade9bd6c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0bb2008fbacd7191482a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c6af6db1f64207850f1f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bcfd872b105264a659d9",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6a16081ce7cddc0bc694",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9828e4296fcc5442491f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-01dcbad166d4e9c9bb8c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-34c3c526f65dc0932e61",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8c51048220f32f1ef048",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4c4b13c5efa844687c5b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f35e1cb5b0d4dd922e56",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-23d077dfb037c2f5ab29",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d187bec3f9fac5e5846a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-362b65a9e46258e42489",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a7efc2fbfa2bd6dadab2",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-604707d7269c71f57b32",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7c10c72d3f2c4bc80234",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-56a612821f934a9f2145",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ce6f48cf86d260771d07",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0b5ea9099c3ffa83c4b9",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-64832602048d31704f49",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-fe9d4cd886bf96643698",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b84f9e8fbf0d49afe103",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-27e3498106a88ecea164",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b89a4a6970d7296e77a5",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ffaaa432a3c3c707e101",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e3882c72c04f9f121603",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bbb5212194e3cfe9e87d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d383eba8e6bc34316804",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e647e2fc5d7bb0f8eb85",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-241b35d467a5cd5de05f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a0e76c0fc7fd63a611f0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-498e2e97e79074ccef98",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c76e1df566fe9351426f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a43b5094c3f2e5f1b2ae",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e741861af23fd897994b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2d9074134e9d5192cd38",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9b3f7e05cc151ab75c74",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9b85e375a7523703f763",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0eaae0edf4185e5ca458",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-67c45e15fd44a908c514",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-12ad00990b41c123b472",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-40240c925235ec73240a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-813c038844319dd64f90",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-be1f02c8fab28511dc77",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b2840ba166a3c84f6227",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ac890fdb21bdcebd3660",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-51d38e53223bbc5597ee",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-afaebed77f81e6246222",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-acb3d90100f6cf969e9f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4ea5794a3a1ab9432105",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ba92dbee42203ba4b61c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8bb45afca715ded757c0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-cfb48a68f3de21986425",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-be7e9d8cf11273a9cb2b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1ef78264839c7cf27add",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0b52b2ff4f955bbac8ff",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0cdf97ee4d43a15d5e55",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-061afe9dbdc0009d1e8c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c013ab8287d008065d36",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3ece0287137737f7fa3c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3f4f83d5135866de7f01",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-13b097f56c42a3e1093d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8c1c62fefde15e4feb09",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c7648629261ccabd3705",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-300092900a5b7ce183a0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1d9b97e57c0b69871092",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ddcafa0ac0cb39d93191",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4391f292edfbccf4b687",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5aa0c6b4aad75e768dc4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-084525c4e35ef2dccb34",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5aef7fe0c814884b27a7",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-05c81ee784b334bee107",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ef10c6c8f6738b19a21f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-dce5afb57c4154fc5a61",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ed64e5a302a7eb6a28bb",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0ac51db7df6b8ab177e6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8ce73cd1a88f66106ae8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-05a56360261892cf7ead",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0eb6cc5ab3d77525d687",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ef432f0b5ebcbef75104",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7bc66d3e8352dc605170",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2a3d3cad4c7fe79c89e3",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-05b5db9cbb38c2a19d2c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-873d5726075f5813e9fa",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b84305fa7d882453281d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5ad6ad68c0f993050ff4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ac105bc83f72186cb1ea",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-36e6943df42fe352bb65",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-280281dfe4d1e1755167",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2067a411149433a090e7",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d09189495944ea53752d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5ef33b536eeba8658bdc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c54ba2ebd870d937c244",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d43b80fbe5d81900940e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a9bc184738128637da98",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3ad4e98d1a8dbd66eed3",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b8eee88319a0bc81816d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2554d1cdb00189623dad",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-aed61bf2dbfb542696bc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5f90c5e35718a2d293fd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-619654b728e600a24049",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-040f8fa48178c2e54ddf",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a6b23a00af932b2c8a94",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4eb05466c36708c885ae",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b46921e79693ae283113",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7eb81e2b0abfa381ccbd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-30f1a0860c2271e5dcd9",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2c7da5ef8b4e52036cb2",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bee541abbb52e46fa7fd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b3df643e23a9a4a7838d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-07383de95397d0566323",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-55d3b20e18c0053d59ac",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-66bf54a8e973aef629d3",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6281edd03c7c1ca0e710",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-25508f0d4395ddf17ae9",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3e206c35a1543550e36a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ba1f4475645af374318a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e41ff8873abde47331b0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3e474f6103af73f55968",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0373c25f51166eadf205",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c84ab37f13e8ecb19e00",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a58f7f456d6bcdd4aa68",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-12931ab7dd2a3ec414f0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6ae46efdf17797259ad8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4fae190a87fb8e8d9a7b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-59071af695ee49ef3b77",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e80ac9c1861d9d1a734e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-be5592b3e825163e1a0b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5dfacc8650d0326db215",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6ab78260594b75ceb67b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-673d7fb36fcb57462d13",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c1cca98a0cdeb6e500e7",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-3f8b90d3b1f596a9102f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c595263bdd16c595592e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ffeef01e9e8aebaa56f0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c4ddf10df8240bd34ea5",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-28954879ab5ac0c5c7ec",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-dcf148c172580bf93c11",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8e4c12f01eb297d25650",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b282a350a48720a54c4f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1c6893c9925cf6437d67",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-64fb9764b8b8166d4f2e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1a02ee54f1f0616d02be",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4bf6af4468a8fc234637",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d76f147342cc25cbcad9",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bf0bb09c4b7252b044e6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4a4a383f7d3db695633c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-63d9c627aee38398e61e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0af4847d5199c97759f4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-93c9f3ec3bd9d3e832a1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-261bcae6777e0f98fd8d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-dade2374f8e3cad41bfe",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d84d4c03d37d98045da8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f40b26bddb9214364971",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5bea8a2e4566cc52499e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-844727ebc9d811aa2955",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-92b960c7c6e9371a72e2",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2e9c811248e4d49a99cd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-35a37b8eed7fba0f0b38",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-61db63f71b09ad6ebc80",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-506d1a6ec9bf08f569fb",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0fb6a5aa4a21956fe65b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6c4d450eecf97e51f32f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5e2271034bb7dbbbcb9a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e310d9cc1d141776a5d6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-62391d3730afd2af8932",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ec17dc9f43a98028dc0d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5037c293f87b336265e2",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-537f8d3a3ae36b472e36",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bad3b6caf19e3473aab4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9c040d8f6c1cdb0b4a30",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0883757fc9aeb38b8e46",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-be57477814b5821d588f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-67f7f96cc58878d12933",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-411d5037c0b9257a734d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a65772683606ff980ff8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bb87c0e2c645b0187287",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7d8b1ac2fe9e267c5986",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-07d76e9142b7343d9d4e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e3607091e2af25b76be4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-21f46ff49929244c1b38",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7284871cedf7a1fbe508",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-84b7d4f3e5c7563bdb37",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c95eea6a9fe1b3504e87",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2d61f8c37de83b33c1f8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b9adbae9245204305dd6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-690380e220b2f715c4dd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1810ebcb24e251bdd787",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e11b69237ac42015c7a0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-4cc628da3fbe97351110",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-be29ff3221f7be9b3d2c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-01cee7e3833e78ba5e39",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0e94ae2a6087552dbe5b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-54a82eb0bc0498a02a4e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7fb98514e2503e6a1cfb",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a0d96a426445f83d75d0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-81fbd78ce6a103d72cb0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-650ff72a0c6a0283617c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-22e941f58f872d38ef6b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f9e521480fa826914f47",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b85c38c9b933088de7bc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7d11445fd45b4ce6b082",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-49387ad684e86fe95654",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-af4642fb3b9f9c819386",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-dbc4cd43b6bd7975557d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-598671d5ff8987fa276f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f88d1be230d0d0377863",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6c110f3618841a69396b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-29649fefec3af8254b58",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-aba3fdeed9fb8b34905f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-af1874035322580f6bca",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b0dc2d99df8b7b66624f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-77bb5b26bf2de34bccdb",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d5eb7bfd60a846b0090e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0d92646a16a73f824ab6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-23f473c828ffbe970e19",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-17953ec7530072652d21",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f8b232709b5a84cf2fb7",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8cff76059f5f5a3a8bea",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-689a4ff4662c94a53acb",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-bd38d1e48b7c7796bdbc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e2d557716fff8b92e782",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5650258d644726971201",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-46ac48760cef358d6d65",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f676e30fa8d8c4cfc99a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-972f50a7bcfbf119dc28",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7d166b569598e8d2c680",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-57132b69a57e0dc86a9a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8c61e654ddb553054007",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c4c0faab033e620893a9",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8c3f27cbc39fae947b6f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b663297a552ce047e742",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-354c0c0df3cba950fe70",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-47dd0b55e1568dcbf598",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c55dd185d5f8c029763e",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a2fc6e10f9ee43eb159f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9c5f244e53cbd4c190de",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7736a1b668794ec41175",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9ee114aa59fb6f21d41d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-b139fa27112e75d0eb1b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f53f443530c0dc6e5fe0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ba8c3d95e5a347787f85",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-281a84fd3979027d17f0",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ce132e4d773d848505fd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ab21011421cd05fc6ee7",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c44649a2ca8b672527ba",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8487c8d48151d0d1fb1a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5620737bcfe1b2071048",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-78aabdf715592c262765",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6210f4dfb2616c76f5f6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-eed2a5cfe8f1869a7871",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-662b7e0d82a80737db77",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d846ff894ce0a3db1542",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-8e91b27e696798d83b08",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-27899539a7be41c0bbc1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-61f33c4c9d8fbae4df52",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-df39ba9372d8e2658f93",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0c0d804b8b6597be0e98",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-44b38e3ddbfe82d9c2fd",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1662bcba5d235c9c0cc6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-77fc69f679fd39ebd3e5",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2077c7e11d80a876a2e6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-467c9fa2fc65a67e930c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-d6e61331c05d7b50dfd8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7b86f269b1e48747abc1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-7b8bd1fde3e860a67848",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c5ead47a7c8fbd114001",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-11a5af978b6265b2b4c9",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-ff8f2b21c7fa398b845d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-33ed5cb059d3bb2c0f66",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-599fa60f8776d65270b8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-2345885299b8ee9978fa",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-c11fbe91885bbddf342b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6c04d4d2bbb1e71ec4f1",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-9ca104ec6bff70c4ffbc",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-821f032116d161973c4a",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-65990017552a04647300",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-0559c1a209396db173d5",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-be0c5273ffa6975605ae",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-45ed62793fcb2f8005c8",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-abd1dd2aadb4a144f21c",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-e749e9b900fabf65dc62",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-558e37c8621feede2380",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-5c462c27ab7952cbae66",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-f404da80e64735a2743d",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-48eef826b513abb216d6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-a68926aaf0fe4cf8d2b6",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-07f9a159b98864e4fee4",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-10def1b02133917a29ed",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-1ea36e34aa99155c9e0f",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-6f0e339c93b6f036d7ba",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    },
+    {
+      "sample_token": "HG-05002213031824a2176b",
+      "materiality": "",
+      "polarity": "",
+      "evidence_state": "",
+      "rationale": "",
+      "reviewed_at": "2026-08-24T09:37:14.807Z",
+      "duration_seconds": 0
+    }
+  ],
+  "target_label_submitted": false,
+  "canonical_state_changed": false,
+  "no_trading": true
+}
