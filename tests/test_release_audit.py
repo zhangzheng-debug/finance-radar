@@ -397,6 +397,8 @@ def test_default_release_contract_covers_runtime_mutation_and_edge_boundaries() 
         "app/models/risk_router.py",
         "app/models/evidence_policy.py",
         "app/services/evidence_agent.py",
+        "app/services/event_admission.py",
+        "app/services/historical_primary_readmission.py",
         "app/services/light_verification.py",
         "app/storage/operations.py",
         "scripts/light_verify.py",
@@ -409,12 +411,17 @@ def test_default_release_contract_covers_runtime_mutation_and_edge_boundaries() 
         "deployment/systemd/finance-radar.slice",
         "deployment/systemd/run_backup_quiesced.sh",
         "deployment/systemd/verify_backup_receipt.py",
+        "deployment/systemd/verify_code_only_release.py",
+        "deployment/windows/Open-FinanceRadar-Backend.ps1",
+        "scripts/apply_historical_primary_readmission.py",
         "scripts/apply_authorized_rough_reviews.py",
+        "scripts/build_historical_primary_readmission_plan.py",
         "scripts/official_primary_page_enricher.py",
         "scripts/run_live_cycle.py",
         "scripts/audit_migration_restore.py",
         "scripts/prepare_migration_restore.py",
         "scripts/restore_migration_to_vps.ps1",
+        "scripts/open_internal_ui.py",
     }
     assert required.issubset(DEFAULT_CRITICAL_FILES)
 

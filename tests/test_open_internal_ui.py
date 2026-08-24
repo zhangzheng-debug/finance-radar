@@ -98,6 +98,19 @@ def test_dry_run_never_connects_or_opens_browser(monkeypatch, capsys) -> None:
     assert "stop" in output
 
 
+def test_default_entry_is_owner_admin_not_a_role_prompt(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        launcher,
+        "choose_role",
+        lambda: pytest.fail("default owner entry prompted for a role"),
+    )
+    assert launcher.run(["--host", "ubuntu@server.example", "--dry-run"]) == 0
+    output = capsys.readouterr().out
+    assert "Admin / 管理总览" in output
+    assert "finance-radar-admin.service" in output
+    assert "http://127.0.0.1:18502/radar-admin/" in output
+
+
 def test_source_contains_no_environment_specific_host_or_secret() -> None:
     source = Path(launcher.__file__).read_text(encoding="utf-8")
     assert "18.208.34.152" not in source

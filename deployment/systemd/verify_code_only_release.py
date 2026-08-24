@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Fail-closed eligibility checks for a Finance Radar code-only release.
 
-The fast path is deliberately limited to public Web code and non-runtime
-release evidence. Everything that owns persistence, collection, dependencies,
-services, recovery or the runtime model must be byte-identical to the active
-release. A recent root-owned attestation binds the fast cutover to a full
-restore drill that already completed successfully.
+The fast path accepts schema-neutral API, Web and collection code plus
+non-runtime release evidence. Database schema owners, dependencies, services,
+recovery code and runtime model assets remain byte-identical to the active
+release. A recent root-owned attestation binds the cutover to a full restore
+drill that already completed successfully.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import sqlite3
 import stat
 import sys
@@ -26,19 +27,58 @@ MAX_BACKUP_AGE_SECONDS = 93_600
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
 GENERATED_RUNTIME_ROOTS = {"data", "reports", "release-records"}
 GENERATED_RUNTIME_FILES = {".env"}
-# The fast path may carry public-Web code plus release evidence that is never
-# imported or executed by a production unit.  Keep this list explicit: adding a
-# new top-level tree must remain a reviewed change, and every API, persistence,
-# collector, deployment, dependency, model and replay path remains protected by
-# the byte-for-byte comparison below.
-ALLOWED_CHANGE_PREFIXES = ("app/web/", ".streamlit/", "docs/", "tests/")
-ALLOWED_CHANGE_DIRECTORIES = {"docs", "tests"}
+# Runtime changes are restricted to code imported by API/Web/Worker. Schema
+# owners and deployment/recovery machinery are denied below even if they share
+# an otherwise allowed prefix.
+ALLOWED_CHANGE_PREFIXES = (
+    "app/api/",
+    "app/web/",
+    "app/workers/",
+    "app/services/",
+    "app/models/",
+    "scripts/",
+    ".streamlit/",
+    "docs/",
+    "tests/",
+)
+ALLOWED_CHANGE_DIRECTORIES = {
+    ".streamlit",
+    "app/api",
+    "app/models",
+    "app/services",
+    "app/web",
+    "app/workers",
+    "docs",
+    "scripts",
+    "tests",
+}
 ALLOWED_CHANGE_FILES = {
     "CHANGELOG.md",
     "CURRENT_STATE.md",
     "README.md",
     "VERSION",
+    "app/__init__.py",
+    "app/config.py",
+    "app/evidence_policy.py",
+    "app/storage/__init__.py",
+    "app/storage/content_store.py",
+    "app/storage/ledger.py",
 }
+FORBIDDEN_CHANGE_PREFIXES = ("app/ops/", "deployment/")
+FORBIDDEN_CHANGE_FILES = {
+    "app/storage/operations.py",
+    "scripts/event_ledger.py",
+    "dependency-lock.json",
+    "requirements.txt",
+    "requirements.lock",
+    "requirements-dev.txt",
+    "requirements-dev.lock",
+}
+SCHEMA_MUTATION_PATTERN = re.compile(
+    rb"\b(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|TRIGGER|VIEW)\b"
+    rb"|\bPRAGMA\s+(?:user_version|schema_version)\b",
+    re.IGNORECASE,
+)
 
 
 def fail(message: str) -> "NoReturn":
@@ -88,6 +128,8 @@ def _generated_runtime_path(relative: str, *, active_release: bool) -> bool:
 
 
 def _allowed_change(relative: str) -> bool:
+    if relative in FORBIDDEN_CHANGE_FILES or relative.startswith(FORBIDDEN_CHANGE_PREFIXES):
+        return False
     return (
         relative in ALLOWED_CHANGE_FILES
         or relative in ALLOWED_CHANGE_DIRECTORIES
@@ -138,13 +180,63 @@ def check_contract(previous: Path, candidate: Path) -> None:
     forbidden = [relative for relative in changed_paths if not _allowed_change(relative)]
     if forbidden:
         fail(
-            "release content outside the public-Web whitelist changed; "
+            "release content outside the schema-neutral runtime whitelist changed; "
             f"use full deployment: {forbidden[:3]}"
         )
+    for relative in changed_paths:
+        candidate_path = candidate / relative
+        if candidate_path.is_file() and candidate_path.suffix == ".py":
+            if SCHEMA_MUTATION_PATTERN.search(candidate_path.read_bytes()):
+                fail(
+                    "changed runtime code contains database schema mutation SQL; "
+                    f"use full deployment: {relative}"
+                )
     print(
         "code_only_candidate_contract=PASS "
         f"compared_files={len(all_paths)} allowed_changes={len(changed_paths)}"
     )
+
+
+def schema_receipt(ledger_path: Path, operations_path: Path) -> dict[str, Any]:
+    """Return a stable receipt for both live SQLite schema surfaces."""
+
+    databases: dict[str, Any] = {}
+    for label, path, version_table in (
+        ("ledger", ledger_path, "event_ledger_schema"),
+        ("operations", operations_path, "operations_schema"),
+    ):
+        _regular_file(path, f"{label} database")
+        try:
+            with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=30) as connection:
+                connection.execute("PRAGMA query_only=ON")
+                objects = [
+                    [str(value or "") for value in row]
+                    for row in connection.execute(
+                        """SELECT type,name,tbl_name,sql FROM sqlite_master
+                           WHERE name NOT LIKE 'sqlite_%'
+                           ORDER BY type,name,tbl_name"""
+                    ).fetchall()
+                ]
+                try:
+                    version = connection.execute(
+                        f"SELECT MAX(version) FROM {version_table}"
+                    ).fetchone()[0]
+                except sqlite3.OperationalError:
+                    version = None
+        except sqlite3.Error as exc:
+            fail(f"unable to inspect {label} schema: {exc}")
+        databases[label] = {
+            "version": int(version) if version is not None else None,
+            "objects": objects,
+        }
+    encoded = json.dumps(databases, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {
+        "format": "finance-radar-live-schema-receipt-v1",
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "ledger_version": databases["ledger"]["version"],
+        "operations_version": databases["operations"]["version"],
+        "object_count": sum(len(value["objects"]) for value in databases.values()),
+    }
 
 
 def _utc(value: Any) -> datetime:
@@ -350,6 +442,9 @@ def parser() -> argparse.ArgumentParser:
     backup.add_argument("--backup-root", type=Path, required=True)
     backup.add_argument("--attestation", type=Path, required=True)
     backup.add_argument("--max-age-seconds", type=int, default=MAX_BACKUP_AGE_SECONDS)
+    schema = commands.add_parser("schema")
+    schema.add_argument("--ledger", type=Path, required=True)
+    schema.add_argument("--operations", type=Path, required=True)
     return result
 
 
@@ -357,8 +452,10 @@ def main() -> int:
     args = parser().parse_args()
     if args.command == "contract":
         check_contract(args.previous, args.candidate)
-    else:
+    elif args.command == "backup":
         check_backup(args.operations, args.backup_root, args.attestation, args.max_age_seconds)
+    else:
+        print(json.dumps(schema_receipt(args.ledger, args.operations), sort_keys=True, separators=(",", ":")))
     return 0
 
 

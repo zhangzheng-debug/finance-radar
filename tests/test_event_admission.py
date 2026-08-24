@@ -239,6 +239,53 @@ def test_financing_slots_preserve_exact_instrument_amount_and_date() -> None:
         assert mismatch.supports_specific_fact is False
 
 
+def test_issuer_named_board_can_prove_an_officer_appointment() -> None:
+    passages = (
+        (
+            "MicroVision, Inc.",
+            "On August 7, 2026, the Board of Directors (the Board) of MicroVision, "
+            "Inc. (the Company) appointed Christine Chambers as the Company's Chief "
+            "Financial Officer, effective as of August 27, 2026.",
+        ),
+        (
+            "Polomar Health Services, Inc.",
+            "On July 15, 2026, the Board of Directors of Polomar Health Services, "
+            "Inc. (the Company) appointed Douglas Beck as the Company's Chief "
+            "Financial Officer and Treasurer, effective July 15, 2026.",
+        ),
+        (
+            "Example Corp",
+            "Example Corp (the Company), today announced that the board of directors "
+            "of the Company (the Board) has appointed Jane Doe as the Company's Chief "
+            "Financial Officer, effective August 3, 2026.",
+        ),
+    )
+    for subject, passage in passages:
+        extraction = extract_evidence_fact_slots(
+            evidence_passage=passage,
+            event_type="chief_financial_officer_appointment",
+            expected_subject=subject,
+        )
+        assert extraction.supports_specific_fact is True, passage
+        assert extraction.supported_facts[0].subject_text == subject
+        assert extraction.supported_facts[0].subject_binding == "EXPLICIT_ISSUER_CONTEXT"
+
+
+def test_unbound_or_other_company_board_cannot_prove_issuer_appointment() -> None:
+    for passage in (
+        "The Board appointed Jane Doe as chief financial officer.",
+        "Target Corp's Board appointed Jane Doe as chief financial officer.",
+        "The Board of Directors of Target Corp appointed Jane Doe as chief financial officer.",
+        "Example Corp described Target Corp, whose Board appointed Jane Doe as chief financial officer.",
+    ):
+        extraction = extract_evidence_fact_slots(
+            evidence_passage=passage,
+            event_type="chief_financial_officer_appointment",
+            expected_subject="Example Corp",
+        )
+        assert extraction.supports_specific_fact is False, passage
+
+
 def test_delisting_slots_preserve_future_modality_and_effective_date() -> None:
     passage = (
         "Nasdaq notified Example Corp that its common stock would be delisted from "

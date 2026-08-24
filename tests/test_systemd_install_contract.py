@@ -104,11 +104,24 @@ def test_code_only_mode_skips_expensive_recovery_and_dependency_work_fail_closed
     assert "reused_verified_daily" in source
     assert "immutable=1" not in validator
     assert "MAX_BACKUP_AGE_SECONDS = 93_600" in validator
-    assert (
-        'ALLOWED_CHANGE_PREFIXES = ("app/web/", ".streamlit/", "docs/", "tests/")'
-        in validator
-    )
-    assert 'ALLOWED_CHANGE_DIRECTORIES = {"docs", "tests"}' in validator
+    for runtime_prefix in (
+        '"app/api/"',
+        '"app/web/"',
+        '"app/workers/"',
+        '"app/services/"',
+        '"app/models/"',
+        '"scripts/"',
+    ):
+        assert runtime_prefix in validator
+    for denied_runtime_owner in (
+        '"app/ops/"',
+        '"deployment/"',
+        '"app/storage/operations.py"',
+        '"scripts/event_ledger.py"',
+    ):
+        assert denied_runtime_owner in validator
+    assert "SCHEMA_MUTATION_PATTERN" in validator
+    assert "changed runtime code contains database schema mutation SQL" in validator
     for non_runtime_file in (
         '"CHANGELOG.md"',
         '"CURRENT_STATE.md"',
@@ -117,7 +130,7 @@ def test_code_only_mode_skips_expensive_recovery_and_dependency_work_fail_closed
     ):
         assert non_runtime_file in validator
     assert "candidate contains generated Python bytecode" in validator
-    assert "release content outside the public-Web whitelist changed" in validator
+    assert "release content outside the schema-neutral runtime whitelist changed" in validator
     assert 'inventory[relative] = ("directory", 0, "")' in validator
     assert "current_sha = _sha256(candidate)" in validator
     assert 'expected_bundle_files = set(manifest_paths) | {"manifest.json"}' in validator

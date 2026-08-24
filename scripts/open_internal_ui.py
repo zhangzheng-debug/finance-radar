@@ -223,7 +223,7 @@ class SessionCleanup:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "按需启动 Finance Radar 的回环内部 UI，建立 SSH 隧道并打开本机浏览器。"
+            "打开 Finance Radar 老板总览：按需启动回环内部 UI，建立 SSH 隧道并打开本机浏览器。"
             "退出时只停止由本次会话启动的内部 UI；不会启动或修改公网服务。"
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -234,10 +234,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=validated_host,
         help="显式 SSH 目标，例如 ubuntu@server.example；仓库不保存默认主机",
     )
-    parser.add_argument(
+    role_group = parser.add_mutually_exclusive_group()
+    role_group.add_argument(
         "--role",
         choices=tuple(ROLE_SPECS),
-        help="内部角色；省略时显示 Admin/Reviewer/Operator 选择菜单",
+        help="高级内部角色；默认直接打开 Admin 老板总览",
+    )
+    role_group.add_argument(
+        "--choose-role",
+        action="store_true",
+        help="显示 Admin/Reviewer/Operator 高级选择菜单",
     )
     parser.add_argument(
         "--identity-file",
@@ -266,7 +272,7 @@ def run(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if not 1 <= args.ssh_port <= 65535:
         raise SystemExit("--ssh-port must be between 1 and 65535")
-    role = ROLE_SPECS[args.role] if args.role else choose_role()
+    role = choose_role() if args.choose_role else ROLE_SPECS[args.role or "admin"]
     local_port = args.local_port or role.remote_port
     identity = args.identity_file if args.dry_run else _ensure_identity(args.identity_file)
     base = ssh_base_command(

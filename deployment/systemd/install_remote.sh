@@ -443,6 +443,7 @@ POSTDEPLOY_BACKUP_MANIFEST_SHA256=""
 POSTDEPLOY_BACKUP_PATH=""
 RECOVERY_BASIS=""
 POSTDEPLOY_FULL_BUNDLE_STATUS=""
+CODE_ONLY_SCHEMA_RECEIPT_BEFORE=""
 PREDEPLOY_HOLD_ROOT=""
 PREDEPLOY_HOLD_PATH=""
 RECOVERY_HOLD_PARENT=/var/lib/finance-radar
@@ -1015,6 +1016,39 @@ require_code_only_shared_state() {
         rm -rf -- "$RELEASE/reports" || return 1
     fi
     printf 'code_only_shared_state=PASS ledger=%s operations=%s\n' "$ledger_db" "$operations_db"
+}
+
+capture_code_only_schema_receipt() {
+    local ledger_db operations_db trusted_validator receipt digest
+    [ "$DEPLOY_MODE" = code-only ] || return 0
+    trusted_validator="$PREVIOUS_RELEASE/deployment/systemd/verify_code_only_release.py"
+    [ -f "$trusted_validator" ] && [ ! -L "$trusted_validator" ] || return 1
+    ledger_db="$(ledger_database_path)" || return 1
+    operations_db="$(operations_database_path)" || return 1
+    receipt="$(python3 "$trusted_validator" schema \
+        --ledger "$ledger_db" --operations "$operations_db")" || return 1
+    digest="$(python3 - "$receipt" <<'PY'
+import json
+import re
+import sys
+
+payload = json.loads(sys.argv[1])
+digest = str(payload.get("sha256") or "")
+if payload.get("format") != "finance-radar-live-schema-receipt-v1" or not re.fullmatch(r"[0-9a-f]{64}", digest):
+    raise SystemExit("invalid live schema receipt")
+print(digest)
+PY
+)" || return 1
+    if [ -z "$CODE_ONLY_SCHEMA_RECEIPT_BEFORE" ]; then
+        CODE_ONLY_SCHEMA_RECEIPT_BEFORE="$digest"
+        printf 'code_only_schema_before=PASS sha256=%s\n' "$digest"
+    elif [ "$digest" != "$CODE_ONLY_SCHEMA_RECEIPT_BEFORE" ]; then
+        printf 'code-only activation changed live database schema: before=%s after=%s\n' \
+            "$CODE_ONLY_SCHEMA_RECEIPT_BEFORE" "$digest" >&2
+        return 1
+    else
+        printf 'code_only_schema_after=PASS sha256=%s\n' "$digest"
+    fi
 }
 
 # Preserve the previous release intact so a failed upgrade can be rolled back.
@@ -2231,10 +2265,10 @@ clear_scheduled_backup_start_inhibit || \
     abort_cutover 'backup timer stopped but its start inhibit could not be cleared' 4
 # A full deployment may change persistence, collection or schema code.  It must
 # quiesce every writer before the candidate backup and keep the collector down
-# through the post-cutover restore drill.  The code-only contract proves those
-# trees and dependencies byte-identical, so that path leaves the worker running
-# through candidate preparation and never terminates an in-flight interpretation
-# batch. The worker stops only for the short activation window below.
+# through the post-cutover restore drill. The code-only contract proves schema
+# owners, dependencies and service contracts byte-identical, so the active
+# worker can keep running through candidate preparation. It stops only for the
+# short activation and the live schema is receipted before and after it.
 # Preserve the credential gate in both modes: an enabled interpretation timer
 # without its root-only credential is already an unsafe state to carry forward.
 if { grep -Fqx -- finance-radar-capture-interpretation.timer "$ROLLBACK_ENABLED_UNITS" || \
@@ -2441,6 +2475,8 @@ install_backup_quiesce_wrapper || \
     abort_cutover 'candidate backup quiesce wrapper could not be installed' 4
 install -d -m 0700 -o root -g root "$RECOVERY_HOLD_PARENT" || \
     abort_cutover 'root backup attestation directory could not be prepared' 4
+install -d -m 0755 -o root -g root /var/lib/finance-radar-health || \
+    abort_cutover 'public backup health receipt directory could not be prepared' 4
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-backup.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-backup.timer" /etc/systemd/system/
 if [ -f "$RELEASE/deployment/systemd/finance-radar-evidence-llm.service" ]; then
@@ -2474,8 +2510,8 @@ fi
 # line was validated against the candidate and snapshotted for automatic
 # rollback. Keep the failed release on disk for forensic inspection.
 # A full deployment keeps the mutable collector quiesced until the candidate's
-# recovery receipt succeeds.  A code-only deployment proves the worker tree and
-# dependencies unchanged and deliberately keeps collection live until this
+# recovery receipt succeeds. A code-only deployment proves database schema
+# owners and dependencies unchanged and deliberately keeps collection live until this
 # short activation window.  Stop it only now so the candidate overview can be
 # built immediately and no process remains attached to the predecessor release.
 # API/Web stay available until their controlled restart below in either mode.
@@ -2487,6 +2523,8 @@ else
         abort_cutover 'worker failed to stop for the short code-only activation window' 5
     systemctl is-active --quiet finance-radar-worker && \
         abort_cutover 'worker remains active during the short code-only activation window' 5
+    capture_code_only_schema_receipt || \
+        abort_cutover 'unable to capture the pre-activation live schema receipt' 5
 fi
 systemctl stop finance-radar-evidence-llm.service 2>/dev/null || true
 systemctl disable finance-radar-evidence-llm.service
@@ -2638,6 +2676,8 @@ wait_for_url http://127.0.0.1:18000/api/v1/overview || \
     abort_cutover 'published overview is unavailable after activation' 6
 wait_for_url http://127.0.0.1:18501/radar/_stcore/health || \
     abort_cutover 'public Web loopback health check failed after activation' 6
+capture_code_only_schema_receipt || \
+    abort_cutover 'code-only activation changed the live database schema' 6
 systemctl is-active --quiet finance-radar-api finance-radar-web
 systemctl is-active --quiet finance-radar-overview-snapshot.timer
 test "$(systemctl show finance-radar-overview-snapshot.service -p Result --value)" = success || \
@@ -2702,8 +2742,8 @@ if [ "$DEPLOY_MODE" = full ]; then
     systemctl start finance-radar-worker || \
         abort_cutover 'worker failed to start after the protected postcutover backup' 6
 else
-    # The fast path kept the byte-identical worker alive while validating and
-    # preparing the candidate, then stopped it only for the atomic activation.
+    # The fast path kept the active worker alive while validating and preparing
+    # the schema-neutral candidate, then stopped it only for atomic activation.
     systemctl start finance-radar-worker || \
         abort_cutover 'worker failed to start after the short code-only activation window' 6
 fi

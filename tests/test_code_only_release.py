@@ -108,15 +108,15 @@ def test_code_only_contract_accepts_non_runtime_release_evidence(
     assert "code_only_candidate_contract=PASS" in result.stdout
 
 
-def test_code_only_contract_rejects_api_change(tmp_path: Path) -> None:
+def test_code_only_contract_accepts_api_change(tmp_path: Path) -> None:
     previous = _release(tmp_path / "previous", "same")
     candidate = _release(tmp_path / "candidate", "same")
     (candidate / "app/api/main.py").write_text("api = 'changed'\n", encoding="utf-8")
 
     result = _contract(previous, candidate)
 
-    assert result.returncode != 0
-    assert "app/api/main.py" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "code_only_candidate_contract=PASS" in result.stdout
 
 
 def test_code_only_contract_rejects_unlisted_root_runtime_module(tmp_path: Path) -> None:
@@ -159,15 +159,16 @@ def test_code_only_contract_rejects_empty_directory_shape_change(tmp_path: Path)
     assert "release-records" in result.stderr
 
 
-def test_code_only_contract_rejects_storage_or_deployment_changes(tmp_path: Path) -> None:
+def test_code_only_contract_accepts_query_storage_but_rejects_schema_or_deployment_changes(
+    tmp_path: Path,
+) -> None:
     previous = _release(tmp_path / "previous", "same")
     candidate = _release(tmp_path / "candidate", "same")
     (candidate / "app/storage/ledger.py").write_text("storage = 'changed'\n", encoding="utf-8")
 
     storage_result = _contract(previous, candidate)
 
-    assert storage_result.returncode != 0
-    assert "app/storage/ledger.py" in storage_result.stderr
+    assert storage_result.returncode == 0, storage_result.stderr
 
     (candidate / "app/storage/ledger.py").write_text("storage = 'stable'\n", encoding="utf-8")
     (candidate / "deployment/systemd/new.service").write_text(
@@ -183,7 +184,6 @@ def test_code_only_contract_rejects_storage_or_deployment_changes(tmp_path: Path
 @pytest.mark.parametrize(
     "relative",
     (
-        "scripts/worker.py",
         "requirements.lock",
         "config/sources.json",
         "replay/cases/example.json",
@@ -202,6 +202,79 @@ def test_code_only_contract_still_rejects_executable_or_runtime_changes(
 
     assert result.returncode != 0
     assert relative in result.stderr
+
+
+def test_code_only_contract_accepts_worker_and_service_logic(tmp_path: Path) -> None:
+    previous = _release(tmp_path / "previous", "same")
+    candidate = _release(tmp_path / "candidate", "same")
+    (candidate / "scripts/worker.py").write_text("worker = 'changed'\n", encoding="utf-8")
+    (candidate / "app/services").mkdir(parents=True)
+    (candidate / "app/services/example.py").write_text(
+        "def classify(value):\n    return value\n",
+        encoding="utf-8",
+    )
+
+    result = _contract(previous, candidate)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_code_only_contract_rejects_schema_owner_or_new_schema_sql(tmp_path: Path) -> None:
+    previous = _release(tmp_path / "previous", "same")
+    candidate = _release(tmp_path / "candidate", "same")
+    (candidate / "scripts/event_ledger.py").write_text(
+        "SCHEMA_VERSION = 99\n", encoding="utf-8"
+    )
+
+    schema_owner = _contract(previous, candidate)
+
+    assert schema_owner.returncode != 0
+    assert "scripts/event_ledger.py" in schema_owner.stderr
+
+    (candidate / "scripts/event_ledger.py").unlink()
+    (candidate / "app/api/new_schema.py").write_text(
+        'SQL = "ALTER TABLE canonical_events ADD COLUMN unsafe TEXT"\n',
+        encoding="utf-8",
+    )
+
+    embedded_schema = _contract(previous, candidate)
+
+    assert embedded_schema.returncode != 0
+    assert "database schema mutation SQL" in embedded_schema.stderr
+
+
+def test_code_only_schema_receipt_changes_only_when_sqlite_schema_changes(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.sqlite3"
+    operations = tmp_path / "operations.sqlite3"
+    with sqlite3.connect(ledger) as connection:
+        connection.execute("CREATE TABLE event_ledger_schema(version INTEGER)")
+        connection.execute("INSERT INTO event_ledger_schema VALUES (14)")
+        connection.execute("CREATE TABLE events(event_id TEXT PRIMARY KEY)")
+    with sqlite3.connect(operations) as connection:
+        connection.execute("CREATE TABLE operations_schema(version INTEGER)")
+        connection.execute("INSERT INTO operations_schema VALUES (10)")
+        connection.execute("CREATE TABLE worker_cycles(cycle_id TEXT PRIMARY KEY)")
+
+    command = [
+        sys.executable,
+        str(VALIDATOR),
+        "schema",
+        "--ledger",
+        str(ledger),
+        "--operations",
+        str(operations),
+    ]
+    first = subprocess.run(command, capture_output=True, text=True, check=False)
+    with sqlite3.connect(ledger) as connection:
+        connection.execute("INSERT INTO events VALUES ('row-only-change')")
+    row_change = subprocess.run(command, capture_output=True, text=True, check=False)
+    with sqlite3.connect(ledger) as connection:
+        connection.execute("CREATE INDEX idx_events_id ON events(event_id)")
+    schema_change = subprocess.run(command, capture_output=True, text=True, check=False)
+
+    assert first.returncode == row_change.returncode == schema_change.returncode == 0
+    assert json.loads(first.stdout)["sha256"] == json.loads(row_change.stdout)["sha256"]
+    assert json.loads(first.stdout)["sha256"] != json.loads(schema_change.stdout)["sha256"]
 
 
 @pytest.mark.skipif(
