@@ -17,6 +17,7 @@ from app.models.qwen_risk_contract import (
     QWEN_RISK_PROMPT_VERSION,
     QWEN_RISK_SYSTEM_PROMPT,
     assessment_scope,
+    normalize_qwen_risk_content,
     validate_semantic_payload,
 )
 from app.models.risk_router import derive_evidence_context
@@ -83,7 +84,7 @@ def build_qwen_risk_input(
                 "passage": passage[:6000],
             }
         )
-    return {
+    return normalize_qwen_risk_content({
         "as_of": event.get("last_updated_at"),
         "event_date": event.get("event_date"),
         "headline": " ".join(
@@ -93,7 +94,7 @@ def build_qwen_risk_input(
             str(source.get("summary") or facts.get("source_summary") or "").split()
         )[:2000],
         "passages": passages,
-    }
+    })
 
 
 @dataclass(frozen=True)
@@ -125,31 +126,9 @@ class QwenRiskModelProvider:
     def model_version(self) -> str:
         return "qwen-risk-" + self.adapter_sha256.strip().casefold()[:16]
 
-    def input_contract(
-        self, detail: dict[str, Any], evidence: list[dict[str, Any]]
-    ) -> dict[str, Any]:
-        content = build_qwen_risk_input(detail, evidence)
-        evidence_context = derive_evidence_context(evidence)
-        scope = assessment_scope(str(evidence_context.get("state") or ""))
-        payload = {
-            "model_task": QWEN_RISK_MODEL_TASK,
-            "contract_version": QWEN_RISK_CONTRACT_VERSION,
-            "prompt_version": QWEN_RISK_PROMPT_VERSION,
-            "model_version": self.model_version,
-            "assessment_scope": scope,
-            "content": content,
-        }
+    @staticmethod
+    def response_schema() -> dict[str, Any]:
         return {
-            **payload,
-            "input_sha256": _sha256(_stable_json(payload)),
-            "evidence_context_sha256": _sha256(_stable_json(evidence_context)),
-        }
-
-    def assess(
-        self, detail: dict[str, Any], evidence: list[dict[str, Any]]
-    ) -> dict[str, Any]:
-        contract = self.input_contract(detail, evidence)
-        response_schema = {
             "type": "object",
             "additionalProperties": False,
             "required": [
@@ -177,6 +156,11 @@ class QwenRiskModelProvider:
                 },
             },
         }
+
+    def predict_content(self, content: dict[str, Any]) -> tuple[dict[str, str], float]:
+        """Return one strict semantic prediction for canonicalized content."""
+
+        normalized = normalize_qwen_risk_content(content)
         request_payload = {
             "model": self.model,
             "temperature": 0,
@@ -186,15 +170,12 @@ class QwenRiskModelProvider:
                 "json_schema": {
                     "name": "finance_radar_qwen_risk_semantics",
                     "strict": True,
-                    "schema": response_schema,
+                    "schema": self.response_schema(),
                 },
             },
             "messages": [
                 {"role": "system", "content": QWEN_RISK_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": _stable_json(contract["content"]),
-                },
+                {"role": "user", "content": _stable_json(normalized)},
             ],
         }
         started = time.perf_counter()
@@ -207,13 +188,48 @@ class QwenRiskModelProvider:
             if hasattr(response, "raise_for_status"):
                 response.raise_for_status()
             body = response.json() if hasattr(response, "json") else response
-            content = body["choices"][0]["message"]["content"]
-            raw = content if isinstance(content, dict) else json.loads(content)
-        except (httpx.HTTPError, TimeoutError, OSError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            value = body["choices"][0]["message"]["content"]
+            raw = value if isinstance(value, dict) else json.loads(value)
+        except (
+            httpx.HTTPError,
+            TimeoutError,
+            OSError,
+            KeyError,
+            IndexError,
+            TypeError,
+            json.JSONDecodeError,
+        ) as exc:
             raise QwenRiskContractError("QWEN_RISK_MODEL_REQUEST_FAILED") from exc
         issues = validate_semantic_payload(raw)
         if issues:
             raise QwenRiskContractError("QWEN_RISK_INVALID_OUTPUT:" + ",".join(issues))
+        return ({key: str(value) for key, value in raw.items()}, (time.perf_counter() - started) * 1000)
+
+    def input_contract(
+        self, detail: dict[str, Any], evidence: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        content = build_qwen_risk_input(detail, evidence)
+        evidence_context = derive_evidence_context(evidence)
+        scope = assessment_scope(str(evidence_context.get("state") or ""))
+        payload = {
+            "model_task": QWEN_RISK_MODEL_TASK,
+            "contract_version": QWEN_RISK_CONTRACT_VERSION,
+            "prompt_version": QWEN_RISK_PROMPT_VERSION,
+            "model_version": self.model_version,
+            "assessment_scope": scope,
+            "content": content,
+        }
+        return {
+            **payload,
+            "input_sha256": _sha256(_stable_json(payload)),
+            "evidence_context_sha256": _sha256(_stable_json(evidence_context)),
+        }
+
+    def assess(
+        self, detail: dict[str, Any], evidence: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        contract = self.input_contract(detail, evidence)
+        raw, latency_ms = self.predict_content(contract["content"])
         event = detail.get("event") if isinstance(detail.get("event"), dict) else {}
         return {
             **raw,
@@ -228,7 +244,7 @@ class QwenRiskModelProvider:
             "semantic_model_invoked": True,
             "conditional_language_required": contract["assessment_scope"] == "SOURCE_CONDITIONAL",
             "adapter_sha256": self.adapter_sha256.strip().casefold(),
-            "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            "latency_ms": round(latency_ms, 3),
             "shadow": True,
             "no_trading": True,
         }

@@ -3,7 +3,10 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from app.models.qwen_risk_contract import expected_semantic_payload
+from app.models.qwen_risk_contract import (
+    expected_semantic_payload,
+    normalize_qwen_risk_content,
+)
 from app.services.qwen_risk_semantics import QwenRiskModelProvider
 from app.services.qwen_risk_worker import run_qwen_risk_batch
 from app.storage import OperationsRepository
@@ -79,6 +82,49 @@ def test_provider_contract_is_conditional_without_current_primary_evidence() -> 
     assert contract["assessment_scope"] == "SOURCE_CONDITIONAL"
     assert contract["model_version"].startswith("qwen-risk-")
     assert len(contract["input_sha256"]) == 64
+
+
+def test_training_and_runtime_share_one_canonical_content_shape() -> None:
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": expected_semantic_payload(
+                                "MATERIAL_ADVERSE", "ADVERSE"
+                            )
+                        }
+                    }
+                ]
+            }
+
+    def request(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Response()
+
+    provider = QwenRiskModelProvider(
+        "http://127.0.0.1:18602",
+        "qwen-risk-test",
+        "a" * 64,
+        request_fn=request,
+    )
+    content = {
+        "headline": "  Issuer   may default  ",
+        "summary": "  source   summary ",
+        "passages": [{"passage": "  exact   source text  "}],
+    }
+    prediction, _latency = provider.predict_content(content)
+    assert prediction == expected_semantic_payload("MATERIAL_ADVERSE", "ADVERSE")
+    request_content = calls[0][1]["json"]["messages"][1]["content"]
+    import json
+
+    assert json.loads(request_content) == normalize_qwen_risk_content(content)
 
 
 def test_qwen_worker_persists_without_reprocessing_current_input(tmp_path: Path) -> None:

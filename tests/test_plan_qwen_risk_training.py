@@ -41,13 +41,25 @@ def _semantic_row(index: int, split: str) -> dict:
 
 
 def _manifest(tmp_path: Path, train_count: int, validation_count: int) -> Path:
+    train_rows = [_semantic_row(i, "TRAIN") for i in range(train_count)]
+    validation_rows = [
+        _semantic_row(i, "VALIDATION") for i in range(validation_count)
+    ]
+    semantic_rows = train_rows + validation_rows
     files = {
-        "qwen_risk_sft_train.jsonl": [_semantic_row(i, "TRAIN") for i in range(train_count)],
-        "qwen_risk_sft_validation.jsonl": [
-            _semantic_row(i, "VALIDATION") for i in range(validation_count)
-        ],
+        "qwen_risk_sft_train.jsonl": train_rows,
+        "qwen_risk_sft_validation.jsonl": validation_rows,
         "qwen_risk_blind_manifest.jsonl": [{"sample_id": "blind-1"}],
-        "qwen_risk_evidence_gate_manifest.jsonl": [],
+        "qwen_risk_evidence_posture_audit.jsonl": [
+            {
+                "sample_id": row["metadata"]["sample_id"],
+                "split": row["metadata"]["split"],
+                "evidence_state": "DISCOVERY_ONLY",
+                "qwen_training_included": True,
+                "evidence_state_exposed_to_model": False,
+            }
+            for row in semantic_rows
+        ],
     }
     outputs = {name: _write_jsonl(tmp_path / name, rows) for name, rows in files.items()}
     manifest = {
@@ -56,8 +68,9 @@ def _manifest(tmp_path: Path, train_count: int, validation_count: int) -> Path:
         "train_rows": train_count,
         "validation_rows": validation_count,
         "human_blind_rows": 1,
-        "evidence_gate_rows": 0,
+        "evidence_posture_audit_rows": train_count + validation_count,
         "evidence_state_used_as_model_target": False,
+        "evidence_state_exposed_to_model": False,
         "human_blind_labels_exported": False,
         "human_blind_content_exported": False,
         "deepseek_output_included": False,

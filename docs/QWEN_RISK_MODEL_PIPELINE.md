@@ -32,7 +32,8 @@ python scripts/prepare_qwen_risk_sft.py `
 2. TRAIN 与 VALIDATION 的事件、主体、事件链和内容哈希无交叉；
 3. 盲测正文与标签未导出；
 4. DeepSeek、旧模型结果与事后价格均未进入训练；
-5. 证据状态只参与确定性准入，不作为 Qwen 的学习目标。
+5. 证据状态只进入隔离的审计清单，不出现在 Qwen 的消息、输入或目标中；
+6. `DISCOVERY_ONLY / INSUFFICIENT` 等来源文本仍参与极性与重大性训练，避免模型在最需要条件性研判的样本上形成分布盲区。
 
 ## 训练前硬门
 
@@ -47,6 +48,35 @@ python scripts/plan_qwen_risk_training.py `
 
 当前硬件目标是 RTX 4060 Laptop 8GB：Qwen2.5-1.5B-Instruct、NF4 4-bit QLoRA、batch 1、梯度累积 16、最大长度 2048。模型选择或超参数发生变化时必须产生新计划和新模型版本，不能覆盖旧适配器。
 
+## 一次性盲测与运行包
+
+训练、验证集调参和适配器冻结完成后，才允许对 `HUMAN_BLIND` 做一次评估：
+
+```powershell
+python scripts/evaluate_qwen_risk_blind.py `
+  --frozen-dataset D:\FinanceRadarGold\human_gold_frozen.jsonl `
+  --sft-manifest D:\FinanceRadarGold\qwen-sft\qwen_risk_sft_manifest.json `
+  --adapter-model D:\FinanceRadarModels\qwen-risk-v1\adapter_model.safetensors `
+  --model-url http://127.0.0.1:18602 `
+  --model-name qwen-risk-candidate `
+  --output-dir D:\FinanceRadarModels\qwen-risk-v1-blind
+```
+
+命令在调用第一条盲样本前先写入 `BLIND_CONSUMED.json`，输出目录存在即拒绝重跑。默认要求至少 120 条全部成功、重大性 macro-F1 ≥ 0.65、极性 macro-F1 ≥ 0.55、重大负面召回率 ≥ 0.75。失败后不能根据这 180 条继续调参再重测；它们已经失去盲测资格。
+
+只有盲测 `PASS` 且模型已合并并转换成固定文件名 `finance-radar-qwen-risk-v1.gguf`，才能生成生产运行清单：
+
+```powershell
+python scripts/build_qwen_risk_runtime_manifest.py `
+  --gguf D:\FinanceRadarModels\runtime\finance-radar-qwen-risk-v1.gguf `
+  --adapter-model D:\FinanceRadarModels\qwen-risk-v1\adapter_model.safetensors `
+  --blind-receipt D:\FinanceRadarModels\qwen-risk-v1-blind\qwen_risk_blind_receipt.json `
+  --sft-manifest D:\FinanceRadarGold\qwen-sft\qwen_risk_sft_manifest.json `
+  --output D:\FinanceRadarModels\runtime\model-manifest.json
+```
+
+清单把 GGUF、适配器、冻结数据、SFT 清单和一次性盲测收据的 SHA-256 串成同一条链。任一不一致，服务器上的 `ExecStartPre` 会拒绝启动模型。
+
 ## 生产运行原则
 
 - 采集、证据接纳、Qwen 研判、DeepSeek 解释是四条独立队列；任何一条变慢都不能阻塞其他三条。
@@ -55,3 +85,4 @@ python scripts/plan_qwen_risk_training.py `
 - Qwen 输出必须绑定 `event_id + event_version + input_sha256 + adapter_sha256 + prompt_version`；任一输入版本变化即旧结果失效。
 - 只有在正文缺乏决策级证据时，页面才用“若来源表述属实”展示 Qwen 的条件性研判；有当前版本一手证据时才可显示“证据支持下的语义研判”。
 - 所有输出只用于情报排序，不触发交易、仓位或外部操作。
+- 生产安装会放置 Qwen 单元，但默认保持禁用；只有完整运行包、环境文件和盲测通过收据都存在时才可显式启用。

@@ -23,7 +23,15 @@ def _bundle(tmp_path: Path, *, status: str = "PASS") -> tuple[Path, Path, str]:
                 "model_file": model.name,
                 "model_sha256": hashlib.sha256(model.read_bytes()).hexdigest(),
                 "adapter_sha256": adapter,
-                "human_blind_evaluation": {"status": status, "rows": 180},
+                "sft_manifest_sha256": "b" * 64,
+                "frozen_dataset_sha256": "c" * 64,
+                "human_blind_evaluation": {
+                    "contract": "qwen-risk-human-blind-evaluation-v1",
+                    "status": status,
+                    "rows": 180,
+                    "receipt_sha256": "d" * 64,
+                    "blind_reuse_allowed": False,
+                },
                 "production_eligible": True,
                 "no_trading": True,
             }

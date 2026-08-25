@@ -24,6 +24,33 @@ ASSESSMENT_SCOPES = frozenset({"EVIDENCE_SUPPORTED", "SOURCE_CONDITIONAL"})
 SEMANTIC_PRIORITIES = frozenset({"PRIORITY_REVIEW", "ROUTINE", "UNDECIDABLE"})
 
 
+def normalize_qwen_risk_content(content: dict[str, Any]) -> dict[str, Any]:
+    """Canonicalize the exact semantic input used for SFT and inference."""
+
+    passages: list[dict[str, Any]] = []
+    for item in content.get("passages") or []:
+        if not isinstance(item, dict):
+            continue
+        passage = " ".join(str(item.get("passage") or "").split())
+        if not passage:
+            continue
+        passages.append(
+            {
+                "document_type": str(item.get("document_type") or "")[:80],
+                "item_section": str(item.get("item_section") or "")[:120],
+                "published_at": item.get("published_at"),
+                "passage": passage[:6000],
+            }
+        )
+    return {
+        "as_of": content.get("as_of"),
+        "event_date": content.get("event_date"),
+        "headline": " ".join(str(content.get("headline") or "").split())[:500],
+        "summary": " ".join(str(content.get("summary") or "").split())[:2000],
+        "passages": passages[:5],
+    }
+
+
 def derive_adverse_strength(materiality: str, polarity: str) -> str:
     """Derive the only strength granularity supported by the 720-label kit.
 

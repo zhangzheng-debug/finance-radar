@@ -107,6 +107,33 @@ def test_prepare_exports_messages_but_keeps_blind_content_and_labels_sealed(
     assert "MATERIAL_ADVERSE" not in blind_text
 
 
+def test_prepare_keeps_source_only_semantics_but_never_exposes_evidence_state(
+    tmp_path: Path,
+) -> None:
+    row = _row(4, "TRAIN", "MATERIAL_ADVERSE", "ADVERSE")
+    row["evidence_state"] = "DISCOVERY_ONLY"
+    row["label"] = "ABSTAIN"
+    dataset = tmp_path / "source-only.jsonl"
+    _write_frozen(dataset, [row])
+
+    output = tmp_path / "qwen"
+    manifest = prepare(dataset, output)
+
+    assert manifest["train_rows"] == 1
+    train_text = (output / "qwen_risk_sft_train.jsonl").read_text(encoding="utf-8")
+    assert "DISCOVERY_ONLY" not in train_text
+    prepared = json.loads(train_text)
+    assert all("evidence_state" not in message["content"] for message in prepared["messages"])
+    audit = json.loads(
+        (output / "qwen_risk_evidence_posture_audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert audit["evidence_state"] == "DISCOVERY_ONLY"
+    assert audit["qwen_training_included"] is True
+    assert audit["evidence_state_exposed_to_model"] is False
+
+
 def test_prepare_rejects_market_or_model_output_leakage(tmp_path: Path) -> None:
     row = _row(1, "TRAIN", "MATERIAL_ADVERSE", "ADVERSE")
     row["content"]["post_event_market_data_included"] = True

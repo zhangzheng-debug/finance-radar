@@ -82,6 +82,23 @@ def _verify_semantic_rows(path: Path, expected_split: str) -> int:
     return len(rows)
 
 
+def _verify_evidence_posture_audit(path: Path) -> int:
+    rows = _jsonl(path)
+    seen: set[str] = set()
+    for number, row in enumerate(rows, 1):
+        sample_id = str(row.get("sample_id") or "")
+        if not sample_id or sample_id in seen:
+            raise ValueError(f"{path.name}:{number} has duplicate or missing sample_id")
+        seen.add(sample_id)
+        if row.get("split") not in {"TRAIN", "VALIDATION"}:
+            raise ValueError(f"{path.name}:{number} has invalid split")
+        if row.get("qwen_training_included") is not True:
+            raise ValueError(f"{path.name}:{number} unexpectedly excludes semantic text")
+        if row.get("evidence_state_exposed_to_model") is not False:
+            raise ValueError(f"{path.name}:{number} exposes evidence posture to Qwen")
+    return len(rows)
+
+
 def build_plan(
     manifest_path: Path,
     output_dir: Path,
@@ -95,6 +112,7 @@ def build_plan(
         raise ValueError("unexpected base model")
     required_false = (
         "evidence_state_used_as_model_target",
+        "evidence_state_exposed_to_model",
         "human_blind_labels_exported",
         "human_blind_content_exported",
         "deepseek_output_included",
@@ -114,17 +132,19 @@ def build_plan(
     train = _verified_output(parent, outputs, "qwen_risk_sft_train.jsonl")
     validation = _verified_output(parent, outputs, "qwen_risk_sft_validation.jsonl")
     blind = _verified_output(parent, outputs, "qwen_risk_blind_manifest.jsonl")
-    gate = _verified_output(parent, outputs, "qwen_risk_evidence_gate_manifest.jsonl")
+    evidence_audit = _verified_output(
+        parent, outputs, "qwen_risk_evidence_posture_audit.jsonl"
+    )
 
     train_rows = _verify_semantic_rows(train, "TRAIN")
     validation_rows = _verify_semantic_rows(validation, "VALIDATION")
     blind_rows = len(_jsonl(blind))
-    gate_rows = len(_jsonl(gate))
+    evidence_audit_rows = _verify_evidence_posture_audit(evidence_audit)
     expected_counts = {
         "train_rows": train_rows,
         "validation_rows": validation_rows,
         "human_blind_rows": blind_rows,
-        "evidence_gate_rows": gate_rows,
+        "evidence_posture_audit_rows": evidence_audit_rows,
     }
     for field, actual in expected_counts.items():
         if manifest.get(field) != actual:
@@ -137,6 +157,8 @@ def build_plan(
         )
     if blind_rows <= 0:
         raise ValueError("sealed human blind holdout is required")
+    if evidence_audit_rows != train_rows + validation_rows:
+        raise ValueError("evidence posture audit does not cover every development row")
 
     output_dir = output_dir.resolve()
     command = [
@@ -207,7 +229,7 @@ def build_plan(
         "train_rows": train_rows,
         "validation_rows": validation_rows,
         "sealed_blind_rows": blind_rows,
-        "evidence_gated_rows": gate_rows,
+        "evidence_posture_audit_rows": evidence_audit_rows,
         "hardware_profile": "single_nvidia_8gb_qlora_nf4",
         "command": command,
         "execution_requires_explicit_execute": True,

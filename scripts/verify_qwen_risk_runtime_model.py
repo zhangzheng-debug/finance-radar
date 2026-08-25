@@ -56,6 +56,18 @@ def verify(
         raise ValueError("human blind evaluation receipt missing")
     if blind.get("status") != "PASS" or int(blind.get("rows") or 0) < 120:
         raise ValueError("human blind evaluation has not passed")
+    for field in (
+        "sft_manifest_sha256",
+        "frozen_dataset_sha256",
+    ):
+        if SHA256_RE.fullmatch(str(manifest.get(field) or "").casefold()) is None:
+            raise ValueError(f"runtime provenance hash missing: {field}")
+    if blind.get("contract") != "qwen-risk-human-blind-evaluation-v1":
+        raise ValueError("human blind evaluation contract mismatch")
+    if SHA256_RE.fullmatch(str(blind.get("receipt_sha256") or "").casefold()) is None:
+        raise ValueError("human blind receipt hash missing")
+    if blind.get("blind_reuse_allowed") is not False:
+        raise ValueError("human blind reuse boundary missing")
     if manifest.get("production_eligible") is not True:
         raise ValueError("model is not production eligible")
     if manifest.get("no_trading") is not True:

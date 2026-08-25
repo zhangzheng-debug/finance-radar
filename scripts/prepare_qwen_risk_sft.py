@@ -15,13 +15,13 @@ from app.models.qwen_risk_contract import (
     QWEN_RISK_PROMPT_VERSION,
     QWEN_RISK_SYSTEM_PROMPT,
     expected_semantic_payload,
+    normalize_qwen_risk_content,
 )
 from app.models.risk_label_contract import coherent_label
 
 
 CONTRACT_VERSION = "qwen-risk-sft-dataset-v1"
 DEVELOPMENT_SPLITS = frozenset({"TRAIN", "VALIDATION"})
-FINALIZABLE_EVIDENCE = frozenset({"PRIMARY_SUPPORTED", "MULTI_SOURCE_SUPPORTED"})
 
 
 def _stable_json(value: Any) -> str:
@@ -42,31 +42,6 @@ def _sidecar_digest(dataset: Path) -> str:
     return parts[0].lower()
 
 
-def _review_input(content: dict[str, Any]) -> dict[str, Any]:
-    passages = []
-    for item in content.get("passages") or []:
-        if not isinstance(item, dict):
-            continue
-        passage = " ".join(str(item.get("passage") or "").split())
-        if not passage:
-            continue
-        passages.append(
-            {
-                "document_type": str(item.get("document_type") or "")[:80],
-                "item_section": str(item.get("item_section") or "")[:120],
-                "published_at": item.get("published_at"),
-                "passage": passage[:6000],
-            }
-        )
-    return {
-        "as_of": content.get("as_of"),
-        "event_date": content.get("event_date"),
-        "headline": " ".join(str(content.get("headline") or "").split())[:500],
-        "summary": " ".join(str(content.get("summary") or "").split())[:2000],
-        "passages": passages[:5],
-    }
-
-
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> str:
     path.write_text("".join(_stable_json(row) + "\n" for row in rows), encoding="utf-8")
     return _sha256(path.read_bytes())
@@ -84,7 +59,7 @@ def prepare(frozen_dataset: Path, output_dir: Path) -> dict[str, Any]:
 
     development: dict[str, list[dict[str, Any]]] = {"TRAIN": [], "VALIDATION": []}
     blind_manifest: list[dict[str, Any]] = []
-    evidence_gate_manifest: list[dict[str, Any]] = []
+    evidence_posture_audit: list[dict[str, Any]] = []
     seen: set[str] = set()
     groups: dict[str, dict[str, set[str]]] = {
         split: {field: set() for field in ("event_id", "entity_group", "event_chain_group", "content_sha256")}
@@ -116,7 +91,7 @@ def prepare(frozen_dataset: Path, output_dir: Path) -> dict[str, Any]:
         ):
             raise ValueError(f"label/axis mismatch for {sample_id}")
 
-        review_input = _review_input(content)
+        review_input = normalize_qwen_risk_content(content)
         content_sha256 = _sha256(_stable_json(review_input).encode("utf-8"))
         if split == "HUMAN_BLIND":
             blind_manifest.append(
@@ -130,19 +105,22 @@ def prepare(frozen_dataset: Path, output_dir: Path) -> dict[str, Any]:
             )
             continue
 
-        evidence_state = str(row.get("evidence_state") or "")
-        if evidence_state not in FINALIZABLE_EVIDENCE:
-            evidence_gate_manifest.append(
-                {
-                    "sample_id": sample_id,
-                    "event_id": row.get("event_id"),
-                    "content_sha256": content_sha256,
-                    "evidence_state": evidence_state,
-                    "split": split,
-                    "qwen_training_included": False,
-                }
-            )
-            continue
+        # Evidence posture is an independent deterministic axis.  It is useful
+        # for auditing the 720-row corpus, but excluding DISCOVERY_ONLY or
+        # INSUFFICIENT rows would remove exactly the source-only cases where the
+        # semantic model is needed.  Keep posture out of messages and targets,
+        # and record it only in a separate non-training audit file.
+        evidence_posture_audit.append(
+            {
+                "sample_id": sample_id,
+                "event_id": row.get("event_id"),
+                "content_sha256": content_sha256,
+                "evidence_state": str(row.get("evidence_state") or ""),
+                "split": split,
+                "qwen_training_included": True,
+                "evidence_state_exposed_to_model": False,
+            }
+        )
 
         assistant_payload = expected_semantic_payload(
             str(row.get("materiality") or ""),
@@ -180,12 +158,14 @@ def prepare(frozen_dataset: Path, output_dir: Path) -> dict[str, Any]:
     train_path = output_dir / "qwen_risk_sft_train.jsonl"
     validation_path = output_dir / "qwen_risk_sft_validation.jsonl"
     blind_path = output_dir / "qwen_risk_blind_manifest.jsonl"
-    gate_path = output_dir / "qwen_risk_evidence_gate_manifest.jsonl"
+    evidence_audit_path = output_dir / "qwen_risk_evidence_posture_audit.jsonl"
     outputs = {
         train_path.name: _write_jsonl(train_path, development["TRAIN"]),
         validation_path.name: _write_jsonl(validation_path, development["VALIDATION"]),
         blind_path.name: _write_jsonl(blind_path, blind_manifest),
-        gate_path.name: _write_jsonl(gate_path, evidence_gate_manifest),
+        evidence_audit_path.name: _write_jsonl(
+            evidence_audit_path, evidence_posture_audit
+        ),
     }
     semantic_rows = development["TRAIN"] + development["VALIDATION"]
     labels = Counter()
@@ -202,7 +182,7 @@ def prepare(frozen_dataset: Path, output_dir: Path) -> dict[str, Any]:
         "input_rows": len(rows),
         "train_rows": len(development["TRAIN"]),
         "validation_rows": len(development["VALIDATION"]),
-        "evidence_gate_rows": len(evidence_gate_manifest),
+        "evidence_posture_audit_rows": len(evidence_posture_audit),
         "human_blind_rows": len(blind_manifest),
         "semantic_label_combinations": {
             "|".join(key): value for key, value in sorted(labels.items())
@@ -211,6 +191,7 @@ def prepare(frozen_dataset: Path, output_dir: Path) -> dict[str, Any]:
         "strength_scale": ["NONE", "LOW", "HIGH", "UNCLEAR"],
         "strength_is_derived_from_human_axes": True,
         "evidence_state_used_as_model_target": False,
+        "evidence_state_exposed_to_model": False,
         "human_blind_labels_exported": False,
         "human_blind_content_exported": False,
         "deepseek_output_included": False,
