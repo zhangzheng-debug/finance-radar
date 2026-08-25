@@ -96,7 +96,8 @@ def test_public_event_feed_row_hides_internal_codes_and_bounds_excerpt() -> None
     )
 
     assert "仅捕获来源" in row
-    assert "自动风险语义：自动研判 · 优先复核" in row
+    assert "自动风险语义" not in row
+    assert "risk-router-test-v1" not in row
     assert "债务融资" in row
     assert "SEC 官方文件" in row
     assert "查看证据" in row
@@ -304,7 +305,7 @@ def test_public_evidence_posture_prefers_contract_and_uses_conservative_fallback
 
 def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() -> None:
     waiting = public_event_risk_assessment({"risk_assessment": None})
-    assert waiting["label"] == "尚无当前版本的自动研判"
+    assert waiting["label"] == "尚无已批准的自动风险语义"
     assert waiting["current"] is False
 
     shadow = public_event_risk_assessment(
@@ -320,10 +321,10 @@ def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() ->
             }
         }
     )
-    assert shadow["label"] == "自动研判 · 优先复核"
-    assert shadow["confidence"] == "84%"
-    assert "不负责确认事件真假" in shadow["explanation"]
-    assert "不触发交易" in shadow["explanation"]
+    assert shadow["label"] == "尚无已批准的自动风险语义"
+    assert shadow["confidence"] == ""
+    assert shadow["current"] is False
+    assert "内部规则分流不会冒充" in shadow["explanation"]
 
     qwen = public_event_risk_assessment(
         {
@@ -341,7 +342,7 @@ def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() ->
     assert qwen["confidence"] == ""
 
 
-def test_public_risk_assessment_distinguishes_rules_fallback_and_unknown_source() -> None:
+def test_public_risk_assessment_hides_internal_rules_fallback_and_unknown_source() -> None:
     evidence_gate = public_event_risk_assessment(
         {
             "risk_assessment": {
@@ -357,12 +358,12 @@ def test_public_risk_assessment_distinguishes_rules_fallback_and_unknown_source(
             }
         }
     )
-    assert evidence_gate["heading"] == "自动风险分流"
-    assert evidence_gate["label"] == "证据规则门 · 自动弃权"
+    assert evidence_gate["heading"] == "自动风险语义"
+    assert evidence_gate["label"] == "尚无已批准的自动风险语义"
     assert evidence_gate["confidence"] == ""
     assert evidence_gate["model_version"] == ""
-    assert evidence_gate["decision_source"] == "DETERMINISTIC_EVIDENCE_GATE"
-    assert "训练模型没有被调用" in evidence_gate["explanation"]
+    assert evidence_gate["decision_source"] == ""
+    assert "内部规则分流不会冒充" in evidence_gate["explanation"]
     assert "影子模型" not in evidence_gate["label"]
     assert "影子模型" not in evidence_gate["explanation"]
 
@@ -378,9 +379,9 @@ def test_public_risk_assessment_distinguishes_rules_fallback_and_unknown_source(
             }
         }
     )
-    assert semantic_gate["label"] == "语义规则门 · 非目标"
+    assert semantic_gate["label"] == "尚无已批准的自动风险语义"
     assert semantic_gate["confidence"] == ""
-    assert "确定性语义规则门" in semantic_gate["explanation"]
+    assert "确定性语义规则门" not in semantic_gate["explanation"]
 
     keyword = public_event_risk_assessment(
         {
@@ -395,10 +396,10 @@ def test_public_risk_assessment_distinguishes_rules_fallback_and_unknown_source(
             }
         }
     )
-    assert keyword["label"] == "关键词回退 · 优先复核"
+    assert keyword["label"] == "尚无已批准的自动风险语义"
     assert keyword["confidence"] == ""
     assert keyword["model_version"] == ""
-    assert "不是训练模型输出" in keyword["explanation"]
+    assert "关键词" not in keyword["explanation"]
 
     unknown = public_event_risk_assessment(
         {
@@ -412,13 +413,13 @@ def test_public_risk_assessment_distinguishes_rules_fallback_and_unknown_source(
             }
         }
     )
-    assert unknown["label"] == "研判来源未标明 · 暂不判断"
+    assert unknown["label"] == "尚无已批准的自动风险语义"
     assert unknown["confidence"] == ""
-    assert "无法把这次路由归因为训练模型" in unknown["explanation"]
+    assert "MODEL" not in unknown["explanation"]
     assert "影子模型" not in unknown["label"]
 
 
-def test_public_feed_calls_rule_gate_output_automatic_routing_not_model_judgment() -> None:
+def test_public_feed_does_not_expose_internal_rule_gate_output() -> None:
     row = event_feed_row(
         {
             "event_id": "evidence-gated",
@@ -435,8 +436,9 @@ def test_public_feed_calls_rule_gate_output_automatic_routing_not_model_judgment
         },
         public=True,
     )
-    assert "自动风险分流：证据规则门 · 自动弃权" in row
-    assert "模型研判：" not in row
+    assert "自动风险分流" not in row
+    assert "证据规则门" not in row
+    assert "自动弃权" not in row
     assert "影子模型" not in row
 
 

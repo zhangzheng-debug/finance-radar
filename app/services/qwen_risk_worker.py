@@ -106,6 +106,9 @@ def run_qwen_risk_batch(
         evidence = item.get("evidence") if isinstance(item.get("evidence"), list) else []
         try:
             contract = provider.input_contract(detail, evidence)
+            if contract.get("input_sufficient") is False:
+                counters["input_insufficient"] += 1
+                continue
             previous = current.get(event_id)
             previous_output = previous.get("output") if isinstance(previous, dict) else {}
             if (
@@ -145,6 +148,7 @@ def run_qwen_risk_batch(
         "attempted": counters["attempted"],
         "recorded": counters["recorded"],
         "already_current": counters["already_current"],
+        "input_insufficient": counters["input_insufficient"],
         "errors": errors,
         "by_priority": {
             key.removeprefix("priority:"): value

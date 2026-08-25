@@ -102,6 +102,10 @@ def summarize_admin_read_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         operations.get("latest_verified_backup") or operations.get("latest_backup")
     )
     external_blind = _as_mapping(model.get("external_blind"))
+    capture_interpretation = _as_mapping(model.get("capture_interpretation"))
+    capture_by_status = _as_mapping(capture_interpretation.get("by_status"))
+    qwen_risk = _as_mapping(model.get("qwen_risk"))
+    qwen_publication = _as_mapping(qwen_risk.get("publication"))
     audit_reconciliation = _as_mapping(operations.get("audit_reconciliation"))
     ledger_audit = _as_mapping(ledger.get("audit"))
     audit_violations = sum(
@@ -134,10 +138,19 @@ def summarize_admin_read_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         },
         "interpretation": {
             "recorded_runs": _optional_int(operation_counts.get("capture_interpretation_runs")),
-            # Health exposes the durable run total but not the status-grouped
-            # queue. Calling it a backlog would be false, so keep it unavailable.
-            "pending_backlog": None,
-            "limitation": "当前只读 API 未提供解读队列的状态分组",
+            "pending_backlog": (
+                sum(
+                    int(capture_by_status.get(key) or 0)
+                    for key in ("PENDING", "BUDGET_BLOCKED", "RUNNING")
+                )
+                if capture_by_status
+                else None
+            ),
+            "limitation": (
+                None
+                if capture_by_status
+                else "当前只读 API 未提供解读队列的状态分组"
+            ),
         },
         "evidence": {
             "total_events": total_events,
@@ -175,6 +188,15 @@ def summarize_admin_read_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             ),
             "promotion_decision": external_blind.get("promotion_decision"),
             "evaluation_type": external_blind.get("evaluation_type"),
+            **(
+                {
+                    "qwen_runtime_state": qwen_risk.get("runtime_state"),
+                    "qwen_publication_state": qwen_publication.get("state"),
+                    "qwen_public_approved": qwen_publication.get("public_approved"),
+                }
+                if qwen_risk
+                else {}
+            ),
         },
         "audit": {
             "status": audit_reconciliation.get("status"),

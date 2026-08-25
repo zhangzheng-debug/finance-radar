@@ -168,7 +168,8 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert "系统与来源健康" not in rendered
     assert "Worker" not in rendered
     assert "官方原文支持" in rendered
-    assert "自动研判 · 暂不判断" in rendered
+    assert "自动研判 · 暂不判断" not in rendered
+    assert "等待模型研判" not in rendered
     assert "待核验" not in rendered
     assert "已粗审" not in rendered
     assert "证据不足" not in rendered
@@ -233,8 +234,8 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "为什么关注" in rendered
     assert "证据与引用" in rendered
     assert "官方原文支持" in rendered
-    assert "模型研判" in rendered
-    assert "自动研判 · 暂不判断" in rendered
+    assert "<article><span>模型研判</span>" not in rendered
+    assert "自动研判 · 暂不判断" not in rendered
     assert "时间口径" in rendered
     assert "来源发布" in rendered
     assert "系统发现" in rendered
@@ -347,9 +348,9 @@ def test_home_calls_evidence_gate_result_automatic_routing_not_model_judgment(
         for item in page.markdown
         if '<section class="event-answer"' in str(item.value)
     )
-    assert "<article><span>自动风险分流</span>" in event_card
-    assert "证据规则门 · 自动弃权" in event_card
-    assert "训练模型没有被调用" in event_card
+    assert "<article><span>自动风险分流</span>" not in event_card
+    assert "证据规则门 · 自动弃权" not in event_card
+    assert "训练模型没有被调用" not in event_card
     assert "<article><span>模型研判</span>" not in event_card
     assert "影子模型" not in event_card
 
@@ -661,6 +662,7 @@ def test_public_collector_marks_missing_success_timestamp_unknown(monkeypatch) -
             return overview
         return _fake_api(path, **kwargs)
 
+    web_common.clear_api_get_cache()
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(web_common, "api_request", missing_worker_time_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10).run()
@@ -686,6 +688,7 @@ def test_public_collector_marks_overdue_worker_as_stale_not_realtime(monkeypatch
             return overview
         return _fake_api(path, **kwargs)
 
+    web_common.clear_api_get_cache()
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(web_common, "api_request", stale_worker_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10).run()

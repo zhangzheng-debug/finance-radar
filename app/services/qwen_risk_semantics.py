@@ -97,6 +97,96 @@ def build_qwen_risk_input(
     })
 
 
+def build_qwen_risk_input_contract(
+    detail: dict[str, Any],
+    evidence: list[dict[str, Any]],
+    *,
+    model_version: str,
+) -> dict[str, Any]:
+    """Bind one semantic input to the exact current source/evidence identity.
+
+    Event version alone is insufficient: a source revision or evidence-relation
+    repair can change what the model saw without incrementing that version.  The
+    identity hashes below make those changes invalidate both the shadow cache
+    and any later public projection.
+    """
+
+    content = build_qwen_risk_input(detail, evidence)
+    source = (
+        detail.get("preferred_source")
+        if isinstance(detail.get("preferred_source"), dict)
+        else {}
+    )
+    source_identity = {
+        key: source.get(key)
+        for key in (
+            "observation_id",
+            "source_id",
+            "external_id",
+            "canonical_url",
+            "content_sha256",
+            "raw_payload_sha256",
+            "latest_revision_no",
+            "latest_revision_kind",
+            "latest_revision_at",
+            "source_published_at",
+            "local_received_at",
+        )
+    }
+    evidence_identity: list[dict[str, Any]] = []
+    for item in evidence[:5]:
+        passage = " ".join(str(item.get("evidence_passage") or "").split())
+        evidence_identity.append(
+            {
+                "evidence_id": item.get("evidence_id"),
+                "evidence_fingerprint": item.get("evidence_fingerprint"),
+                "relation_event_version": item.get("relation_event_version"),
+                "relation_status": item.get("relation_status"),
+                "subject_match": item.get("subject_match"),
+                "event_claim_supported": item.get("event_claim_supported"),
+                "date_coherent": item.get("date_coherent"),
+                "modality": item.get("modality"),
+                "passage_sha256": _sha256(passage),
+            }
+        )
+    evidence_identity.sort(
+        key=lambda item: (
+            str(item.get("evidence_id") or ""),
+            str(item.get("evidence_fingerprint") or ""),
+        )
+    )
+    evidence_context = derive_evidence_context(evidence)
+    scope = assessment_scope(str(evidence_context.get("state") or ""))
+    input_sufficient = bool(
+        str(content.get("headline") or "").strip()
+        or str(content.get("summary") or "").strip()
+        or any(str(item.get("passage") or "").strip() for item in content.get("passages") or [])
+    )
+    identity = {
+        "source": source_identity,
+        "evidence": evidence_identity,
+    }
+    payload = {
+        "model_task": QWEN_RISK_MODEL_TASK,
+        "contract_version": QWEN_RISK_CONTRACT_VERSION,
+        "prompt_version": QWEN_RISK_PROMPT_VERSION,
+        "model_version": model_version,
+        "assessment_scope": scope,
+        "content": content,
+        "input_identity": identity,
+        "input_sufficient": input_sufficient,
+    }
+    return {
+        **payload,
+        "input_sha256": _sha256(_stable_json(payload)),
+        "source_identity_sha256": _sha256(_stable_json(source_identity)),
+        "evidence_identity_sha256": _sha256(_stable_json(evidence_identity)),
+        "evidence_context_sha256": _sha256(
+            _stable_json({"context": evidence_context, "identity": evidence_identity})
+        ),
+    }
+
+
 @dataclass(frozen=True)
 class QwenRiskModelProvider:
     base_url: str
@@ -208,27 +298,18 @@ class QwenRiskModelProvider:
     def input_contract(
         self, detail: dict[str, Any], evidence: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        content = build_qwen_risk_input(detail, evidence)
-        evidence_context = derive_evidence_context(evidence)
-        scope = assessment_scope(str(evidence_context.get("state") or ""))
-        payload = {
-            "model_task": QWEN_RISK_MODEL_TASK,
-            "contract_version": QWEN_RISK_CONTRACT_VERSION,
-            "prompt_version": QWEN_RISK_PROMPT_VERSION,
-            "model_version": self.model_version,
-            "assessment_scope": scope,
-            "content": content,
-        }
-        return {
-            **payload,
-            "input_sha256": _sha256(_stable_json(payload)),
-            "evidence_context_sha256": _sha256(_stable_json(evidence_context)),
-        }
+        return build_qwen_risk_input_contract(
+            detail,
+            evidence,
+            model_version=self.model_version,
+        )
 
     def assess(
         self, detail: dict[str, Any], evidence: list[dict[str, Any]]
     ) -> dict[str, Any]:
         contract = self.input_contract(detail, evidence)
+        if contract.get("input_sufficient") is not True:
+            raise QwenRiskContractError("QWEN_RISK_INPUT_INSUFFICIENT")
         raw, latency_ms = self.predict_content(contract["content"])
         event = detail.get("event") if isinstance(detail.get("event"), dict) else {}
         return {

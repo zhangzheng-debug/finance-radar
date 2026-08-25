@@ -5,6 +5,28 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.25.1
+
+- Replace the DeepSeek interpretation worker's generation-reset OFFSET sweep
+  with a recent lane plus a durable keyset lane. New captures stay responsive,
+  old eligible captures cannot be starved, and the runtime receipt now reports
+  the actual cursor, queue, attempt and provider state instead of claiming that
+  an unchanged source generation means no work remains.
+- Expose exact public interpretation states for eligible zero-evidence events:
+  not queued, queued, running, retry wait, terminal failure, superseded and
+  ready. Bind every ready explanation to the exact capture receipt and current
+  provider/contract/prompt/model; UI polling no longer invents a generic pending
+  state or stops after an arbitrary 30-second browser window.
+- Keep Qwen risk semantics fail-closed behind a separate publication contract.
+  Internal router rules, keyword fallbacks and automatic abstentions no longer
+  appear as reader-facing model judgment. A Qwen result can be projected only
+  after an explicit approval pins the model, adapter, contract and prompt, and
+  only while its source, evidence and current-input identity hashes still
+  match. Production remains disabled and makes no Qwen calls until the gold
+  dataset, training, blind evaluation and approval receipt are complete.
+- Extend authenticated model monitoring with DeepSeek candidate/queue/runtime
+  health and Qwen enabled/publication/coverage state, while keeping model
+  outputs, secrets and internal workflow labels out of the public interface.
 - Restrict the public DeepSeek capture explanation to one explicit boundary:
   the event must have zero evidence relations, no P0/P1 URL awaiting refetch,
   and readable P2/raw capture text. Evidence arrival hides cached AI output and

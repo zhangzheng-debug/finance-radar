@@ -1062,7 +1062,7 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
         explanation_data = explanation.json()["data"]
         assert explanation_data["display"] is True
         assert explanation_data["reason_code"] == "NO_EVENT_EVIDENCE"
-        assert explanation_data["state"] == "PENDING"
+        assert explanation_data["state"] == "ELIGIBLE_NOT_QUEUED"
         assert explanation_data["generation_path"] == "BACKGROUND_CACHE_ONLY"
         assert explanation_data["source"]["source_title"] == (
             "Markets await central-bank minutes while gold rises"
@@ -1088,7 +1088,7 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
         assert dossier_data["capture_explanation"] == {
             "display": True,
             "reason_code": "NO_EVENT_EVIDENCE",
-            "state": "DEFERRED",
+            "state": "CHECKING",
             "generation_path": "BACKGROUND_CACHE_ONLY",
         }
         assert dossier_data["contract"] == {

@@ -82,6 +82,21 @@ def test_provider_contract_is_conditional_without_current_primary_evidence() -> 
     assert contract["assessment_scope"] == "SOURCE_CONDITIONAL"
     assert contract["model_version"].startswith("qwen-risk-")
     assert len(contract["input_sha256"]) == 64
+    assert contract["input_sufficient"] is True
+    assert len(contract["source_identity_sha256"]) == 64
+
+
+def test_provider_contract_fails_closed_when_all_semantic_input_is_empty() -> None:
+    provider = QwenRiskModelProvider(
+        "http://127.0.0.1:18602",
+        "qwen-risk-test",
+        "a" * 64,
+        request_fn=lambda *args, **kwargs: None,
+    )
+    empty = _item(1)
+    empty["detail"]["preferred_source"] = {}
+    contract = provider.input_contract(empty["detail"], [])
+    assert contract["input_sufficient"] is False
 
 
 def test_training_and_runtime_share_one_canonical_content_shape() -> None:

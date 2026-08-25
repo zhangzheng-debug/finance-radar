@@ -12,6 +12,7 @@ import argparse
 import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -39,7 +40,8 @@ from scripts.run_capture_interpretation_deepseek import (  # noqa: E402
 
 
 PRIORITY = {"NO_URL_RAW_ONLY": 0, "P2_CAPTURE_ONLY": 1}
-INVENTORY_STATE_KEY = "capture_interpretation_inventory_v2"
+INVENTORY_STATE_KEY = "capture_interpretation_inventory_v3"
+RUNTIME_STATE_KEY = "capture_interpretation_runtime_v1"
 
 
 def is_current_terminal(run: dict[str, Any] | None) -> bool:
@@ -165,91 +167,59 @@ def run(args: argparse.Namespace) -> int:
     operations = OperationsRepository(settings.operations_db)
     generation = ledger.capture_source_generation()
     prior_inventory = operations.get_state(INVENTORY_STATE_KEY, {})
-    health = operations.capture_interpretation_queue_health(
-        "deepseek",
-        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
-        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
-        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
-        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
-    )
-    if (
-        isinstance(prior_inventory, dict)
-        and prior_inventory.get("backlog_complete") is True
-        and prior_inventory.get("source_generation") == generation
-    ):
-        _safe_json(
-            status="IDLE",
-            reason="SOURCE_GENERATION_UNCHANGED",
-            examined=0,
-            completed=0,
-            remaining=0,
-            source_generation=generation,
-            queue=health.get("by_status") or {},
-            daily=health.get("daily") or {},
-            only_new_or_changed=True,
-            canonical_state_unchanged=True,
-            no_trading=True,
-        )
-        return 0
-
     candidate_count = ledger.capture_interpretation_candidate_count()
-    generation_changed = not (
-        isinstance(prior_inventory, dict)
-        and prior_inventory.get("source_generation") == generation
-    )
-    try:
-        cursor_offset = (
-            0
-            if generation_changed
-            else max(0, int(prior_inventory.get("next_offset") or 0))
-        )
-    except (AttributeError, TypeError, ValueError):
-        cursor_offset = 0
     window_limit = max(args.limit, min(args.scan_limit, 1_000))
-    inventory = ledger.capture_interpretation_candidates(
-        limit=window_limit,
-        offset=cursor_offset,
+    recent_limit = max(1, min(window_limit // 3, max(args.limit, 50)))
+    fair_limit = max(1, window_limit - recent_limit)
+
+    after: tuple[int, str, str] | None = None
+    if isinstance(prior_inventory, dict):
+        cursor = prior_inventory.get("fair_cursor")
+        if isinstance(cursor, dict):
+            try:
+                after = (
+                    int(cursor.get("bucket_priority") or 0),
+                    str(cursor.get("event_id") or ""),
+                    str(cursor.get("observation_id") or ""),
+                )
+            except (TypeError, ValueError):
+                after = None
+
+    recent = ledger.capture_interpretation_candidates(
+        limit=recent_limit,
+        order="recent",
     )
-    if not inventory and cursor_offset:
-        # The stable sweep reached the end. A generation change resets the
-        # cursor before the next query, so no newly linked/revised capture can
-        # be skipped by this completion shortcut.
-        operations.set_state(
-            INVENTORY_STATE_KEY,
-            {
-                "source_generation": generation,
-                "candidate_count": candidate_count,
-                "remaining": 0,
-                "remaining_exact": True,
-                "backlog_complete": True,
-                "next_offset": 0,
-                "contract_version": CAPTURE_INTERPRETATION_CONTRACT,
-                "prompt_version": CAPTURE_INTERPRETATION_PROMPT_VERSION,
-                "prompt_sha256": CAPTURE_INTERPRETATION_PROMPT_SHA256,
-                "provider": "deepseek",
-                "model_snapshot": DEEPSEEK_CHEAP_TEXT_MODEL,
-                "only_new_or_changed": True,
-                "inventory_loader": "bounded_keyset_v2",
-            },
+    fair = ledger.capture_interpretation_candidates(
+        limit=fair_limit,
+        order="fair",
+        after=after,
+    )
+    wrapped = False
+    if not fair and after is not None:
+        wrapped = True
+        after = None
+        fair = ledger.capture_interpretation_candidates(
+            limit=fair_limit,
+            order="fair",
         )
-        _safe_json(
-            status="IDLE",
-            reason="BACKLOG_SWEEP_COMPLETE",
-            examined=0,
-            candidates=candidate_count,
-            completed=0,
-            remaining=0,
-            remaining_exact=True,
-            backlog_complete=True,
-            source_generation=generation,
-            queue=health.get("by_status") or {},
-            daily=health.get("daily") or {},
-            only_new_or_changed=True,
-            canonical_state_unchanged=True,
-            inventory_loader="bounded_keyset_v2",
-            no_trading=True,
-        )
-        return 0
+
+    inventory: list[dict[str, Any]] = []
+    seen_inventory: set[tuple[str, str, int]] = set()
+    for index in range(max(len(recent), len(fair))):
+        for lane, values in (("recent", recent), ("fair", fair)):
+            if index >= len(values):
+                continue
+            item = dict(values[index])
+            key = (
+                str(item.get("event_id") or ""),
+                str(item.get("capture_receipt_sha256") or ""),
+                int(item.get("event_version") or 0),
+            )
+            if key in seen_inventory:
+                continue
+            seen_inventory.add(key)
+            item["scheduler_lane"] = lane
+            inventory.append(item)
     terminal_before = operations.capture_interpretation_terminal_keys(
         provider="deepseek",
         contract_version=CAPTURE_INTERPRETATION_CONTRACT,
@@ -306,38 +276,21 @@ def run(args: argparse.Namespace) -> int:
         prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
         model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
     )
-    advance = 0
-    for item in inventory:
+    fair_advance = 0
+    fair_cursor = after
+    for item in fair:
         if not is_terminal(item, terminal_after):
             break
-        advance += 1
-    next_offset = cursor_offset + advance
-    backlog_complete = len(inventory) < window_limit and advance == len(inventory)
-    if backlog_complete:
-        next_offset = 0
-    remaining = (
-        0
-        if backlog_complete
-        else max(1, candidate_count - (cursor_offset + advance))
-    )
-    operations.set_state(
-        INVENTORY_STATE_KEY,
-        {
-            "source_generation": generation,
-            "candidate_count": candidate_count,
-            "remaining": remaining,
-            "remaining_exact": backlog_complete,
-            "backlog_complete": backlog_complete,
-            "next_offset": next_offset,
-            "contract_version": CAPTURE_INTERPRETATION_CONTRACT,
-            "prompt_version": CAPTURE_INTERPRETATION_PROMPT_VERSION,
-            "prompt_sha256": CAPTURE_INTERPRETATION_PROMPT_SHA256,
-            "provider": "deepseek",
-            "model_snapshot": DEEPSEEK_CHEAP_TEXT_MODEL,
-            "only_new_or_changed": True,
-            "inventory_loader": "bounded_keyset_v2",
-        },
-    )
+        fair_advance += 1
+        fair_cursor = (
+            int(item.get("bucket_priority") or 0),
+            str(item.get("event_id") or ""),
+            str(item.get("observation_id") or ""),
+        )
+    reached_end = len(fair) < fair_limit and fair_advance == len(fair)
+    if reached_end:
+        fair_cursor = None
+
     health = operations.capture_interpretation_queue_health(
         "deepseek",
         contract_version=CAPTURE_INTERPRETATION_CONTRACT,
@@ -345,28 +298,49 @@ def run(args: argparse.Namespace) -> int:
         prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
         model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
     )
-    _safe_json(
-        status="COMPLETED" if failed == 0 else "PARTIAL",
-        examined=examined,
-        candidates=candidate_count,
-        window_candidates=len(inventory),
-        window_offset=cursor_offset,
-        next_offset=next_offset,
-        completed=completed,
-        skipped_terminal=skipped_terminal,
-        remaining=remaining,
-        remaining_exact=backlog_complete,
-        backlog_complete=backlog_complete,
-        deferred=deferred,
-        failed=failed,
-        queue=health.get("by_status") or {},
-        daily=health.get("daily") or {},
-        source_generation=generation,
-        only_new_or_changed=True,
-        canonical_state_unchanged=True,
-        inventory_loader="bounded_keyset_v2",
-        no_trading=True,
-    )
+    status = "COMPLETED" if failed == 0 else "PARTIAL"
+    runtime = {
+        "status": status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "examined": examined,
+        "candidates": candidate_count,
+        "window_candidates": len(inventory),
+        "recent_loaded": len(recent),
+        "fair_loaded": len(fair),
+        "fair_advanced": fair_advance,
+        "fair_wrapped": wrapped,
+        "fair_reached_end": reached_end,
+        "completed": completed,
+        "skipped_terminal": skipped_terminal,
+        "deferred": deferred,
+        "failed": failed,
+        "queue": health.get("by_status") or {},
+        "daily": health.get("daily") or {},
+        "source_generation": generation,
+        "inventory_loader": "recent_plus_durable_keyset_v3",
+        "canonical_state_unchanged": True,
+        "no_trading": True,
+    }
+    inventory_state = {
+        **runtime,
+        "fair_cursor": (
+            {
+                "bucket_priority": fair_cursor[0],
+                "event_id": fair_cursor[1],
+                "observation_id": fair_cursor[2],
+            }
+            if fair_cursor is not None
+            else None
+        ),
+        "contract_version": CAPTURE_INTERPRETATION_CONTRACT,
+        "prompt_version": CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        "prompt_sha256": CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        "provider": "deepseek",
+        "model_snapshot": DEEPSEEK_CHEAP_TEXT_MODEL,
+    }
+    operations.set_state(INVENTORY_STATE_KEY, inventory_state)
+    operations.set_state(RUNTIME_STATE_KEY, runtime)
+    _safe_json(**runtime)
     return 0 if failed == 0 else 1
 
 

@@ -188,6 +188,10 @@ def project_public_qwen_semantics(
 
     if not isinstance(run, dict):
         return None
+    if run.get("publication_state") != "PUBLIC_APPROVED":
+        return None
+    if run.get("current_input") is not True:
+        return None
     output = run.get("output")
     if not isinstance(output, dict) or output.get("model_task") != "QWEN_RISK_SEMANTICS":
         return None
@@ -221,4 +225,6 @@ def project_public_qwen_semantics(
         "confidence": None,
         "current": True,
         "no_trading": True,
+        "publication_state": "PUBLIC_APPROVED",
+        "shadow": False,
     }
