@@ -48,6 +48,14 @@ python scripts/plan_qwen_risk_training.py `
 
 当前硬件目标是 RTX 4060 Laptop 8GB：Qwen2.5-1.5B-Instruct、NF4 4-bit QLoRA、batch 1、梯度累积 16、最大长度 2048。模型选择或超参数发生变化时必须产生新计划和新模型版本，不能覆盖旧适配器。
 
+Windows 本机环境统一放在 D 盘，避免继续占用 C 盘：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/bootstrap_qwen_training_windows.ps1 -Install
+```
+
+该脚本固定使用 `D:\FinanceRadarModels` 存放虚拟环境、pip 临时目录和 Hugging Face 缓存，并只做 CUDA/ms-swift/bitsandbytes 安装与探针，不下载基础模型、不读取盲测标签、不开始训练。去掉 `-Install` 可随时复跑只读探针。
+
 ## 一次性盲测与运行包
 
 训练、验证集调参和适配器冻结完成后，才允许对 `HUMAN_BLIND` 做一次评估：
