@@ -662,6 +662,7 @@ def test_public_collector_marks_missing_success_timestamp_unknown(monkeypatch) -
             return overview
         return _fake_api(path, **kwargs)
 
+    web_common.clear_api_get_cache()
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(web_common, "api_request", missing_worker_time_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10).run()
@@ -687,6 +688,7 @@ def test_public_collector_marks_overdue_worker_as_stale_not_realtime(monkeypatch
             return overview
         return _fake_api(path, **kwargs)
 
+    web_common.clear_api_get_cache()
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(web_common, "api_request", stale_worker_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10).run()
