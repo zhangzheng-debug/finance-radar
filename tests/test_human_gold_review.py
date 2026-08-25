@@ -16,6 +16,8 @@ from app.services.human_gold_review import (
     finalize_with_arbitration,
     merge_dual_submissions,
     stable_json,
+    summarize_partial_progress,
+    validate_progress_submission,
     validate_submission,
 )
 
@@ -120,6 +122,33 @@ def make_submission(
     }
 
 
+def make_progress_submission(assignment: dict, completed_sample_ids: set[str]) -> dict:
+    submission = make_submission(assignment)
+    token_by_id = {
+        row["sample_token"]: row["content"]["headline"]
+        for row in assignment["events"]
+    }
+    # Tests use a stable trailing integer in the masked headline to select
+    # underlying samples without access to the owner token map.
+    for row in submission["results"]:
+        sample_id = "sample-" + token_by_id[row["sample_token"]].rsplit(" ", 1)[-1]
+        if sample_id not in completed_sample_ids:
+            row.update(
+                {
+                    "materiality": "",
+                    "polarity": "",
+                    "evidence_state": "",
+                    "rationale": "",
+                    "duration_seconds": 0,
+                }
+            )
+    submission["complete"] = False
+    submission["attestations"] = {
+        field: False for field in submission["attestations"]
+    }
+    return submission
+
+
 def test_build_masks_private_ids_uses_slot_tokens_and_different_order(batch: dict) -> None:
     assignment_a = batch["assignments"]["A"]
     assignment_b = batch["assignments"]["B"]
@@ -160,6 +189,61 @@ def test_submission_contract_rejects_ai_old_label_or_direct_target(batch: dict) 
 
     old_label_lookup = {**valid, "attestations": {**valid["attestations"], "no_old_label": False}}
     assert validate_submission(assignment, old_label_lookup)["valid"] is False
+
+
+def test_progress_submission_is_valid_but_never_gold_eligible(batch: dict) -> None:
+    assignment = batch["assignments"]["A"]
+    draft = make_progress_submission(assignment, {"sample-1", "sample-2"})
+    report = validate_progress_submission(assignment, draft)
+    assert report["valid"] is True
+    assert report["completed_count"] == 2
+    assert report["remaining_count"] == 1
+    assert report["attested"] is False
+    assert report["gold_eligible"] is False
+    assert validate_submission(assignment, draft)["valid"] is False
+
+
+def test_partial_progress_aligns_slot_tokens_and_reports_provisional_conflict(batch: dict) -> None:
+    a = make_progress_submission(batch["assignments"]["A"], {"sample-1", "sample-2"})
+    b = make_progress_submission(batch["assignments"]["B"], {"sample-2", "sample-3"})
+    b_token = next(
+        token
+        for token, sample_id in batch["owner_manifest"]["token_maps"]["B"].items()
+        if sample_id == "sample-2"
+    )
+    for row in b["results"]:
+        if row["sample_token"] == b_token:
+            row["polarity"] = "POSITIVE"
+            row["materiality"] = "NOT_MATERIAL_ADVERSE"
+
+    progress = summarize_partial_progress(batch["owner_manifest"], {"A": [a], "B": [b]})
+    assert progress["progress"] == {
+        "A_completed": 2,
+        "B_completed": 2,
+        "A_remaining": 1,
+        "B_remaining": 1,
+        "covered_by_at_least_one": 3,
+        "covered_by_both": 1,
+        "dual_reviews_remaining": 2,
+        "provisional_exact_agreements": 0,
+        "provisional_conflicts": 1,
+        "current_arbitrations_required": 1,
+        "untouched": 0,
+    }
+    assert progress["completion_requirements"] == {
+        "each_reviewer_must_complete": 3,
+        "reviewer_A_required": 3,
+        "reviewer_B_required": 3,
+        "combined_one_sided_coverage_is_not_gold": True,
+        "every_sample_requires_two_independent_reviews": True,
+        "every_axis_conflict_requires_third_human_arbitration": True,
+        "current_dual_review_candidates": 1,
+        "current_exact_consensus_candidates": 0,
+    }
+    assert progress["provisional_conflicts"][0]["sample_id"] == "sample-2"
+    assert progress["gold_eligible"] is False
+    assert progress["target_label_derived"] is False
+    assert progress["freeze_required_before_training_or_blind_evaluation"] is True
 
 
 def test_merge_derives_consensus_and_builds_third_human_conflict_pack(batch: dict) -> None:

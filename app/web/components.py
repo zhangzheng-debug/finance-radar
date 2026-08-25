@@ -81,6 +81,21 @@ PUBLIC_RISK_DECISION_SOURCE_LABELS = {
     "LEGACY_SCOPE_GUARDRAIL": "范围规则门",
 }
 
+QWEN_POLARITY_LABELS = {
+    "ADVERSE": "负面",
+    "POSITIVE": "正面",
+    "NEUTRAL": "中性",
+    "MIXED": "多空交织",
+    "UNCLEAR": "方向不明确",
+}
+
+QWEN_STRENGTH_LABELS = {
+    "HIGH": "高下行重大性",
+    "LOW": "低下行重大性",
+    "NONE": "未见下行重大性",
+    "UNCLEAR": "重大性不明确",
+}
+
 PUBLIC_EVIDENCE_GAP_LABELS = {
     "MISSING_SUBJECT": "主体待补",
     "SUBJECT_UNRESOLVED": "主体待确认",
@@ -797,6 +812,49 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
     invoking the trained semantic model.
     """
 
+    semantic = item.get("semantic_assessment")
+    if isinstance(semantic, dict) and semantic.get("current") is True:
+        polarity = str(semantic.get("polarity") or "").strip().upper()
+        strength = str(semantic.get("adverse_strength") or "").strip().upper()
+        priority = str(semantic.get("semantic_priority") or "").strip().upper()
+        scope = str(semantic.get("assessment_scope") or "").strip().upper()
+        if (
+            polarity in QWEN_POLARITY_LABELS
+            and strength in QWEN_STRENGTH_LABELS
+            and priority in {"PRIORITY_REVIEW", "ROUTINE", "UNDECIDABLE"}
+            and scope in {"EVIDENCE_SUPPORTED", "SOURCE_CONDITIONAL"}
+        ):
+            conditional = scope == "SOURCE_CONDITIONAL"
+            boundary = (
+                "由于当前只有来源捕获文本、没有足以确认事件事实的证据，"
+                "这是条件性自动研判：若来源表述属实，模型判断其语义风险如下。"
+                if conditional
+                else "当前版本已有可定位的一手材料；模型只判断文本表达的风险语义，"
+                "仍不负责确认事实真假。"
+            )
+            return {
+                "route": {
+                    "PRIORITY_REVIEW": "RISK_REVIEW",
+                    "ROUTINE": "NON_TARGET",
+                    "UNDECIDABLE": "ABSTAIN",
+                }[priority],
+                "label": (
+                    ("条件性研判 · " if conditional else "自动研判 · ")
+                    + QWEN_POLARITY_LABELS[polarity]
+                    + " · "
+                    + QWEN_STRENGTH_LABELS[strength]
+                ),
+                "heading": "自动风险语义",
+                "explanation": boundary + " 结果只用于情报排序，不触发交易或改变证据状态。",
+                "confidence": "",
+                "model_version": "",
+                "decision_source": "HUMAN_GOLD_TRAINED_QWEN",
+                "decision_source_label": "人类金标训练模型",
+                "trained_model": True,
+                "shadow": False,
+                "current": True,
+            }
+
     raw = item.get("risk_assessment")
     if not isinstance(raw, dict):
         raw = {}
@@ -814,15 +872,12 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
     trained_model = decision_source == "TRAINED_SEMANTIC_MODEL"
 
     if not route:
-        heading = "模型研判"
-        label = "等待模型研判"
+        heading = "自动风险语义"
+        label = "尚无当前版本的自动研判"
         source_label = ""
     elif trained_model:
-        heading = "模型研判"
-        label = (
-            f"{'影子模型' if shadow else source_label} · "
-            f"{PUBLIC_RISK_ROUTE_LABELS[route]}"
-        )
+        heading = "自动风险语义"
+        label = f"自动研判 · {PUBLIC_RISK_ROUTE_LABELS[route]}"
     else:
         heading = "自动风险分流"
         route_label = (
@@ -836,8 +891,7 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
             }
             else PUBLIC_RISK_ROUTE_LABELS[route]
         )
-        shadow_prefix = "影子管线 · " if shadow else ""
-        label = f"{shadow_prefix}{source_label} · {route_label}"
+        label = f"{source_label} · {route_label}"
 
     confidence_text = ""
     # Only an explicitly identified trained-model result may expose calibrated
@@ -857,7 +911,9 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
             confidence_text = f"{min(confidence, 100):.0f}%"
 
     if not route:
-        explanation = "尚无绑定当前事件版本的模型研判。"
+        explanation = (
+            "事件与现有来源仍可正常浏览；后台尚未产生绑定当前事件版本的自动研判。"
+        )
     elif trained_model:
         explanation = {
             "RISK_REVIEW": "训练模型建议优先复核这条可能的下行风险线索。",
@@ -891,14 +947,8 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
             "这里只展示路由结果。"
         )
 
-    if route and shadow:
-        explanation += (
-            "这是影子模型的实验分流，不是正式事件结论。"
-            if trained_model
-            else "该规则运行在影子分流管线中，不是正式事件结论。"
-        )
-    elif route:
-        explanation += "风险分流不负责确认事件真假。"
+    if route:
+        explanation += " 自动分流不负责确认事件真假，也不触发交易。"
 
     return {
         "route": route,

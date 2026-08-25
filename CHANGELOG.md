@@ -16,6 +16,38 @@ Releases use the same version prefixed by `v`.
   every minute and expose 24-hour queue-wait/provider-latency percentiles.
 - Scope event evidence revision expansion to the requested event before ranking
   source history, removing a whole-ledger scan from the event detail path.
+- Add the independent human-gold-trained Qwen risk-semantic pipeline. Partial
+  A/B drafts remain provisional; training, one-time blind evaluation and the
+  fail-closed runtime manifest require completed dual review, arbitration and
+  a frozen 420 / 120 / 180 dataset. Qwen scores polarity, materiality and
+  adverse strength only; it cannot change evidence state or trigger trading.
+  Progress reports now state the real critical path: both reviewers must each
+  finish all 720 rows, and one-sided union coverage is not counted as gold.
+- Make the 720-row freeze feasible without weakening its source holdout. The
+  original globally chronological split put SEC in both validation and blind,
+  so the mandatory unseen-source gate could never pass. The v2 freeze contract
+  now selects one complete source family from pre-label metadata only, keeps
+  the remaining core chronological and records the exact policy and bounds.
+  Replace unattainable class-balance quotas with natural-distribution viability
+  floors, and require at least 20 adverse-priority blind cases before a model
+  can pass the production gate. Preserve the unique TRAIN export while using a
+  capped, deterministic TRAIN-only priority resample for SFT; validation and
+  blind distributions remain natural and untouched.
+- Add a D-drive Windows bootstrap for pinned CUDA PyTorch, bitsandbytes and
+  ms-swift, including real GPU and SFT argument-contract probes. It does not
+  download the model or start training.
+- Stop an apposition from binding another issuer's board action to this issuer.
+  The new issuer-bound appointment grammar allowed up to 55 free characters
+  between the governing-body noun and its genitive `of`, so in `Board of
+  Directors of Parent Corp, the parent of <issuer>` the trailing `of` — which
+  governs `the parent`, not the board — bound `<issuer>` with
+  `EXPLICIT_ISSUER_CONTEXT`. The pre-existing extractor already rejected these
+  correctly; the new path overrode it, publishing a citable claim that this
+  issuer's board made an appointment another issuer's board made. Short
+  appositions (`the parent of`, `sole shareholder of`, `the acquirer of`, `an
+  affiliate of`) were affected; longer ones already exceeded the 55-character
+  bound. The gap may no longer contain a comma or a second `of`.
+
 - Close a bypass in the code-only fast-path schema guard. The mutation scan
   only matched a bare `CREATE|ALTER|DROP TABLE|INDEX|TRIGGER|VIEW`, so the
   qualified SQLite forms `CREATE UNIQUE INDEX`, `CREATE VIRTUAL TABLE` and

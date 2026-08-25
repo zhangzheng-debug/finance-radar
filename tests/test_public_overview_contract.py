@@ -629,6 +629,7 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
             "evidence_posture",
             "evidence_gap_codes",
             "risk_assessment",
+            "semantic_assessment",
         }
         assert set(response.json()["data"]["items"][0]) == public_event_keys
         assert api_overview.status_code == 200

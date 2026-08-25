@@ -1,0 +1,13 @@
+[Unit]
+Description=Run bounded Finance Radar Qwen semantic risk worker
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=60s
+RandomizedDelaySec=5s
+AccuracySec=5s
+Persistent=true
+Unit=finance-radar-qwen-risk-worker.service
+
+[Install]
+WantedBy=timers.target

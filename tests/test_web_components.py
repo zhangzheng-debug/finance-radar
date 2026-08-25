@@ -96,7 +96,7 @@ def test_public_event_feed_row_hides_internal_codes_and_bounds_excerpt() -> None
     )
 
     assert "仅捕获来源" in row
-    assert "模型研判：影子模型 · 优先复核" in row
+    assert "自动风险语义：自动研判 · 优先复核" in row
     assert "债务融资" in row
     assert "SEC 官方文件" in row
     assert "查看证据" in row
@@ -304,7 +304,7 @@ def test_public_evidence_posture_prefers_contract_and_uses_conservative_fallback
 
 def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() -> None:
     waiting = public_event_risk_assessment({"risk_assessment": None})
-    assert waiting["label"] == "等待模型研判"
+    assert waiting["label"] == "尚无当前版本的自动研判"
     assert waiting["current"] is False
 
     shadow = public_event_risk_assessment(
@@ -320,9 +320,25 @@ def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() ->
             }
         }
     )
-    assert shadow["label"] == "影子模型 · 优先复核"
+    assert shadow["label"] == "自动研判 · 优先复核"
     assert shadow["confidence"] == "84%"
-    assert "实验分流" in shadow["explanation"]
+    assert "不负责确认事件真假" in shadow["explanation"]
+    assert "不触发交易" in shadow["explanation"]
+
+    qwen = public_event_risk_assessment(
+        {
+            "semantic_assessment": {
+                "polarity": "ADVERSE",
+                "adverse_strength": "HIGH",
+                "semantic_priority": "PRIORITY_REVIEW",
+                "assessment_scope": "SOURCE_CONDITIONAL",
+                "current": True,
+            }
+        }
+    )
+    assert qwen["label"] == "条件性研判 · 负面 · 高下行重大性"
+    assert "没有足以确认事件事实的证据" in qwen["explanation"]
+    assert qwen["confidence"] == ""
 
 
 def test_public_risk_assessment_distinguishes_rules_fallback_and_unknown_source() -> None:
@@ -342,7 +358,7 @@ def test_public_risk_assessment_distinguishes_rules_fallback_and_unknown_source(
         }
     )
     assert evidence_gate["heading"] == "自动风险分流"
-    assert evidence_gate["label"] == "影子管线 · 证据规则门 · 自动弃权"
+    assert evidence_gate["label"] == "证据规则门 · 自动弃权"
     assert evidence_gate["confidence"] == ""
     assert evidence_gate["model_version"] == ""
     assert evidence_gate["decision_source"] == "DETERMINISTIC_EVIDENCE_GATE"
@@ -379,7 +395,7 @@ def test_public_risk_assessment_distinguishes_rules_fallback_and_unknown_source(
             }
         }
     )
-    assert keyword["label"] == "影子管线 · 关键词回退 · 优先复核"
+    assert keyword["label"] == "关键词回退 · 优先复核"
     assert keyword["confidence"] == ""
     assert keyword["model_version"] == ""
     assert "不是训练模型输出" in keyword["explanation"]
@@ -396,7 +412,7 @@ def test_public_risk_assessment_distinguishes_rules_fallback_and_unknown_source(
             }
         }
     )
-    assert unknown["label"] == "影子管线 · 研判来源未标明 · 暂不判断"
+    assert unknown["label"] == "研判来源未标明 · 暂不判断"
     assert unknown["confidence"] == ""
     assert "无法把这次路由归因为训练模型" in unknown["explanation"]
     assert "影子模型" not in unknown["label"]
@@ -419,7 +435,7 @@ def test_public_feed_calls_rule_gate_output_automatic_routing_not_model_judgment
         },
         public=True,
     )
-    assert "自动风险分流：影子管线 · 证据规则门 · 自动弃权" in row
+    assert "自动风险分流：证据规则门 · 自动弃权" in row
     assert "模型研判：" not in row
     assert "影子模型" not in row
 

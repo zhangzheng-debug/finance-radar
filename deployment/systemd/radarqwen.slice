@@ -1,0 +1,11 @@
+[Unit]
+Description=Finance Radar Qwen risk model resource boundary
+
+[Slice]
+# This is intentionally not a dashed child of finance-radar.slice.  The core
+# application keeps its 700-MiB aggregate cap while this accepted Q4 model gets
+# a separate, bounded allowance on the 4-GiB host.
+MemoryHigh=1500M
+MemoryMax=1800M
+MemorySwapMax=256M
+TasksMax=192

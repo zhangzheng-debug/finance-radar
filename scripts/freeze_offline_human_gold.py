@@ -34,9 +34,19 @@ def main() -> int:
     parser.add_argument("--annotations", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--dataset", type=Path)
+    parser.add_argument(
+        "--holdout-source-family",
+        help=(
+            "pin the source family reserved exclusively for HUMAN_BLIND; "
+            "when omitted, the largest eligible family is selected from source metadata only"
+        ),
+    )
     args = parser.parse_args()
 
-    result = assess_freeze_readiness(_load_jsonl(args.annotations))
+    result = assess_freeze_readiness(
+        _load_jsonl(args.annotations),
+        holdout_source_family=args.holdout_source_family,
+    )
     report = {key: value for key, value in result.items() if key != "rows"}
     _write(args.report, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     if args.dataset:

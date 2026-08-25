@@ -1689,6 +1689,10 @@ class LedgerRepository:
                 evidence_rows = connection.execute(
                     f"""WITH ranked_evidence AS (
                           SELECT ev.*,r.source_id,src.authority_tier,
+                                 rel.event_version AS relation_event_version,
+                                 rel.relation_status,rel.subject_match,
+                                 rel.event_claim_supported,rel.date_coherent,
+                                 rel.modality,rel.evidence_fingerprint,
                                  ROW_NUMBER() OVER (
                                    PARTITION BY ev.event_id
                                    ORDER BY ev.passage_score DESC,
@@ -1698,8 +1702,18 @@ class LedgerRepository:
                           JOIN latest_source_content r
                             ON r.observation_id=ev.observation_id
                           JOIN sources src ON src.source_id=r.source_id
+                          JOIN canonical_events current_event
+                            ON current_event.event_id=ev.event_id
+                          JOIN event_evidence_relations rel
+                            ON rel.event_id=ev.event_id
+                           AND rel.evidence_id=ev.evidence_id
+                           AND rel.event_version=current_event.current_version
                           WHERE ev.event_id IN ({placeholders})
                             AND r.observation_status!='deleted'
+                            AND rel.relation_status IN ('SCOPED_MATCH','HUMAN_CONFIRMED')
+                            AND rel.subject_match=1
+                            AND rel.event_claim_supported=1
+                            AND rel.date_coherent=1
                         )
                         SELECT * FROM ranked_evidence
                         WHERE evidence_rank<=5

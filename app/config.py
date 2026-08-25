@@ -115,6 +115,14 @@ class Settings:
     # A zero daily cap means unlimited. The worker still has bounded batches,
     # leases, retry counts, timeouts and output tokens.
     capture_llm_daily_request_cap: int = 0
+    # Human-gold-trained Qwen semantic risk service.  It is loopback-only and
+    # remains disabled until a frozen adapter hash has passed blind evaluation.
+    qwen_risk_enabled: bool = False
+    qwen_risk_url: str = "http://127.0.0.1:18602"
+    qwen_risk_model: str = ""
+    qwen_risk_adapter_sha256: str = ""
+    qwen_risk_timeout_seconds: float = 30.0
+    qwen_risk_max_tokens: int = 180
 
     def __post_init__(self) -> None:
         """Fail closed when scoped credentials can impersonate one another.
@@ -254,6 +262,22 @@ class Settings:
             capture_llm_daily_request_cap=max(
                 0,
                 int(os.getenv("FINANCE_RADAR_CAPTURE_LLM_DAILY_REQUEST_CAP", "0")),
+            ),
+            qwen_risk_enabled=_env_flag("FINANCE_RADAR_QWEN_RISK_ENABLED", False),
+            qwen_risk_url=os.getenv(
+                "FINANCE_RADAR_QWEN_RISK_URL", "http://127.0.0.1:18602"
+            ).strip(),
+            qwen_risk_model=os.getenv("FINANCE_RADAR_QWEN_RISK_MODEL", "").strip(),
+            qwen_risk_adapter_sha256=os.getenv(
+                "FINANCE_RADAR_QWEN_RISK_ADAPTER_SHA256", ""
+            ).strip().casefold(),
+            qwen_risk_timeout_seconds=max(
+                1.0,
+                float(os.getenv("FINANCE_RADAR_QWEN_RISK_TIMEOUT_SECONDS", "30")),
+            ),
+            qwen_risk_max_tokens=max(
+                64,
+                int(os.getenv("FINANCE_RADAR_QWEN_RISK_MAX_TOKENS", "180")),
             ),
         )
 

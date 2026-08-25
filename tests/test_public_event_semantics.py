@@ -10,6 +10,7 @@ from app.api.main import create_app
 from app.config import Settings
 from app.services.public_event_semantics import (
     derive_public_event_semantics,
+    project_public_qwen_semantics,
     project_public_risk_assessment,
 )
 from app.storage import OperationsRepository
@@ -142,6 +143,29 @@ def test_public_risk_projection_requires_current_version_and_applicable_confiden
     assert gated["decision_source"] == "DETERMINISTIC_EVIDENCE_GATE"
 
 
+def test_qwen_semantics_are_separate_from_fact_confirmation() -> None:
+    run = {
+        "model_version": "qwen-risk-abc",
+        "created_at": "2026-08-25T01:02:03+00:00",
+        "output": {
+            "model_task": "QWEN_RISK_SEMANTICS",
+            "event_version": 3,
+            "polarity": "ADVERSE",
+            "materiality": "MATERIAL_ADVERSE",
+            "adverse_strength": "HIGH",
+            "semantic_priority": "PRIORITY_REVIEW",
+            "assessment_scope": "SOURCE_CONDITIONAL",
+            "model_version": "qwen-risk-abc",
+        },
+    }
+    projected = project_public_qwen_semantics(run, current_version=3)
+    assert projected is not None
+    assert projected["conditional_language_required"] is True
+    assert projected["confirms_event_fact"] is False
+    assert projected["confidence"] is None
+    assert project_public_qwen_semantics(run, current_version=4) is None
+
+
 def test_latest_model_runs_are_batched_and_match_requested_event_versions(
     tmp_path: Path,
 ) -> None:
@@ -156,6 +180,13 @@ def test_latest_model_runs_are_batched_and_match_requested_event_versions(
         "event-b",
         _model_result(event_version=4, label="NON_TARGET", input_marker="c"),
     )
+    qwen = {
+        **_model_result(event_version=1, input_marker="qwen"),
+        "model_task": "QWEN_RISK_SEMANTICS",
+        "model_version": "qwen-risk-abc",
+        "label": "PRIORITY_REVIEW",
+    }
+    operations.record_model_run("event-a", qwen)
 
     selected = operations.latest_model_runs_for_versions(
         {"event-a": 1, "event-b": 4, "event-missing": 1}
@@ -163,8 +194,11 @@ def test_latest_model_runs_are_batched_and_match_requested_event_versions(
 
     assert set(selected) == {"event-a", "event-b"}
     assert selected["event-a"]["event_version"] == 1
+    assert selected["event-a"]["model_version"] == "router-test-v1"
     assert selected["event-a"]["output"]["event_version"] == 1
     assert selected["event-b"]["output"]["label"] == "NON_TARGET"
+    qwen_selected = operations.latest_qwen_risk_runs_for_versions({"event-a": 1})
+    assert qwen_selected["event-a"]["model_version"] == "qwen-risk-abc"
 
     with sqlite3.connect(operations.path) as connection:
         plan = connection.execute(

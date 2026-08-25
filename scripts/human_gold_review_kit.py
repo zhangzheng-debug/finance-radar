@@ -24,6 +24,7 @@ from app.services.human_gold_review import (  # noqa: E402
     build_offline_batch,
     finalize_with_arbitration,
     merge_dual_submissions,
+    summarize_partial_progress,
     validate_submission,
 )
 
@@ -280,6 +281,22 @@ def finalize_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def progress_command(args: argparse.Namespace) -> int:
+    """Stage one or more progress snapshots without deriving gold labels."""
+
+    owner_manifest = _read_json(args.owner_manifest)
+    report = summarize_partial_progress(
+        owner_manifest,
+        {
+            "A": [_read_json(path) for path in args.submission_a],
+            "B": [_read_json(path) for path in args.submission_b],
+        },
+    )
+    _write_json(args.output, report)
+    print(json.dumps(report["progress"], ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -312,6 +329,16 @@ def build_parser() -> argparse.ArgumentParser:
     finalize.add_argument("--output", type=Path, required=True)
     finalize.add_argument("--report", type=Path, required=True)
     finalize.set_defaults(handler=finalize_command)
+
+    progress = commands.add_parser(
+        "progress",
+        help="stage partial A/B snapshots and report coverage/conflicts without making gold",
+    )
+    progress.add_argument("--owner-manifest", type=Path, required=True)
+    progress.add_argument("--submission-a", type=Path, action="append", default=[])
+    progress.add_argument("--submission-b", type=Path, action="append", default=[])
+    progress.add_argument("--output", type=Path, required=True)
+    progress.set_defaults(handler=progress_command)
     return parser
 
 

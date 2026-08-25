@@ -425,6 +425,316 @@ def validate_submission(assignment: dict[str, Any], submission: dict[str, Any]) 
     }
 
 
+def _draft_row_is_blank(row: dict[str, Any]) -> bool:
+    """Return whether an exported reviewer row still contains no decision.
+
+    The offline exporter stamps every row with the export time, including
+    untouched rows.  ``reviewed_at`` therefore is not a completion signal; the
+    three axes and rationale are authoritative.
+    """
+
+    return not any(
+        _clean_text(row.get(field))
+        for field in ("materiality", "polarity", "evidence_state", "rationale")
+    )
+
+
+def validate_progress_submission(
+    assignment: dict[str, Any], submission: dict[str, Any]
+) -> dict[str, Any]:
+    """Validate an in-progress export without treating it as final gold.
+
+    Partial snapshots are useful for durable progress and early integration,
+    but they remain ineligible for training or blind evaluation until the
+    existing strict validator accepts a complete, fully attested export.
+    """
+
+    issues: list[str] = []
+    extra = sorted(set(submission) - SUBMISSION_FIELDS)
+    if extra:
+        issues.append("unsupported submission fields: " + ", ".join(extra))
+    for field in sorted(SUBMISSION_FIELDS - submission.keys()):
+        issues.append(f"missing submission field: {field}")
+    if issues:
+        return {"valid": False, "issues": issues, "gold_eligible": False}
+
+    expected_hash = _assignment_digest(assignment)
+    if assignment.get("assignment_sha256") != expected_hash:
+        issues.append("assignment file hash is invalid")
+    for field in ("contract_version", "batch_id", "reviewer_slot", "review_role", "reviewer_token"):
+        if submission.get(field) != assignment.get(field):
+            issues.append(f"submission {field} does not match assignment")
+    if submission.get("assignment_sha256") != assignment.get("assignment_sha256"):
+        issues.append("submission is not bound to this assignment")
+    if submission.get("schema_version") != 1:
+        issues.append("schema_version must be 1")
+    if submission.get("complete") not in {True, False}:
+        issues.append("complete must be boolean")
+    if submission.get("target_label_submitted") is not False:
+        issues.append("reviewers must not submit a target label")
+    if submission.get("canonical_state_changed") is not False:
+        issues.append("offline review must not claim a canonical state change")
+    if submission.get("no_trading") is not True:
+        issues.append("no_trading must be true")
+    if not _valid_iso_datetime(submission.get("exported_at")):
+        issues.append("exported_at must be a timezone-aware ISO datetime")
+
+    attestations = submission.get("attestations")
+    attested = False
+    if not isinstance(attestations, dict):
+        issues.append("attestations must be an object")
+    else:
+        extra_attestations = sorted(set(attestations) - REQUIRED_ATTESTATIONS)
+        missing_attestations = sorted(REQUIRED_ATTESTATIONS - set(attestations))
+        if extra_attestations:
+            issues.append("unsupported attestations: " + ", ".join(extra_attestations))
+        if missing_attestations:
+            issues.append("missing attestations: " + ", ".join(missing_attestations))
+        for field in sorted(REQUIRED_ATTESTATIONS & set(attestations)):
+            if attestations.get(field) not in {True, False}:
+                issues.append(f"attestation {field} must be boolean")
+        attested = all(attestations.get(field) is True for field in REQUIRED_ATTESTATIONS)
+
+    expected_peer_hidden = assignment.get("review_role") == "REVIEWER"
+    if submission.get("peer_answers_hidden") is not expected_peer_hidden:
+        issues.append(f"peer_answers_hidden must be {str(expected_peer_hidden).lower()}")
+
+    assignment_tokens = [row.get("sample_token") for row in assignment.get("events", [])]
+    assignment_token_set = set(assignment_tokens)
+    rows = submission.get("results")
+    if not isinstance(rows, list):
+        issues.append("results must be an array")
+        rows = []
+    seen: set[str] = set()
+    completed_tokens: list[str] = []
+    for index, row in enumerate(rows):
+        prefix = f"results[{index}]"
+        if not isinstance(row, dict):
+            issues.append(f"{prefix} must be an object")
+            continue
+        extra_fields = sorted(set(row) - RESULT_FIELDS)
+        missing_fields = sorted(RESULT_FIELDS - row.keys())
+        if extra_fields:
+            issues.append(f"{prefix} unsupported fields: {', '.join(extra_fields)}")
+        if missing_fields:
+            issues.append(f"{prefix} missing fields: {', '.join(missing_fields)}")
+            continue
+        token = str(row.get("sample_token") or "")
+        if token not in assignment_token_set:
+            issues.append(f"{prefix} unknown sample_token")
+        if token in seen:
+            issues.append(f"{prefix} duplicate sample_token")
+        seen.add(token)
+
+        duration = row.get("duration_seconds")
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0:
+            issues.append(f"{prefix} duration_seconds must be non-negative")
+
+        if _draft_row_is_blank(row):
+            continue
+        populated_axes = [
+            bool(_clean_text(row.get(field)))
+            for field in ("materiality", "polarity", "evidence_state")
+        ]
+        if not all(populated_axes) or not _clean_text(row.get("rationale")):
+            issues.append(f"{prefix} partially completed decision")
+            continue
+        if row.get("materiality") not in MATERIALITY:
+            issues.append(f"{prefix} invalid materiality")
+        if row.get("polarity") not in POLARITIES:
+            issues.append(f"{prefix} invalid polarity")
+        if row.get("evidence_state") not in EVIDENCE_STATES:
+            issues.append(f"{prefix} invalid evidence_state")
+        if len(_clean_text(row.get("rationale"))) < 20:
+            issues.append(f"{prefix} rationale must contain at least 20 characters")
+        if not _valid_iso_datetime(row.get("reviewed_at")):
+            issues.append(f"{prefix} reviewed_at must be a timezone-aware ISO datetime")
+        completed_tokens.append(token)
+
+    if not seen.issubset(assignment_token_set):
+        issues.append("submission contains tokens outside the assignment")
+    if submission.get("complete") is True:
+        if seen != assignment_token_set or set(completed_tokens) != assignment_token_set:
+            issues.append("complete submission must contain every assigned decision")
+        if not attested:
+            issues.append("complete submission requires every human attestation")
+
+    strict_report = validate_submission(assignment, submission) if submission.get("complete") is True else None
+    gold_eligible = bool(strict_report and strict_report.get("valid"))
+    return {
+        "valid": not issues,
+        "issues": issues,
+        "batch_id": assignment.get("batch_id"),
+        "reviewer_slot": assignment.get("reviewer_slot"),
+        "review_role": assignment.get("review_role"),
+        "assigned_count": len(assignment_tokens),
+        "row_count": len(rows),
+        "completed_count": len(set(completed_tokens)),
+        "remaining_count": max(0, len(assignment_tokens) - len(set(completed_tokens))),
+        "attested": attested,
+        "complete": submission.get("complete") is True,
+        "gold_eligible": gold_eligible,
+        "target_label_derived": False,
+        "canonical_state_changed": False,
+        "model_changed": False,
+        "no_trading": True,
+    }
+
+
+def summarize_partial_progress(
+    owner_manifest: dict[str, Any],
+    submissions_by_slot: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Align partial A/B snapshots through the private owner token map.
+
+    This emits progress and provisional disagreements only.  It never derives
+    a target label or a freeze-ready annotation.
+    """
+
+    if owner_manifest.get("contract_version") != OFFLINE_GOLD_CONTRACT_VERSION:
+        raise ValueError("unsupported owner manifest contract")
+    expected_manifest_hash = sha256_text(
+        stable_json({key: value for key, value in owner_manifest.items() if key != "manifest_sha256"})
+    )
+    if owner_manifest.get("manifest_sha256") != expected_manifest_hash:
+        raise ValueError("owner manifest hash is invalid")
+
+    samples_by_id = {row["sample_id"]: row for row in owner_manifest["samples"]}
+    selected: dict[str, dict[str, dict[str, Any]]] = {"A": {}, "B": {}}
+    validation: dict[str, list[dict[str, Any]]] = {"A": [], "B": []}
+    revisions: list[dict[str, Any]] = []
+
+    for slot in ("A", "B"):
+        assignment = owner_manifest["assignments"][slot]
+        token_map = owner_manifest["token_maps"][slot]
+        snapshots = list(submissions_by_slot.get(slot) or [])
+        snapshots.sort(key=lambda row: str(row.get("exported_at") or ""))
+        for snapshot_index, submission in enumerate(snapshots, 1):
+            report = validate_progress_submission(assignment, submission)
+            validation[slot].append(report)
+            if not report["valid"]:
+                raise ValueError(
+                    f"invalid {slot} progress submission #{snapshot_index}: "
+                    + ", ".join(report["issues"])
+                )
+            for row in submission["results"]:
+                if _draft_row_is_blank(row):
+                    continue
+                sample_id = token_map[row["sample_token"]]
+                prior = selected[slot].get(sample_id)
+                if prior is not None:
+                    prior_axes = tuple(prior[field] for field in ("materiality", "polarity", "evidence_state"))
+                    current_axes = tuple(row[field] for field in ("materiality", "polarity", "evidence_state"))
+                    if prior_axes != current_axes or _clean_text(prior["rationale"]) != _clean_text(row["rationale"]):
+                        revisions.append(
+                            {
+                                "slot": slot,
+                                "sample_id": sample_id,
+                                "previous_axes": list(prior_axes),
+                                "current_axes": list(current_axes),
+                                "previous_reviewed_at": prior.get("reviewed_at"),
+                                "current_reviewed_at": row.get("reviewed_at"),
+                            }
+                        )
+                selected[slot][sample_id] = dict(row)
+
+    agreements: list[dict[str, Any]] = []
+    conflicts: list[dict[str, Any]] = []
+    one_sided: list[dict[str, Any]] = []
+    for sample_id in sorted(samples_by_id):
+        first = selected["A"].get(sample_id)
+        second = selected["B"].get(sample_id)
+        if first is None and second is None:
+            continue
+        if first is None or second is None:
+            one_sided.append({"sample_id": sample_id, "completed_by": "A" if first else "B"})
+            continue
+        axis_conflicts = [
+            field
+            for field in ("materiality", "polarity", "evidence_state")
+            if first[field] != second[field]
+        ]
+        if axis_conflicts:
+            conflicts.append(
+                {
+                    "sample_id": sample_id,
+                    "axis_conflicts": axis_conflicts,
+                    "review_a": {field: first[field] for field in ("materiality", "polarity", "evidence_state", "rationale")},
+                    "review_b": {field: second[field] for field in ("materiality", "polarity", "evidence_state", "rationale")},
+                }
+            )
+        else:
+            agreements.append(
+                {
+                    "sample_id": sample_id,
+                    "axes": {field: first[field] for field in ("materiality", "polarity", "evidence_state")},
+                    "status": "PROVISIONAL_EXACT_AGREEMENT",
+                }
+            )
+
+    completed_a = len(selected["A"])
+    completed_b = len(selected["B"])
+    covered = len(set(selected["A"]) | set(selected["B"]))
+    both = len(set(selected["A"]) & set(selected["B"]))
+    total = len(samples_by_id)
+    blockers = []
+    for slot in ("A", "B"):
+        reports = validation[slot]
+        if not reports:
+            blockers.append(f"missing_reviewer_{slot}_snapshot")
+        elif not any(report.get("gold_eligible") for report in reports):
+            blockers.append(f"reviewer_{slot}_not_complete_or_attested")
+    if conflicts:
+        blockers.append("third_human_arbitration_required_for_current_conflicts")
+    if both < total:
+        blockers.append("dual_review_incomplete")
+
+    return {
+        "schema_version": 1,
+        "contract_version": "human-gold-progress-v1",
+        "batch_id": owner_manifest["batch_id"],
+        "owner_manifest_sha256": owner_manifest["manifest_sha256"],
+        "sample_count": total,
+        "progress": {
+            "A_completed": completed_a,
+            "B_completed": completed_b,
+            "A_remaining": total - completed_a,
+            "B_remaining": total - completed_b,
+            "covered_by_at_least_one": covered,
+            "covered_by_both": both,
+            "dual_reviews_remaining": total - both,
+            "provisional_exact_agreements": len(agreements),
+            "provisional_conflicts": len(conflicts),
+            "current_arbitrations_required": len(conflicts),
+            "untouched": total - covered,
+        },
+        "completion_requirements": {
+            "each_reviewer_must_complete": total,
+            "reviewer_A_required": total,
+            "reviewer_B_required": total,
+            "combined_one_sided_coverage_is_not_gold": True,
+            "every_sample_requires_two_independent_reviews": True,
+            "every_axis_conflict_requires_third_human_arbitration": True,
+            "current_dual_review_candidates": both,
+            "current_exact_consensus_candidates": len(agreements),
+        },
+        "validation": validation,
+        "provisional_agreements": agreements,
+        "provisional_conflicts": conflicts,
+        "one_sided_reviews": one_sided,
+        "revision_audit": revisions,
+        "finalization_blockers": blockers,
+        "gold_eligible": not blockers,
+        "provisional_only": True,
+        "target_label_derived": False,
+        "split": "UNASSIGNED",
+        "freeze_required_before_training_or_blind_evaluation": True,
+        "canonical_state_changed": False,
+        "model_changed": False,
+        "no_trading": True,
+    }
+
+
 def _review_row(
     *,
     sample_id: str,

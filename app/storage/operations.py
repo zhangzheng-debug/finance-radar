@@ -634,6 +634,7 @@ class OperationsRepository:
                               FROM model_runs AS candidate
                               WHERE candidate.event_id=requested.event_id
                                 AND candidate.event_version=requested.event_version
+                                AND candidate.model_version NOT LIKE 'qwen-risk-%'
                               ORDER BY candidate.created_at DESC,candidate.run_id DESC
                               LIMIT 1
                           )""",
@@ -644,6 +645,70 @@ class OperationsRepository:
                     event_id = str(row.get("event_id") or "")
                     output = _safe_json(row.pop("output_json", None), {})
                     if not isinstance(output, dict):
+                        continue
+                    if int(row.get("event_version") or 0) != requested.get(event_id):
+                        continue
+                    row["output"] = output
+                    selected[event_id] = row
+        return selected
+
+    def latest_qwen_risk_runs_for_versions(
+        self,
+        event_versions: dict[str, int],
+    ) -> dict[str, dict[str, Any]]:
+        """Return current-version Qwen semantic runs without replacing routers.
+
+        Qwen estimates polarity/materiality while the historical risk router
+        emits queue routes.  Both are stored in the immutable model audit table,
+        but their newest rows are never interchangeable.
+        """
+
+        requested: dict[str, int] = {}
+        for event_id, version in event_versions.items():
+            normalized_id = str(event_id or "").strip()
+            try:
+                normalized_version = int(version)
+            except (TypeError, ValueError):
+                continue
+            if normalized_id and normalized_version > 0:
+                requested[normalized_id] = normalized_version
+        if not requested:
+            return {}
+
+        selected: dict[str, dict[str, Any]] = {}
+        requested_items = list(requested.items())
+        with closing(self.connect()) as connection:
+            for start in range(0, len(requested_items), 400):
+                chunk = requested_items[start : start + 400]
+                values = ",".join("(?,?)" for _ in chunk)
+                params: list[Any] = []
+                for event_id, event_version in chunk:
+                    params.extend((event_id, event_version))
+                rows = connection.execute(
+                    f"""WITH requested(event_id,event_version) AS (
+                            VALUES {values}
+                        )
+                        SELECT model_runs.*
+                        FROM requested
+                        JOIN model_runs
+                          ON model_runs.run_id = (
+                              SELECT candidate.run_id
+                              FROM model_runs AS candidate
+                              WHERE candidate.event_id=requested.event_id
+                                AND candidate.event_version=requested.event_version
+                                AND candidate.model_version LIKE 'qwen-risk-%'
+                              ORDER BY candidate.created_at DESC,candidate.run_id DESC
+                              LIMIT 1
+                          )""",
+                    params,
+                ).fetchall()
+                for sqlite_row in rows:
+                    row = dict(sqlite_row)
+                    event_id = str(row.get("event_id") or "")
+                    output = _safe_json(row.pop("output_json", None), {})
+                    if not isinstance(output, dict):
+                        continue
+                    if output.get("model_task") != "QWEN_RISK_SEMANTICS":
                         continue
                     if int(row.get("event_version") or 0) != requested.get(event_id):
                         continue
