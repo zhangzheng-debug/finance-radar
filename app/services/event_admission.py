@@ -543,8 +543,15 @@ def _management_appointment_subject(
 
         # ``the Board of Directors of Example Corp (...) appointed`` and
         # ``Example Corp's Board appointed`` are explicit local bindings.
+        # The gap between the governing-body noun and its genitive ``of`` must
+        # not cross an apposition: in ``Board of Directors of Parent Corp, the
+        # parent of <issuer>`` the trailing ``of`` belongs to ``the parent``,
+        # not to the board, so binding it to <issuer> would attribute another
+        # issuer's board action to this one.  Forbid a comma and a second
+        # ``of`` inside the gap; ``Board of Directors (the Board) of X`` stays.
         board_of_issuer = re.search(
-            r"\b(?:board(?:\s+of\s+directors)?|directors?)\b[^.;:]{0,55}\bof\s+$",
+            r"\b(?:board(?:\s+of\s+directors)?|directors?)\b"
+            r"(?:(?!\bof\b)[^.;:,]){0,55}\bof\s+$",
             local_prefix[: match.start() - max(0, match.start() - 100)],
             re.I,
         )

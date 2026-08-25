@@ -286,6 +286,33 @@ def test_unbound_or_other_company_board_cannot_prove_issuer_appointment() -> Non
         assert extraction.supports_specific_fact is False, passage
 
 
+def test_another_issuers_board_cannot_bind_through_an_apposition() -> None:
+    """An intervening apposition must not hand one issuer another's board.
+
+    In ``Board of Directors of Parent Corp, the parent of <issuer>`` the
+    trailing ``of`` governs ``the parent``, not the board.  Binding it would
+    publish a citable claim that <issuer>'s board made an appointment that
+    another issuer's board actually made.
+    """
+
+    for passage in (
+        "The Board of Directors of Parent Corp, the parent of Example Corp, "
+        "appointed Jane Doe as chief financial officer.",
+        "The Board of Directors of Holdings Inc, sole shareholder of Example "
+        "Corp, appointed Jane Doe as chief financial officer.",
+        "The Board of Directors of Acquirer Inc, the acquirer of Example Corp, "
+        "appointed Jane Doe as chief financial officer.",
+        "The Board of Directors of Target Corp, an affiliate of Example Corp, "
+        "appointed Jane Doe as chief financial officer.",
+    ):
+        extraction = extract_evidence_fact_slots(
+            evidence_passage=passage,
+            event_type="chief_financial_officer_appointment",
+            expected_subject="Example Corp",
+        )
+        assert extraction.supports_specific_fact is False, passage
+
+
 def test_delisting_slots_preserve_future_modality_and_effective_date() -> None:
     passage = (
         "Nasdaq notified Example Corp that its common stock would be delisted from "
