@@ -345,6 +345,15 @@ def test_bulk_capture_interpretations_preserve_external_then_newest_preference(
     assert selected["d" * 64]["interpretation_id"] == created["deepseek"]
     assert selected["d" * 64]["external_call"] == 1
     assert selected["d" * 64]["output"]["one_line_zh"] == "selected-deepseek"
+    terminal = operations.capture_interpretation_terminal_keys(
+        provider="deepseek",
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        model_snapshot="deepseek-chat",
+    )
+    assert (str(event["event_id"]), "d" * 64, 2) in terminal
+    assert (str(event["event_id"]), "d" * 64, 3) not in terminal
 
 
 def _enqueue_external(operations: OperationsRepository, suffix: str) -> str:

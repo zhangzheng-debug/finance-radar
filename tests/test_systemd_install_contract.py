@@ -256,6 +256,12 @@ def test_prepared_restore_creates_root_backup_attestation_directory() -> None:
 
 def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() -> None:
     source = CAPTURE_INTERPRETATION_UNIT.read_text(encoding="utf-8")
+    timer = (
+        Path(__file__).parents[1]
+        / "deployment"
+        / "systemd"
+        / "finance-radar-capture-interpretation.timer"
+    ).read_text(encoding="utf-8")
     installer = INSTALLER.read_text(encoding="utf-8")
 
     assert (
@@ -287,6 +293,10 @@ def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() ->
     assert '"$group_id" = 0' in installer
     assert '"$mode" = 600' in installer
     assert "DeepSeek LoadCredential source validation failed" in installer
+    assert "OnBootSec=2min" in timer
+    assert "OnUnitActiveSec=60s" in timer
+    assert "RandomizedDelaySec=5s" in timer
+    assert "AccuracySec=5s" in timer
 
 
 def test_deploy_quiesces_capture_interpretation_and_restores_only_timer_state() -> None:

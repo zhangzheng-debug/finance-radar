@@ -257,10 +257,24 @@ def run(args: argparse.Namespace) -> int:
         prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
         model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
     )
+
+    def is_terminal(
+        item: dict[str, Any],
+        terminal: dict[tuple[str, str, int], str],
+    ) -> bool:
+        event_id = str(item["event_id"])
+        receipt = str(item["capture_receipt_sha256"])
+        version = int(item.get("event_version") or 0)
+        return (event_id, receipt, version) in terminal or (
+            event_id,
+            receipt,
+            -1,
+        ) in terminal or (event_id, receipt) in terminal
+
     pending = [
         item
         for item in inventory
-        if (item["event_id"], item["capture_receipt_sha256"]) not in terminal_before
+        if not is_terminal(item, terminal_before)
     ]
     completed = 0
     skipped_terminal = len(inventory) - len(pending)
@@ -294,8 +308,7 @@ def run(args: argparse.Namespace) -> int:
     )
     advance = 0
     for item in inventory:
-        key = (item["event_id"], item["capture_receipt_sha256"])
-        if key not in terminal_after:
+        if not is_terminal(item, terminal_after):
             break
         advance += 1
     next_offset = cursor_offset + advance

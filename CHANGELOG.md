@@ -5,6 +5,17 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+- Restrict the public DeepSeek capture explanation to one explicit boundary:
+  the event must have zero evidence relations, no P0/P1 URL awaiting refetch,
+  and readable P2/raw capture text. Evidence arrival hides cached AI output and
+  prevents new calls. Public requests are cache-only, load after the event core,
+  and never render the old deterministic preview as if it were external AI.
+- Bind successful interpretation terminal keys and public cache validation to
+  the current event version, capture receipt, source revision/content hash,
+  contract, prompt and fixed model generation. Run the bounded background timer
+  every minute and expose 24-hour queue-wait/provider-latency percentiles.
+- Scope event evidence revision expansion to the requested event before ranking
+  source history, removing a whole-ledger scan from the event detail path.
 - Stop an apposition from binding another issuer's board action to this issuer.
   The new issuer-bound appointment grammar allowed up to 55 free characters
   between the governing-body noun and its genitive `of`, so in `Board of
@@ -16,7 +27,6 @@ Releases use the same version prefixed by `v`.
   appositions (`the parent of`, `sole shareholder of`, `the acquirer of`, `an
   affiliate of`) were affected; longer ones already exceeded the 55-character
   bound. The gap may no longer contain a comma or a second `of`.
-
 - Close a bypass in the code-only fast-path schema guard. The mutation scan
   only matched a bare `CREATE|ALTER|DROP TABLE|INDEX|TRIGGER|VIEW`, so the
   qualified SQLite forms `CREATE UNIQUE INDEX`, `CREATE VIRTUAL TABLE` and

@@ -254,6 +254,35 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "本次浏览会话首次查看" in "\n".join(str(item.value) for item in page.caption)
 
 
+def test_public_preview_timeout_keeps_feed_summary_without_legacy_retry(monkeypatch) -> None:
+    requests: list[str] = []
+
+    def timeout_dossier_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        requests.append(path)
+        if urllib.parse.urlsplit(path).path == "/api/v1/events/event-a/dossier":
+            raise web_common.ApiError("API unavailable (TimeoutError)")
+        return _fake_api(path, **kwargs)
+
+    web_common.clear_api_get_cache()
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", timeout_dossier_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in [*page.markdown, *page.warning])
+
+    assert not page.exception
+    assert "事件详情读取超时" in rendered
+    assert "Example Holdings" in rendered
+    assert "数据服务暂时不可用" not in rendered
+    preview_requests = [
+        urllib.parse.urlsplit(value).path
+        for value in requests
+        if urllib.parse.urlsplit(value).path.startswith("/api/v1/events/event-a")
+    ]
+    assert preview_requests == ["/api/v1/events/event-a/dossier"]
+
+
 def test_preview_event_id_is_path_quoted_without_losing_the_deep_link(monkeypatch) -> None:
     raw_event_id = "event/a?x=1"
     encoded_event_id = urllib.parse.quote(raw_event_id, safe="")
@@ -487,6 +516,33 @@ def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatc
                     }
                 ]
             }
+        if parsed.path == "/api/v1/events/event-a/capture-explanation":
+            return {
+                "display": True,
+                "reason_code": "NO_EVENT_EVIDENCE",
+                "state": "READY",
+                "generation_path": "BACKGROUND_CACHE_ONLY",
+                "source": {
+                    "source_name": "OpenNews",
+                    "source_type": "aggregated_discovery",
+                    "authority_tier": "P2_experimental",
+                    "source_title": "Markets await central-bank minutes while gold rises",
+                    "source_excerpt": "A provider discovery summary, not a verified policy action.",
+                    "source_url": "https://example.test/discovery",
+                },
+                "item": {
+                    "status": "READY",
+                    "mode": "LLM_ASSISTED",
+                    "one_line_zh": "这是一条市场评论，不是一项已经发生的政策行动。",
+                    "what_source_says": [
+                        {
+                            "text_zh": "来源称市场正在等待央行会议纪要。",
+                            "quote": "Markets await central-bank minutes",
+                        }
+                    ],
+                    "missing_to_change_state_zh": ["需要央行官方网站原文。"],
+                },
+            }
         if parsed.path == "/api/v1/events/event-a/source-interpretations":
             return {
                 "items": [
@@ -561,16 +617,14 @@ def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatc
     assert "仅捕获来源" in rendered
     assert "0 条可读证据" in rendered
     assert "1 条采集来源记录" in rendered
-    assert any(
-        item.label == "查看来源捕获与内容解读（非正式证据）"
-        for item in page.expander
-    )
+    assert "AI 自动解释（仅在无证据时启用）" in rendered
+    assert "AI 阅读辅助 · 非证据" in rendered
+    assert "因为该事件目前完全没有关联证据" in rendered
     assert "Markets await central-bank minutes while gold rises" in rendered
-    assert "API 发现载荷 · 不参与正式结论" in rendered
+    assert "系统捕获文本 · 不是 P0/P1 原始证据" in rendered
     assert "这是一条市场评论，不是一项已经发生的政策行动" in rendered
     assert "来源称市场正在等待央行会议纪要" in rendered
-    assert "没有证明央行已经发布会议纪要" in rendered
-    assert "确定性预览 · 外部模型待接入" in rendered
+    assert "确定性预览 · 外部模型待接入" not in rendered
     assert "这是一条异常处置记录" in rendered
     assert "异常处置：已排除" in rendered
     assert any(

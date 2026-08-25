@@ -345,7 +345,7 @@ def test_public_list_detail_and_dossier_share_current_semantics(tmp_path: Path) 
     assert feed_response.status_code == 200
     assert detail_response.status_code == 200
     assert dossier_response.status_code == 200
-    assert feed_response.json()["schema_version"] == "1.2"
+    assert feed_response.json()["schema_version"] == "1.3"
 
     feed_event = feed_response.json()["data"]["items"][0]
     detail_event = detail_response.json()["data"]["event"]
