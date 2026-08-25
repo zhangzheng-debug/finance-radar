@@ -220,11 +220,25 @@ def test_partial_progress_aligns_slot_tokens_and_reports_provisional_conflict(ba
     assert progress["progress"] == {
         "A_completed": 2,
         "B_completed": 2,
+        "A_remaining": 1,
+        "B_remaining": 1,
         "covered_by_at_least_one": 3,
         "covered_by_both": 1,
+        "dual_reviews_remaining": 2,
         "provisional_exact_agreements": 0,
         "provisional_conflicts": 1,
+        "current_arbitrations_required": 1,
         "untouched": 0,
+    }
+    assert progress["completion_requirements"] == {
+        "each_reviewer_must_complete": 3,
+        "reviewer_A_required": 3,
+        "reviewer_B_required": 3,
+        "combined_one_sided_coverage_is_not_gold": True,
+        "every_sample_requires_two_independent_reviews": True,
+        "every_axis_conflict_requires_third_human_arbitration": True,
+        "current_dual_review_candidates": 1,
+        "current_exact_consensus_candidates": 0,
     }
     assert progress["provisional_conflicts"][0]["sample_id"] == "sample-2"
     assert progress["gold_eligible"] is False

@@ -21,6 +21,8 @@ Releases use the same version prefixed by `v`.
   fail-closed runtime manifest require completed dual review, arbitration and
   a frozen 420 / 120 / 180 dataset. Qwen scores polarity, materiality and
   adverse strength only; it cannot change evidence state or trigger trading.
+  Progress reports now state the real critical path: both reviewers must each
+  finish all 720 rows, and one-sided union coverage is not counted as gold.
 - Make the 720-row freeze feasible without weakening its source holdout. The
   original globally chronological split put SEC in both validation and blind,
   so the mandatory unseen-source gate could never pass. The v2 freeze contract
