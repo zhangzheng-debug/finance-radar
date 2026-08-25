@@ -111,7 +111,7 @@ def test_worker_overlaps_only_a_bounded_number_of_independent_receipts(
     assert 2 <= peak <= 3
 
 
-def test_worker_advances_a_bounded_inventory_and_then_uses_generation_shortcut(
+def test_worker_combines_recent_and_durable_keyset_lanes_without_generation_reset(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -127,7 +127,7 @@ def test_worker_advances_a_bounded_inventory_and_then_uses_generation_shortcut(
     ]
 
     class FakeLedger:
-        calls: list[tuple[int, int]] = []
+        calls: list[tuple[str, tuple[int, str, str] | None]] = []
 
         def capture_source_generation(self):
             return {"observation_count": 3, "revision_count": 0}
@@ -135,9 +135,28 @@ def test_worker_advances_a_bounded_inventory_and_then_uses_generation_shortcut(
         def capture_interpretation_candidate_count(self):
             return len(items)
 
-        def capture_interpretation_candidates(self, *, limit: int, offset: int):
-            self.calls.append((limit, offset))
-            return items[offset : offset + limit]
+        def capture_interpretation_candidates(
+            self,
+            *,
+            limit: int,
+            offset: int = 0,
+            order: str = "fair",
+            after=None,
+        ):
+            self.calls.append((order, after))
+            values = list(reversed(items)) if order == "recent" else list(items)
+            if after is not None:
+                values = [
+                    item
+                    for item in values
+                    if (
+                        int(item.get("bucket_priority") or 1),
+                        item["event_id"],
+                        item["observation_id"],
+                    )
+                    > after
+                ]
+            return values[offset : offset + limit]
 
     class FakeOperations:
         def __init__(self) -> None:
@@ -192,20 +211,24 @@ def test_worker_advances_a_bounded_inventory_and_then_uses_generation_shortcut(
         workers=2,
     )
 
+    for item in items:
+        item["bucket_priority"] = 1
+
     assert worker.run(args) == 0
     first_state = operations.state[worker.INVENTORY_STATE_KEY]
-    assert first_state["next_offset"] == 2
-    assert first_state["backlog_complete"] is False
+    assert first_state["inventory_loader"] == "recent_plus_durable_keyset_v3"
+    assert first_state["fair_cursor"]["event_id"] == "event-1"
 
+    # Even though source_generation is unchanged, the durable fair cursor moves
+    # forward instead of returning early or resetting to the head.
     assert worker.run(args) == 0
     second_state = operations.state[worker.INVENTORY_STATE_KEY]
-    assert second_state["next_offset"] == 0
-    assert second_state["backlog_complete"] is True
-    calls_before_idle = list(ledger.calls)
+    assert second_state["fair_cursor"]["event_id"] == "event-2"
+    assert ("fair", (1, "event-1", "obs-1")) in ledger.calls
 
     assert worker.run(args) == 0
-    assert ledger.calls == calls_before_idle
     assert len(operations.terminal) == 3
+    assert worker.RUNTIME_STATE_KEY in operations.state
 
 
 def test_single_job_rejects_evidence_event_before_provider_or_enqueue(

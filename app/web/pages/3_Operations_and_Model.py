@@ -293,6 +293,35 @@ with tab_backup:
     st.code("python -m app.ops.backup backup", language="bash")
 
 with tab_model:
+    capture_runtime = model.get("capture_interpretation") or {}
+    qwen_runtime = model.get("qwen_risk") or {}
+    qwen_publication = qwen_runtime.get("publication") or {}
+    runtime_cols = st.columns(4)
+    runtime_cols[0].metric(
+        "DeepSeek 解释",
+        "已启用" if capture_runtime.get("enabled") else "已禁用",
+    )
+    runtime_cols[1].metric(
+        "解释候选",
+        int(capture_runtime.get("candidate_count") or 0),
+    )
+    runtime_cols[2].metric(
+        "千问运行态",
+        str(qwen_runtime.get("runtime_state") or "未知"),
+    )
+    runtime_cols[3].metric(
+        "千问公网态",
+        str(qwen_publication.get("state") or "CANDIDATE"),
+    )
+    queue = capture_runtime.get("by_status") or {}
+    st.caption(
+        "DeepSeek 队列："
+        + " · ".join(f"{key}={value}" for key, value in sorted(queue.items()))
+        + "。千问结果默认只写影子审计表；没有独立 PUBLIC_APPROVED 收据时不会进入公网。"
+    )
+    if not qwen_runtime.get("enabled"):
+        st.info("千问当前明确禁用：不会调用本地模型；历史影子结果也不会因存在于数据库而自动公开。")
+
     card = model.get("model_card")
     if card:
         metrics = card.get("metrics") or {}

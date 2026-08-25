@@ -38,6 +38,7 @@ from .qwen_risk_semantics import (
     QwenRiskContractError,
     QwenRiskModelProvider,
     build_qwen_risk_input,
+    build_qwen_risk_input_contract,
 )
 from .qwen_risk_worker import run_qwen_risk_batch
 
@@ -73,5 +74,6 @@ __all__ = [
     "QwenRiskContractError",
     "QwenRiskModelProvider",
     "build_qwen_risk_input",
+    "build_qwen_risk_input_contract",
     "run_qwen_risk_batch",
 ]

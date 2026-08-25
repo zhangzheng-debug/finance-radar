@@ -209,7 +209,7 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
             width="stretch",
         )
 
-    state = str(payload.get("state") or "PENDING")
+    state = str(payload.get("state") or "CHECKING")
     interpretation = payload.get("item")
     interpretation = interpretation if isinstance(interpretation, dict) else None
     if state == "READY" and interpretation:
@@ -231,10 +231,24 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
             for item in missing[:3]:
                 st.markdown(f"- {escape(str(item))}")
         st.caption("完整结果已通过引文、数字、版本和提示词合同校验后一次性展示。")
-    elif state == "FAILED_RETRYING":
-        st.warning("AI 自动解释暂不可用；原始捕获仍保留，系统不会用猜测内容替代。")
+    elif state == "ELIGIBLE_NOT_QUEUED":
+        st.info("捕获文本符合解释边界，但尚未进入后台队列；原文阅读不受影响。")
+    elif state == "QUEUED":
+        st.info("AI 自动解释已进入后台队列；其他事件内容已经可以正常阅读。")
+    elif state == "RUNNING":
+        st.info("AI 正在读取这条捕获文本；结果完成并通过合同校验后才会展示。")
+    elif state == "RETRY_WAIT":
+        retry_at = str(payload.get("next_retry_at") or "").strip()
+        suffix = f"（下次重试：{escape(retry_at)}）" if retry_at else ""
+        st.warning(f"本次外部调用未完成，后台会自动重试{suffix}；不会用猜测补位。")
+    elif state == "FAILED_TERMINAL":
+        st.warning("多次尝试后仍未生成合规解释；捕获原文仍可读，系统不会伪造结果。")
+    elif state == "SUPERSEDED":
+        st.info("已有解释不再匹配当前文本或事件版本，后台将按新输入重新生成。")
+    elif state == "STATUS_UNAVAILABLE":
+        st.warning("暂时无法读取后台任务状态；这不代表任务仍在生成，稍后会自动重试查询。")
     else:
-        st.info("事件主体和捕获文本已加载；AI 自动解释正在后台生成，不影响其他内容阅读。")
+        st.info("正在读取后台任务的真实状态；其他事件内容不受影响。")
 
 
 @st.fragment(run_every="2s")
@@ -243,43 +257,18 @@ def render_capture_explanation_fragment(
     event_id: str,
     initial_payload: dict[str, object],
 ) -> None:
-    """Poll only the cache-only explanation panel for at most thirty seconds."""
+    """Poll the cache-only endpoint without inventing a local queue state."""
 
-    final_key = f"capture_explanation_final:{event_id}"
-    started_key = f"capture_explanation_started:{event_id}"
-    payload = st.session_state.get(final_key)
-    if not isinstance(payload, dict):
-        started = st.session_state.get(started_key)
-        if not isinstance(started, datetime):
-            started = datetime.now(timezone.utc)
-            st.session_state[started_key] = started
-        elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-        if elapsed > 30:
-            payload = {
-                "display": True,
-                "state": "PENDING",
-                "source": None,
-                "item": None,
-            }
-        else:
-            try:
-                payload = api_request(
-                    f"/api/v1/events/{event_path_id}/capture-explanation",
-                    timeout_seconds=3,
-                )
-            except Exception:
-                payload = dict(initial_payload)
-                payload["display"] = True
-                payload["state"] = "FAILED_RETRYING"
-                payload.setdefault("item", None)
-        if str(payload.get("state") or "") in {
-            "READY",
-            "FAILED_RETRYING",
-            "NOT_APPLICABLE",
-            "NO_CAPTURE_TEXT",
-            "REFETCH_PRIMARY_SOURCE",
-        }:
-            st.session_state[final_key] = payload
+    try:
+        payload = api_request(
+            f"/api/v1/events/{event_path_id}/capture-explanation",
+            timeout_seconds=3,
+        )
+    except Exception:
+        payload = dict(initial_payload)
+        payload["display"] = bool(initial_payload.get("display"))
+        payload["state"] = "STATUS_UNAVAILABLE"
+        payload.setdefault("item", None)
     render_capture_explanation_payload(payload)
 
 
@@ -1121,6 +1110,13 @@ if preview_event_id:
                     risk_meta += f" · 置信度 {escape(str(public_copy['risk_confidence']))}"
                 if public_copy["risk_model_version"]:
                     risk_meta += f" · 模型 {escape(str(public_copy['risk_model_version']))}"
+                risk_article = (
+                    f'<article><span>{escape(str(public_copy["risk_heading"]))}</span>'
+                    f'<p><strong>{escape(str(public_copy["risk_label"]))}</strong>{risk_meta} · '
+                    f'{escape(str(public_copy["risk_explanation"]))}</p></article>'
+                    if public_copy["risk_route"]
+                    else ""
+                )
                 st.markdown(
                     '<section class="event-answer" aria-label="事件阅读摘要">'
                     '<div class="event-answer-meta">'
@@ -1143,9 +1139,7 @@ if preview_event_id:
                         else ''
                     )
                     + '</p></article>'
-                    f'<article><span>{escape(str(public_copy["risk_heading"]))}</span>'
-                    f'<p><strong>{escape(str(public_copy["risk_label"]))}</strong>{risk_meta} · '
-                    f'{escape(str(public_copy["risk_explanation"]))}</p></article>'
+                    f'{risk_article}'
                     '</div>'
                     '</section>',
                     unsafe_allow_html=True,

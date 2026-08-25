@@ -8,12 +8,24 @@ from fastapi.testclient import TestClient
 
 from app.api.main import create_app
 from app.config import Settings
+from app.models.qwen_risk_contract import (
+    QWEN_RISK_CONTRACT_VERSION,
+    QWEN_RISK_PROMPT_VERSION,
+)
+from app.services import (
+    CAPTURE_INTERPRETATION_CONTRACT,
+    CAPTURE_INTERPRETATION_PROMPT_SHA256,
+    DEEPSEEK_CHEAP_TEXT_MODEL,
+    build_qwen_risk_input_contract,
+    normalized_capture_input,
+)
+from app.services.capture_interpretation import CAPTURE_INTERPRETATION_PROMPT_VERSION
 from app.services.public_event_semantics import (
     derive_public_event_semantics,
     project_public_qwen_semantics,
     project_public_risk_assessment,
 )
-from app.storage import OperationsRepository
+from app.storage import LedgerRepository, OperationsRepository
 from scripts.event_ledger import open_ledger
 
 
@@ -147,6 +159,8 @@ def test_qwen_semantics_are_separate_from_fact_confirmation() -> None:
     run = {
         "model_version": "qwen-risk-abc",
         "created_at": "2026-08-25T01:02:03+00:00",
+        "publication_state": "PUBLIC_APPROVED",
+        "current_input": True,
         "output": {
             "model_task": "QWEN_RISK_SEMANTICS",
             "event_version": 3,
@@ -163,7 +177,16 @@ def test_qwen_semantics_are_separate_from_fact_confirmation() -> None:
     assert projected["conditional_language_required"] is True
     assert projected["confirms_event_fact"] is False
     assert projected["confidence"] is None
+    assert projected["publication_state"] == "PUBLIC_APPROVED"
+    assert projected["shadow"] is False
     assert project_public_qwen_semantics(run, current_version=4) is None
+    assert (
+        project_public_qwen_semantics(
+            {**run, "publication_state": "SHADOW_ACCEPTED"},
+            current_version=3,
+        )
+        is None
+    )
 
 
 def test_latest_model_runs_are_batched_and_match_requested_event_versions(
@@ -391,6 +414,137 @@ def test_public_list_detail_and_dossier_share_current_semantics(tmp_path: Path) 
         assert event["risk_assessment"]["confidence"] is None
         assert event["risk_assessment"]["confidence_applicable"] is False
         assert event["risk_assessment"]["current"] is True
+
+
+def test_qwen_publication_is_closed_until_approved_and_current_input_matches(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    ledger = LedgerRepository(ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    item = ledger.shadow_batch(event_ids=["semantic-event"], order="event_id")[0]
+    adapter = "a" * 64
+    model_version = "qwen-risk-" + adapter[:16]
+    contract = build_qwen_risk_input_contract(
+        item["detail"], item["evidence"], model_version=model_version
+    )
+    result = {
+        **contract,
+        "model_task": "QWEN_RISK_SEMANTICS",
+        "adapter_sha256": adapter,
+        "event_version": 1,
+        "event_status": "candidate",
+        "polarity": "ADVERSE",
+        "materiality": "MATERIAL_ADVERSE",
+        "adverse_strength": "HIGH",
+        "semantic_priority": "PRIORITY_REVIEW",
+        "label": "PRIORITY_REVIEW",
+        "confidence": 0.0,
+        "confidence_applicable": False,
+        "latency_ms": 1.0,
+        "shadow": True,
+        "no_trading": True,
+    }
+    operations.record_model_run("semantic-event", result)
+    application = create_app(settings)
+
+    with TestClient(application) as client:
+        assert client.get("/api/v1/events/semantic-event").json()["data"][
+            "event"
+        ]["semantic_assessment"] is None
+
+        operations.set_state(
+            "qwen_risk_publication_v1",
+            {
+                "state": "PUBLIC_APPROVED",
+                "model_version": model_version,
+                "adapter_sha256": adapter,
+                "contract_version": QWEN_RISK_CONTRACT_VERSION,
+                "prompt_version": QWEN_RISK_PROMPT_VERSION,
+                "approval_receipt_sha256": "b" * 64,
+                "approved_at": "2026-08-25T01:00:00+00:00",
+            },
+        )
+        approved = client.get("/api/v1/events/semantic-event").json()["data"][
+            "event"
+        ]["semantic_assessment"]
+        assert approved["publication_state"] == "PUBLIC_APPROVED"
+        assert approved["shadow"] is False
+
+        # A source revision invalidates the previously approved input even when
+        # the canonical event version has not changed.
+        with sqlite3.connect(ledger_path) as connection:
+            connection.execute(
+                """UPDATE raw_observations
+                   SET title='Revised source title',content_sha256=?
+                   WHERE observation_id='semantic-observation'""",
+                ("2" * 64,),
+            )
+            connection.commit()
+        invalidated = client.get("/api/v1/events/semantic-event").json()["data"][
+            "event"
+        ]["semantic_assessment"]
+        assert invalidated is None
+
+
+def test_capture_explanation_exposes_real_queue_retry_and_terminal_states(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    ledger = LedgerRepository(ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    detail = ledger.event_detail("semantic-event")
+    capture = ledger.captured_sources("semantic-event")[0]
+    normalized = normalized_capture_input(detail["event"], capture)
+    interpretation_id, inserted = operations.enqueue_capture_interpretation(
+        "semantic-event",
+        str(capture["observation_id"]),
+        normalized,
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        provider="deepseek",
+        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+        external_call=True,
+    )
+    assert inserted is True
+    application = create_app(settings)
+    endpoint = "/api/v1/events/semantic-event/capture-explanation"
+    with TestClient(application) as client:
+        queued = client.get(endpoint).json()["data"]
+        assert queued["state"] == "QUEUED"
+        assert queued["attempts"] == 0
+
+        with sqlite3.connect(settings.operations_db) as connection:
+            connection.execute(
+                """UPDATE capture_interpretation_runs
+                   SET status='PENDING',attempts=1,available_at=?
+                   WHERE interpretation_id=?""",
+                ("2026-08-25T02:00:00+00:00", interpretation_id),
+            )
+            connection.commit()
+        retry = client.get(endpoint).json()["data"]
+        assert retry["state"] == "RETRY_WAIT"
+        assert retry["attempts"] == 1
+        assert retry["next_retry_at"] == "2026-08-25T02:00:00+00:00"
+
+        with sqlite3.connect(settings.operations_db) as connection:
+            connection.execute(
+                """UPDATE capture_interpretation_runs
+                   SET status='FAILED',updated_at='2026-08-25T02:01:00+00:00'
+                   WHERE interpretation_id=?""",
+                (interpretation_id,),
+            )
+            connection.commit()
+        terminal = client.get(endpoint).json()["data"]
+        assert terminal["state"] == "FAILED_TERMINAL"
+        assert terminal["source"]["capture_receipt_sha256"] == capture[
+            "capture_receipt_sha256"
+        ]
 
 
 def test_public_events_remain_available_when_model_store_read_fails(

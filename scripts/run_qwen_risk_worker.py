@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 
 from app.config import Settings
 from app.services import QwenRiskModelProvider, run_qwen_risk_batch
@@ -27,12 +28,27 @@ def main() -> int:
         timeout_seconds=settings.qwen_risk_timeout_seconds,
         max_tokens=settings.qwen_risk_max_tokens,
     )
+    operations = OperationsRepository(settings.operations_db)
     result = run_qwen_risk_batch(
         LedgerRepository(settings.ledger_db),
-        OperationsRepository(settings.operations_db),
+        operations,
         provider,
         scan_limit=args.scan_limit,
         run_limit=args.limit,
+    )
+    operations.set_state(
+        "qwen_risk_worker_runtime_v1",
+        {
+            "status": "COMPLETED" if not result["errors"] else "PARTIAL",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "model_version": provider.model_version,
+            "attempted": result.get("attempted", 0),
+            "recorded": result.get("recorded", 0),
+            "input_insufficient": result.get("input_insufficient", 0),
+            "errors": len(result.get("errors") or []),
+            "shadow": True,
+            "no_trading": True,
+        },
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0 if not result["errors"] else 1

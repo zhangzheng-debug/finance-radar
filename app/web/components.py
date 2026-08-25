@@ -804,12 +804,12 @@ def public_event_evidence_posture(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
-    """Translate current risk routing without pretending every run used a model.
+    """Render only an explicitly public-approved Qwen semantic assessment.
 
-    ``route`` says where the item was routed; ``decision_source`` says what
-    produced that route.  Those are deliberately kept separate because the
-    deterministic gates and keyword fallback can return a route without ever
-    invoking the trained semantic model.
+    Historical router gates remain available to operator tooling, but their
+    workflow labels (rule gate, keyword fallback, automatic abstention) are not
+    reader-facing financial semantics.  A missing approved Qwen result is
+    therefore shown as unavailable, never replaced by an internal route.
     """
 
     semantic = item.get("semantic_assessment")
@@ -851,121 +851,24 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
                 "decision_source": "HUMAN_GOLD_TRAINED_QWEN",
                 "decision_source_label": "人类金标训练模型",
                 "trained_model": True,
-                "shadow": False,
+                "shadow": _public_bool(semantic.get("shadow")),
                 "current": True,
             }
-
-    raw = item.get("risk_assessment")
-    if not isinstance(raw, dict):
-        raw = {}
-    route = str(raw.get("route") or "").strip().upper()
-    current_value = raw.get("current")
-    current = bool(route) if current_value is None else _public_bool(current_value)
-    if not current or route not in PUBLIC_RISK_ROUTE_LABELS:
-        route = ""
-
-    shadow = _public_bool(raw.get("shadow"))
-    decision_source = str(raw.get("decision_source") or "").strip().upper()
-    source_label = PUBLIC_RISK_DECISION_SOURCE_LABELS.get(
-        decision_source, "研判来源未标明"
-    )
-    trained_model = decision_source == "TRAINED_SEMANTIC_MODEL"
-
-    if not route:
-        heading = "自动风险语义"
-        label = "尚无当前版本的自动研判"
-        source_label = ""
-    elif trained_model:
-        heading = "自动风险语义"
-        label = f"自动研判 · {PUBLIC_RISK_ROUTE_LABELS[route]}"
-    else:
-        heading = "自动风险分流"
-        route_label = (
-            "自动弃权"
-            if route == "ABSTAIN"
-            and decision_source
-            in {
-                "DETERMINISTIC_EVIDENCE_GATE",
-                "DETERMINISTIC_SEMANTIC_POLICY_GATE",
-                "LEGACY_SCOPE_GUARDRAIL",
-            }
-            else PUBLIC_RISK_ROUTE_LABELS[route]
-        )
-        label = f"{source_label} · {route_label}"
-
-    confidence_text = ""
-    # Only an explicitly identified trained-model result may expose calibrated
-    # confidence.  Rule gates and keyword fallbacks keep diagnostic scores out
-    # of the reader UI even if an old producer accidentally marks them usable.
-    if (
-        route
-        and trained_model
-        and _public_bool(raw.get("confidence_applicable"))
-    ):
-        try:
-            confidence = float(raw.get("confidence"))
-        except (TypeError, ValueError):
-            confidence = -1.0
-        if confidence >= 0:
-            confidence = confidence * 100 if confidence <= 1 else confidence
-            confidence_text = f"{min(confidence, 100):.0f}%"
-
-    if not route:
-        explanation = (
-            "事件与现有来源仍可正常浏览；后台尚未产生绑定当前事件版本的自动研判。"
-        )
-    elif trained_model:
-        explanation = {
-            "RISK_REVIEW": "训练模型建议优先复核这条可能的下行风险线索。",
-            "NON_TARGET": "训练模型暂未把这条事件路由为主要做空风险目标。",
-            "ABSTAIN": "当前信息不足以支持训练模型作出方向性研判。",
-        }[route]
-    elif decision_source == "DETERMINISTIC_EVIDENCE_GATE":
-        explanation = (
-            "当前版本未通过确定性证据门，系统自动弃权；训练模型没有被调用。"
-            if route == "ABSTAIN"
-            else "该路由由确定性证据门产生；训练模型没有被调用。"
-        )
-    elif decision_source == "DETERMINISTIC_SEMANTIC_POLICY_GATE":
-        explanation = (
-            "确定性语义规则门自动弃权；训练模型没有被调用。"
-            if route == "ABSTAIN"
-            else "该路由由确定性语义规则门产生；训练模型没有被调用。"
-        )
-    elif decision_source == "KEYWORD_FALLBACK":
-        explanation = (
-            "这是关键词回退启发式的自动分流，不是训练模型输出，"
-            "也不是校准后的概率判断。"
-        )
-    elif decision_source == "LEGACY_SCOPE_GUARDRAIL":
-        explanation = (
-            "该路由由兼容旧数据的确定性范围规则产生；训练模型没有被调用。"
-        )
-    else:
-        explanation = (
-            "API 未提供可识别的 decision_source，无法把这次路由归因为训练模型；"
-            "这里只展示路由结果。"
-        )
-
-    if route:
-        explanation += " 自动分流不负责确认事件真假，也不触发交易。"
-
     return {
-        "route": route,
-        "label": label,
-        "heading": heading,
-        "explanation": explanation,
-        "confidence": confidence_text,
-        "model_version": (
-            _bounded_public_text(raw.get("model_version"), limit=80)
-            if trained_model and route
-            else ""
+        "route": "",
+        "label": "尚无已批准的自动风险语义",
+        "heading": "自动风险语义",
+        "explanation": (
+            "事件与来源仍可正常浏览。千问结果只有在模型、输入和发布审批均匹配当前版本时才会展示；"
+            "内部规则分流不会冒充面向用户的风险判断。"
         ),
-        "decision_source": decision_source if route else "",
-        "decision_source_label": source_label,
-        "trained_model": trained_model and bool(route),
-        "shadow": shadow,
-        "current": bool(route),
+        "confidence": "",
+        "model_version": "",
+        "decision_source": "",
+        "decision_source_label": "",
+        "trained_model": False,
+        "shadow": False,
+        "current": False,
     }
 
 
@@ -1266,6 +1169,8 @@ def event_feed_row(
             f'<span class="feed-chip {risk_class}">'
             f'{escape(str(copy["risk_heading"]))}：'
             f'{escape(str(copy["risk_label"]))}</span>'
+            if copy["risk_route"]
+            else ""
         )
         disposition_markup = (
             f'<span class="feed-chip status-rejected">'

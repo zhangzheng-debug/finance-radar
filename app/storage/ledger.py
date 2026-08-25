@@ -148,6 +148,7 @@ live_interpretation_capture AS (
            r.source_published_at,r.local_received_at,r.title,r.summary,
            r.canonical_url,r.content_sha256,r.raw_json,
            r.observation_status,r.latest_revision_no,r.latest_revision_kind,
+           r.latest_revision_at,
            s.authority_tier,
            CASE WHEN x.observation_id IS NOT NULL
                      AND (
@@ -1358,29 +1359,62 @@ class LedgerRepository:
         *,
         limit: int = 250,
         offset: int = 0,
+        order: str = "fair",
+        after: tuple[int, str, str] | None = None,
     ) -> list[dict[str, str]]:
-        """Load one bounded, stable window of receipt-bound LLM candidates.
+        """Load one bounded window of receipt-bound LLM candidates.
 
         This is the scheduler path, not the historical recovery-report path.
         It intentionally excludes orphan captures and official/refetch buckets,
         preserves the exact immutable receipt used by the single-job runner,
-        and never loads more than 1,000 capture payloads into memory.
+        and never loads more than 1,000 capture payloads into memory.  The
+        ``recent`` lane keeps new/revised captures responsive.  The ``fair``
+        lane supports a durable keyset cursor, so a continuously changing head
+        of the ledger cannot reset or starve the historical sweep.
         """
 
         limit = max(1, min(int(limit), 1_000))
         offset = max(0, int(offset))
+        if order not in {"fair", "recent"}:
+            raise ValueError(f"unsupported capture interpretation order: {order}")
+        bucket_priority = "CASE bucket WHEN 'NO_URL_RAW_ONLY' THEN 0 ELSE 1 END"
+        where = ""
+        params: list[Any] = []
+        if order == "fair" and after is not None:
+            after_priority, after_event_id, after_observation_id = after
+            where = f"""WHERE ({bucket_priority}>?
+                           OR ({bucket_priority}=? AND event_id>?)
+                           OR ({bucket_priority}=? AND event_id=? AND observation_id>?))"""
+            params.extend(
+                (
+                    int(after_priority),
+                    int(after_priority),
+                    str(after_event_id),
+                    int(after_priority),
+                    str(after_event_id),
+                    str(after_observation_id),
+                )
+            )
+        ordering = (
+            f"{bucket_priority},event_id,observation_id"
+            if order == "fair"
+            else "COALESCE(latest_revision_at,local_received_at) DESC,event_id,observation_id"
+        )
+        # OFFSET remains only for backwards-compatible bounded diagnostics.  The
+        # production fair scheduler passes ``after`` and therefore never uses it.
+        params.extend((limit, 0 if after is not None else offset))
         with closing(self.connect()) as connection:
             rows = connection.execute(
                 f"""WITH {_CAPTURE_INTERPRETATION_CANDIDATE_CTES}
                     SELECT bucket,current_version,event_id,observation_id,source_id,external_id,
                            source_published_at,local_received_at,canonical_url,
                            content_sha256,raw_json,latest_revision_no,
-                           latest_revision_kind
+                           latest_revision_kind,latest_revision_at
                     FROM eligible_interpretation_capture
-                    ORDER BY CASE bucket WHEN 'NO_URL_RAW_ONLY' THEN 0 ELSE 1 END,
-                             event_id,observation_id
+                    {where}
+                    ORDER BY {ordering}
                     LIMIT ? OFFSET ?""",
-                (limit, offset),
+                params,
             ).fetchall()
 
         candidates: list[dict[str, str]] = []
@@ -1414,6 +1448,14 @@ class LedgerRepository:
                         ).encode("utf-8")
                     ).hexdigest(),
                     "bucket": str(item["bucket"]),
+                    "bucket_priority": (
+                        0 if str(item["bucket"]) == "NO_URL_RAW_ONLY" else 1
+                    ),
+                    "latest_revision_at": str(
+                        item.get("latest_revision_at")
+                        or item.get("local_received_at")
+                        or ""
+                    ),
                 }
             )
         return candidates
@@ -1615,6 +1657,7 @@ class LedgerRepository:
         limit: int = 200,
         offset: int = 0,
         order: str = "latest",
+        event_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Load recent shadow-router inputs with two bounded SQL queries.
 
@@ -1627,6 +1670,13 @@ class LedgerRepository:
         default recent lane keeps newly changed events responsive.
         """
 
+        requested_event_ids = list(
+            dict.fromkeys(
+                str(value).strip()
+                for value in (event_ids or [])
+                if str(value).strip()
+            )
+        )[:200]
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
         sort_orders = {
@@ -1642,14 +1692,22 @@ class LedgerRepository:
             # revision before SQLite could apply LIMIT.  On the production
             # ledger that made a 200-event shadow window consume the outer
             # ten-minute worker deadline.
+            event_filter = ""
+            event_params: list[Any] = []
+            if requested_event_ids:
+                event_filter = "WHERE ce.event_id IN (" + ",".join(
+                    "?" for _ in requested_event_ids
+                ) + ")"
+                event_params.extend(requested_event_ids)
             event_rows = connection.execute(
                 f"""SELECT ce.*,v.facts_json
                     FROM canonical_events ce
                     JOIN event_versions v
                       ON v.event_id=ce.event_id AND v.version=ce.current_version
+                    {event_filter}
                     ORDER BY {sort_orders[order]}
                     LIMIT ? OFFSET ?""",
-                (limit, offset),
+                (*event_params, limit, offset),
             ).fetchall()
             event_ids = [str(row["event_id"]) for row in event_rows]
             preferred_source_by_event: dict[str, dict[str, Any]] = {
@@ -1662,7 +1720,9 @@ class LedgerRepository:
                 placeholders = ",".join("?" for _ in event_ids)
                 source_rows = connection.execute(
                     f"""WITH ranked_source AS (
-                          SELECT eo.event_id,r.title,r.summary,r.source_id,
+                          SELECT eo.event_id,r.observation_id,r.title,r.summary,r.source_id,
+                                 r.external_id,r.canonical_url,r.content_sha256,r.raw_json,
+                                 r.latest_revision_no,r.latest_revision_kind,r.latest_revision_at,
                                  r.source_published_at,r.local_received_at,
                                  ROW_NUMBER() OVER (
                                    PARTITION BY eo.event_id
@@ -1676,7 +1736,9 @@ class LedgerRepository:
                             AND eo.relation_type!='filtered_aggregated_noise'
                             AND r.observation_status!='deleted'
                         )
-                        SELECT event_id,title,summary,source_id,
+                        SELECT event_id,observation_id,title,summary,source_id,external_id,
+                               canonical_url,content_sha256,raw_json,latest_revision_no,
+                               latest_revision_kind,latest_revision_at,
                                source_published_at,local_received_at
                         FROM ranked_source
                         WHERE source_rank=1""",
@@ -1685,6 +1747,10 @@ class LedgerRepository:
                 for row in source_rows:
                     item = dict(row)
                     event_id = str(item.pop("event_id"))
+                    raw_payload = str(item.pop("raw_json", "") or "")
+                    item["raw_payload_sha256"] = hashlib.sha256(
+                        raw_payload.encode("utf-8")
+                    ).hexdigest()
                     preferred_source_by_event[event_id] = item
                 evidence_rows = connection.execute(
                     f"""WITH ranked_evidence AS (

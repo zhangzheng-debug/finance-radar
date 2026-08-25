@@ -20,6 +20,13 @@ FORMAL_MUTATION_STATES = {
     "ABANDONED",
     "RECOVERY_CONFLICT",
 }
+QWEN_RISK_PUBLICATION_STATE_KEY = "qwen_risk_publication_v1"
+QWEN_RISK_PUBLICATION_STATES = {
+    "CANDIDATE",
+    "SHADOW_ACCEPTED",
+    "PUBLIC_APPROVED",
+    "REVOKED",
+}
 
 
 def utc_now() -> str:
@@ -715,6 +722,70 @@ class OperationsRepository:
                     row["output"] = output
                     selected[event_id] = row
         return selected
+
+    def qwen_risk_publication(self) -> dict[str, Any]:
+        """Return a fail-closed model-publication contract.
+
+        Persisted model rows are always shadow rows.  They become eligible for
+        public projection only after a separate, explicit approval receipt pins
+        the exact model, adapter, prompt, and contract.  Missing or malformed
+        state therefore resolves to ``CANDIDATE`` rather than inheriting an old
+        result accidentally.
+        """
+
+        default = {
+            "state": "CANDIDATE",
+            "public_approved": False,
+            "model_version": None,
+            "adapter_sha256": None,
+            "contract_version": None,
+            "prompt_version": None,
+            "approval_receipt_sha256": None,
+            "approved_at": None,
+        }
+        raw = self.get_state(QWEN_RISK_PUBLICATION_STATE_KEY, {})
+        if not isinstance(raw, dict):
+            return default
+        state = str(raw.get("state") or "CANDIDATE").strip().upper()
+        if state not in QWEN_RISK_PUBLICATION_STATES:
+            return default
+        result = {**default, **{key: raw.get(key) for key in default}}
+        result["state"] = state
+        result["public_approved"] = False
+        if state != "PUBLIC_APPROVED":
+            return result
+        required_text = (
+            "model_version",
+            "contract_version",
+            "prompt_version",
+            "approved_at",
+        )
+        if any(not str(result.get(key) or "").strip() for key in required_text):
+            return default
+        for key in ("adapter_sha256", "approval_receipt_sha256"):
+            digest = str(result.get(key) or "").strip().casefold()
+            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                return default
+            result[key] = digest
+        result["public_approved"] = True
+        return result
+
+    def qwen_risk_run_health(self) -> dict[str, Any]:
+        """Return aggregate shadow coverage without exposing model outputs."""
+
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                """SELECT COUNT(*) AS runs,COUNT(DISTINCT event_id) AS events,
+                          SUM(CASE WHEN shadow=1 THEN 1 ELSE 0 END) AS shadow_runs,
+                          MAX(created_at) AS latest_at
+                   FROM model_runs WHERE model_version LIKE 'qwen-risk-%'"""
+            ).fetchone()
+        return {
+            "runs": int(row["runs"] or 0),
+            "events": int(row["events"] or 0),
+            "shadow_runs": int(row["shadow_runs"] or 0),
+            "latest_at": row["latest_at"],
+        }
 
     @staticmethod
     def _capture_interpretation_idempotency_key(
