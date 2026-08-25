@@ -33,6 +33,13 @@ from .financial_knowledge import (
     fully_diluted_share_count,
     knowledge_context,
 )
+from .qwen_risk_semantics import (
+    QWEN_RISK_MODEL_TASK,
+    QwenRiskContractError,
+    QwenRiskModelProvider,
+    build_qwen_risk_input,
+)
+from .qwen_risk_worker import run_qwen_risk_batch
 
 __all__ = [
     "EvidenceAgent",
@@ -62,4 +69,9 @@ __all__ = [
     "financing_dilution",
     "fully_diluted_share_count",
     "knowledge_context",
+    "QWEN_RISK_MODEL_TASK",
+    "QwenRiskContractError",
+    "QwenRiskModelProvider",
+    "build_qwen_risk_input",
+    "run_qwen_risk_batch",
 ]

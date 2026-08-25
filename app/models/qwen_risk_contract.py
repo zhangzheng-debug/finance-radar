@@ -15,6 +15,10 @@ from app.models.risk_label_contract import MATERIALITY, POLARITIES
 
 QWEN_RISK_CONTRACT_VERSION = "qwen-risk-semantics-v1"
 QWEN_RISK_PROMPT_VERSION = "qwen-risk-human-gold-sft-v1"
+QWEN_RISK_SYSTEM_PROMPT = (
+    "你是金融雷达的语义风险分类器。只判断所给文本表达的极性与做空风险重大性，"
+    "不判断证据真假，不补充外部事实，不给投资建议。仅输出指定 JSON。"
+)
 ADVERSE_STRENGTHS = frozenset({"HIGH", "LOW", "NONE", "UNCLEAR"})
 ASSESSMENT_SCOPES = frozenset({"EVIDENCE_SUPPORTED", "SOURCE_CONDITIONAL"})
 SEMANTIC_PRIORITIES = frozenset({"PRIORITY_REVIEW", "ROUTINE", "UNDECIDABLE"})

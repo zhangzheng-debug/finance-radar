@@ -49,6 +49,7 @@ from app.services import (
 from app.services.capture_interpretation import CAPTURE_INTERPRETATION_PROMPT_VERSION
 from app.services.public_event_semantics import (
     derive_public_event_semantics,
+    project_public_qwen_semantics,
     project_public_risk_assessment,
 )
 from app.services.replay import ReplayCaseNotFound
@@ -931,6 +932,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         *,
         captured_source: dict[str, Any] | None = None,
         risk_run: dict[str, Any] | None = None,
+        qwen_run: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Return the public event fields without promoting private review prose.
 
@@ -945,6 +947,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result.update(derive_public_event_semantics(value))
         result["risk_assessment"] = project_public_risk_assessment(
             risk_run,
+            current_version=int(value.get("current_version") or 0),
+        )
+        result["semantic_assessment"] = project_public_qwen_semantics(
+            qwen_run,
             current_version=int(value.get("current_version") or 0),
         )
         # A structured claim is public only when the current event version has
@@ -1006,6 +1012,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # dependency.  If the operations store is locked or unavailable,
             # keep every canonical event visible and project a null assessment.
             LOGGER.warning("public risk assessment unavailable: %s", exc)
+            return {}
+
+    def current_qwen_runs(
+        events: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        event_versions: dict[str, int] = {}
+        for event in events:
+            event_id = str(event.get("event_id") or "").strip()
+            try:
+                current_version = int(event.get("current_version") or 0)
+            except (TypeError, ValueError):
+                continue
+            if event_id and current_version > 0:
+                event_versions[event_id] = current_version
+        try:
+            return operations.latest_qwen_risk_runs_for_versions(event_versions)
+        except (OSError, sqlite3.Error) as exc:
+            LOGGER.warning("public Qwen semantic assessment unavailable: %s", exc)
             return {}
 
     def public_evidence_item(value: dict[str, Any]) -> dict[str, Any]:
@@ -1267,6 +1291,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         *,
         evidence: list[dict[str, Any]],
         risk_run: dict[str, Any] | None = None,
+        qwen_run: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Return only fields consumed by the public event dossier.
 
@@ -1298,6 +1323,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else None
             ),
             risk_run=risk_run,
+            qwen_run=qwen_run,
         )
         public_facts = (
             {
@@ -1633,10 +1659,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not internal_reader:
             recent_events = list(data.get("recent_events", []))
             risk_runs = current_risk_runs(recent_events)
+            qwen_runs = current_qwen_runs(recent_events)
             data["recent_events"] = [
                 public_event_item(
                     item,
                     risk_run=risk_runs.get(str(item.get("event_id") or "")),
+                    qwen_run=qwen_runs.get(str(item.get("event_id") or "")),
                 )
                 for item in recent_events
             ]
@@ -1820,10 +1848,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             data = cached_read(cache_key, 20.0, read_events)
         if not internal_reader:
             risk_runs = current_risk_runs(data["items"])
+            qwen_runs = current_qwen_runs(data["items"])
             data["items"] = [
                 public_event_item(
                     item,
                     risk_run=risk_runs.get(str(item.get("event_id") or "")),
+                    qwen_run=qwen_runs.get(str(item.get("event_id") or "")),
                 )
                 for item in data["items"]
             ]
@@ -1871,6 +1901,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             event = dict(data.get("event") or {})
             risk_runs = current_risk_runs([event])
+            qwen_runs = current_qwen_runs([event])
             explanation_eligibility = ledger.capture_interpretation_eligibility(
                 event_id
             )
@@ -1879,6 +1910,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     data,
                     evidence=evidence,
                     risk_run=risk_runs.get(str(event.get("event_id") or "")),
+                    qwen_run=qwen_runs.get(str(event.get("event_id") or "")),
                 ),
                 "evidence": {"items": evidence},
                 "knowledge": knowledge_context(
@@ -1950,10 +1982,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             event = dict(data.get("event") or {})
             risk_runs = current_risk_runs([event])
+            qwen_runs = current_qwen_runs([event])
             data = public_event_detail(
                 data,
                 evidence=evidence,
                 risk_run=risk_runs.get(str(event.get("event_id") or "")),
+                qwen_run=qwen_runs.get(str(event.get("event_id") or "")),
             )
         return envelope(request, data)
 

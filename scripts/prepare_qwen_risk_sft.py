@@ -13,15 +13,12 @@ from typing import Any
 from app.models.qwen_risk_contract import (
     QWEN_RISK_CONTRACT_VERSION,
     QWEN_RISK_PROMPT_VERSION,
+    QWEN_RISK_SYSTEM_PROMPT,
     expected_semantic_payload,
 )
 from app.models.risk_label_contract import coherent_label
 
 
-SYSTEM_PROMPT = (
-    "你是金融雷达的语义风险分类器。只判断所给文本表达的极性与做空风险重大性，"
-    "不判断证据真假，不补充外部事实，不给投资建议。仅输出指定 JSON。"
-)
 CONTRACT_VERSION = "qwen-risk-sft-dataset-v1"
 DEVELOPMENT_SPLITS = frozenset({"TRAIN", "VALIDATION"})
 FINALIZABLE_EVIDENCE = frozenset({"PRIMARY_SUPPORTED", "MULTI_SOURCE_SUPPORTED"})
@@ -153,7 +150,7 @@ def prepare(frozen_dataset: Path, output_dir: Path) -> dict[str, Any]:
         )
         prepared = {
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": QWEN_RISK_SYSTEM_PROMPT},
                 {"role": "user", "content": _stable_json(review_input)},
                 {"role": "assistant", "content": _stable_json(assistant_payload)},
             ],

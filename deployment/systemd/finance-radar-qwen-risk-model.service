@@ -1,0 +1,34 @@
+[Unit]
+Description=Finance Radar human-gold-trained Qwen semantic risk model
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/finance-radar/qwen-risk/model-manifest.json
+ConditionPathExists=/opt/finance-radar/qwen-risk/finance-radar-qwen-risk-v1.gguf
+ConditionPathExists=/etc/finance-radar-qwen-risk.env
+
+[Service]
+Type=simple
+User=finance-radar
+Group=finance-radar
+WorkingDirectory=/opt/finance-radar/qwen-risk
+Slice=radarqwen.slice
+EnvironmentFile=/etc/finance-radar-qwen-risk.env
+Environment=LD_LIBRARY_PATH=/opt/finance-radar/evidence-llm/current
+ExecStartPre=/opt/finance-radar/venv/bin/python -B /opt/finance-radar/current/scripts/verify_qwen_risk_runtime_model.py --manifest /opt/finance-radar/qwen-risk/model-manifest.json --model /opt/finance-radar/qwen-risk/finance-radar-qwen-risk-v1.gguf --expected-adapter-sha256 ${FINANCE_RADAR_QWEN_RISK_ADAPTER_SHA256}
+ExecStart=/opt/finance-radar/evidence-llm/current/llama-server --model /opt/finance-radar/qwen-risk/finance-radar-qwen-risk-v1.gguf --alias ${FINANCE_RADAR_QWEN_RISK_MODEL} --host 127.0.0.1 --port 18602 --ctx-size 2048 --threads 2 --threads-batch 2 --parallel 1 --batch-size 128 --ubatch-size 128
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/finance-radar/qwen-risk /opt/finance-radar/evidence-llm
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryAccounting=true
+OOMPolicy=stop
+OOMScoreAdjust=700
+TasksMax=160
+
+[Install]
+WantedBy=multi-user.target

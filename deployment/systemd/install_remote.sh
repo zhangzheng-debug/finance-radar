@@ -1157,6 +1157,8 @@ ROLLBACK_SERVICE_UNITS=(
     # unrelated daily recovery drill.
     finance-radar-backup.timer
     finance-radar-evidence-llm.service
+    finance-radar-qwen-risk-model.service
+    finance-radar-qwen-risk-worker.timer
     # The interpretation service is a bounded oneshot, not a persistent
     # session.  Deployment waits for an in-flight invocation to finish but
     # never kills or restarts it merely because it was active at snapshot time.
@@ -1178,6 +1180,10 @@ ROLLBACK_PATHS=(
     /etc/systemd/system/finance-radar-backup.service
     /etc/systemd/system/finance-radar-backup.timer
     /etc/systemd/system/finance-radar-evidence-llm.service
+    /etc/systemd/system/radarqwen.slice
+    /etc/systemd/system/finance-radar-qwen-risk-model.service
+    /etc/systemd/system/finance-radar-qwen-risk-worker.service
+    /etc/systemd/system/finance-radar-qwen-risk-worker.timer
     /etc/systemd/system/finance-radar-capture-interpretation.service
     /etc/systemd/system/finance-radar-capture-interpretation.timer
     /etc/systemd/system/finance-radar.slice
@@ -2148,6 +2154,59 @@ restore_capture_interpretation_runtime() {
     fi
 }
 
+assert_qwen_risk_worker_quiescent() {
+    local attempt state jobs
+    for attempt in $(seq 1 650); do
+        state="$(systemctl show finance-radar-qwen-risk-worker.service \
+            --property=ActiveState --value 2>/dev/null || printf 'not-found')"
+        jobs="$(systemctl list-jobs --no-legend --plain 2>/dev/null | \
+            awk '$2 == "finance-radar-qwen-risk-worker.service" { print $0 }')" || return 1
+        case "$state" in
+            inactive|failed|not-found)
+                if [ -z "$jobs" ]; then
+                    systemctl reset-failed finance-radar-qwen-risk-worker.service \
+                        2>/dev/null || true
+                    printf 'qwen_risk_worker_quiescent=PASS wait_seconds=%s\n' \
+                        "$((attempt - 1))"
+                    return 0
+                fi
+                ;;
+        esac
+        sleep 1
+    done
+    printf 'Qwen risk worker did not become quiescent: state=%s jobs=%s\n' \
+        "$state" "${jobs:-none}" >&2
+    return 1
+}
+
+restore_qwen_risk_runtime() {
+    local timer=finance-radar-qwen-risk-worker.timer
+    local was_enabled=0 was_active=0
+    grep -Fqx -- "$timer" "$ROLLBACK_ENABLED_UNITS" && was_enabled=1
+    grep -Fqx -- "$timer" "$ROLLBACK_ACTIVE_UNITS" && was_active=1
+    if [ "$was_enabled" -eq 1 ]; then
+        systemctl enable "$timer" || return 1
+    else
+        systemctl disable "$timer" || return 1
+    fi
+    if [ "$was_active" -eq 1 ]; then
+        [ -s /etc/finance-radar-qwen-risk.env ] && \
+        [ -s /opt/finance-radar/qwen-risk/model-manifest.json ] && \
+        [ -s /opt/finance-radar/qwen-risk/finance-radar-qwen-risk-v1.gguf ] || {
+            printf 'cannot resume Qwen risk timer without its accepted model bundle\n' >&2
+            return 1
+        }
+        systemctl start finance-radar-qwen-risk-model.service || return 1
+        systemctl start "$timer" || return 1
+        systemctl is-active --quiet finance-radar-qwen-risk-model.service "$timer" || return 1
+        printf 'qwen_risk_timer=RESTORED_ACTIVE enabled=%s\n' "$was_enabled"
+    else
+        systemctl stop "$timer" 2>/dev/null || true
+        systemctl is-active --quiet "$timer" && return 1
+        printf 'qwen_risk_timer=RESTORED_INACTIVE enabled=%s\n' "$was_enabled"
+    fi
+}
+
 preserve_failed_predeploy_backup_hold() {
     local failed_root failure_phase
     [ -n "$PREDEPLOY_HOLD_ROOT" ] && [ -d "$PREDEPLOY_HOLD_ROOT" ] || return 0
@@ -2312,6 +2371,12 @@ if [ "$DEPLOY_MODE" = full ]; then
     fi
     assert_capture_interpretation_quiescent || \
         abort_cutover 'capture interpretation remained active before protected bridge backup' 4
+    if systemctl cat finance-radar-qwen-risk-worker.timer >/dev/null 2>&1; then
+        systemctl stop finance-radar-qwen-risk-worker.timer || \
+            abort_cutover 'Qwen risk timer failed to stop before protected bridge backup' 4
+    fi
+    assert_qwen_risk_worker_quiescent || \
+        abort_cutover 'Qwen risk worker remained active before protected bridge backup' 4
     inhibit_worker_resume || \
         abort_cutover 'unable to inhibit worker resume during protected bridge backup' 4
     systemctl stop finance-radar-worker || \
@@ -2518,6 +2583,14 @@ fi
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-capture-interpretation.service" \
     /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-capture-interpretation.timer" \
+    /etc/systemd/system/
+install -m 0644 "$RELEASE/deployment/systemd/radarqwen.slice" \
+    /etc/systemd/system/
+install -m 0644 "$RELEASE/deployment/systemd/finance-radar-qwen-risk-model.service" \
+    /etc/systemd/system/
+install -m 0644 "$RELEASE/deployment/systemd/finance-radar-qwen-risk-worker.service" \
+    /etc/systemd/system/
+install -m 0644 "$RELEASE/deployment/systemd/finance-radar-qwen-risk-worker.timer" \
     /etc/systemd/system/
 remove_legacy_managed_property_dropins || \
     abort_cutover 'refusing to replace an unrecognized Finance Radar memory override' 4
@@ -2838,6 +2911,9 @@ ACTIVATION_RECORD_COMMITTED=1
 # that record and execute the normal rollback transaction.
 if ! restore_capture_interpretation_runtime; then
     abort_cutover 'capture interpretation timer state could not be restored after activation checks' 6
+fi
+if ! restore_qwen_risk_runtime; then
+    abort_cutover 'Qwen risk timer state could not be restored after activation checks' 6
 fi
 # Recheck every public runtime and persistent timer after the activation receipt
 # and optional interpretation timer have settled. The accepted public marker is

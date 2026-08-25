@@ -307,6 +307,8 @@ def public_event_snapshot(
     semantic_input = dict(event)
     if not isinstance(semantic_input.get("risk_assessment"), dict):
         semantic_input["risk_assessment"] = detail.get("risk_assessment")
+    if not isinstance(semantic_input.get("semantic_assessment"), dict):
+        semantic_input["semantic_assessment"] = detail.get("semantic_assessment")
     posture = public_event_evidence_posture(semantic_input)
     risk = public_event_risk_assessment(semantic_input)
     legacy_state = public_event_state(event)
@@ -1039,6 +1041,10 @@ if preview_event_id:
             copy_input["facts"] = preview_facts
             if not isinstance(copy_input.get("risk_assessment"), dict):
                 copy_input["risk_assessment"] = preview_detail.get("risk_assessment")
+            if not isinstance(copy_input.get("semantic_assessment"), dict):
+                copy_input["semantic_assessment"] = preview_detail.get(
+                    "semantic_assessment"
+                )
             copy_input.setdefault("citable_evidence_count", len(preview_evidence))
             copy_input.setdefault("captured_source_count", len(preview_sources))
             if preview_evidence and not copy_input.get("credibility_tier"):

@@ -41,6 +41,15 @@ RISK_EVIDENCE_STATES = frozenset(
         "NOT_PROVIDED",
     }
 )
+QWEN_POLARITIES = frozenset({"ADVERSE", "POSITIVE", "NEUTRAL", "MIXED", "UNCLEAR"})
+QWEN_MATERIALITY = frozenset(
+    {"MATERIAL_ADVERSE", "NOT_MATERIAL_ADVERSE", "UNCLEAR"}
+)
+QWEN_ADVERSE_STRENGTHS = frozenset({"HIGH", "LOW", "NONE", "UNCLEAR"})
+QWEN_SEMANTIC_PRIORITIES = frozenset(
+    {"PRIORITY_REVIEW", "ROUTINE", "UNDECIDABLE"}
+)
+QWEN_ASSESSMENT_SCOPES = frozenset({"EVIDENCE_SUPPORTED", "SOURCE_CONDITIONAL"})
 
 
 def _count(value: Any) -> int:
@@ -167,4 +176,49 @@ def project_public_risk_assessment(
         "evaluated_at": _bounded_text(run.get("created_at"), 80),
         "shadow": bool(run.get("shadow", output.get("shadow", True))),
         "current": True,
+    }
+
+
+def project_public_qwen_semantics(
+    run: dict[str, Any] | None,
+    *,
+    current_version: int,
+) -> dict[str, Any] | None:
+    """Project human-gold-trained semantics without implying fact verification."""
+
+    if not isinstance(run, dict):
+        return None
+    output = run.get("output")
+    if not isinstance(output, dict) or output.get("model_task") != "QWEN_RISK_SEMANTICS":
+        return None
+    try:
+        evaluated_version = int(output.get("event_version") or 0)
+    except (TypeError, ValueError):
+        return None
+    if evaluated_version != int(current_version or 0):
+        return None
+    polarity = _bounded_enum(output.get("polarity"), QWEN_POLARITIES)
+    materiality = _bounded_enum(output.get("materiality"), QWEN_MATERIALITY)
+    strength = _bounded_enum(output.get("adverse_strength"), QWEN_ADVERSE_STRENGTHS)
+    priority = _bounded_enum(output.get("semantic_priority"), QWEN_SEMANTIC_PRIORITIES)
+    scope = _bounded_enum(output.get("assessment_scope"), QWEN_ASSESSMENT_SCOPES)
+    if None in {polarity, materiality, strength, priority, scope}:
+        return None
+    return {
+        "polarity": polarity,
+        "materiality": materiality,
+        "adverse_strength": strength,
+        "semantic_priority": priority,
+        "assessment_scope": scope,
+        "conditional_language_required": scope == "SOURCE_CONDITIONAL",
+        "model_version": _bounded_text(
+            output.get("model_version") or run.get("model_version"), 160
+        ),
+        "evaluated_at": _bounded_text(run.get("created_at"), 80),
+        "training_basis": "INDEPENDENT_DUAL_HUMAN_GOLD",
+        "automatic": True,
+        "confirms_event_fact": False,
+        "confidence": None,
+        "current": True,
+        "no_trading": True,
     }

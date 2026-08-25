@@ -1,0 +1,43 @@
+[Unit]
+Description=Finance Radar persisted Qwen semantic risk worker
+After=finance-radar-qwen-risk-model.service
+Requires=finance-radar-qwen-risk-model.service
+ConditionPathExists=/etc/finance-radar-qwen-risk.env
+
+[Service]
+Type=oneshot
+User=finance-radar
+Group=finance-radar
+WorkingDirectory=/opt/finance-radar/current
+Environment=PYTHONUNBUFFERED=1
+Environment=OMP_NUM_THREADS=1
+Environment=FINANCE_RADAR_DB=/opt/finance-radar/shared/data/finance_radar.sqlite3
+Environment=FINANCE_RADAR_OPS_DB=/opt/finance-radar/shared/data/finance_radar_operations.sqlite3
+Environment=FINANCE_RADAR_QWEN_RISK_ENABLED=1
+Environment=FINANCE_RADAR_QWEN_RISK_URL=http://127.0.0.1:18602
+EnvironmentFile=/etc/finance-radar-qwen-risk.env
+ExecStart=/opt/finance-radar/venv/bin/python -B scripts/run_qwen_risk_worker.py --limit 20 --scan-limit 100
+NoNewPrivileges=true
+UMask=0077
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryHigh=180M
+MemoryMax=260M
+TasksMax=32
+ReadWritePaths=/opt/finance-radar/shared/data
+InaccessiblePaths=-/etc/finance-radar.env -/etc/finance-radar-public.env -/etc/finance-radar-reviewer-principals.json -/opt/finance-radar/current/.env -/opt/finance-radar/current/.env.local -/opt/finance-radar/shared/reports
+
+[Install]
+WantedBy=multi-user.target
