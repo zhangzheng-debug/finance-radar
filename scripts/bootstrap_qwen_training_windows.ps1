@@ -20,6 +20,13 @@ if (-not (Test-Path -LiteralPath $pythonPath)) {
     py -3.12 -m venv $environmentPath
 }
 
+# Keep the probe and any follow-on plan execution bound to the isolated
+# training environment even when the caller did not activate the venv first.
+# Without this, Python imports succeed through the explicit interpreter while
+# shutil.which("swift") incorrectly reports that the CLI is missing.
+$environmentScriptsPath = Join-Path $environmentPath "Scripts"
+$env:PATH = "$environmentScriptsPath;$env:PATH"
+
 if ($Install) {
     & $pythonPath -m pip install --upgrade pip
     & $pythonPath -m pip install torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
@@ -29,6 +36,7 @@ if ($Install) {
 $probe = @'
 import json
 import shutil
+from dataclasses import fields
 
 result = {
     "python": None,
@@ -41,6 +49,7 @@ result = {
     "bitsandbytes_installed": False,
     "bitsandbytes_version": None,
     "swift_executable": shutil.which("swift"),
+    "swift_sft_required_fields": {},
     "training_started": False,
 }
 import sys
@@ -62,6 +71,23 @@ try:
     result["bitsandbytes_version"] = bitsandbytes.__version__
 except Exception as exc:
     result["bitsandbytes_error"] = f"{type(exc).__name__}:{exc}"
+try:
+    from swift.arguments import SftArguments
+    available_fields = {item.name for item in fields(SftArguments)}
+    required_fields = (
+        "val_dataset",
+        "quant_method",
+        "quant_bits",
+        "bnb_4bit_quant_type",
+        "bnb_4bit_use_double_quant",
+        "target_modules",
+        "strict",
+    )
+    result["swift_sft_required_fields"] = {
+        name: name in available_fields for name in required_fields
+    }
+except Exception as exc:
+    result["swift_sft_error"] = f"{type(exc).__name__}:{exc}"
 print(json.dumps(result, ensure_ascii=False, indent=2))
 '@
 
