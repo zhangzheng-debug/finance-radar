@@ -20,6 +20,20 @@ Qwen 和 DeepSeek 不能互相提供训练标签。价格、成交量、事件�
 
 ## 训练数据生成
 
+仲裁完成后先冻结 420 / 120 / 180。冻结器从来源元数据确定完整来源族留出，
+同时保持其余时间核心的先后顺序；它不读取模型输出或标签来挑选留出来源：
+
+```powershell
+python scripts/freeze_offline_human_gold.py `
+  --annotations D:\FinanceRadarGold\human_gold_annotations_unassigned.jsonl `
+  --report D:\FinanceRadarGold\human_gold_freeze_readiness.json `
+  --dataset D:\FinanceRadarGold\human_gold_frozen.jsonl
+```
+
+冻结报告会记录 `source_holdout_policy.selection_basis=SOURCE_METADATA_ONLY_PRE_LABELS`、
+实际留出来源族、行数与各来源分布。若负责人已经在审核完成前声明来源族，可另加
+`--holdout-source-family` 固定它；不得在看到标签、价格或模型结果后改选。
+
 ```powershell
 python scripts/prepare_qwen_risk_sft.py `
   --frozen-dataset D:\FinanceRadarGold\human_gold_frozen.jsonl `

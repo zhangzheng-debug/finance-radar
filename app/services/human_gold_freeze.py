@@ -1,9 +1,10 @@
 """Deterministically freeze returned human-only gold annotations.
 
 This is an artifact-only gate.  It does not import reviews into production,
-change canonical events, retrain a model or promote a model.  The split is
-strictly chronological after the human labels are finalized, while issuer,
-event-chain, exact-text and near-duplicate overlap are required to be zero.
+change canonical events, retrain a model or promote a model.  The split keeps
+the non-holdout core chronological and reserves one source family, selected
+only from pre-label source metadata, for HUMAN_BLIND.  Issuer, event-chain,
+exact-text and near-duplicate overlap are required to be zero.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from app.services.adjudication import AdjudicationService, normalize_source_fami
 from app.services.human_gold_review import OFFLINE_GOLD_CONTRACT_VERSION
 
 
-FREEZE_CONTRACT_VERSION = "human-gold-chronological-freeze-v1"
+FREEZE_CONTRACT_VERSION = "human-gold-chronological-source-holdout-freeze-v2"
 DEFAULT_SPLIT_SIZES = {"TRAIN": 420, "VALIDATION": 120, "HUMAN_BLIND": 180}
 DEFAULT_LABEL_MINIMUMS = {
     "TRAIN": {"RISK_REVIEW": 120, "NON_TARGET": 120, "ABSTAIN": 40},
@@ -66,12 +67,150 @@ def _content_boundaries(row: dict[str, Any]) -> list[str]:
     return issues
 
 
+def _select_source_holdout_family(
+    rows: list[dict[str, Any]],
+    *,
+    blind_size: int,
+    requested_family: str | None,
+    minimum_rows: int,
+) -> tuple[str | None, dict[str, int], list[str]]:
+    """Choose a blind-only family without consulting any human label.
+
+    A purely chronological split can accidentally place the same dominant
+    provider in all three partitions.  That makes a source-family holdout
+    impossible even when the batch deliberately contains smaller independent
+    providers.  Selection therefore uses source identity and row count only,
+    before labels are inspected.  The largest eligible non-dominant family is
+    deterministic; callers may pin the already declared family explicitly.
+    """
+
+    counts = Counter(
+        normalize_source_family(row.get("source_id"))
+        for row in rows
+        if normalize_source_family(row.get("source_id"))
+    )
+    normalized_requested = normalize_source_family(requested_family)
+    if requested_family and not normalized_requested:
+        return None, dict(sorted(counts.items())), ["requested source holdout family is invalid"]
+    if normalized_requested:
+        candidates = [normalized_requested]
+    else:
+        candidates = [
+            family
+            for family, count in counts.items()
+            if int(minimum_rows) <= count <= int(blind_size) and count < len(rows)
+        ]
+        candidates.sort(key=lambda family: (-counts[family], family))
+    if not candidates:
+        return None, dict(sorted(counts.items())), [
+            "no source family is eligible for a metadata-only HUMAN_BLIND holdout"
+        ]
+    selected = candidates[0]
+    selected_count = int(counts.get(selected, 0))
+    issues: list[str] = []
+    if selected_count < int(minimum_rows):
+        issues.append(
+            f"source holdout family {selected} has {selected_count} rows; minimum is {minimum_rows}"
+        )
+    if selected_count > int(blind_size):
+        issues.append(
+            f"source holdout family {selected} has {selected_count} rows; HUMAN_BLIND has {blind_size}"
+        )
+    if selected_count == len(rows):
+        issues.append("source holdout family cannot contain the entire dataset")
+    return selected, dict(sorted(counts.items())), issues
+
+
+def _assign_splits(
+    rows: list[dict[str, Any]],
+    sizes: dict[str, int],
+    *,
+    holdout_source_family: str | None,
+    minimum_holdout_family_rows: int,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any], list[str]]:
+    blind_size = int(sizes["HUMAN_BLIND"])
+    selected, family_counts, issues = _select_source_holdout_family(
+        rows,
+        blind_size=blind_size,
+        requested_family=holdout_source_family,
+        minimum_rows=minimum_holdout_family_rows,
+    )
+    if selected is None or issues:
+        return {split: [] for split in sizes}, {
+            "selected_source_family": selected,
+            "source_family_counts": family_counts,
+            "selection_basis": "SOURCE_METADATA_ONLY_PRE_LABELS",
+            "minimum_rows": int(minimum_holdout_family_rows),
+        }, issues
+
+    holdout_rows = [
+        row for row in rows if normalize_source_family(row.get("source_id")) == selected
+    ]
+    chronological_core = [
+        row for row in rows if normalize_source_family(row.get("source_id")) != selected
+    ]
+    train_size = int(sizes["TRAIN"])
+    validation_size = int(sizes["VALIDATION"])
+    blind_core_size = blind_size - len(holdout_rows)
+    expected_core_size = train_size + validation_size + blind_core_size
+    if len(chronological_core) != expected_core_size or blind_core_size < 0:
+        issues.append("source holdout allocation does not match requested split sizes")
+        return {split: [] for split in sizes}, {
+            "selected_source_family": selected,
+            "selected_source_family_rows": len(holdout_rows),
+            "source_family_counts": family_counts,
+            "selection_basis": "SOURCE_METADATA_ONLY_PRE_LABELS",
+            "minimum_rows": int(minimum_holdout_family_rows),
+        }, issues
+
+    train_rows = chronological_core[:train_size]
+    validation_rows = chronological_core[train_size : train_size + validation_size]
+    blind_core_rows = chronological_core[train_size + validation_size :]
+
+    def bounds(selected: list[dict[str, Any]]) -> dict[str, str | None]:
+        return {
+            "min_as_of": min(
+                (row["_as_of"].isoformat() for row in selected), default=None
+            ),
+            "max_as_of": max(
+                (row["_as_of"].isoformat() for row in selected), default=None
+            ),
+        }
+
+    blind_rows = sorted(
+        [*holdout_rows, *blind_core_rows],
+        key=lambda row: (row.get("_as_of"), str(row.get("sample_id") or "")),
+    )
+    split_rows = {
+        "TRAIN": train_rows,
+        "VALIDATION": validation_rows,
+        "HUMAN_BLIND": blind_rows,
+    }
+    policy = {
+        "selected_source_family": selected,
+        "selected_source_family_rows": len(holdout_rows),
+        "blind_chronological_core_rows": len(blind_core_rows),
+        "source_family_counts": family_counts,
+        "selection_basis": "SOURCE_METADATA_ONLY_PRE_LABELS",
+        "minimum_rows": int(minimum_holdout_family_rows),
+        "non_holdout_core_is_chronological": True,
+        "chronological_core_bounds": {
+            "TRAIN": bounds(train_rows),
+            "VALIDATION": bounds(validation_rows),
+            "HUMAN_BLIND": bounds(blind_core_rows),
+        },
+    }
+    return split_rows, policy, issues
+
+
 def assess_freeze_readiness(
     annotations: Iterable[dict[str, Any]],
     *,
     split_sizes: dict[str, int] | None = None,
     label_minimums: dict[str, dict[str, int]] | None = None,
     minimum_source_families: int = 4,
+    holdout_source_family: str | None = None,
+    minimum_holdout_family_rows: int | None = None,
 ) -> dict[str, Any]:
     sizes = dict(split_sizes or DEFAULT_SPLIT_SIZES)
     minimums = {
@@ -82,6 +221,13 @@ def assess_freeze_readiness(
         raise ValueError("split_sizes must be ordered TRAIN, VALIDATION, HUMAN_BLIND")
     if any(int(value) < 1 for value in sizes.values()):
         raise ValueError("every split size must be positive")
+    holdout_minimum = (
+        int(minimum_holdout_family_rows)
+        if minimum_holdout_family_rows is not None
+        else min(5, max(1, int(sizes["HUMAN_BLIND"]) // 10))
+    )
+    if holdout_minimum < 1:
+        raise ValueError("minimum_holdout_family_rows must be positive")
     rows = [dict(row) for row in annotations]
     issues: list[str] = []
     seen_samples: set[str] = set()
@@ -124,19 +270,21 @@ def assess_freeze_readiness(
             str(row.get("sample_id") or ""),
         )
     )
-    cursor = 0
+    split_rows, source_holdout_policy, split_issues = _assign_splits(
+        rows,
+        sizes,
+        holdout_source_family=holdout_source_family,
+        minimum_holdout_family_rows=holdout_minimum,
+    )
+    issues.extend(split_issues)
     assigned: list[dict[str, Any]] = []
-    split_rows: dict[str, list[dict[str, Any]]] = {}
-    for split, size in sizes.items():
-        selected = rows[cursor : cursor + int(size)]
-        cursor += int(size)
-        split_rows[split] = selected
+    for split in sizes:
         assigned.extend(
             {
                 **{key: value for key, value in row.items() if key != "_as_of"},
                 "split": split,
             }
-            for row in selected
+            for row in split_rows[split]
         )
 
     label_counts = {
@@ -169,8 +317,8 @@ def assess_freeze_readiness(
         issues.append(
             f"source families must be at least {minimum_source_families}, got {len(all_source_families)}"
         )
-    if not held_out:
-        issues.append("HUMAN_BLIND has no fully held-out source family")
+    if source_holdout_policy.get("selected_source_family") not in held_out:
+        issues.append("HUMAN_BLIND source-family holdout policy was not satisfied")
     for split, deficits in label_deficits.items():
         for label, deficit in deficits.items():
             if deficit:
@@ -209,6 +357,7 @@ def assess_freeze_readiness(
         "label_minimums": minimums,
         "label_deficits": label_deficits,
         "source_families": {split: sorted(values) for split, values in source_families.items()},
+        "source_holdout_policy": source_holdout_policy,
         "all_source_family_count": len(all_source_families),
         "fully_held_out_blind_source_families": sorted(held_out),
         "temporal_bounds": temporal_serialized,

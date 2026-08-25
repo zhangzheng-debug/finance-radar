@@ -16,6 +16,19 @@ Releases use the same version prefixed by `v`.
   every minute and expose 24-hour queue-wait/provider-latency percentiles.
 - Scope event evidence revision expansion to the requested event before ranking
   source history, removing a whole-ledger scan from the event detail path.
+- Add the independent human-gold-trained Qwen risk-semantic pipeline. Partial
+  A/B drafts remain provisional; training, one-time blind evaluation and the
+  fail-closed runtime manifest require completed dual review, arbitration and
+  a frozen 420 / 120 / 180 dataset. Qwen scores polarity, materiality and
+  adverse strength only; it cannot change evidence state or trigger trading.
+- Make the 720-row freeze feasible without weakening its source holdout. The
+  original globally chronological split put SEC in both validation and blind,
+  so the mandatory unseen-source gate could never pass. The v2 freeze contract
+  now selects one complete source family from pre-label metadata only, keeps
+  the remaining core chronological and records the exact policy and bounds.
+- Add a D-drive Windows bootstrap for pinned CUDA PyTorch, bitsandbytes and
+  ms-swift, including real GPU and SFT argument-contract probes. It does not
+  download the model or start training.
 - Stop an apposition from binding another issuer's board action to this issuer.
   The new issuer-bound appointment grammar allowed up to 55 free characters
   between the governing-body noun and its genitive `of`, so in `Board of

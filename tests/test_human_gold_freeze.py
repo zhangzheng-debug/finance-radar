@@ -105,16 +105,74 @@ def test_freeze_is_chronological_group_disjoint_and_source_held_out() -> None:
 
 
 def test_freeze_fails_closed_without_a_real_source_holdout() -> None:
+    rows = _rows(blind_source="sec_current_filings")
+    for row in rows:
+        row["source_id"] = "sec_current_filings"
     result = assess_freeze_readiness(
-        _rows(blind_source="sec_current_filings"),
+        rows,
         split_sizes={"TRAIN": 3, "VALIDATION": 3, "HUMAN_BLIND": 3},
         label_minimums={
             split: {label: 1 for label in AXES}
             for split in ("TRAIN", "VALIDATION", "HUMAN_BLIND")
         },
-        minimum_source_families=3,
+        minimum_source_families=1,
     )
 
     assert result["status"] == "NOT_READY_TO_FREEZE"
     assert result["rows"] == []
-    assert "HUMAN_BLIND has no fully held-out source family" in result["issues"]
+    assert (
+        "no source family is eligible for a metadata-only HUMAN_BLIND holdout"
+        in result["issues"]
+    )
+
+
+def test_freeze_moves_an_early_predeclared_source_family_into_blind() -> None:
+    rows = [
+        annotation(
+            index,
+            label=("RISK_REVIEW", "NON_TARGET", "ABSTAIN")[index % 3],
+            source_id="fda_enforcement" if index < 2 else "sec_current_filings",
+        )
+        for index in range(12)
+    ]
+
+    result = assess_freeze_readiness(
+        rows,
+        split_sizes={"TRAIN": 6, "VALIDATION": 3, "HUMAN_BLIND": 3},
+        label_minimums={
+            split: {} for split in ("TRAIN", "VALIDATION", "HUMAN_BLIND")
+        },
+        minimum_source_families=2,
+        holdout_source_family="fda",
+        minimum_holdout_family_rows=2,
+    )
+
+    assert result["status"] == "READY_TO_FREEZE"
+    assert result["fully_held_out_blind_source_families"] == ["fda"]
+    policy = result["source_holdout_policy"]
+    assert policy["selected_source_family"] == "fda"
+    assert policy["selected_source_family_rows"] == 2
+    assert policy["blind_chronological_core_rows"] == 1
+    assert policy["source_family_counts"] == {"fda": 2, "sec": 10}
+    assert policy["selection_basis"] == "SOURCE_METADATA_ONLY_PRE_LABELS"
+    assert policy["minimum_rows"] == 2
+    assert policy["non_holdout_core_is_chronological"] is True
+    assert policy["chronological_core_bounds"] == {
+        "TRAIN": {
+            "min_as_of": "2026-08-03T00:00:00+00:00",
+            "max_as_of": "2026-08-08T00:00:00+00:00",
+        },
+        "VALIDATION": {
+            "min_as_of": "2026-08-09T00:00:00+00:00",
+            "max_as_of": "2026-08-11T00:00:00+00:00",
+        },
+        "HUMAN_BLIND": {
+            "min_as_of": "2026-08-12T00:00:00+00:00",
+            "max_as_of": "2026-08-12T00:00:00+00:00",
+        },
+    }
+    blind_rows = [row for row in result["rows"] if row["split"] == "HUMAN_BLIND"]
+    assert {row["source_id"] for row in blind_rows} == {
+        "fda_enforcement",
+        "sec_current_filings",
+    }
