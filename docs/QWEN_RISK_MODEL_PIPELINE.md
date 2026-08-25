@@ -33,12 +33,22 @@ python scripts/freeze_offline_human_gold.py `
 冻结报告会记录 `source_holdout_policy.selection_basis=SOURCE_METADATA_ONLY_PRE_LABELS`、
 实际留出来源族、行数与各来源分布。若负责人已经在审核完成前声明来源族，可另加
 `--holdout-source-family` 固定它；不得在看到标签、价格或模型结果后改选。
+类别最低数只是自然分布的可用性底线，不是强行配平目标：TRAIN 至少
+40 / 100 / 20，VALIDATION 至少 10 / 20 / 5，HUMAN_BLIND 至少
+20 / 30 / 5（顺序均为 RISK_REVIEW / NON_TARGET / ABSTAIN）。冻结器不会
+因为标签而移动、删除或重写任何事件。
 
 ```powershell
 python scripts/prepare_qwen_risk_sft.py `
   --frozen-dataset D:\FinanceRadarGold\human_gold_frozen.jsonl `
   --output-dir D:\FinanceRadarGold\qwen-sft
 ```
+
+准备器同时保留一份每个 TRAIN 样本只出现一次的审计文件，并生成实际训练使用的
+`qwen_risk_sft_train_balanced.jsonl`。只有人工语义标签推导出的
+`PRIORITY_REVIEW` 可以在 TRAIN 内重复：目标占比 25%，每条最多出现 4 次，全部
+重复实例都绑定原始 `sample_id` 与 repeat index。VALIDATION 和 HUMAN_BLIND
+绝不重复；最终指标仍在自然分布上计算，因此训练重采样不能抬高验收分数。
 
 冻结文件必须同目录带有 `human_gold_frozen.jsonl.sha256`。生成器会检查：
 
@@ -84,7 +94,11 @@ python scripts/evaluate_qwen_risk_blind.py `
   --output-dir D:\FinanceRadarModels\qwen-risk-v1-blind
 ```
 
-命令在调用第一条盲样本前先写入 `BLIND_CONSUMED.json`，输出目录存在即拒绝重跑。默认要求至少 120 条全部成功、重大性 macro-F1 ≥ 0.65、极性 macro-F1 ≥ 0.55、重大负面召回率 ≥ 0.75。失败后不能根据这 180 条继续调参再重测；它们已经失去盲测资格。
+命令在调用第一条盲样本前先写入 `BLIND_CONSUMED.json`，输出目录存在即拒绝重跑。
+默认要求至少 120 条全部成功、其中 `PRIORITY_REVIEW` 至少 20 条、重大性
+macro-F1 ≥ 0.65、极性 macro-F1 ≥ 0.55、重大负面召回率 ≥ 0.75。支持数不足
+也会永久记为 `FAIL`，不能靠一个极小正例集取得偶然高召回。失败后不能根据这
+180 条继续调参再重测；它们已经失去盲测资格。
 
 只有盲测 `PASS` 且模型已合并并转换成固定文件名 `finance-radar-qwen-risk-v1.gguf`，才能生成生产运行清单：
 

@@ -97,6 +97,7 @@ def test_blind_evaluation_passes_and_refuses_reuse(tmp_path: Path) -> None:
         output,
         Provider(adapter),
         minimum_rows=3,
+        minimum_priority_review_support=3,
         thresholds={
             "materiality_macro_f1": 1.0,
             "polarity_macro_f1": 1.0,
@@ -105,6 +106,8 @@ def test_blind_evaluation_passes_and_refuses_reuse(tmp_path: Path) -> None:
     )
     assert result["status"] == "PASS"
     assert result["production_eligible"] is True
+    assert result["gate_checks"]["priority_review_support"] is True
+    assert result["blind_supports"] == {"PRIORITY_REVIEW": 3}
     assert (output / "BLIND_CONSUMED.json").is_file()
     with pytest.raises(ValueError, match="may not be reused"):
         evaluate(dataset, manifest, adapter, output, Provider(adapter), minimum_rows=3)
@@ -123,3 +126,22 @@ def test_blind_evaluation_rejects_wrong_candidate_hash(tmp_path: Path) -> None:
             provider,
             minimum_rows=3,
         )
+
+
+def test_blind_evaluation_fails_when_adverse_support_is_too_small(tmp_path: Path) -> None:
+    dataset, manifest, adapter = _bundle(tmp_path)
+    output = tmp_path / "evaluation"
+    result = evaluate(
+        dataset,
+        manifest,
+        adapter,
+        output,
+        Provider(adapter),
+        minimum_rows=3,
+        minimum_priority_review_support=4,
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["production_eligible"] is False
+    assert result["gate_checks"]["priority_review_support"] is False
+    assert (output / "BLIND_CONSUMED.json").is_file()

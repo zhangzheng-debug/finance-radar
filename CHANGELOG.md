@@ -26,6 +26,11 @@ Releases use the same version prefixed by `v`.
   so the mandatory unseen-source gate could never pass. The v2 freeze contract
   now selects one complete source family from pre-label metadata only, keeps
   the remaining core chronological and records the exact policy and bounds.
+  Replace unattainable class-balance quotas with natural-distribution viability
+  floors, and require at least 20 adverse-priority blind cases before a model
+  can pass the production gate. Preserve the unique TRAIN export while using a
+  capped, deterministic TRAIN-only priority resample for SFT; validation and
+  blind distributions remain natural and untouched.
 - Add a D-drive Windows bootstrap for pinned CUDA PyTorch, bitsandbytes and
   ms-swift, including real GPU and SFT argument-contract probes. It does not
   download the model or start training.

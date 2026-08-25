@@ -27,6 +27,7 @@ DEFAULT_THRESHOLDS = {
     "polarity_macro_f1": 0.55,
     "priority_review_recall": 0.75,
 }
+DEFAULT_MINIMUM_PRIORITY_REVIEW_SUPPORT = 20
 
 
 class Predictor(Protocol):
@@ -126,6 +127,7 @@ def evaluate(
     *,
     thresholds: dict[str, float] | None = None,
     minimum_rows: int = 120,
+    minimum_priority_review_support: int = DEFAULT_MINIMUM_PRIORITY_REVIEW_SUPPORT,
     retries: int = 2,
 ) -> dict[str, Any]:
     """Evaluate once; creating the output directory permanently consumes the blind set."""
@@ -157,6 +159,14 @@ def evaluate(
     blind_rows = [row for row in rows if row.get("split") == "HUMAN_BLIND"]
     if len(blind_rows) != len(manifest_by_id) or len(blind_rows) < int(minimum_rows):
         raise ValueError("sealed human-blind row count mismatch or below minimum")
+    if int(minimum_priority_review_support) < 1:
+        raise ValueError("minimum priority-review support must be positive")
+    expected_priority_support = Counter(
+        expected_semantic_payload(
+            str(row.get("materiality") or ""), str(row.get("polarity") or "")
+        )["semantic_priority"]
+        for row in blind_rows
+    )
     for row in blind_rows:
         sample_id = str(row.get("sample_id") or "")
         content = row.get("content")
@@ -244,6 +254,8 @@ def evaluate(
     )
     gate_checks = {
         "all_rows_scored": successful == len(blind_rows) and not errors,
+        "priority_review_support": int(expected_priority_support["PRIORITY_REVIEW"])
+        >= int(minimum_priority_review_support),
         "materiality_macro_f1": materiality["macro_f1"] >= required["materiality_macro_f1"],
         "polarity_macro_f1": polarity["macro_f1"] >= required["polarity_macro_f1"],
         "priority_review_recall": priority_recall >= required["priority_review_recall"],
@@ -256,6 +268,10 @@ def evaluate(
         "successful_rows": successful,
         "errors": errors,
         "thresholds": required,
+        "minimum_supports": {
+            "PRIORITY_REVIEW": int(minimum_priority_review_support),
+        },
+        "blind_supports": dict(sorted(expected_priority_support.items())),
         "gate_checks": gate_checks,
         "metrics": {
             "materiality": materiality,
@@ -298,6 +314,11 @@ def main() -> int:
     parser.add_argument("--model-name", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--minimum-rows", type=int, default=120)
+    parser.add_argument(
+        "--minimum-priority-review-support",
+        type=int,
+        default=DEFAULT_MINIMUM_PRIORITY_REVIEW_SUPPORT,
+    )
     parser.add_argument("--retries", type=int, default=2)
     args = parser.parse_args()
     adapter_sha256 = _sha256_file(args.adapter_model.resolve())
@@ -315,6 +336,7 @@ def main() -> int:
         args.output_dir,
         provider,
         minimum_rows=args.minimum_rows,
+        minimum_priority_review_support=args.minimum_priority_review_support,
         retries=args.retries,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -92,6 +92,8 @@ def test_prepare_exports_messages_but_keeps_blind_content_and_labels_sealed(
     output = tmp_path / "qwen"
     manifest = prepare(dataset, output)
     assert manifest["train_rows"] == 1
+    assert manifest["train_effective_rows"] == 1
+    assert manifest["train_oversampled_rows"] == 0
     assert manifest["validation_rows"] == 1
     assert manifest["human_blind_rows"] == 1
     assert manifest["human_blind_labels_exported"] is False
@@ -105,6 +107,48 @@ def test_prepare_exports_messages_but_keeps_blind_content_and_labels_sealed(
     blind_text = (output / "qwen_risk_blind_manifest.jsonl").read_text(encoding="utf-8")
     assert "Issuer disclosure 3" not in blind_text
     assert "MATERIAL_ADVERSE" not in blind_text
+
+
+def test_prepare_resamples_only_priority_train_rows_and_keeps_unique_export(
+    tmp_path: Path,
+) -> None:
+    dataset = tmp_path / "imbalanced.jsonl"
+    rows = [_row(1, "TRAIN", "MATERIAL_ADVERSE", "ADVERSE")]
+    rows.extend(
+        _row(index, "TRAIN", "NOT_MATERIAL_ADVERSE", "NEUTRAL")
+        for index in range(2, 6)
+    )
+    rows.append(_row(6, "VALIDATION", "NOT_MATERIAL_ADVERSE", "NEUTRAL"))
+    rows.append(_row(7, "HUMAN_BLIND", "MATERIAL_ADVERSE", "ADVERSE"))
+    _write_frozen(dataset, rows)
+
+    output = tmp_path / "qwen"
+    manifest = prepare(dataset, output)
+    unique = [
+        json.loads(line)
+        for line in (output / "qwen_risk_sft_train.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    balanced = [
+        json.loads(line)
+        for line in (output / "qwen_risk_sft_train_balanced.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+
+    assert len(unique) == 5
+    assert len(balanced) == 6
+    assert manifest["train_oversampled_rows"] == 1
+    repeats = [row for row in balanced if row["metadata"]["oversampled"]]
+    assert len(repeats) == 1
+    assert repeats[0]["metadata"]["origin_sample_id"] == "sample-1"
+    assert repeats[0]["metadata"]["oversample_repeat_index"] == 1
+    assert manifest["train_priority_resampling"]["target_met"] is True
+    validation = (output / "qwen_risk_sft_validation.jsonl").read_text(
+        encoding="utf-8"
+    )
+    assert validation.count("\n") == 1
 
 
 def test_prepare_keeps_source_only_semantics_but_never_exposes_evidence_state(

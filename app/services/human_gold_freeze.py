@@ -23,9 +23,13 @@ from app.services.human_gold_review import OFFLINE_GOLD_CONTRACT_VERSION
 FREEZE_CONTRACT_VERSION = "human-gold-chronological-source-holdout-freeze-v2"
 DEFAULT_SPLIT_SIZES = {"TRAIN": 420, "VALIDATION": 120, "HUMAN_BLIND": 180}
 DEFAULT_LABEL_MINIMUMS = {
-    "TRAIN": {"RISK_REVIEW": 120, "NON_TARGET": 120, "ABSTAIN": 40},
-    "VALIDATION": {"RISK_REVIEW": 30, "NON_TARGET": 30, "ABSTAIN": 10},
-    "HUMAN_BLIND": {"RISK_REVIEW": 50, "NON_TARGET": 50, "ABSTAIN": 20},
+    # These are viability floors for the natural human-label distribution,
+    # not class-balance targets.  Freeze never moves a row because of its
+    # label.  Model training may oversample within TRAIN, while validation and
+    # blind remain untouched and publish their exact support counts.
+    "TRAIN": {"RISK_REVIEW": 40, "NON_TARGET": 100, "ABSTAIN": 20},
+    "VALIDATION": {"RISK_REVIEW": 10, "NON_TARGET": 20, "ABSTAIN": 5},
+    "HUMAN_BLIND": {"RISK_REVIEW": 20, "NON_TARGET": 30, "ABSTAIN": 5},
 }
 
 

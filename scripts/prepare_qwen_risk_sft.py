@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
+import math
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -20,8 +22,10 @@ from app.models.qwen_risk_contract import (
 from app.models.risk_label_contract import coherent_label
 
 
-CONTRACT_VERSION = "qwen-risk-sft-dataset-v1"
+CONTRACT_VERSION = "qwen-risk-sft-dataset-v2"
 DEVELOPMENT_SPLITS = frozenset({"TRAIN", "VALIDATION"})
+TRAIN_PRIORITY_TARGET_FRACTION = 0.25
+TRAIN_MAX_OCCURRENCES_PER_SAMPLE = 4
 
 
 def _stable_json(value: Any) -> str:
@@ -45,6 +49,102 @@ def _sidecar_digest(dataset: Path) -> str:
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> str:
     path.write_text("".join(_stable_json(row) + "\n" for row in rows), encoding="utf-8")
     return _sha256(path.read_bytes())
+
+
+def _semantic_priority(row: dict[str, Any]) -> str:
+    payload = json.loads(str(row["messages"][-1]["content"]))
+    return str(payload.get("semantic_priority") or "")
+
+
+def _build_priority_balanced_train(
+    rows: list[dict[str, Any]],
+    *,
+    target_fraction: float = TRAIN_PRIORITY_TARGET_FRACTION,
+    max_occurrences_per_sample: int = TRAIN_MAX_OCCURRENCES_PER_SAMPLE,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Return a deterministic TRAIN-only resample and its complete audit.
+
+    The original one-row-per-sample dataset remains a separate output.  Only
+    PRIORITY_REVIEW examples may be repeated, repeats are capped, and the
+    validation and sealed blind sets never enter this function.  This keeps the
+    natural evaluation distribution intact while reducing majority collapse in
+    a small generative SFT dataset.
+    """
+
+    if not 0 < float(target_fraction) < 1:
+        raise ValueError("priority target fraction must be between zero and one")
+    if int(max_occurrences_per_sample) < 1:
+        raise ValueError("max occurrences per sample must be positive")
+
+    unique_count = len(rows)
+    priority_rows = [row for row in rows if _semantic_priority(row) == "PRIORITY_REVIEW"]
+    priority_count = len(priority_rows)
+    required_extras = 0
+    if unique_count and priority_count:
+        required_extras = max(
+            0,
+            math.ceil(
+                (float(target_fraction) * unique_count - priority_count)
+                / (1.0 - float(target_fraction))
+            ),
+        )
+    capacity = priority_count * (int(max_occurrences_per_sample) - 1)
+    extra_count = min(required_extras, capacity)
+
+    balanced: list[dict[str, Any]] = []
+    for row in rows:
+        item = copy.deepcopy(row)
+        sample_id = str(item["metadata"]["sample_id"])
+        item["metadata"].update(
+            {
+                "origin_sample_id": sample_id,
+                "training_instance_id": sample_id,
+                "oversample_repeat_index": 0,
+                "oversampled": False,
+            }
+        )
+        balanced.append(item)
+
+    priority_rows = sorted(
+        priority_rows,
+        key=lambda row: (
+            str(row["metadata"].get("content_sha256") or ""),
+            str(row["metadata"].get("sample_id") or ""),
+        ),
+    )
+    for index in range(extra_count):
+        origin = priority_rows[index % priority_count]
+        repeat_index = 1 + index // priority_count
+        item = copy.deepcopy(origin)
+        sample_id = str(item["metadata"]["sample_id"])
+        item["metadata"].update(
+            {
+                "origin_sample_id": sample_id,
+                "training_instance_id": f"{sample_id}#priority-repeat-{repeat_index}",
+                "oversample_repeat_index": repeat_index,
+                "oversampled": True,
+            }
+        )
+        balanced.append(item)
+
+    effective_priority = priority_count + extra_count
+    effective_count = len(balanced)
+    achieved_fraction = effective_priority / effective_count if effective_count else 0.0
+    return balanced, {
+        "policy": "TRAIN_ONLY_PRIORITY_REVIEW_CAPPED_REPEAT_V1",
+        "selection_uses_human_semantic_target": True,
+        "validation_resampled": False,
+        "human_blind_resampled": False,
+        "unique_train_rows": unique_count,
+        "unique_priority_review_rows": priority_count,
+        "effective_train_rows": effective_count,
+        "effective_priority_review_rows": effective_priority,
+        "oversampled_rows": extra_count,
+        "target_priority_fraction": float(target_fraction),
+        "achieved_priority_fraction": achieved_fraction,
+        "max_occurrences_per_sample": int(max_occurrences_per_sample),
+        "target_met": achieved_fraction >= float(target_fraction),
+    }
 
 
 def prepare(frozen_dataset: Path, output_dir: Path) -> dict[str, Any]:
@@ -156,11 +256,16 @@ def prepare(frozen_dataset: Path, output_dir: Path) -> dict[str, Any]:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     train_path = output_dir / "qwen_risk_sft_train.jsonl"
+    balanced_train_path = output_dir / "qwen_risk_sft_train_balanced.jsonl"
     validation_path = output_dir / "qwen_risk_sft_validation.jsonl"
     blind_path = output_dir / "qwen_risk_blind_manifest.jsonl"
     evidence_audit_path = output_dir / "qwen_risk_evidence_posture_audit.jsonl"
+    balanced_train, resampling = _build_priority_balanced_train(development["TRAIN"])
+    if development["TRAIN"] and not resampling["target_met"]:
+        raise ValueError("TRAIN priority-review resampling target is infeasible")
     outputs = {
         train_path.name: _write_jsonl(train_path, development["TRAIN"]),
+        balanced_train_path.name: _write_jsonl(balanced_train_path, balanced_train),
         validation_path.name: _write_jsonl(validation_path, development["VALIDATION"]),
         blind_path.name: _write_jsonl(blind_path, blind_manifest),
         evidence_audit_path.name: _write_jsonl(
@@ -181,12 +286,15 @@ def prepare(frozen_dataset: Path, output_dir: Path) -> dict[str, Any]:
         "frozen_dataset_sha256": actual_digest,
         "input_rows": len(rows),
         "train_rows": len(development["TRAIN"]),
+        "train_effective_rows": len(balanced_train),
+        "train_oversampled_rows": int(resampling["oversampled_rows"]),
         "validation_rows": len(development["VALIDATION"]),
         "evidence_posture_audit_rows": len(evidence_posture_audit),
         "human_blind_rows": len(blind_manifest),
         "semantic_label_combinations": {
             "|".join(key): value for key, value in sorted(labels.items())
         },
+        "train_priority_resampling": resampling,
         "outputs": outputs,
         "strength_scale": ["NONE", "LOW", "HIGH", "UNCLEAR"],
         "strength_is_derived_from_human_axes": True,
