@@ -123,6 +123,21 @@ FDIC_REGULATORY_TRIGGER = re.compile(
     re.I,
 )
 
+# Institutional feeds sometimes mix market-relevant releases with cultural or
+# community notices.  Keep those notices as immutable source observations, but
+# do not promote them into canonical financial events merely because the body
+# repeats an institution name such as "European Central Bank".
+NON_FINANCIAL_OFFICIAL_SOURCE_IDS = {
+    "ecb_press",
+    "federal_reserve_press",
+}
+OFFICIAL_NON_FINANCIAL_TITLE = re.compile(
+    r"\b(?:concert|orchestra|cultural\s+days?|art\s+exhibition|museum|"
+    r"music\s+festival|visitor\s+centre|photography\s+exhibition)\b|"
+    r"音乐会|文化节|艺术展|博物馆",
+    re.I,
+)
+
 ENTITY_PATTERNS = (
     ("ostium", re.compile(r"\bostium\b", re.I)),
     ("sk_hynix", re.compile(r"\b(?:sk\s*hynix|skhy)\b|SK\s*海力士", re.I)),
@@ -339,6 +354,12 @@ def classify_observation(row: Any) -> EventRule | None:
     item = payload.get("item") if isinstance(payload, dict) else None
     source_id = str(row["source_id"])
     text = f"{row['title']}\n{row['summary']}"
+
+    if (
+        source_id in NON_FINANCIAL_OFFICIAL_SOURCE_IDS
+        and OFFICIAL_NON_FINANCIAL_TITLE.search(str(row["title"] or ""))
+    ):
+        return None
 
     if source_id == "opennews_free":
         discovery_text = opennews_discovery_text(row)
@@ -630,6 +651,69 @@ def retract_filtered_opennews_candidates(connection: Any) -> int:
             now=now,
         )
         retracted += int(filtered)
+    connection.commit()
+    return retracted
+
+
+def retract_nonfinancial_official_candidates(connection: Any) -> int:
+    """Demote legacy cultural notices that predate the admission filter.
+
+    The source capture stays immutable. Only evidence-free candidate events
+    whose every current observation is an explicitly recognized institutional
+    culture/community notice are closed and marked as filtered noise.
+    """
+
+    placeholders = ",".join("?" for _ in NON_FINANCIAL_OFFICIAL_SOURCE_IDS)
+    rows = connection.execute(
+        f"""SELECT e.event_id,r.source_id,r.observation_id,r.title,r.summary,
+                   eo.relation_type
+            FROM canonical_events e
+            JOIN event_observations eo ON eo.event_id=e.event_id
+            JOIN latest_source_content r ON r.observation_id=eo.observation_id
+            WHERE e.status='candidate'
+              AND r.source_id IN ({placeholders})
+              AND r.observation_status!='deleted'
+              AND NOT EXISTS (
+                  SELECT 1 FROM event_evidence x WHERE x.event_id=e.event_id
+              )
+            ORDER BY e.event_id,r.observation_id""",
+        tuple(sorted(NON_FINANCIAL_OFFICIAL_SOURCE_IDS)),
+    ).fetchall()
+    grouped: dict[str, list[Any]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["event_id"]), []).append(row)
+    now = utc_now()
+    retracted = 0
+    for event_id, observations in grouped.items():
+        if not observations or not all(
+            OFFICIAL_NON_FINANCIAL_TITLE.search(
+                f"{str(row['title'] or '')}\n{str(row['summary'] or '')}"
+            )
+            for row in observations
+        ):
+            continue
+        for row in observations:
+            connection.execute(
+                """UPDATE event_observations
+                   SET relation_type='filtered_aggregated_noise',linked_at=?
+                   WHERE event_id=? AND observation_id=?""",
+                (now, event_id, row["observation_id"]),
+            )
+        connection.execute(
+            """UPDATE pipeline_jobs
+               SET status='COMPLETED_DISCOVERY_FILTERED',
+                   last_error='official_nonfinancial_notice',updated_at=?
+               WHERE event_id=? AND status NOT LIKE 'COMPLETED_%'""",
+            (now, event_id),
+        )
+        retracted += int(
+            _filter_candidate_event(
+                connection,
+                event_id,
+                reason="official_nonfinancial_notice",
+                now=now,
+            )
+        )
     connection.commit()
     return retracted
 
@@ -1074,6 +1158,9 @@ def process_pending(
     p2_cycle_cap: int = DEFAULT_P2_CYCLE_CAP,
     p2_stale_hours: int = DEFAULT_P2_STALE_HOURS,
 ) -> dict[str, Any]:
+    official_nonfinancial_retracted = retract_nonfinancial_official_candidates(
+        connection
+    )
     retracted = retract_filtered_opennews_candidates(connection)
     expired = expire_stale_opennews_candidates(connection, stale_hours=p2_stale_hours)
     evicted = trim_opennews_backlog(connection, pending_cap=p2_pending_cap)
@@ -1111,6 +1198,7 @@ def process_pending(
         "by_type": {},
         "event_ids": [],
         "retracted_events": retracted,
+        "official_nonfinancial_retracted": official_nonfinancial_retracted,
         "expired_events": expired,
         "backlog_evicted_events": evicted,
         "candidate_duplicates_reconciled": candidate_duplicates,

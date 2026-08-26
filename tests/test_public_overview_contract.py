@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from app.api.main import create_app
+from app.api.main import _public_market_reaction, create_app
 from app.config import Settings
 from app.storage import LedgerRepository, OperationsRepository
 from app.storage.ledger import PUBLIC_EVENT_STATE_CTE
@@ -624,8 +624,11 @@ def test_reader_ready_gate_separates_citable_events_from_discovery_backlog() -> 
             "reader_ready",
             "no_trading",
             "unverified_capture_excerpt",
-            "summary_basis",
-            "citation_ready",
+                "summary_basis",
+                "display_headline",
+                "headline_mode",
+                "headline_source",
+                "citation_ready",
             "evidence_posture",
             "evidence_gap_codes",
             "risk_assessment",
@@ -1586,6 +1589,81 @@ def test_event_detail_bounds_public_state_projection_to_selected_event() -> None
     assert "WHERE e.event_id=" in state_query
     assert "FROM paged_canonical canonical" in state_query
     assert "FROM canonical_events canonical" not in state_query
+
+
+def test_public_market_reaction_exposes_only_completed_isolated_returns() -> None:
+    value = {
+        "market_metrics": [
+            {
+                "provider": "twelve_data",
+                "ticker_at_event": "ACME",
+                "metric_name": "reaction_return_t_plus_5m_pct__ACME",
+                "metric_value": "-3.125",
+                "metric_scope": "post_event_audit_only",
+                "allowed_for_discovery_rank": 0,
+                "allowed_as_model_feature": 0,
+                "event_trade_date": "2026-08-03",
+                "updated_at": "2026-08-03T14:40:00+00:00",
+            },
+            {
+                "provider": "twelve_data",
+                "ticker_at_event": "ACME",
+                "metric_name": "observer_return_t_plus_30m_pct__ACME",
+                "metric_value": "99",
+                "metric_scope": "post_event_audit_only",
+                "allowed_for_discovery_rank": 0,
+                "allowed_as_model_feature": 0,
+            },
+            {
+                "provider": "twelve_data",
+                "ticker_at_event": "ACME",
+                "metric_name": "reaction_return_t_plus_2h_pct__ACME",
+                "metric_value": "4.2",
+                "metric_scope": "post_event_audit_only",
+                "allowed_for_discovery_rank": 0,
+                "allowed_as_model_feature": 1,
+            },
+            {
+                "provider": "twelve_data",
+                "ticker_at_event": "ACME",
+                "metric_name": "reaction_return_t_plus_1d_pct__ACME",
+                "metric_value": "not-a-number",
+                "metric_scope": "post_event_audit_only",
+                "allowed_for_discovery_rank": 0,
+                "allowed_as_model_feature": 0,
+            },
+        ],
+        "market_jobs": [
+            {"observation_window": "t_plus_30m", "status": "PENDING"},
+            {"observation_window": "t_plus_2h", "status": "MISSED_WINDOW"},
+        ],
+        "market_snapshots": [{"price": "1.23", "last_error": "private"}],
+    }
+
+    reaction = _public_market_reaction(value)
+
+    assert reaction == {
+        "items": [
+            {
+                "window": "t_plus_5m",
+                "label": "T+5m",
+                "symbol": "ACME",
+                "return_pct": -3.125,
+                "provider": "twelve_data",
+                "event_trade_date": "2026-08-03",
+                "benchmark_ticker": None,
+                "scope": "post_event_audit_only",
+            }
+        ],
+        "scope": "post_event_audit_only",
+        "uses_event_truth": False,
+        "used_as_model_feature": False,
+        "used_for_discovery_rank": False,
+    }
+    serialized = json.dumps(reaction, ensure_ascii=False)
+    assert "PENDING" not in serialized
+    assert "MISSED_WINDOW" not in serialized
+    assert "private" not in serialized
 
 
 def test_large_public_state_page_has_bounded_query_work() -> None:

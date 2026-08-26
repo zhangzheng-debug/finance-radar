@@ -52,22 +52,22 @@ PUBLIC_NAVIGATION: tuple[dict[str, str], ...] = (
         "key": "home",
         "path": "Home.py",
         "url": "./",
-        "label": "态势总览",
-        "description": "浏览事件、证据摘要与更新状态",
+        "label": "事件雷达",
+        "description": "浏览事件与来源材料",
     },
     {
         "key": "replay",
         "path": "pages/2_Replay_Lab.py",
         "url": "./Replay_Lab",
-        "label": "证据演示",
-        "description": "用精选案例理解证据判断过程",
+        "label": "案例",
+        "description": "查看精选事件案例",
     },
     {
         "key": "method",
         "path": "pages/5_Method_and_Boundaries.py",
         "url": "./Method_and_Boundaries",
-        "label": "方法与边界",
-        "description": "了解来源、时间、置信度与使用边界",
+        "label": "方法",
+        "description": "了解数据与模型口径",
     },
 )
 
@@ -352,13 +352,18 @@ def render_primary_navigation(active: str) -> None:
         raise ValueError(f"Unknown primary navigation key: {active}")
 
     links = "".join(
-        '<a class="radar-primary-link{}" href="{}" target="_self"{}>'
-        '<span>{}</span><small>{}</small></a>'.format(
+        (
+            '<a class="radar-primary-link{} public-primary-link" href="{}" target="_self"{}>'
+            '<span>{}</span></a>'
+            if UI_ROLE == "public"
+            else '<a class="radar-primary-link{}" href="{}" target="_self"{}>'
+            '<span>{}</span><small>{}</small></a>'
+        ).format(
             " is-active" if item["key"] == active else "",
             escape(item["url"], quote=True),
             ' aria-current="page"' if item["key"] == active else "",
             escape(item["label"]),
-            escape(item["description"]),
+            *(() if UI_ROLE == "public" else (escape(item["description"]),)),
         )
         for item in navigation
     )
@@ -369,26 +374,35 @@ def render_primary_navigation(active: str) -> None:
         "admin": "系统管理",
     }.get(UI_ROLE, "公开浏览")
     with st.sidebar:
-        st.markdown(
+        brand = (
             '<div class="radar-sidebar-brand">'
             '<span class="radar-sidebar-mark" aria-hidden="true">◎</span>'
-            '<div><strong>FINANCE RADAR</strong><span>证据情报终端</span></div>'
+            '<div><strong>FINANCE RADAR</strong><span>风险事件研究</span></div>'
             '</div>'
+        )
+        navigation_markup = (
             f'<div class="radar-sidebar-section">{role_section}</div>'
             '<nav class="radar-primary-nav" aria-label="主要页面">'
             f'{links}'
             '</nav>'
-            '<div class="radar-sidebar-current">'
-            '<span>当前工作面</span>'
-            f'<strong>{escape(current["label"])}</strong>'
-            f'<p>{escape(current["description"])}</p>'
-            '</div>'
-            '<div class="radar-sidebar-boundary">'
-            '<span aria-hidden="true">◈</span> '
-            f'{"只读情报 · 证据驱动核验 · 不触发交易" if UI_ROLE == "public" else "内部最小权限 · 操作留痕 · 不触发交易"}'
-            '</div>',
-            unsafe_allow_html=True,
         )
+        if UI_ROLE == "public":
+            st.markdown(brand + navigation_markup, unsafe_allow_html=True)
+        else:
+            st.markdown(
+                brand
+                + navigation_markup
+                + '<div class="radar-sidebar-current">'
+                '<span>当前工作面</span>'
+                f'<strong>{escape(current["label"])}</strong>'
+                f'<p>{escape(current["description"])}</p>'
+                '</div>'
+                '<div class="radar-sidebar-boundary">'
+                '<span aria-hidden="true">◈</span> '
+                '内部最小权限 · 操作留痕 · 不触发交易'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
 
 def api_request(

@@ -252,9 +252,45 @@ def test_public_excerpt_bound_does_not_change_internal_source_semantics(tmp_path
     unbounded = repository.list_events(limit=1)["items"][0]
 
     assert bounded["captured_source_count"] == 2
-    assert bounded["source_title"] == "Deleted"
+    assert bounded["source_title"] == "Active"
     assert len(bounded["source_summary"]) == 512
     assert unbounded["source_summary"] == long_summary
+
+
+def test_public_browse_prefers_same_day_source_text_over_later_form_title(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "source-ranking.sqlite3"
+    _large_unreviewed_ledger(ledger_path, event_count=1)
+    received_at = "2026-08-21T12:00:00+00:00"
+    with open_ledger(ledger_path) as connection:
+        for observation_id, published_at, title, summary in (
+            ("same-day", "2026-08-01", "SEC 8-K SAME", "The company filed for Chapter 11 protection on August 1."),
+            ("later", "2026-08-20", "SEC 8-K LATER", ""),
+        ):
+            connection.execute(
+                """INSERT INTO raw_observations VALUES (
+                   ?,'src',?,?,?, ?,?,'https://example.test/source',?,'{}','captured'
+                )""",
+                (
+                    observation_id,
+                    observation_id,
+                    published_at,
+                    received_at,
+                    title,
+                    summary,
+                    observation_id[0] * 64,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO event_observations VALUES ('browse-00000',?,'primary',?)",
+                (observation_id, received_at),
+            )
+        connection.commit()
+
+    item = LedgerRepository(ledger_path).list_events(limit=1)["items"][0]
+    assert item["source_title"] == "SEC 8-K SAME"
+    assert item["source_summary"].startswith("The company filed for Chapter 11")
 
 
 def test_explicit_reader_ready_filter_still_uses_full_gate(tmp_path: Path) -> None:
@@ -270,3 +306,71 @@ def test_explicit_reader_ready_filter_still_uses_full_gate(tmp_path: Path) -> No
     empty_page = repository.list_events(limit=10, offset=1000)
     assert empty_page["total"] == 25
     assert empty_page["items"] == []
+
+
+def test_public_browse_excludes_only_explicit_nonfinancial_retractions(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "filtered-only.sqlite3"
+    _large_unreviewed_ledger(ledger_path, event_count=3)
+    timestamp = "2026-08-21T12:00:00+00:00"
+    with open_ledger(ledger_path) as connection:
+        for index, relation_type in (
+            (0, "filtered_aggregated_noise"),
+            (1, "filtered_aggregated_noise"),
+            (1, "primary"),
+        ):
+            observation_id = f"noise-{index}-{relation_type}"
+            connection.execute(
+                """INSERT INTO raw_observations VALUES (
+                   ?,'src',?,?,?,?,?,'https://example.test/source',?,'{}','captured'
+                )""",
+                (
+                    observation_id,
+                    observation_id,
+                    timestamp,
+                    timestamp,
+                    observation_id,
+                    observation_id,
+                    f"{index + 1:064x}",
+                ),
+            )
+            connection.execute(
+                "INSERT INTO event_observations VALUES (?,?,?,?)",
+                (
+                    f"browse-{index:05d}",
+                    observation_id,
+                    relation_type,
+                    timestamp,
+                ),
+            )
+        connection.execute(
+            """INSERT INTO event_versions VALUES (
+               'browse-00000',2,?,'rejected','rejected','regulatory','filing',
+               NULL,'{}','official_nonfinancial_notice')""",
+            (timestamp,),
+        )
+        connection.execute(
+            """UPDATE canonical_events
+               SET current_version=2,status='rejected',label_status='rejected'
+               WHERE event_id='browse-00000'"""
+        )
+        connection.commit()
+
+    repository = LedgerRepository(ledger_path)
+    public_page = repository.list_events(
+        exclude_nonfinancial_retractions=True,
+        limit=10,
+    )
+    internal_page = repository.list_events(limit=10)
+    public_facets = repository.event_facets(
+        exclude_nonfinancial_retractions=True
+    )
+
+    assert internal_page["total"] == 3
+    assert public_page["total"] == 2
+    assert {item["event_id"] for item in public_page["items"]} == {
+        "browse-00001",
+        "browse-00002",
+    }
+    assert sum(item["count"] for item in public_facets["families"]) == 2

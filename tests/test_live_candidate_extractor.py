@@ -109,6 +109,105 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         self.assertEqual(job["status"], "COMPLETED_SUBJECT_FILTERED")
         self.assertEqual(job["last_error"], "subject_unresolved_not_canonical")
 
+    def test_ecb_cultural_notice_stays_a_source_observation_not_a_financial_event(self) -> None:
+        upsert_source(
+            self.connection,
+            source_id="ecb_press",
+            name="European Central Bank press and speeches",
+            source_type="official_primary_feed",
+            authority_tier="P0_official",
+        )
+        self.add_observation(
+            "ecb-cultural-days-concert",
+            "ECB Cultural Days concert celebrates European music",
+            "https://www.ecb.europa.eu/press/cultural/example.en.html",
+            source_id="ecb_press",
+            raw_json=json.dumps(
+                {
+                    "item": {
+                        "title": "ECB Cultural Days concert celebrates European music",
+                        "summary": (
+                            "The European Central Bank welcomes visitors to an evening concert."
+                        ),
+                    }
+                }
+            ),
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["no_candidate"], 1)
+        self.assertEqual(result["candidates"], 0)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM raw_observations").fetchone()[0],
+            1,
+        )
+
+    def test_legacy_ecb_cultural_candidate_is_retracted_without_deleting_capture(self) -> None:
+        upsert_source(
+            self.connection,
+            source_id="ecb_press",
+            name="European Central Bank press and speeches",
+            source_type="official_primary_feed",
+            authority_tier="P0_official",
+        )
+        self.add_observation(
+            "legacy-ecb-concert",
+            "ECB Cultural Days concert celebrates European music",
+            "https://www.ecb.europa.eu/press/cultural/legacy.en.html",
+            source_id="ecb_press",
+            raw_json="{}",
+        )
+        now = utc_now()
+        observation_id = stable_id("OBS", "ecb_press", "legacy-ecb-concert")
+        self.connection.execute(
+            """INSERT INTO canonical_events VALUES (
+               'legacy-ecb-event',1,'candidate','candidate','macro_policy','central_bank_policy',
+               '2026-07-15',?,?,NULL,NULL,'European Central Bank',NULL,NULL,
+               'ecb_press',1)""",
+            (now, now),
+        )
+        self.connection.execute(
+            """INSERT INTO event_versions VALUES (
+               'legacy-ecb-event',1,?,'candidate','candidate','macro_policy',
+               'central_bank_policy',NULL,'{}','legacy_import')""",
+            (now,),
+        )
+        self.connection.execute(
+            "INSERT INTO event_observations VALUES (?,?,?,?)",
+            (
+                "legacy-ecb-event",
+                observation_id,
+                "official_discovery_candidate",
+                now,
+            ),
+        )
+        self.connection.commit()
+
+        retracted = extractor.retract_nonfinancial_official_candidates(self.connection)
+
+        event = self.connection.execute(
+            "SELECT status,current_version FROM canonical_events WHERE event_id='legacy-ecb-event'"
+        ).fetchone()
+        relation = self.connection.execute(
+            "SELECT relation_type FROM event_observations WHERE event_id='legacy-ecb-event'"
+        ).fetchone()
+        self.assertEqual(retracted, 1)
+        self.assertEqual(event["status"], "rejected")
+        self.assertEqual(event["current_version"], 2)
+        self.assertEqual(relation["relation_type"], "filtered_aggregated_noise")
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM raw_observations WHERE observation_id=?",
+                (observation_id,),
+            ).fetchone()[0],
+            1,
+        )
+
     def test_legal_company_name_in_headline_satisfies_subject_gate(self) -> None:
         self.add_observation(
             "named-subject",

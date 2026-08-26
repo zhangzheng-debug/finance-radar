@@ -53,6 +53,7 @@ from app.services import (
 )
 from app.services.capture_interpretation import CAPTURE_INTERPRETATION_PROMPT_VERSION
 from app.services.public_event_semantics import (
+    derive_public_display_headline,
     derive_public_event_semantics,
     project_public_qwen_semantics,
     project_public_risk_assessment,
@@ -68,6 +69,14 @@ BACKUP_HEALTH_RECEIPT_FORMAT = "finance-radar-backup-health-receipt-v1"
 BACKUP_HEALTH_RECEIPT_MAX_BYTES = 64 * 1024
 OVERVIEW_SNAPSHOT_REFRESH_SECONDS = 30.0
 OVERVIEW_PUBLISHED_SNAPSHOT_REFRESH_SECONDS = 5 * 60.0
+PUBLIC_MARKET_REACTION_WINDOWS = (
+    ("t_plus_5m", "T+5m"),
+    ("t_plus_30m", "T+30m"),
+    ("t_plus_2h", "T+2h"),
+    ("next_close", "下个收盘"),
+    ("t_plus_1d", "T+1d"),
+    ("t_plus_5d", "T+5d"),
+)
 GENERIC_REVIEW_REASONS = frozenset(
     {
         "已逐条核对精确引文",
@@ -76,6 +85,98 @@ GENERIC_REVIEW_REASONS = frozenset(
         "n/a",
     }
 )
+
+
+def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
+    """Project completed, audit-only reaction returns for public reading.
+
+    Pending jobs, missed windows, raw snapshots and provider failures remain
+    operational data. The public surface receives only numeric metrics whose
+    database isolation flags prove they cannot feed discovery or model input.
+    """
+
+    rows = value.get("market_metrics")
+    if not isinstance(rows, list):
+        return None
+    window_order = {
+        window: index
+        for index, (window, _label) in enumerate(PUBLIC_MARKET_REACTION_WINDOWS)
+    }
+    labels = dict(PUBLIC_MARKET_REACTION_WINDOWS)
+    projected: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("metric_scope") or "") != "post_event_audit_only":
+            continue
+        try:
+            if int(row.get("allowed_for_discovery_rank") or 0) != 0:
+                continue
+            if int(row.get("allowed_as_model_feature") or 0) != 0:
+                continue
+            value_percent = float(str(row.get("metric_value") or ""))
+        except (TypeError, ValueError):
+            continue
+        if value_percent != value_percent or value_percent in {
+            float("inf"),
+            float("-inf"),
+        }:
+            continue
+        metric_name = str(row.get("metric_name") or "")
+        window = next(
+            (
+                candidate
+                for candidate, _label in PUBLIC_MARKET_REACTION_WINDOWS
+                if metric_name.startswith(f"reaction_return_{candidate}_pct__")
+            ),
+            "",
+        )
+        if not window:
+            continue
+        suffix = metric_name.split(
+            f"reaction_return_{window}_pct__",
+            1,
+        )[-1].strip()
+        symbol = str(
+            row.get("ticker_at_event") or suffix or row.get("stable_id") or ""
+        ).strip()
+        if not symbol:
+            continue
+        item = {
+            "window": window,
+            "label": labels[window],
+            "symbol": symbol[:32],
+            "return_pct": round(value_percent, 6),
+            "provider": str(row.get("provider") or "")[:64],
+            "event_trade_date": row.get("event_trade_date"),
+            "benchmark_ticker": str(row.get("benchmark_ticker") or "")[:32] or None,
+            "scope": "post_event_audit_only",
+            "_updated_at": row.get("updated_at"),
+        }
+        key = (symbol, window)
+        previous = projected.get(key)
+        if previous is None or str(item.get("_updated_at") or "") >= str(
+            previous.get("_updated_at") or ""
+        ):
+            projected[key] = item
+    items = list(projected.values())
+    for item in items:
+        item.pop("_updated_at", None)
+    items.sort(
+        key=lambda item: (
+            str(item["symbol"]),
+            window_order[str(item["window"])],
+        )
+    )
+    if not items:
+        return None
+    return {
+        "items": items,
+        "scope": "post_event_audit_only",
+        "uses_event_truth": False,
+        "used_as_model_feature": False,
+        "used_for_discovery_rank": False,
+    }
 
 
 def _rate_limit_client_key(request: Request, trusted_proxy_hosts: tuple[str, ...]) -> str:
@@ -950,6 +1051,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         result = {key: value.get(key) for key in public_event_fields}
         result.update(derive_public_event_semantics(value))
+        result.update(derive_public_display_headline(value, captured_source))
         result["risk_assessment"] = project_public_risk_assessment(
             risk_run,
             current_version=int(value.get("current_version") or 0),
@@ -1394,20 +1496,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if public_event.get("citation_ready") is True
             else {}
         )
+        preferred_source = (
+            value.get("preferred_source")
+            if isinstance(value.get("preferred_source"), dict)
+            else {}
+        )
         result: dict[str, Any] = {
             "event": public_event,
             "current_version": {
                 "version": version.get("version"),
                 "facts": public_facts,
             },
-            "preferred_source": {
-                "source_published_at": (
-                    value.get("preferred_source") or {}
-                ).get("source_published_at")
-            },
+            "preferred_source": (
+                public_captured_source(preferred_source)
+                if preferred_source
+                else {}
+            ),
             "evidence_count": len(evidence),
             "no_trading_banner": value.get("no_trading_banner"),
         }
+        market_reaction = _public_market_reaction(value)
+        if market_reaction is not None:
+            result["market_reaction"] = market_reaction
         verification = value.get("verification_method")
         if isinstance(verification, dict):
             eligible_ids = {
@@ -1931,6 +2041,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 date_to=date_to.isoformat() if date_to else None,
                 reader_ready=effective_reader_ready,
                 captured_source_required=False,
+                exclude_nonfinancial_retractions=not internal_reader,
                 # The public card renders at most 360 characters.  Avoid
                 # pulling multi-megabyte provider summaries from historical
                 # observations only to discard them in ``public_event_item``.
@@ -1944,7 +2055,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if internal_reader:
             data = read_events()
         else:
-            cache_key = "public-event-feed-v3:" + repr(
+            cache_key = "public-event-feed-v4:" + repr(
                 (
                     status,
                     public_state,
@@ -1979,11 +2090,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         internal_reader: bool = Depends(internal_reader_access),
     ):
         effective_reader_ready = reader_ready if internal_reader else None
-        cache_key = f"event-facets-v2:{effective_reader_ready!r}"
+        cache_key = f"event-facets-v3:{effective_reader_ready!r}:{not internal_reader!r}"
         data = cached_read(
             cache_key,
             60.0,
-            lambda: ledger.event_facets(reader_ready=effective_reader_ready),
+            lambda: ledger.event_facets(
+                reader_ready=effective_reader_ready,
+                exclude_nonfinancial_retractions=not internal_reader,
+            ),
         )
         return envelope(request, data)
 

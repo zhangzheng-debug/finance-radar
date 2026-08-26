@@ -90,39 +90,29 @@ def test_readonly_presentation_is_deterministic_for_all_frozen_cases() -> None:
         )
 
 
-def test_public_replay_explains_its_readonly_boundary() -> None:
+def test_public_replay_states_its_readonly_boundary_once() -> None:
     source = PAGE.read_text(encoding="utf-8")
-    for copy in (
-        "固定案例的只读教学示意",
-        "不会触发实时采集、模型运行或数据库写入",
-        "不会改变任何历史记录",
-        "不代表当前系统的实际输出或最终判断",
-        "不调用模型或读取当前系统输出",
-        "不保存演示过程",
-        "不修改生产数据",
-    ):
-        assert copy in source
+    boundary = "冻结案例仅用于说明证据变化；页面不写入生产数据。"
+    assert source.count(boundary) == 1
+    assert "status_strip" not in source
+    assert "no_trading_banner" not in source
 
 
 def test_public_replay_has_a_chinese_first_screen_and_secondary_raw_evidence() -> None:
     source = PAGE.read_text(encoding="utf-8")
     for copy in (
-        '    "证据演示",',
-        '    "只读教学演示",',
-        '("演示目的", "冻结案例教学示意"',
-        '("证据如何变化", "按时间顺序查看"',
-        '("教学小结", "走完案例后显示"',
-        '("仍不做什么", "不写入、不交易"',
-        'section_header("发生什么"',
-        'section_header("证据如何改变教学提示"',
-        'st.expander("查看英文原始证据（次级）", expanded=False)',
+        '<div><span>FINANCE RADAR</span><h1>案例</h1></div>',
+        'case = st.selectbox("选择案例"',
+        'restart_col.button("第一步"',
+        'next_col.button("下一步"',
+        'all_col.button("完整过程"',
+        'with st.expander("原文", expanded=False)',
     ):
         assert copy in source
 
     assert "READ-ONLY DEMO" not in source
-    assert 'st.write(summary)' in source
     assert 'st.write(observation.get("passage")' in source
-    assert source.index('with st.expander("查看英文原始证据（次级）"') < source.index(
+    assert source.index('with st.expander("原文"') < source.index(
         'st.write(observation.get("passage")'
     )
 
@@ -130,18 +120,14 @@ def test_public_replay_has_a_chinese_first_screen_and_secondary_raw_evidence() -
 def test_completed_demo_has_an_explicit_terminal_state_and_session_only_restart() -> None:
     source = PAGE.read_text(encoding="utf-8")
     for copy in (
-        'restart_col.button(\n    "重新开始"',
-        'section_header("教学小结"',
-        "教学示意完成：最后一步的规则提示为",
-        "教学规则提示进入人工风险复核",
-        'section_header("仍不做什么"',
-        "本页唯一会变化的是当前浏览会话中的显示进度",
+        'restart_col.button("第一步"',
+        'st.success(f"案例结论：',
+        'st.session_state[visible_key] = 1',
     ):
         assert copy in source
 
     assert "演示完成：最终判断为" not in source
     assert "此刻系统应该怎样做" not in source
-    assert 'st.session_state[visible_key] = 1' in source
     assert "session_state.pop" not in source
 
 
@@ -154,8 +140,7 @@ def test_replay_progress_strip_uses_the_same_visible_step_as_the_conclusion(monk
     next_button = next(button for button in page.button if button.label == "下一步")
     next_button.click().run()
 
-    rendered = "\n".join(str(item.value) for item in page.markdown)
+    rendered = "\n".join(str(item.value) for item in [*page.markdown, *page.caption])
     assert not page.exception
-    assert "当前进度" in rendered
-    assert "2/2" in rendered
-    assert any("教学示意完成：最后一步的规则提示为" in str(item.value) for item in page.success)
+    assert "证据节点 2/2" in rendered
+    assert any("案例结论：高风险信号" in str(item.value) for item in page.success)

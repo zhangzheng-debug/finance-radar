@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from app.web.common import (
+    UI_ROLE,
     header,
     install_style,
     no_trading_banner,
@@ -15,6 +16,56 @@ from app.web.common import (
 st.set_page_config(page_title="方法与边界 · Finance Radar", page_icon="◎", layout="wide")
 install_style()
 render_primary_navigation("method")
+
+if UI_ROLE == "public":
+    st.markdown(
+        '<header class="public-reader-header">'
+        '<div><span>FINANCE RADAR</span><h1>方法</h1></div>'
+        '<p>从事件发现到市场反应的可追溯研究链路。</p>'
+        '</header>',
+        unsafe_allow_html=True,
+    )
+    section_header("核心流程", "")
+    st.markdown(
+        """
+1. **自动发现**：持续读取监管机构、交易所、公司公告与公开新闻来源。
+2. **风险排序**：千问模型结合人工金标，判断事件的正负面、下行强度与关注优先级。
+3. **材料核对**：事件卡片连接来源摘录与可定位的原始材料，事实判断以原文为准。
+4. **价格审计**：按消息公开时间观察固定窗口内的市场变化，用于事后检验信号质量。
+"""
+    )
+
+    section_header("页面标签", "")
+    label_left, label_right = st.columns(2, gap="large")
+    with label_left:
+        st.markdown(
+            """
+**风险信号**
+
+显示金标训练模型给出的方向与下行强度，用于排序研究注意力。
+
+**信息依据**
+
+“原文支持”“一手材料”“来源摘录”“线索档案”描述当前可读材料的层级。
+"""
+        )
+    with label_right:
+        st.markdown(
+            """
+**时间**
+
+事件日、来源发布与数据更新时间分别记录，统一使用 UTC。
+
+**AI 阅读辅助**
+
+AI 解释来源摘录，帮助快速阅读；它不参与风险标签和事实认定。
+"""
+        )
+
+    st.caption(
+        "只读研究工具 · 模型用于风险排序 · 原始材料用于事实核对 · 不连接交易账户"
+    )
+    st.stop()
 
 header("方法与边界", "看清证据从哪里来、何时发生，以及系统没有替你做什么")
 no_trading_banner()

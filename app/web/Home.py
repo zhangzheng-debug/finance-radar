@@ -33,10 +33,10 @@ from app.web.components import (
     facet_values,
     event_anchor_id,
     focus_event_preview,
+    focus_public_event_feed,
     next_action_guidance,
     public_event_copy,
     public_event_evidence_posture,
-    public_event_quality,
     public_event_risk_assessment,
     public_event_state,
     render_evidence_route,
@@ -63,6 +63,8 @@ PUBLIC_SORTS = {
     "主体名称": "subject",
 }
 PUBLIC_EVENT_SEEN_STATE_KEY = "public_event_seen_v1"
+CAPTURE_EXPLANATION_CACHE_STATE_KEY = "public_capture_explanation_v1"
+CAPTURE_EXPLANATION_MAX_POLLS = 15
 
 
 def bounded_int(value: object, default: int, *, minimum: int, maximum: int) -> int:
@@ -90,53 +92,6 @@ def public_source_label(value: str, counts: dict[str, int]) -> str:
         return "全部来源"
     label = PUBLIC_SOURCE_LABELS.get(value, "其他公开来源")
     return f"{label} · {counts.get(value, 0):,}"
-
-
-def render_public_reading_prompt(event: dict[str, object], evidence: list[dict[str, object]]) -> None:
-    """Give public readers a useful next step without exposing review tooling."""
-    state = public_event_state(event)
-    posture = public_event_evidence_posture(event)
-    quality = public_event_quality(event, evidence)
-    if state == "excluded":
-        title = "这是一条异常处置记录"
-        reason = "系统保留它是为了说明曾捕获过什么；这项处置不等于一条有效事件事实。"
-        steps = ("查看最初捕获内容", "核对处置原因", "只有出现新的高权威材料时再重新判断")
-        tone = "ok"
-    elif posture["key"] == "PRIMARY_SUPPORTED":
-        title = "先读支持当前事实的官方原文"
-        reason = f"当前结构化事实已关联 {len(evidence)} 条可读证据；摘要仍不能替代完整上下文。"
-        steps = ("打开官方原始来源", "核对主体、日期和文件版本", "区分已发生事实与前瞻性表述")
-        tone = "ok"
-    elif posture["key"] == "PRIMARY_SOURCE_AVAILABLE":
-        title = "一手材料已经找到，事实槽仍需补齐"
-        missing = posture["gap_labels"] or quality["gaps"]
-        reason = "当前缺口：" + "、".join(missing or ["结构化事实尚未闭合"]) + "。"
-        steps = (
-            "先确认是谁、做了什么以及处于哪个阶段",
-            "从现有一手材料中定位支持该事实的精确段落",
-            "事实槽补齐前，不把分类标签当作事件结论",
-        )
-        tone = "watch"
-    elif posture["key"] == "SOURCE_CAPTURED":
-        title = "先读来源捕获，再寻找一手原文"
-        reason = "当前只有系统捕获到的来源内容，它可以解释线索来自哪里，但不能单独确认事件事实。"
-        steps = ("阅读捕获原文与自动解读", "寻找监管、交易所或公司原始文件", "不要从风险路由推断事件真假")
-        tone = "watch"
-    else:
-        title = "当前还没有可供核对的来源"
-        reason = "页面只保留规范化事件记录；在来源补齐前，不应把类别、主体或模型标签写成确定事实。"
-        steps = ("确认来源采集是否遗漏", "优先寻找官方原始文件", "来源补齐前保留不确定性")
-        tone = "risk"
-    step_markup = "".join(f"<li>{escape(step)}</li>" for step in steps)
-    st.markdown(
-        f'<section class="next-action next-action-{tone}" aria-labelledby="public-reading-title">'
-        '<div class="next-action-topline"><span>阅读提示</span><strong>只读</strong></div>'
-        f'<h2 id="public-reading-title">{escape(title)}</h2>'
-        f'<p>{escape(reason)}</p><ol>{step_markup}</ol>'
-        '<div class="next-action-boundary"><span>不构成投资建议 · 不触发任何外部操作</span></div>'
-        '</section>',
-        unsafe_allow_html=True,
-    )
 
 
 def public_source_url(evidence: list[dict[str, object]]) -> str | None:
@@ -170,7 +125,7 @@ def public_capture_url(sources: list[dict[str, object]]) -> str | None:
 
 
 def render_capture_explanation_payload(payload: dict[str, object]) -> None:
-    """Render the compact zero-evidence boundary without the legacy AI template."""
+    """Render source text immediately and AI assistance only when complete."""
 
     if not payload.get("display"):
         return
@@ -180,23 +135,19 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
         str(source.get("source_title") or "已捕获一条 API 来源文本").split()
     )
     source_excerpt = " ".join(
-        str(source.get("source_excerpt") or "来源没有提供更多摘要。").split()
+        str(source.get("source_excerpt") or "").split()
     )
     if len(source_excerpt) > 900:
         source_excerpt = source_excerpt[:897].rstrip() + "…"
+    excerpt_markup = (
+        f'<p>{escape(source_excerpt)}</p>' if source_excerpt != source_title else ""
+    )
     st.markdown(
-        '<section class="capture-ai-boundary" aria-label="无证据事件的自动解释">'
-        '<div class="capture-ai-boundary-head">'
-        '<span>AI 自动解释（仅在无证据时启用）</span>'
-        '<strong>AI 阅读辅助 · 非证据</strong>'
-        '</div>'
-        '<p>因为该事件目前完全没有关联证据，系统才启动外部 AI，对已捕获的 API '
-        '标题、摘要或正文片段进行自动解释。该内容只帮助理解来源文本，不证明事件真实发生，'
-        '不改变事件状态、重大性、极性、风险分流或价格审计，也不会触发交易。</p>'
+        '<section class="capture-ai-boundary" aria-label="来源摘录">'
+        '<div class="capture-ai-boundary-head"><span>来源摘录</span></div>'
         '<div class="capture-ai-source">'
-        '<small>系统捕获文本 · 不是 P0/P1 原始证据</small>'
         f'<h3>{escape(source_title)}</h3>'
-        f'<p>{escape(source_excerpt)}</p>'
+        f'{excerpt_markup}'
         '</div>'
         '</section>',
         unsafe_allow_html=True,
@@ -204,7 +155,7 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
     source_url = public_capture_url([source]) if source else None
     if source_url:
         st.link_button(
-            "查看这条发现来源（非核验证据）",
+            "打开来源",
             source_url,
             width="stretch",
         )
@@ -213,11 +164,19 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
     interpretation = payload.get("item")
     interpretation = interpretation if isinstance(interpretation, dict) else None
     if state == "READY" and interpretation:
-        st.markdown("#### AI 对捕获文本的解释")
-        st.markdown(str(interpretation.get("one_line_zh") or "自动解释已完成。"))
+        st.markdown(
+            '<section class="capture-ai-result" aria-label="AI 阅读辅助">'
+            '<div class="capture-ai-boundary-head">'
+            '<span>AI 阅读辅助</span>'
+            '<strong>基于来源摘录 · 独立于风险信号</strong>'
+            '</div>'
+            f'<p>{escape(str(interpretation.get("one_line_zh") or ""))}</p>'
+            '</section>',
+            unsafe_allow_html=True,
+        )
         claims = interpretation.get("what_source_says") or []
         if claims:
-            st.markdown("**捕获文本明确表达**")
+            st.markdown("**来源要点**")
             for claim in claims[:4]:
                 if not isinstance(claim, dict):
                     continue
@@ -225,40 +184,86 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
                     f"- {escape(str(claim.get('text_zh') or ''))}  "
                     f"\n  原文：{escape(str(claim.get('quote') or ''))}"
                 )
-        missing = interpretation.get("missing_to_change_state_zh") or []
-        if missing:
-            st.markdown("**仍缺少什么**")
-            for item in missing[:3]:
-                st.markdown(f"- {escape(str(item))}")
-        st.caption("完整结果已通过引文、数字、版本和提示词合同校验后一次性展示。")
-    elif state == "ELIGIBLE_NOT_QUEUED":
-        st.info("捕获文本符合解释边界，但尚未进入后台队列；原文阅读不受影响。")
-    elif state == "QUEUED":
-        st.info("AI 自动解释已进入后台队列；其他事件内容已经可以正常阅读。")
-    elif state == "RUNNING":
-        st.info("AI 正在读取这条捕获文本；结果完成并通过合同校验后才会展示。")
-    elif state == "RETRY_WAIT":
-        retry_at = str(payload.get("next_retry_at") or "").strip()
-        suffix = f"（下次重试：{escape(retry_at)}）" if retry_at else ""
-        st.warning(f"本次外部调用未完成，后台会自动重试{suffix}；不会用猜测补位。")
-    elif state == "FAILED_TERMINAL":
-        st.warning("多次尝试后仍未生成合规解释；捕获原文仍可读，系统不会伪造结果。")
-    elif state == "SUPERSEDED":
-        st.info("已有解释不再匹配当前文本或事件版本，后台将按新输入重新生成。")
-    elif state == "STATUS_UNAVAILABLE":
-        st.warning("暂时无法读取后台任务状态；这不代表任务仍在生成，稍后会自动重试查询。")
-    else:
-        st.info("正在读取后台任务的真实状态；其他事件内容不受影响。")
+
+
+def public_market_reaction_markup(detail: dict[str, object]) -> str:
+    """Render only completed post-event returns; empty work stays invisible."""
+
+    reaction = detail.get("market_reaction")
+    reaction = reaction if isinstance(reaction, dict) else {}
+    items = reaction.get("items")
+    items = items if isinstance(items, list) else []
+    cards: list[str] = []
+    providers: set[str] = set()
+    symbols: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            value = float(item.get("return_pct"))
+        except (TypeError, ValueError):
+            continue
+        if value != value or value in {float("inf"), float("-inf")}:
+            continue
+        label = " ".join(str(item.get("label") or "").split())
+        symbol = " ".join(str(item.get("symbol") or "").split())
+        if not label or not symbol:
+            continue
+        providers.add(" ".join(str(item.get("provider") or "").split()))
+        symbols.add(symbol)
+        tone = "positive" if value > 0 else "negative" if value < 0 else "flat"
+        cards.append(
+            '<div class="market-reaction-item">'
+            f'<span>{escape(label)}</span><strong class="{tone}">{value:+.2f}%</strong>'
+            '</div>'
+        )
+    if not cards:
+        return ""
+    provider_text = "、".join(sorted(value for value in providers if value))
+    symbol_text = "、".join(sorted(symbols))
+    context = " · ".join(value for value in (symbol_text, provider_text) if value)
+    return (
+        '<section class="market-reaction" aria-label="价格反应">'
+        '<div class="market-reaction-head"><span>价格反应</span>'
+        f'<small>{escape(context)}</small></div>'
+        '<div class="market-reaction-grid">'
+        + "".join(cards)
+        + '</div><p>来源公开后的价格变化</p></section>'
+    )
 
 
 @st.fragment(run_every="2s")
 def render_capture_explanation_fragment(
     event_path_id: str,
     event_id: str,
+    event_version: int,
     initial_payload: dict[str, object],
 ) -> None:
     """Poll the cache-only endpoint without inventing a local queue state."""
 
+    cache = st.session_state.get(CAPTURE_EXPLANATION_CACHE_STATE_KEY, {})
+    cache = cache if isinstance(cache, dict) else {}
+    previous = cache.get(event_id)
+    previous = previous if isinstance(previous, dict) else {}
+    previous_payload = previous.get("payload")
+    previous_payload = (
+        previous_payload if isinstance(previous_payload, dict) else {}
+    )
+    if (
+        int(previous.get("version") or -1) == event_version
+        and str(previous_payload.get("state") or "")
+        in {
+            "READY",
+            "FAILED_TERMINAL",
+            "SUPERSEDED",
+            "NOT_APPLICABLE",
+            "NO_CAPTURE_TEXT",
+            "REFETCH_PRIMARY_SOURCE",
+            "CLIENT_POLL_PAUSED",
+        }
+    ):
+        render_capture_explanation_payload(previous_payload)
+        return
     try:
         payload = api_request(
             f"/api/v1/events/{event_path_id}/capture-explanation",
@@ -269,6 +274,33 @@ def render_capture_explanation_fragment(
         payload["display"] = bool(initial_payload.get("display"))
         payload["state"] = "STATUS_UNAVAILABLE"
         payload.setdefault("item", None)
+    polls = int(previous.get("polls") or 0) + 1
+    state = str(payload.get("state") or "")
+    terminal = state in {
+        "READY",
+        "FAILED_TERMINAL",
+        "SUPERSEDED",
+        "NOT_APPLICABLE",
+        "NO_CAPTURE_TEXT",
+        "REFETCH_PRIMARY_SOURCE",
+    }
+    if terminal or polls >= CAPTURE_EXPLANATION_MAX_POLLS:
+        if not terminal:
+            payload = dict(payload)
+            payload["state"] = "CLIENT_POLL_PAUSED"
+        cache[event_id] = {
+            "version": event_version,
+            "polls": polls,
+            "payload": payload,
+        }
+        st.session_state[CAPTURE_EXPLANATION_CACHE_STATE_KEY] = cache
+    else:
+        cache[event_id] = {
+            "version": event_version,
+            "polls": polls,
+            "payload": payload,
+        }
+        st.session_state[CAPTURE_EXPLANATION_CACHE_STATE_KEY] = cache
     render_capture_explanation_payload(payload)
 
 
@@ -356,7 +388,7 @@ def public_time_value(value: object, *, date_only: bool = False) -> str:
     """Format a declared timestamp while preserving the difference between date and time."""
     normalized = " ".join(str(value or "").split())
     if not normalized:
-        return "未记录"
+        return ""
     if date_only or len(normalized) == 10:
         return normalized[:10]
     try:
@@ -369,7 +401,7 @@ def public_time_value(value: object, *, date_only: bool = False) -> str:
 
 
 def public_time_markup(event: dict[str, object], detail: dict[str, object]) -> str:
-    """Render event/source clocks without exposing internal review workflow."""
+    """Render only the source and data clocks that help a public reader."""
     version = detail.get("current_version") or {}
     facts = version.get("facts") or {} if isinstance(version, dict) else {}
     if not isinstance(facts, dict):
@@ -383,11 +415,12 @@ def public_time_markup(event: dict[str, object], detail: dict[str, object]) -> s
         or facts.get("published_at")
     )
     values = (
-        ("事件日", public_time_value(event.get("event_date"), date_only=True)),
         ("来源发布", public_time_value(published_at)),
-        ("系统发现", public_time_value(event.get("first_seen_at"))),
-        ("最后更新", public_time_value(event.get("last_updated_at"))),
+        ("数据更新", public_time_value(event.get("last_updated_at"))),
     )
+    values = tuple((label, value) for label, value in values if value)
+    if not values:
+        return ""
     cells = "".join(
         '<div class="event-time-cell"><span>{}</span><strong>{}</strong></div>'.format(
             escape(label), escape(value)
@@ -395,8 +428,7 @@ def public_time_markup(event: dict[str, object], detail: dict[str, object]) -> s
         for label, value in values
     )
     return (
-        '<section class="event-time-facts" aria-label="事件与来源时间">'
-        '<div class="event-time-heading">时间口径 · 事件本身、来源发布、系统处理不是同一个时间</div>'
+        '<section class="public-source-timing" aria-label="来源与数据时间">'
         f'<div class="event-time-grid">{cells}</div>'
         '</section>'
     )
@@ -430,11 +462,17 @@ if requested_page in page_targets:
     st.query_params.clear()
     st.switch_page(page_targets[requested_page])
 
-header(
-    "态势总览",
-    "事件记录、证据姿态与模型研判" if UI_ROLE != "admin" else "事件流、复核队列与运行态总览",
-)
-no_trading_banner()
+if UI_ROLE == "admin":
+    header("态势总览", "事件流、复核队列与运行态总览")
+    no_trading_banner()
+else:
+    st.markdown(
+        '<header class="public-reader-header">'
+        '<div><span>FINANCE RADAR</span><h1>风险雷达</h1></div>'
+        '<p>自动发现潜在下行事件，连接来源材料与市场反应。</p>'
+        '</header>',
+        unsafe_allow_html=True,
+    )
 overview_loading = st.empty()
 overview_loading.caption("正在读取采集状态与证据概览…")
 try:
@@ -468,18 +506,13 @@ public_worker_fresh = (
     public_worker_age_seconds is not None and public_worker_age_seconds <= 30 * 60
 )
 public_worker_stale = UI_ROLE != "admin" and public_worker_age_seconds is not None and not public_worker_fresh
-public_worker_unknown = UI_ROLE != "admin" and public_worker_age_seconds is None
-
 if public_worker_stale:
-    st.error(
-        "完整数据处理周期已中断：最近一次完整成功为 "
-        f"{format_elapsed(public_worker_age)} 前。部分来源可能仍已采集，"
-        "但尚未完成核验、路由与索引；以下只展示已经持久化的历史记录，不是实时信息。"
-    )
-elif public_worker_unknown:
-    st.warning(
-        "数据更新状态无法确认：没有获得最近一次成功采集时间。"
-        "以下内容是事件记录，不能视为实时信息。"
+    st.markdown(
+        '<div class="public-data-alert" role="status">'
+        "数据更新中断 · 最近一次完整处理为 "
+        f"{escape(format_elapsed(public_worker_age))} 前。"
+        "</div>",
+        unsafe_allow_html=True,
     )
 
 active_flow = str(st.query_params.get("preview_flow") or "全部事件")
@@ -549,9 +582,12 @@ reader_funnel = overview.get("reader_funnel") or {}
 reader_ready_count = max(0, int(reader_funnel.get("total") or 0))
 canonical_inventory_count = max(
     reader_ready_count,
-    int(canonical_public_funnel.get("total") or counts.get("canonical_events") or 0),
+    int(
+        counts.get("public_visible_events")
+        if counts.get("public_visible_events") is not None
+        else canonical_public_funnel.get("total") or counts.get("canonical_events") or 0
+    ),
 )
-evidence_gap_inventory = max(0, canonical_inventory_count - reader_ready_count)
 timing = overview.get("timing", {})
 event_age = timing.get("latest_new_event_age_seconds", timing.get("latest_event_age_seconds"))
 worker_age = timing.get("latest_worker_success_age_seconds")
@@ -567,57 +603,27 @@ if UI_ROLE == "admin":
     attention_sources = source_watch + source_error
 
 review_queue = int(overview.get("review_queue") or 0)
-if UI_ROLE != "admin":
-    brief_copy = f"账本中的 {canonical_inventory_count:,} 条事件现在全部可以浏览。"
-    brief_copy += (
-        f"其中 {reader_ready_count:,} 条达到正式引用条件；"
-        f"其余 {evidence_gap_inventory:,} 条按一手材料、来源捕获或尚无来源分级展示。"
-    )
-elif review_queue:
+if UI_ROLE == "admin" and review_queue:
     brief_copy = f"有 {review_queue:,} 条可读事件仍在等待证据或规则核验。"
     brief_copy += "先在当前页预览证据与下一步行动，需要完整工具时再进入人工复核。"
-else:
+elif UI_ROLE == "admin":
     brief_copy = "当前没有等待复核的事件。可以浏览最新事件流，或按需展开运行健康与来源状态。"
-situation_brief(
-    "先看需要判断的事件" if UI_ROLE == "admin" else "全部事件，分级展示",
-    brief_copy,
-    focus_label="当前优先级" if UI_ROLE == "admin" else "当前可见性",
-    focus_value=(
-        f"{review_queue:,} 待复核"
-        if UI_ROLE == "admin" and review_queue
-        else ("队列已清" if UI_ROLE == "admin" else f"全部可浏览 {canonical_inventory_count:,}")
-    ),
-    focus_state=(
-        "watch"
-        if (UI_ROLE == "admin" and review_queue)
-        or (UI_ROLE != "admin" and evidence_gap_inventory)
-        else "ok"
-    ),
-)
-if UI_ROLE != "admin":
+if UI_ROLE == "admin":
+    situation_brief(
+        "先看需要判断的事件",
+        brief_copy,
+        focus_label="当前优先级",
+        focus_value=f"{review_queue:,} 待复核" if review_queue else "队列已清",
+        focus_state="watch" if review_queue else "ok",
+    )
+else:
     st.markdown(
-        '<a class="mobile-primary-action" href="#live-events" target="_self">'
-        '查看事件与证据 <span aria-hidden="true">↓</span></a>',
+        '<div class="public-reader-summary">'
+        f'<strong>{canonical_inventory_count:,}</strong><span>个事件</span>'
+        f'<span>最近更新 {escape(format_elapsed(event_age))} 前</span>'
+        '</div>',
         unsafe_allow_html=True,
     )
-    workspace_cols = st.columns(3, gap="small")
-    workspace_actions = (
-        ("今日新增", {"preview_period": "最近 24 小时", "preview_sort": "latest"}),
-        ("最近 7 天", {"preview_period": "最近 7 天", "preview_sort": "latest"}),
-        ("全部事件", {"preview_period": "", "preview_sort": "latest"}),
-    )
-    for column, (label, updates) in zip(workspace_cols, workspace_actions, strict=True):
-        if column.button(label, width="stretch", key=f"public-workspace-{label}"):
-            for key in (
-                "preview_period",
-                "preview_event_id",
-                "preview_page",
-            ):
-                st.query_params.pop(key, None)
-            for key, value in updates.items():
-                st.query_params[key] = value
-            st.rerun()
-    st.caption("三个时间入口只改变发生时间范围；证据姿态和模型研判会显示在每条事件上。")
 if UI_ROLE == "admin":
     with st.form("terminal-global-search", border=False):
         search_col, submit_col = st.columns([5.4, .8], gap="small", vertical_alignment="bottom")
@@ -654,45 +660,8 @@ if UI_ROLE == "admin":
         ),
         ("最新事件", format_elapsed(event_age), ""),
     ]
-else:
-    latest_worker = overview.get("latest_worker_cycle") or {}
-    worker_status = str(latest_worker.get("status") or "").upper()
-    worker_has_finished_time = public_worker_age_seconds is not None
-    collector_ok = worker_status in {"SUCCESS", "COMPLETED", "OK"} and public_worker_fresh
-    collector_label = (
-        "正常"
-        if collector_ok
-        else (
-            "更新状态未知"
-            if not worker_has_finished_time
-            else ("更新已中断" if not public_worker_fresh else "最近采集异常")
-        )
-    )
-    collector_state = "ok" if collector_ok else ("risk" if public_worker_stale or public_worker_unknown else "watch")
-    status_items = [
-        ("采集状态", collector_label, collector_state),
-        ("最近成功采集", format_elapsed(worker_age), collector_state),
-        (
-            "事件总量",
-            f"{canonical_inventory_count:,} 条",
-            "ok" if canonical_inventory_count else "watch",
-        ),
-        (
-            "正式可引用 / 其他证据姿态",
-            f"{reader_ready_count:,} / {evidence_gap_inventory:,}",
-            "watch" if evidence_gap_inventory else "ok",
-        ),
-    ]
-status_strip(status_items)
-if UI_ROLE != "admin":
-    st.markdown(
-        '<p class="public-health-explainer">'
-        f'采集、证据归类与模型研判是独立时间线（最近发现新事件：{escape(format_elapsed(event_age))} 前）。'
-        '全部规范事件均可浏览；“正式可引用”只统计已有官方原文支持的结构化事实。'
-        '其余记录按证据姿态展示，不会因为内部流程进度从事件流中消失。'
-        '</p>',
-        unsafe_allow_html=True,
-    )
+if UI_ROLE == "admin":
+    status_strip(status_items)
 if UI_ROLE == "admin":
     render_evidence_route(event_status, review_queue)
     render_flow_shortcuts(event_status, public=False)
@@ -702,8 +671,7 @@ feed_loading = st.empty()
 if UI_ROLE != "admin":
     feed_loading.markdown(
         '<section class="fr-loading-state" role="status" aria-live="polite">'
-        '<strong class="fr-state-title">正在加载当前筛选的事件</strong>'
-        '<p class="fr-state-copy">筛选条件和当前页面会被保留；不会切换到其他页面。</p>'
+        '<strong class="fr-state-title">加载事件…</strong>'
         '</section>',
         unsafe_allow_html=True,
     )
@@ -737,42 +705,51 @@ if UI_ROLE != "admin":
         search_col, submit_col = st.columns([5.2, 1], gap="small", vertical_alignment="bottom")
         terminal_query = search_col.text_input(
             "搜索事件",
-            placeholder="搜索公司、Ticker、事件类别或 Event ID",
+            placeholder="搜索公司、Ticker 或事件",
             value=preview_query,
+            label_visibility="collapsed",
         )
-        search_submitted = submit_col.form_submit_button("应用筛选", width="stretch")
-        family_col, source_col, period_col, sort_col, size_col = st.columns(
-            [1.4, 1.5, 1.05, 1.05, .8],
-            gap="small",
+        search_submitted = submit_col.form_submit_button("搜索", width="stretch")
+        advanced_filters_active = bool(
+            public_family
+            or public_source
+            or public_period != "全部时间"
+            or public_sort != "latest"
+            or public_page_size != 24
         )
-        selected_family = family_col.selectbox(
-            "事件类别",
-            family_options,
-            index=family_options.index(public_family),
-            format_func=lambda value: public_family_label(value, family_counts),
-        )
-        selected_source = source_col.selectbox(
-            "信息来源",
-            source_options,
-            index=source_options.index(public_source),
-            format_func=lambda value: public_source_label(value, source_counts),
-        )
-        selected_period_label = period_col.selectbox(
-            "发生时间",
-            list(PUBLIC_PERIODS),
-            index=list(PUBLIC_PERIODS).index(public_period),
-        )
-        selected_sort_label = sort_col.selectbox(
-            "排序方式",
-            list(PUBLIC_SORTS),
-            index=list(PUBLIC_SORTS).index(selected_sort_label),
-        )
-        selected_page_size = size_col.selectbox(
-            "每页",
-            [12, 24, 48],
-            index=[12, 24, 48].index(public_page_size),
-            format_func=lambda value: f"{value} 条",
-        )
+        with st.expander("筛选", expanded=advanced_filters_active):
+            family_col, source_col, period_col, sort_col, size_col = st.columns(
+                [1.4, 1.5, 1.05, 1.05, .8],
+                gap="small",
+            )
+            selected_family = family_col.selectbox(
+                "事件类别",
+                family_options,
+                index=family_options.index(public_family),
+                format_func=lambda value: public_family_label(value, family_counts),
+            )
+            selected_source = source_col.selectbox(
+                "信息来源",
+                source_options,
+                index=source_options.index(public_source),
+                format_func=lambda value: public_source_label(value, source_counts),
+            )
+            selected_period_label = period_col.selectbox(
+                "发生时间",
+                list(PUBLIC_PERIODS),
+                index=list(PUBLIC_PERIODS).index(public_period),
+            )
+            selected_sort_label = sort_col.selectbox(
+                "排序方式",
+                list(PUBLIC_SORTS),
+                index=list(PUBLIC_SORTS).index(selected_sort_label),
+            )
+            selected_page_size = size_col.selectbox(
+                "每页",
+                [12, 24, 48],
+                index=[12, 24, 48].index(public_page_size),
+                format_func=lambda value: f"{value} 条",
+            )
     if search_submitted:
         normalized_query = terminal_search_state(terminal_query)["q"]
         updates = {
@@ -973,6 +950,15 @@ if preview_event_id:
                 explanation_state = dossier.get("capture_explanation") or {}
                 if isinstance(explanation_state, dict):
                     preview_capture_explanation = explanation_state
+                preferred_capture = preview_detail.get("preferred_source") or {}
+                if (
+                    isinstance(preferred_capture, dict)
+                    and (
+                        preferred_capture.get("source_title")
+                        or preferred_capture.get("source_excerpt")
+                    )
+                ):
+                    preview_sources = [preferred_capture]
             preview_evidence = [
                 item
                 for item in preview_evidence
@@ -1057,12 +1043,13 @@ if preview_event_id:
             seen_events[preview_event_id] = current_snapshot
             st.session_state[PUBLIC_EVENT_SEEN_STATE_KEY] = seen_events
         with st.container(border=True):
-            section_header(
-                "当前页事件预览",
-                "留在态势总览 · 核对原始证据与上下文"
-                if UI_ROLE != "admin"
-                else "留在态势总览 · 需要时再进入人工复核",
-            )
+            if UI_ROLE == "admin":
+                section_header(
+                    "当前页事件预览",
+                    "留在态势总览 · 需要时再进入人工复核",
+                )
+            else:
+                section_header("事件详情", "")
             if preview_load_error is not None and UI_ROLE != "admin":
                 st.warning(
                     "事件详情读取超时；当前先展示事件流中已经加载的摘要。"
@@ -1082,64 +1069,112 @@ if preview_event_id:
                     unsafe_allow_html=True,
                 )
             else:
-                evidence_authority = (
-                    PUBLIC_AUTHORITY_LABELS.get(
-                        str(preview_evidence[0].get("authority_tier") or "P?"),
-                        "来源待核实",
+                meta_values = []
+                event_date = str(preview_event.get("event_date") or "").strip()
+                ticker = str(preview_event.get("ticker_at_event") or "").strip()
+                if event_date:
+                    meta_values.append(event_date[:10])
+                if preview_company:
+                    meta_values.append(str(preview_company))
+                if ticker and ticker != preview_company:
+                    meta_values.append(ticker)
+                meta_values.append(str(public_copy["family"]))
+                if public_copy["headline_mode"] == "ATTRIBUTED_SOURCE":
+                    headline_source = str(public_copy["headline_source"] or public_copy["source"])
+                    if headline_source:
+                        meta_values.append(f"来源：{headline_source}")
+                meta_markup = "".join(
+                    f"<span>{escape(value)}</span>" for value in meta_values if value
+                )
+                top_public_passage = ""
+                if preview_evidence:
+                    top_public_passage = " ".join(
+                        str(
+                            preview_evidence[0].get("evidence_passage")
+                            or preview_evidence[0].get("observation_summary")
+                            or ""
+                        ).split()
                     )
-                    if preview_evidence
-                    else "尚无可引用证据"
+                    if len(top_public_passage) > 900:
+                        top_public_passage = top_public_passage[:897].rstrip() + "…"
+                elif preview_sources:
+                    top_public_passage = " ".join(
+                        str(
+                            preview_sources[0].get("source_excerpt")
+                            or preview_sources[0].get("source_title")
+                            or ""
+                        ).split()
+                    )
+                    if len(top_public_passage) > 900:
+                        top_public_passage = top_public_passage[:897].rstrip() + "…"
+                summary_text = " ".join(str(public_copy["summary"] or "").split())
+                comparison_summary = summary_text.casefold().strip(" .。…")
+                comparison_passage = top_public_passage.casefold().strip(" .。…")
+                summary_duplicates_source = bool(
+                    comparison_summary
+                    and comparison_passage
+                    and (
+                        comparison_summary == comparison_passage
+                        or comparison_summary in comparison_passage
+                        or comparison_passage in comparison_summary
+                    )
                 )
-                citation_copy = (
-                    "达到正式引用条件"
-                    if public_copy["citation_ready"]
-                    else "尚未达到正式引用条件"
-                )
-                gap_copy = (
-                    f" · 当前缺口：{escape(str(public_copy['evidence_gaps']))}"
-                    if public_copy["evidence_gaps"]
+                summary_article = (
+                    '<article class="event-answer-summary"><span>事件摘要</span>'
+                    f'<p>{escape(summary_text)}</p></article>'
+                    if summary_text and not summary_duplicates_source
                     else ""
                 )
+                evidence_details = [str(public_copy["evidence_label"])]
+                if preview_evidence:
+                    evidence_authority = PUBLIC_AUTHORITY_LABELS.get(
+                        str(preview_evidence[0].get("authority_tier") or "P?"),
+                        "",
+                    )
+                    if evidence_authority:
+                        evidence_details.append(evidence_authority)
+                    evidence_details.append(f"{len(preview_evidence):,} 条关键材料")
+                elif preview_sources:
+                    evidence_details.append(f"{len(preview_sources):,} 条来源记录")
                 disposition_copy = (
                     f" · {escape(str(public_copy['disposition_label']))}"
                     if public_copy["disposition_label"]
                     else ""
                 )
-                risk_meta = ""
-                if public_copy["risk_confidence"]:
-                    risk_meta += f" · 置信度 {escape(str(public_copy['risk_confidence']))}"
-                if public_copy["risk_model_version"]:
-                    risk_meta += f" · 模型 {escape(str(public_copy['risk_model_version']))}"
+                evidence_article = (
+                    '<article><span>信息依据</span><p><strong>'
+                    f'{escape(" · ".join(evidence_details))}</strong>{disposition_copy}</p></article>'
+                    if preview_evidence or not preview_sources
+                    else ""
+                )
                 risk_article = (
                     f'<article><span>{escape(str(public_copy["risk_heading"]))}</span>'
-                    f'<p><strong>{escape(str(public_copy["risk_label"]))}</strong>{risk_meta} · '
-                    f'{escape(str(public_copy["risk_explanation"]))}</p></article>'
+                    f'<p><strong>{escape(str(public_copy["risk_label"]))}</strong>'
+                    + (
+                        f' · {escape(str(public_copy["risk_explanation"]))}'
+                        if public_copy["risk_explanation"]
+                        else ""
+                    )
+                    + '</p></article>'
                     if public_copy["risk_route"]
+                    else ""
+                )
+                source_heading = "原始材料节选" if preview_evidence else "来源摘录"
+                source_article = (
+                    f'<article class="event-source-passage"><span>{source_heading}</span>'
+                    f'<p>{escape(top_public_passage)}</p></article>'
+                    if top_public_passage
                     else ""
                 )
                 st.markdown(
                     '<section class="event-answer" aria-label="事件阅读摘要">'
-                    '<div class="event-answer-meta">'
-                    f'<span>{escape(str(preview_event.get("event_date") or "日期待确认"))}</span>'
-                    f'<span>{escape(str(preview_event.get("ticker_at_event") or "无证券代码"))}</span>'
-                    f'<span>{escape(public_copy["family"])}</span>'
-                    '</div>'
-                    f'<h2>{escape(preview_company)}</h2>'
+                    f'<div class="event-answer-meta">{meta_markup}</div>'
+                    f'<h2>{escape(str(public_copy["headline"]))}</h2>'
                     '<div class="event-answer-grid">'
-                    '<article><span>发生了什么</span>'
-                    f'<p>{escape(public_copy["summary"])}</p></article>'
-                    '<article><span>为什么关注</span>'
-                    f'<p>{escape(public_copy["relevance"])}</p></article>'
-                    '<article><span>证据与引用</span>'
-                    f'<p><strong>{escape(str(public_copy["evidence_label"]))}</strong> · {citation_copy}'
-                    f'{gap_copy}{disposition_copy} · {len(preview_evidence):,} 条可读证据 · {escape(evidence_authority)}'
-                    + (
-                        f' · {len(preview_sources):,} 条采集来源记录'
-                        if preview_sources
-                        else ''
-                    )
-                    + '</p></article>'
+                    f'{summary_article}'
                     f'{risk_article}'
+                    f'{evidence_article}'
+                    f'{source_article}'
                     '</div>'
                     '</section>',
                     unsafe_allow_html=True,
@@ -1148,14 +1183,13 @@ if preview_event_id:
                     public_time_markup(preview_event, preview_detail),
                     unsafe_allow_html=True,
                 )
-                if previous_snapshot is None:
-                    st.caption("本次浏览会话首次查看；系统已记住当前版本，后续变化会在这里说明。")
-                elif changes_since_view:
+                market_reaction_markup = public_market_reaction_markup(preview_detail)
+                if market_reaction_markup:
+                    st.markdown(market_reaction_markup, unsafe_allow_html=True)
+                if previous_snapshot is not None and changes_since_view:
                     st.markdown("**自上次查看后的变化**")
                     for change in changes_since_view:
                         st.markdown(f"- {escape(change)}")
-                else:
-                    st.caption("与本次浏览会话中的上次查看相比，证据姿态、模型研判和材料集合没有变化。")
             if preview_evidence and UI_ROLE == "admin":
                 top_evidence = preview_evidence[0]
                 top_passage = (
@@ -1173,25 +1207,6 @@ if preview_event_id:
                     '</div>',
                     unsafe_allow_html=True,
                 )
-            elif preview_evidence:
-                top_evidence = preview_evidence[0]
-                top_passage = " ".join(
-                    str(
-                        top_evidence.get("evidence_passage")
-                        or top_evidence.get("observation_summary")
-                        or "暂无精确证据段落"
-                    ).split()
-                )
-                if len(top_passage) > 900:
-                    top_passage = top_passage[:897].rstrip() + "…"
-                with st.expander("查看原始证据节选（可能为英文）", expanded=False):
-                    st.markdown(
-                        '<div class="preview-evidence raw-evidence">'
-                        '<span>原始证据 · 请结合完整文件阅读</span>'
-                        f'<p>{escape(top_passage)}</p>'
-                        '</div>',
-                        unsafe_allow_html=True,
-                    )
             if preview_sources and UI_ROLE == "admin":
                 source = preview_sources[0]
                 source_title = " ".join(
@@ -1238,38 +1253,67 @@ if preview_event_id:
                 UI_ROLE != "admin"
                 and preview_capture_explanation.get("display") is True
             ):
-                render_capture_explanation_fragment(
-                    preview_event_path_id,
-                    preview_event_id,
-                    preview_capture_explanation,
+                event_version = int(preview_event.get("current_version") or 0)
+                explanation_cache = st.session_state.get(
+                    CAPTURE_EXPLANATION_CACHE_STATE_KEY,
+                    {},
                 )
+                explanation_cache = (
+                    explanation_cache if isinstance(explanation_cache, dict) else {}
+                )
+                cached_explanation = explanation_cache.get(preview_event_id)
+                cached_explanation = (
+                    cached_explanation if isinstance(cached_explanation, dict) else {}
+                )
+                if int(cached_explanation.get("version") or -1) == event_version:
+                    cached_payload = cached_explanation.get("payload")
+                    cached_payload = (
+                        cached_payload if isinstance(cached_payload, dict) else {}
+                    )
+                else:
+                    cached_payload = {}
+                if str(cached_payload.get("state") or "") in {
+                    "READY",
+                    "FAILED_TERMINAL",
+                    "SUPERSEDED",
+                    "NOT_APPLICABLE",
+                    "NO_CAPTURE_TEXT",
+                    "REFETCH_PRIMARY_SOURCE",
+                    "CLIENT_POLL_PAUSED",
+                }:
+                    render_capture_explanation_payload(cached_payload)
+                else:
+                    render_capture_explanation_fragment(
+                        preview_event_path_id,
+                        preview_event_id,
+                        event_version,
+                        preview_capture_explanation,
+                    )
             if preview_knowledge.get("covered"):
-                with st.expander("金融专业规则与核验清单", expanded=False):
+                with st.expander("核对清单", expanded=False):
                     st.markdown(
                         f"**为什么重要：** {escape(str(preview_knowledge.get('why_it_matters') or ''))}"
                     )
                     facts = preview_knowledge.get("facts_to_confirm") or []
                     if facts:
-                        st.markdown("**需要确认的事实**")
+                        st.markdown("**核对清单**")
                         for item in facts:
                             st.markdown(f"- {escape(str(item))}")
                     missing = preview_knowledge.get("still_missing_when") or []
                     if missing:
-                        st.markdown("**出现以下情况时仍不能下结论**")
+                        st.markdown("**判断边界**")
                         for item in missing:
                             st.markdown(f"- {escape(str(item))}")
                     counterexamples = preview_knowledge.get("what_would_change_the_view") or []
                     if counterexamples:
-                        st.markdown("**常见反例 / 会改变当前看法的情况**")
+                        st.markdown("**改变判断的情形**")
                         for item in counterexamples:
                             st.markdown(f"- {escape(str(item))}")
-                    st.caption("规则卡只帮助核验，不会自动改变事件状态，也不构成投资建议。")
+                    st.caption("规则卡用于理解事件机制与核对要点。")
             if UI_ROLE == "admin":
                 render_next_action_prompt(
                     next_action_guidance(preview_event, preview_evidence, preview_model)
                 )
-            else:
-                render_public_reading_prompt(copy_input, preview_evidence)
             if UI_ROLE == "admin":
                 full_col, close_col = st.columns([1.25, 1], gap="small")
                 if full_col.button(
@@ -1289,22 +1333,18 @@ if preview_event_id:
                 capture_url = public_capture_url(preview_sources)
                 if source_url:
                     method_col.link_button(
-                        "直达本条原始来源（外部网站）",
+                        "打开原始材料",
                         source_url,
                         width="stretch",
                     )
                 elif capture_url:
                     method_col.link_button(
-                        "查看这条发现来源（非核验证据）",
+                        "打开来源",
                         capture_url,
                         width="stretch",
                     )
                 else:
-                    method_col.page_link(
-                        "pages/5_Method_and_Boundaries.py",
-                        label="如何理解证据与置信度",
-                        width="stretch",
-                    )
+                    method_col.empty()
             if UI_ROLE == "admin":
                 if close_col.button(
                     "收起当前页预览",
@@ -1325,34 +1365,59 @@ if preview_event_id:
 
 if UI_ROLE != "admin" and feed_error is not None:
     st.markdown('<div id="live-events"></div>', unsafe_allow_html=True)
-    section_header("事件浏览", "当前筛选的数据暂时不可用 · 未显示任何替代事件")
+    section_header("事件", "读取失败")
     render_api_error(feed_error)
-    st.caption("已保留当前筛选、排序和分页设置；恢复后请刷新重新读取。")
 elif UI_ROLE != "admin":
     total_pages = max(1, ceil(live_total / public_page_size))
     if live_total and public_page > total_pages:
         st.query_params["preview_page"] = str(total_pages)
         st.query_params.pop("preview_event_id", None)
         st.rerun()
-    st.markdown(
-        '<section class="queue-card queue-card-horizontal" aria-label="事件可见性与证据层级">'
-        '<div>'
-        '<div class="queue-card-label">全部可浏览</div>'
-        f'<div class="queue-card-value">{canonical_inventory_count:,}</div>'
+
+    def public_page_url(page_number: int) -> str:
+        params = {
+            "preview_query": preview_query,
+            "preview_family": public_family,
+            "preview_source": public_source,
+            "preview_period": public_period if public_period != "全部时间" else "",
+            "preview_sort": public_sort,
+            "preview_page_size": public_page_size,
+            "preview_page": page_number if page_number > 1 else "",
+            "preview_focus": "feed",
+        }
+        return "./?" + urlencode(
+            {key: value for key, value in params.items() if value not in (None, "")}
+        ) + "#live-events"
+
+    previous_link = (
+        f'<a href="{escape(public_page_url(public_page - 1), quote=True)}" target="_self" aria-label="上一页">← 上一页</a>'
+        if public_page > 1
+        else '<span aria-disabled="true">← 上一页</span>'
+    )
+    next_link = (
+        f'<a href="{escape(public_page_url(public_page + 1), quote=True)}" target="_self" aria-label="下一页">下一页 →</a>'
+        if public_page < total_pages
+        else '<span aria-disabled="true">下一页 →</span>'
+    )
+    pagination_markup = (
+        '<div class="fr-pagination {placement}" role="group" aria-label="事件分页">'
+        f'{previous_link}'
+        f'<span class="fr-pagination-status">第 {public_page} / {total_pages} 页</span>'
+        f'{next_link}'
+        '<a href="./#live-events" target="_self">重置筛选</a>'
         '</div>'
-        '<div class="queue-card-copy">'
-        f'其中 {reader_ready_count:,} 条达到正式引用条件；'
-        f'{evidence_gap_inventory:,} 条按“一手材料待补、仅捕获来源或尚无来源”如实展示。'
-        '<div class="queue-card-next">下一步 · 打开事件，先读中文说明，再核对捕获来源或原始证据</div>'
-        '</div>'
-        '</section>',
-        unsafe_allow_html=True,
     )
     st.markdown('<div id="live-events"></div>', unsafe_allow_html=True)
-    section_header(
-        "事件浏览",
-        f"本页 {len(live_feed):,} 条 · 共 {live_total:,} 条 · 第 {public_page}/{total_pages} 页 · UTC",
+    if str(st.query_params.get("preview_focus") or "") == "feed":
+        focus_public_event_feed(
+            f"{public_page}:{preview_query}:{public_family}:{public_source}:{public_sort}"
+        )
+    st.markdown(
+        f'<div class="public-feed-heading"><strong>事件</strong>'
+        f'<span>{live_total:,} 条 · UTC</span></div>',
+        unsafe_allow_html=True,
     )
+    st.markdown(pagination_markup.format(placement="fr-pagination-top"), unsafe_allow_html=True)
     if live_feed:
         link_context = {
             "preview_query": preview_query,
@@ -1372,45 +1437,12 @@ elif UI_ROLE != "admin":
     else:
         st.markdown(
             '<section class="fr-empty-state" role="status">'
-            '<strong>当前筛选没有匹配事件</strong>'
-            '<p>可以扩大时间范围、清除来源或类别筛选；系统不会用演示数据填充空结果。</p>'
+            '<strong>当前筛选无结果</strong>'
+            '<a href="./#live-events" target="_self">重置筛选</a>'
             '</section>',
             unsafe_allow_html=True,
         )
-
-    def public_page_url(page_number: int) -> str:
-        params = {
-            "preview_query": preview_query,
-            "preview_family": public_family,
-            "preview_source": public_source,
-            "preview_period": public_period if public_period != "全部时间" else "",
-            "preview_sort": public_sort,
-            "preview_page_size": public_page_size,
-            "preview_page": page_number if page_number > 1 else "",
-        }
-        return "./?" + urlencode(
-            {key: value for key, value in params.items() if value not in (None, "")}
-        ) + "#live-events"
-
-    previous_link = (
-        f'<a href="{escape(public_page_url(public_page - 1), quote=True)}" target="_self" aria-label="上一页">← 上一页</a>'
-        if public_page > 1
-        else '<span aria-disabled="true">← 上一页</span>'
-    )
-    next_link = (
-        f'<a href="{escape(public_page_url(public_page + 1), quote=True)}" target="_self" aria-label="下一页">下一页 →</a>'
-        if public_page < total_pages
-        else '<span aria-disabled="true">下一页 →</span>'
-    )
-    st.markdown(
-        '<div class="fr-pagination" role="group" aria-label="事件分页">'
-        f'{previous_link}'
-        f'<span class="fr-pagination-status">第 {public_page} / {total_pages} 页</span>'
-        f'{next_link}'
-        '<a href="./#live-events" target="_self">清除全部筛选</a>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(pagination_markup.format(placement="fr-pagination-bottom"), unsafe_allow_html=True)
 else:
     left, right = st.columns([1.78, .82], gap="large")
     with left:
@@ -1481,61 +1513,8 @@ else:
         with st.expander("其他工作面", expanded=False):
             render_command_palette(facets)
 
-if UI_ROLE != "admin":
-    # Product KPIs are useful context, but they must never delay the primary
-    # event feed. Load them only after the current event page has rendered.
-    product_quality: dict[str, object] | None = None
-    product_quality_cache = None
-    try:
-        product_quality, product_quality_cache = cached_api_get(
-            "/api/v1/product/metrics",
-            ttl_seconds=60,
-            stale_if_error_seconds=300,
-            timeout_seconds=3,
-        )
-    except Exception:
-        product_quality = None
-    with st.expander("产品质量指标 · 30 天窗口", expanded=False):
-        if product_quality is None:
-            st.caption("当前无法测量产品质量指标；事件与证据浏览不受影响。")
-        else:
-            if product_quality_cache is not None and product_quality_cache.stale:
-                st.caption(
-                    "指标刷新失败；以下为 "
-                    f"{format_elapsed(product_quality_cache.age_seconds)} 前的快照。"
-                )
-            metric_map = {
-                str(item.get("id")): item
-                for item in (product_quality.get("metrics") or [])
-                if isinstance(item, dict)
-            }
-
-            def metric_text(metric_id: str, *, seconds: bool = False) -> str:
-                metric = metric_map.get(metric_id) or {}
-                if metric.get("status") != "MEASURED":
-                    return "未测量"
-                value = metric.get("value")
-                if seconds:
-                    return format_elapsed(value)
-                if metric.get("unit") == "percent":
-                    return f"{float(value or 0):.1f}%"
-                return str(value)
-
-            quality_cols = st.columns(4, gap="small")
-            quality_cols[0].metric("发现延迟 P95", metric_text("capture_latency_p95", seconds=True))
-            quality_cols[1].metric("可引用证据覆盖", metric_text("citable_evidence_coverage"))
-            quality_cols[2].metric("事实闭合率", metric_text("evidence_closure_rate"))
-            quality_cols[3].metric("待复核年龄 P95", metric_text("review_queue_age_p95", seconds=True))
-            unavailable_count = sum(
-                item.get("status") != "MEASURED" for item in metric_map.values()
-            )
-            st.caption(
-                f"样本量与数据源随每项指标返回；{unavailable_count} 项当前明确标记为未测量。"
-                "测试通过数和服务健康不替代用户价值。"
-            )
-
 st.caption(
     "J/K 在人工复核中切换事件 · / 聚焦检索 · 所有行情只读 · 所有模型输出均为 shadow"
     if UI_ROLE == "admin"
-    else "全部事件均可浏览 · 证据姿态与模型研判分开表达 · 时间统一为 UTC · 原始材料可能保留发布语言"
+    else "只读事件研究工具 · 模型用于风险排序，原始材料用于事实核对"
 )

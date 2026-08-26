@@ -5,6 +5,36 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.26.1
+
+- Rebuild the Public surface around one core path: discover downside events,
+  read the event claim, inspect the source material, view an approved Qwen risk
+  signal when one exists, and audit completed post-publication price reactions.
+  Remove reviewer workflow states, empty model placeholders, backend metrics,
+  repeated safety prose and duplicated navigation from the reader interface.
+- Replace company-name cards with provenance-aware event headlines. A current
+  citable fact is stated directly; a capture-only record is explicitly
+  attributed to its source; recovery boilerplate is never presented as the
+  event. Bound and deduplicate card excerpts and keep one compact update clock.
+- Keep all financial canonical events browsable regardless of review progress,
+  while retracting narrow, evidence-free central-bank cultural notices to the
+  immutable source archive. Future matching notices are rejected before
+  canonical admission, and historical retractions remain visible internally.
+- Add completed, audit-only reaction returns to the public dossier. Pending or
+  missed windows, raw snapshots, provider errors and job internals remain
+  private. Database isolation flags still prohibit every displayed return from
+  becoming a discovery rank or model feature.
+- Make zero-evidence DeepSeek assistance non-blocking. The source excerpt loads
+  with the event core; AI text appears only after a current persisted result is
+  ready. The browser stops network polling after a terminal result or a bounded
+  observation window and never exposes queue/failure placeholders to readers.
+- Simplify the Case and Method pages, keep public navigation to three entries,
+  preserve same-page event reading and pagination state, and tighten responsive
+  layout for 390-pixel screens without horizontal overflow.
+- Prevent obvious non-financial institutional releases from entering the
+  canonical event ledger while retaining their raw source observations for
+  audit.
+
 ## 2026.08.25.1
 
 - Replace the DeepSeek interpretation worker's generation-reset OFFSET sweep

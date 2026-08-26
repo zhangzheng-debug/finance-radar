@@ -47,17 +47,17 @@ PUBLIC_STATE_LABELS = {
 # compatibility contract for reviewer/admin workflows; these two maps are the
 # public product vocabulary.
 PUBLIC_EVIDENCE_POSTURE_LABELS = {
-    "PRIMARY_SUPPORTED": "官方原文支持",
-    "PRIMARY_SOURCE_AVAILABLE": "已有一手材料但事实槽待补",
-    "SOURCE_CAPTURED": "仅捕获来源",
-    "NO_SOURCE": "尚无来源",
+    "PRIMARY_SUPPORTED": "原文支持",
+    "PRIMARY_SOURCE_AVAILABLE": "一手材料",
+    "SOURCE_CAPTURED": "来源摘录",
+    "NO_SOURCE": "线索档案",
 }
 
 PUBLIC_EVIDENCE_POSTURE_COPY = {
-    "PRIMARY_SUPPORTED": "已有可定位的官方原文支持当前结构化事实，可作为正式引用起点。",
-    "PRIMARY_SOURCE_AVAILABLE": "系统已有一手材料，但主体、动作、阶段或时间等事实槽仍需补齐。",
-    "SOURCE_CAPTURED": "系统保存了来源捕获内容，但它尚未达到正式引用条件。",
-    "NO_SOURCE": "当前记录尚未关联可供读者核对的来源。",
+    "PRIMARY_SUPPORTED": "关键原文已定位。",
+    "PRIMARY_SOURCE_AVAILABLE": "已关联一手材料。",
+    "SOURCE_CAPTURED": "已保存来源摘录。",
+    "NO_SOURCE": "事件记录已归档。",
 }
 
 PUBLIC_EVIDENCE_POSTURE_STATUS_CLASS = {
@@ -90,10 +90,10 @@ QWEN_POLARITY_LABELS = {
 }
 
 QWEN_STRENGTH_LABELS = {
-    "HIGH": "高下行重大性",
-    "LOW": "低下行重大性",
-    "NONE": "未见下行重大性",
-    "UNCLEAR": "重大性不明确",
+    "HIGH": "下行风险强",
+    "LOW": "下行风险弱",
+    "NONE": "下行风险低",
+    "UNCLEAR": "",
 }
 
 PUBLIC_EVIDENCE_GAP_LABELS = {
@@ -179,6 +179,13 @@ PUBLIC_SOURCE_LABELS = {
     "fdic_press_releases": "FDIC 官方公告",
     "bls_key_indicators": "美国劳工统计局数据",
     "ecb_statistical_press": "欧洲央行统计公告",
+}
+PUBLIC_SOURCE_NAME_LABELS = {
+    "sec edgar": "SEC 官方文件",
+    "sharadar active historical discovery": "历史研究资料",
+    "opennews": "公开新闻线索",
+    "nasdaq": "Nasdaq 官方公告",
+    "nyse": "NYSE 官方公告",
 }
 
 PUBLIC_AUTHORITY_LABELS = {
@@ -312,6 +319,45 @@ _event_preview_focus_component = st.components.v2.component(
 )
 
 
+EVENT_FEED_FOCUS_JS = """
+export default function() {
+  let frame = 0;
+  const timers = [];
+  const focusFeed = () => {
+    const target = document.getElementById("live-events");
+    if (!target) return;
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    const behavior = reducedMotion ? "auto" : "smooth";
+    target.scrollIntoView({ block: "start", behavior });
+    const headerHeight = document.querySelector('[data-testid="stHeader"]')?.getBoundingClientRect().height || 0;
+    const top = target.getBoundingClientRect().top - headerHeight - 8;
+    const main = target.closest('section.stMain') || document.querySelector('section.stMain');
+    if (main && Math.abs(top) > 16) main.scrollBy({ top, behavior });
+    else if (Math.abs(top) > 16) window.scrollBy({ top, behavior });
+  };
+  const clearFocusRequest = () => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("preview_focus") !== "feed") return;
+    url.searchParams.delete("preview_focus");
+    window.history.replaceState({}, "", url.toString());
+  };
+  frame = requestAnimationFrame(focusFeed);
+  [120, 420, 900].forEach((delay) => timers.push(window.setTimeout(focusFeed, delay)));
+  timers.push(window.setTimeout(clearFocusRequest, 950));
+  return () => {
+    cancelAnimationFrame(frame);
+    timers.forEach((timer) => window.clearTimeout(timer));
+  };
+}
+""".strip()
+
+
+_event_feed_focus_component = st.components.v2.component(
+    "finance_radar_event_feed_focus",
+    js=EVENT_FEED_FOCUS_JS,
+)
+
+
 SAVED_FLOW_HTML = """
 <div class="saved-flow-manager">
   <div class="saved-flow-entry">
@@ -427,7 +473,7 @@ export default function(component) {
     if (!flows.length) {
       const empty = document.createElement("span");
       empty.className = "saved-flow-empty";
-      empty.textContent = "尚未保存 · 筛选仅保存在本机浏览器，不上传服务器";
+      empty.textContent = "保存常用筛选 · 仅存于本机浏览器";
       list.appendChild(empty);
       return;
     }
@@ -559,6 +605,30 @@ def focus_event_preview(event_id: str) -> None:
             js=EVENT_PREVIEW_FOCUS_JS,
         )
         _event_preview_focus_component(**mount_args)
+
+
+def focus_public_event_feed(token: str) -> None:
+    """Restore the feed position after a same-page pagination navigation."""
+
+    global _event_feed_focus_component
+    normalized = " ".join(str(token or "").split())[:160]
+    if not normalized:
+        return
+    mount_args = {
+        "key": f"event-feed-focus::{normalized}",
+        "height": 0,
+        "width": "stretch",
+    }
+    try:
+        _event_feed_focus_component(**mount_args)
+    except ValueError as exc:
+        if "is not registered" not in str(exc):
+            raise
+        _event_feed_focus_component = st.components.v2.component(
+            "finance_radar_event_feed_focus",
+            js=EVENT_FEED_FOCUS_JS,
+        )
+        _event_feed_focus_component(**mount_args)
 
 
 def saved_flow_payload(
@@ -821,17 +891,12 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
         if (
             polarity in QWEN_POLARITY_LABELS
             and strength in QWEN_STRENGTH_LABELS
-            and priority in {"PRIORITY_REVIEW", "ROUTINE", "UNDECIDABLE"}
+            and priority in {"PRIORITY_REVIEW", "ROUTINE"}
             and scope in {"EVIDENCE_SUPPORTED", "SOURCE_CONDITIONAL"}
+            and polarity != "UNCLEAR"
+            and strength != "UNCLEAR"
         ):
             conditional = scope == "SOURCE_CONDITIONAL"
-            boundary = (
-                "由于当前只有来源捕获文本、没有足以确认事件事实的证据，"
-                "这是条件性自动研判：若来源表述属实，模型判断其语义风险如下。"
-                if conditional
-                else "当前版本已有可定位的一手材料；模型只判断文本表达的风险语义，"
-                "仍不负责确认事实真假。"
-            )
             return {
                 "route": {
                     "PRIORITY_REVIEW": "RISK_REVIEW",
@@ -839,13 +904,16 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
                     "UNDECIDABLE": "ABSTAIN",
                 }[priority],
                 "label": (
-                    ("条件性研判 · " if conditional else "自动研判 · ")
-                    + QWEN_POLARITY_LABELS[polarity]
+                    QWEN_POLARITY_LABELS[polarity]
                     + " · "
                     + QWEN_STRENGTH_LABELS[strength]
                 ),
-                "heading": "自动风险语义",
-                "explanation": boundary + " 结果只用于情报排序，不触发交易或改变证据状态。",
+                "heading": "风险信号",
+                "explanation": (
+                    "基于来源摘录的风险语义判断。"
+                    if conditional
+                    else "基于关键原文的风险语义判断。"
+                ),
                 "confidence": "",
                 "model_version": "",
                 "decision_source": "HUMAN_GOLD_TRAINED_QWEN",
@@ -856,12 +924,9 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
             }
     return {
         "route": "",
-        "label": "尚无已批准的自动风险语义",
-        "heading": "自动风险语义",
-        "explanation": (
-            "事件与来源仍可正常浏览。千问结果只有在模型、输入和发布审批均匹配当前版本时才会展示；"
-            "内部规则分流不会冒充面向用户的风险判断。"
-        ),
+        "label": "",
+        "heading": "风险信号",
+        "explanation": "",
         "confidence": "",
         "model_version": "",
         "decision_source": "",
@@ -894,7 +959,7 @@ def public_event_state(item: dict[str, Any]) -> str:
 def public_event_subject(item: dict[str, Any]) -> str:
     """Prefer a named entity while being honest about incomplete identity."""
     value = item.get("company_name") or item.get("ticker_at_event")
-    return " ".join(str(value).split()) if value else "主体待确认"
+    return " ".join(str(value).split()) if value else ""
 
 
 def _bounded_public_text(value: object, *, limit: int = 360) -> str:
@@ -937,7 +1002,7 @@ def public_event_quality(
 ) -> dict[str, Any]:
     """Explain whether a record is complete enough for the public event feed."""
 
-    has_subject = public_event_subject(item) != "主体待确认"
+    has_subject = bool(public_event_subject(item))
     fact_summary, _ = public_event_fact_summary(item)
     facts = item.get("facts") if isinstance(item.get("facts"), dict) else {}
     claim_subject = _bounded_public_text(
@@ -1023,34 +1088,48 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, Any]:
     fact_summary, fact_provenance = public_event_fact_summary(item)
     capture_excerpt = _bounded_public_text(item.get("unverified_capture_excerpt"))
     fact_is_public = bool(fact_summary and evidence["citation_ready"])
+    declared_mode = str(item.get("headline_mode") or "").strip().upper()
+    headline_mode = declared_mode if declared_mode in {"FACT", "ATTRIBUTED_SOURCE", "RECORD"} else ""
+    headline = _bounded_public_text(item.get("display_headline"), limit=180)
+    if not headline:
+        if fact_is_public:
+            headline = fact_summary
+            headline_mode = "FACT"
+        elif capture_excerpt:
+            headline = capture_excerpt
+            headline_mode = "ATTRIBUTED_SOURCE"
+        else:
+            record_parts = [part for part in (subject, family, str(item.get("event_date") or "")) if part]
+            headline = " · ".join(record_parts) or "事件记录"
+            headline_mode = "RECORD"
     if fact_is_public:
-        separator = " " if fact_summary[-1:] in {"。", "！", "？", ".", "!", "?"} else "。"
-        summary = (
-            f"{fact_provenance}：{fact_summary}{separator}"
-            f"{evidence['explanation']}"
-        )
-    elif capture_excerpt:
-        separator = (
-            " "
-            if capture_excerpt[-1:] in {"。", "！", "？", ".", "!", "?"}
-            else "。"
-        )
-        summary = (
-            f"来源捕获节选：{capture_excerpt}{separator}"
-            "这只说明系统采集到了什么，不等于原文已经支持一条确定事实。"
-        )
-        fact_provenance = "来源捕获节选"
+        summary = "" if headline == fact_summary else fact_summary
+    elif (
+        capture_excerpt
+        and headline != capture_excerpt
+        and not capture_excerpt.startswith(headline.rstrip("…"))
+        and not headline.startswith(capture_excerpt.rstrip("…"))
+    ):
+        summary = capture_excerpt
+        fact_provenance = "来源摘录"
     else:
-        summary = (
-            f"目前只记录到{subject}的一条“{family}”分类线索；"
-            f"尚没有可公开复述的主体—动作—阶段事实。{evidence['explanation']}"
-        )
+        summary = ""
         fact_provenance = ""
-    disposition_label = "异常处置：已排除" if state == "excluded" else ""
-    if disposition_label:
-        summary += " 该记录已作排除处置，仅保留来源与审计上下文。"
+    # Internal workflow disposition remains available to reviewers, but it is
+    # not part of the public event-reading contract.  Readers see the source
+    # posture and the current Qwen risk signal instead.
+    disposition_label = ""
+    raw_headline_source = _bounded_public_text(item.get("headline_source"), limit=80)
+    headline_source = (
+        PUBLIC_SOURCE_NAME_LABELS.get(raw_headline_source.casefold(), source)
+        if raw_headline_source
+        else ""
+    )
     return {
         "subject": subject,
+        "headline": headline,
+        "headline_mode": headline_mode,
+        "headline_source": headline_source,
         "family": family,
         "source": source,
         "authority": authority_label,
@@ -1070,14 +1149,18 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, Any]:
         "risk_decision_source_label": str(risk["decision_source_label"]),
         "risk_shadow": bool(risk["shadow"]),
         "summary": summary,
-        "summary_provenance": fact_provenance or "来源与事实槽说明",
+        "summary_provenance": (
+            "结构化事实摘要"
+            if headline_mode == "FACT"
+            else ("来源摘录" if headline_mode == "ATTRIBUTED_SOURCE" else "事件记录")
+        ),
         "relevance": (
             EVENT_FAMILY_RELEVANCE.get(
                 family_key,
                 "请结合原始来源、主体、日期与上下文判断其实际意义。",
             )
             if fact_is_public
-            else f"先确认具体动作、阶段和原始来源，再判断这条{family}线索是否值得关注。"
+            else ""
         ),
     }
 
@@ -1107,6 +1190,7 @@ def event_feed_row(
     subject = copy["subject"] if copy else (
         item.get("company_name") or item.get("ticker_at_event") or "Unknown"
     )
+    headline = copy["headline"] if copy else subject
     event_type = str(item.get("event_type") or "event").replace("_", " ")
     family_key = str(item.get("event_family") or "")
     family = copy["family"] if copy else EVENT_FAMILY_LABELS.get(
@@ -1116,7 +1200,7 @@ def event_feed_row(
     source = copy["source"] if copy else source_key
     authority = str(item.get("credibility_tier") or "P?")
     summary = copy["summary"] if copy else " ".join(
-        str(item.get("evidence_excerpt") or "尚无结构化证据摘要，等待人工复核。").split()
+        str(item.get("evidence_excerpt") or "").split()
     )
     preview_flow = flow if flow in FLOW_PRESETS else "全部事件"
     preview_params = {
@@ -1134,30 +1218,30 @@ def event_feed_row(
     timing_markup = "".join(
         '<span><b>{}</b> {}</span>'.format(escape(label), escape(value))
         for label, value in timing
-        if label != "最后更新"
+        if label == "事件日"
     )
     status_glyph = STATUS_GLYPHS.get(status_key, "◇" if status_key == "reviewed" else "○")
     authority_class = f"authority-{authority.lower()}" if authority.lower() in {"p0", "p1", "p2"} else ""
     authority_label = PUBLIC_AUTHORITY_LABELS.get(authority) if public else authority
     authority_chip = (
         f'<span class="feed-chip {escape(authority_class)}">{escape(authority_label)}</span>'
-        if authority_label
+        if authority_label and not public
         else ""
     )
     event_type_markup = "" if public else f'<span class="feed-type">{escape(event_type)}</span>'
     row_class = "feed-row public-feed-row" if public else "feed-row"
-    open_label = "查看证据 ›" if public else "当前页预览 ›"
+    open_label = "查看 ›" if public else "当前页预览 ›"
     aria_label = (
-        f"在当前页面查看 {subject} 的证据" if public else f"在当前页面预览事件 {subject}"
+        f"在当前页面查看 {headline}" if public else f"在当前页面预览事件 {subject}"
     )
     impact_markup = (
         f'<div class="feed-impact">为什么关注：{escape(copy["relevance"])}</div>'
-        if copy
+        if copy and copy["relevance"] and not public
         else ""
     )
     changed_markup = (
         '<span class="feed-chip is-changed">自上次查看有更新</span>'
-        if item.get("_changed_since_view")
+        if item.get("_changed_since_view") and not public
         else ""
     )
     if copy:
@@ -1167,20 +1251,38 @@ def event_feed_row(
         }.get(str(copy["risk_route"]), "")
         risk_markup = (
             f'<span class="feed-chip {risk_class}">'
-            f'{escape(str(copy["risk_heading"]))}：'
             f'{escape(str(copy["risk_label"]))}</span>'
             if copy["risk_route"]
             else ""
         )
-        disposition_markup = (
-            f'<span class="feed-chip status-rejected">'
-            f'{escape(str(copy["disposition_label"]))}</span>'
-            if copy["disposition_label"]
-            else ""
-        )
+        disposition_markup = ""
     else:
         risk_markup = ""
         disposition_markup = ""
+    public_context = ""
+    if copy:
+        context_parts = [
+            str(value)
+            for value in (
+                subject,
+                item.get("ticker_at_event") if item.get("ticker_at_event") != subject else "",
+                family,
+                source,
+                "本次浏览后有更新" if item.get("_changed_since_view") else "",
+            )
+            if value
+        ]
+        public_context = (
+            f'<div class="feed-context">{escape(" · ".join(context_parts))}</div>'
+            if context_parts
+            else ""
+        )
+    summary_markup = (
+        f'<div class="feed-summary">{escape(str(summary))}</div>' if summary else ""
+    )
+    family_chip = (
+        f'<span class="feed-chip">{escape(family)}</span>' if not public else ""
+    )
     return (
         f'<a id="{event_anchor_id(item.get("event_id"))}" class="{row_class}" href="{preview_url}" target="_self" '
         f'aria-label="{escape(str(aria_label), quote=True)}">'
@@ -1194,12 +1296,12 @@ def event_feed_row(
         f'{disposition_markup}'
         f'{changed_markup}'
         f'{authority_chip}'
-        f'<span class="feed-chip">{escape(family)}</span>'
-        f'<span class="feed-chip">{escape(source)}</span>'
+        f'{family_chip}'
         '</div>'
-        f'<div class="feed-headline">{escape(str(subject))}'
+        f'<div class="feed-headline">{escape(str(headline))}'
         f'{event_type_markup}</div>'
-        f'<div class="feed-summary">{escape(str(summary))}</div>'
+        f'{public_context}'
+        f'{summary_markup}'
         f'<div class="feed-timing" aria-label="事件时间">{timing_markup}</div>'
         f'{impact_markup}'
         '</div>'

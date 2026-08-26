@@ -16,16 +16,20 @@ def test_public_method_page_explains_evidence_without_internal_details() -> None
         for item in [*page.markdown, *page.info, *page.warning, *page.caption]
     )
     assert not page.exception
-    assert "先看证据，再形成判断" in rendered
-    assert "来源" in rendered
+    assert "核心流程" in rendered
+    assert "自动发现" in rendered
+    assert "风险排序" in rendered
+    assert "价格审计" in rendered
+    assert "信息依据" in rendered
     assert "时间" in rendered
-    assert "置信度" in rendered
-    assert "不提供投资建议" in rendered
-    assert "公开界面是只读的" in rendered
-    assert "系统发现时间" in rendered
-    assert "正式处置状态" in rendered
-    assert "核验引用证据 ID" in rendered
-    assert "内部运行细节" in rendered
+    assert "AI 阅读辅助" in rendered
+    assert "只读研究工具" in rendered
+    assert "数据更新时间" in rendered
+    assert "系统发现" not in rendered
+    assert "待核验" not in rendered
+    assert "已粗审" not in rendered
+    assert "正式处置状态" not in rendered
+    assert "核验引用证据 ID" not in rendered
     assert "SQLite" not in rendered
     assert "Worker" not in rendered
     assert "/opt/" not in rendered

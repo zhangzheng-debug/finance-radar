@@ -1,37 +1,29 @@
 from __future__ import annotations
 
+from html import escape
 from typing import Any
 
 import streamlit as st
 
-from app.web.common import (
-    api_request,
-    header,
-    install_style,
-    no_trading_banner,
-    render_primary_navigation,
-    restore_deep_link,
-    section_header,
-    status_strip,
-)
+from app.web.common import api_request, install_style, render_primary_navigation, restore_deep_link
 
 
 _CASE_COPY = {
     "sec_bankruptcy_verified": (
         "官方申报确认破产风险",
-        "先出现聚合新闻线索，随后由 SEC 原始申报确认。观察系统为何要等到一手证据出现后，才把事件送入风险复核。",
+        "新闻线索与 SEC 原始申报形成两步证据链，展示风险信号如何随材料层级升级。",
     ),
     "positive_earnings_non_target": (
         "正面业绩不进入下行风险队列",
-        "一则普通的正面业绩公告应被完整保留，但不会因为系统过度解读而变成下行风险告警。",
+        "正面经营公告完整保留在事件档案中，同时被风险路由识别为非下行事件。",
     ),
     "rumor_correction_abstain": (
-        "公司澄清推翻破产传言",
-        "低可信度传言随后被公司原文否认。证据发生冲突时，系统应停止告警并交给人工复核。",
+        "公司原文推翻破产传言",
+        "匿名传言与公司正式公告形成冲突，展示高权威原文如何撤回风险信号。",
     ),
     "sec_filing_corrected_abstain": (
         "更正申报撤回早先风险披露",
-        "同一官方来源发布更正并撤回早先披露。演示结论为何必须跟随新证据变化，而不能保留已经过时的告警。",
+        "同一官方来源发布更正，展示新原文如何替代过时披露。",
     ),
 }
 
@@ -39,38 +31,38 @@ _OBSERVATION_TITLES = {
     "Company reportedly prepares a court-supervised restructuring": "媒体称公司可能进行法院监督下的重组",
     "Issuer files Form 8-K under Item 1.03": "公司提交涉及破产事项的 Form 8-K",
     "Company raises guidance after record revenue": "公司在收入创新高后上调业绩指引",
-    "Unverified post claims imminent bankruptcy": "未经核实的帖子声称公司即将破产",
+    "Unverified post claims imminent bankruptcy": "匿名账号声称公司即将破产",
     "Issuer denies bankruptcy rumor": "公司正式否认破产传言",
     "Corrected Form 8-K withdraws Item 1.03 disclosure": "更正后的 Form 8-K 撤回早先披露",
 }
 
 _OBSERVATION_SUMMARIES = {
-    "Company reportedly prepares a court-supervised restructuring": "聚合新闻称公司可能进入法院监督下的重组，但当时还没有官方文件可以确认。",
-    "Issuer files Form 8-K under Item 1.03": "公司在官方申报中披露已经启动美国破产法第 11 章程序，风险说法首次获得一手材料支持。",
-    "Company raises guidance after record revenue": "公司披露收入与利润增长，并上调全年指引；这是一则正面经营消息，不属于下行风险。",
-    "Unverified post claims imminent bankruptcy": "匿名社交账号声称公司即将破产并违约，但没有提供可核实的一手文件。",
-    "Issuer denies bankruptcy rumor": "公司通过正式公告否认破产与违约说法，直接反驳了先前的匿名传言。",
-    "Corrected Form 8-K withdraws Item 1.03 disclosure": "更正申报说明早先选中破产事项是操作错误，公司并未申请破产，原披露被撤回。",
+    "Company reportedly prepares a court-supervised restructuring": "此时可读材料只有聚合报道，事实层级停留在来源说法。",
+    "Issuer files Form 8-K under Item 1.03": "公司在官方申报中披露已启动美国破产法第 11 章程序，风险动作获得一手材料支持。",
+    "Company raises guidance after record revenue": "公司披露收入与利润增长，并上调全年指引；这是一则正面经营消息。",
+    "Unverified post claims imminent bankruptcy": "风险说法来自匿名社交账号，材料中未附可定位的一手文件。",
+    "Issuer denies bankruptcy rumor": "公司正式公告直接否认破产与违约说法。",
+    "Corrected Form 8-K withdraws Item 1.03 disclosure": "更正申报说明早先选中破产事项是操作错误，原披露被撤回。",
 }
 
 _SOURCE_LABELS = {
     "aggregated_news": "聚合新闻",
     "sec_current_filings": "SEC 官方申报",
     "issuer_release": "公司公告",
-    "social_channel": "社交渠道线索",
+    "social_channel": "社交渠道",
 }
 
 _AUTHORITY_LABELS = {
-    "P0": "官方原始文件",
+    "P0": "官方原文",
     "P1": "发布主体原文",
     "P2": "聚合报道",
-    "P3": "未经核实的线索",
+    "P3": "匿名线索",
 }
 
 _DECISION_LABELS = {
-    "RISK_REVIEW": "进入风险复核",
-    "NON_TARGET": "不属于下行风险",
-    "ABSTAIN": "暂不下结论",
+    "RISK_REVIEW": "高风险信号",
+    "NON_TARGET": "非下行事件",
+    "ABSTAIN": "仅展示来源",
 }
 
 _RISK_TERMS = (
@@ -85,25 +77,20 @@ _RISK_TERMS = (
 
 def _public_case_title(case: dict[str, Any]) -> str:
     copy = _CASE_COPY.get(str(case.get("case_id")))
-    return copy[0] if copy else "其他冻结案例"
+    return copy[0] if copy else "其他案例"
 
 
 def _public_case_description(case: dict[str, Any]) -> str:
     copy = _CASE_COPY.get(str(case.get("case_id")))
-    return copy[1] if copy else "这个冻结案例用于解释证据如何改变判断。"
+    return copy[1] if copy else "这个案例展示来源材料如何改变风险信号。"
 
 
 def _decision_label(value: str) -> str:
-    return _DECISION_LABELS.get(value, "等待更多证据")
+    return _DECISION_LABELS.get(value, "来源记录")
 
 
 def _presentation_steps(case: dict[str, Any]) -> list[dict[str, Any]]:
-    """Build a deterministic teaching illustration from frozen observations.
-
-    This deliberately does not call the model or a write endpoint.  Its simple
-    rules illustrate the public evidence-gate concept; they are not a replay of
-    the current router and must never be read as its actual final judgment.
-    """
+    """Build a deterministic, read-only presentation from frozen observations."""
 
     observed: list[dict[str, Any]] = []
     steps: list[dict[str, Any]] = []
@@ -119,26 +106,31 @@ def _presentation_steps(case: dict[str, Any]) -> list[dict[str, Any]]:
 
         if has_conflict:
             decision = "ABSTAIN"
-            explanation = "教学规则示意：证据相互冲突时，提示暂不下结论，并交给完整核验流程与人工复核。"
-            evidence_summary = "出现相互冲突的证据"
+            signal_label = "证据冲突"
+            explanation = "更高权威的新材料反驳先前说法，风险信号撤回。"
+            evidence_summary = "来源冲突"
         elif has_risk_claim and not has_primary:
             decision = "ABSTAIN"
-            explanation = "教学规则示意：只有发现线索时，提示等待官方原始文件确认。"
-            evidence_summary = "只有发现线索，尚无官方确认"
+            signal_label = "来源线索"
+            explanation = "保留风险说法及其出处，不把来源说法改写成事件事实。"
+            evidence_summary = "聚合或匿名来源"
         elif has_risk_claim and has_primary:
             decision = "RISK_REVIEW"
-            explanation = "教学规则示意：官方原始文件出现后，提示进入人工风险复核；这不是当前模型输出。"
-            evidence_summary = "官方原始文件已经到位"
+            signal_label = "高风险信号"
+            explanation = "官方原文支持该风险动作，进入高优先级研究队列。"
+            evidence_summary = "官方原文支持"
         else:
             decision = "NON_TARGET"
-            explanation = "教学规则示意：材料不属于下行风险目标，提示不进入下行风险队列；这不是当前模型输出。"
-            evidence_summary = "材料完整，但不构成下行风险"
+            signal_label = "非下行事件"
+            explanation = "材料描述正面或中性事项，不进入下行风险队列。"
+            evidence_summary = "非下行材料"
 
         steps.append(
             {
                 "seconds": int(observation.get("at_seconds", 0)),
                 "observation": observation,
                 "decision": decision,
+                "signal_label": signal_label,
                 "explanation": explanation,
                 "evidence_summary": evidence_summary,
             }
@@ -146,165 +138,91 @@ def _presentation_steps(case: dict[str, Any]) -> list[dict[str, Any]]:
     return steps
 
 
-st.set_page_config(page_title="证据演示 · Finance Radar", page_icon="▷", layout="wide")
+st.set_page_config(page_title="案例 · Finance Radar", page_icon="▷", layout="wide")
 install_style()
 restore_deep_link("Replay_Lab")
 render_primary_navigation("replay")
-header(
-    "证据演示",
-    "用冻结案例说明教学规则如何随证据变化；不代表当前系统的实际输出",
-    "只读教学演示",
-)
-no_trading_banner()
-
-st.info(
-    "这是固定案例的只读教学示意，不会触发实时采集、模型运行或数据库写入，也不会改变任何历史记录。"
-    "页面展示的规则提示不代表当前系统的实际输出或最终判断。"
-)
-status_strip(
-    [
-        ("演示目的", "冻结案例教学示意", ""),
-        ("证据如何变化", "按时间顺序查看", ""),
-        ("教学小结", "走完案例后显示", "watch"),
-        ("真实系统输出", "本页不读取", "ok"),
-        ("仍不做什么", "不写入、不交易", "ok"),
-    ]
+st.markdown(
+    '<header class="public-reader-header">'
+    '<div><span>FINANCE RADAR</span><h1>案例</h1></div>'
+    '<p>看材料变化如何改变风险信号。</p>'
+    '</header>',
+    unsafe_allow_html=True,
 )
 
 try:
     payload = api_request("/api/v1/replays")
 except Exception:
-    st.error("演示案例暂时无法加载，请稍后再试。实时事件与本页演示互不影响。")
+    st.error("案例读取失败。")
     st.stop()
 
 cases = payload.get("items", [])
 if not cases:
-    st.warning("目前没有可展示的冻结案例。")
+    st.info("案例库为空。")
     st.stop()
 
-case = st.selectbox("选择一个演示案例", cases, format_func=_public_case_title)
+case = st.selectbox("选择案例", cases, format_func=_public_case_title)
 steps = _presentation_steps(case)
 if not steps:
-    st.warning("这个案例还没有可展示的证据节点。")
+    st.info("案例未包含证据节点。")
     st.stop()
 
 case_key = str(case.get("case_id") or _public_case_title(case))
 visible_key = f"readonly_demo_visible::{case_key}"
 visible_steps = min(max(int(st.session_state.get(visible_key, 1)), 1), len(steps))
 
-section_header("发生什么", "选中的冻结案例")
-st.markdown(f"**{_public_case_title(case)}**")
-st.write(_public_case_description(case))
-progress_slot = st.empty()
+st.markdown(
+    '<section class="replay-case-intro">'
+    f'<h2>{escape(_public_case_title(case))}</h2>'
+    f'<p>{escape(_public_case_description(case))}</p>'
+    '</section>',
+    unsafe_allow_html=True,
+)
 
-restart_col, next_col, all_col, _ = st.columns([1.0, 1.0, 1.25, 3.2], gap="small")
-if restart_col.button(
-    "重新开始",
-    width="stretch",
-    disabled=visible_steps == 1,
-    help="只把当前页面的展示进度回到第一步，不会修改任何历史记录。",
-):
+restart_col, next_col, all_col = st.columns([1, 1, 1.3], gap="small")
+if restart_col.button("第一步", width="stretch", disabled=visible_steps == 1):
     st.session_state[visible_key] = 1
     visible_steps = 1
 if next_col.button("下一步", type="primary", width="stretch", disabled=visible_steps >= len(steps)):
     st.session_state[visible_key] = visible_steps + 1
     visible_steps += 1
-if all_col.button("查看完整过程", width="stretch", disabled=visible_steps >= len(steps)):
+if all_col.button("完整过程", width="stretch", disabled=visible_steps >= len(steps)):
     st.session_state[visible_key] = len(steps)
     visible_steps = len(steps)
 
-# The placeholder stays above the controls but is filled only after a button
-# has updated session state.  This keeps the visible progress strip and the
-# final conclusion in the same render pass.
-with progress_slot:
-    status_strip(
-        [
-            ("证据节点", str(len(steps)), ""),
-            (
-                "当前进度",
-                f"{visible_steps}/{len(steps)}",
-                "watch" if visible_steps < len(steps) else "ok",
-            ),
-            ("外部网络", "未使用", "ok"),
-            ("数据写入", "无", "ok"),
-        ]
-    )
+st.caption(f"证据节点 {visible_steps}/{len(steps)}")
 
 shown_steps = steps[:visible_steps]
 current = shown_steps[-1]
-complete = visible_steps == len(steps)
-status_strip(
-    [
-        ("当前教学提示", _decision_label(current["decision"]), "ok" if complete else "watch"),
-        ("教学状态", "已完整展示" if complete else "等待下一步", "ok" if complete else "watch"),
-        ("真实系统输出", "本页不读取", "ok"),
-        ("交易功能", "始终关闭", "ok"),
-    ]
-)
-if not complete:
-    st.info("教学示意停在当前证据状态。点击“下一步”，观察新证据如何改变规则提示。")
-
-section_header("证据如何改变教学提示", "冻结时间线 · 只读教学示意")
 for index, step in enumerate(shown_steps, 1):
     observation = step["observation"]
     original_title = str(observation.get("title") or "")
     source = _SOURCE_LABELS.get(str(observation.get("source")), "公开来源")
-    authority = _AUTHORITY_LABELS.get(str(observation.get("authority_tier")), "来源待核实")
-    title = _OBSERVATION_TITLES.get(original_title, "来自公开来源的新证据")
+    authority = _AUTHORITY_LABELS.get(str(observation.get("authority_tier")), "来源记录")
+    title = _OBSERVATION_TITLES.get(original_title, "来自公开来源的新材料")
     summary = _OBSERVATION_SUMMARIES.get(
         original_title,
-        "这个节点出现了一条新证据；教学示意会依据来源与内容更新规则提示。",
+        "这个节点增加了一条来源材料，并据此更新风险信号。",
     )
     with st.container(border=True):
-        clock_col, evidence_col, decision_col = st.columns([0.36, 1.2, 0.9], gap="small")
-        with clock_col:
-            st.caption(f"第 {index} 步")
-            st.metric("相对时间", f"开始后 {step['seconds']} 秒")
-            st.caption(authority)
-        with evidence_col:
-            st.caption(source)
-            st.markdown(f"**{title}**")
-            revision_kind = observation.get("revision_kind")
-            if revision_kind == "CORRECTION":
-                st.warning("这是更正信息：它会替代案例中较早的相关说法。")
-            elif revision_kind == "INITIAL":
-                st.caption("首次披露")
-            st.write(summary)
-            st.caption(f"证据状态：{step['evidence_summary']}")
-            with st.expander("查看英文原始证据（次级）", expanded=False):
-                if original_title:
-                    st.caption(original_title)
-                st.write(observation.get("passage") or "这个节点没有附带英文原始摘录。")
-        with decision_col:
-            st.caption("教学规则在此刻给出的提示")
-            st.metric("教学提示", _decision_label(step["decision"]))
-            st.write(step["explanation"])
-            if step["decision"] == "RISK_REVIEW":
-                st.caption("教学示意提示进入人工风险复核；真实运行仍需完整证据流程，不触发交易。")
-            else:
-                st.caption("教学示意提示保持克制；真实运行仍需完整证据流程，不触发交易。")
+        st.markdown(
+            '<div class="replay-step">'
+            f'<div class="replay-step-meta">{index} · {escape(source)} · {escape(authority)}</div>'
+            f'<h3>{escape(title)}</h3>'
+            f'<p>{escape(summary)}</p>'
+            '<div class="replay-step-output">'
+            f'<strong>{escape(str(step["signal_label"]))}</strong>'
+            f'<span>{escape(str(step["explanation"]))}</span>'
+            '</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        with st.expander("原文", expanded=False):
+            if original_title:
+                st.caption(original_title)
+            st.write(observation.get("passage") or "该节点仅包含来源标题。")
 
-section_header("教学小结", "完成全部证据节点后显示")
-if complete:
-    st.success(f"教学示意完成：最后一步的规则提示为“{_decision_label(current['decision'])}”。")
-    with st.container(border=True):
-        st.markdown(f"**教学提示：{_decision_label(current['decision'])}**")
-        st.write(current["explanation"])
-        if current["decision"] == "RISK_REVIEW":
-            st.write("教学规则提示进入人工风险复核；真实系统仍需完整核验。这个演示不会发布告警，也不会触发交易。")
-        else:
-            st.write("教学案例到此结束；真实系统仍需完整核验。这个演示不会发布风险告警，也不触发交易。")
-        if len(steps) > 1:
-            st.caption("想重新讲解时，可点击上方“重新开始”回到第一步。")
-else:
-    st.info(f"还剩 {len(steps) - visible_steps} 个证据节点。走完后，这里会显示教学小结。")
+if visible_steps == len(steps):
+    st.success(f"案例结论：{_decision_label(current['decision'])}")
 
-section_header("仍不做什么", "演示边界始终不变")
-with st.container(border=True):
-    st.write("不把冻结案例冒充实时事件，不运行模型或采集器，不写入数据库或演示历史，也不触发告警、交易或其他外部动作。")
-    st.caption("本页唯一会变化的是当前浏览会话中的显示进度；关闭页面后无需清理任何生产数据。")
-
-st.caption(
-    "演示边界：页面只读取冻结案例并在浏览会话中控制显示进度，不调用模型或读取当前系统输出，"
-    "不保存演示过程，也不修改生产数据。"
-)
+st.caption("冻结案例仅用于说明证据变化；页面不写入生产数据。")
