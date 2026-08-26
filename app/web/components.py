@@ -48,15 +48,15 @@ PUBLIC_STATE_LABELS = {
 # public product vocabulary.
 PUBLIC_EVIDENCE_POSTURE_LABELS = {
     "PRIMARY_SUPPORTED": "原文支持",
-    "PRIMARY_SOURCE_AVAILABLE": "一手材料",
-    "SOURCE_CAPTURED": "来源摘录",
-    "NO_SOURCE": "线索档案",
+    "PRIMARY_SOURCE_AVAILABLE": "一手来源",
+    "SOURCE_CAPTURED": "来源已收录",
+    "NO_SOURCE": "事件记录",
 }
 
 PUBLIC_EVIDENCE_POSTURE_COPY = {
     "PRIMARY_SUPPORTED": "关键原文已定位。",
-    "PRIMARY_SOURCE_AVAILABLE": "已关联一手材料。",
-    "SOURCE_CAPTURED": "已保存来源摘录。",
+    "PRIMARY_SOURCE_AVAILABLE": "一手来源已关联。",
+    "SOURCE_CAPTURED": "来源内容已收录。",
     "NO_SOURCE": "事件记录已归档。",
 }
 
@@ -910,10 +910,11 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
                 ),
                 "heading": "风险信号",
                 "explanation": (
-                    "基于来源摘录的风险语义判断。"
+                    "基于来源文本的风险语义判断。"
                     if conditional
                     else "基于关键原文的风险语义判断。"
                 ),
+                "basis_label": "基于来源文本" if conditional else "基于关键原文",
                 "confidence": "",
                 "model_version": "",
                 "decision_source": "HUMAN_GOLD_TRAINED_QWEN",
@@ -927,6 +928,7 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
         "label": "",
         "heading": "风险信号",
         "explanation": "",
+        "basis_label": "",
         "confidence": "",
         "model_version": "",
         "decision_source": "",
@@ -1111,7 +1113,7 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, Any]:
         and not headline.startswith(capture_excerpt.rstrip("…"))
     ):
         summary = capture_excerpt
-        fact_provenance = "来源摘录"
+        fact_provenance = "来源文本"
     else:
         summary = ""
         fact_provenance = ""
@@ -1143,6 +1145,7 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, Any]:
         "risk_label": str(risk["label"]),
         "risk_heading": str(risk["heading"]),
         "risk_explanation": str(risk["explanation"]),
+        "risk_basis_label": str(risk["basis_label"]),
         "risk_confidence": str(risk["confidence"]),
         "risk_model_version": str(risk["model_version"]),
         "risk_decision_source": str(risk["decision_source"]),
@@ -1152,7 +1155,7 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, Any]:
         "summary_provenance": (
             "结构化事实摘要"
             if headline_mode == "FACT"
-            else ("来源摘录" if headline_mode == "ATTRIBUTED_SOURCE" else "事件记录")
+            else ("来源文本" if headline_mode == "ATTRIBUTED_SOURCE" else "事件记录")
         ),
         "relevance": (
             EVENT_FAMILY_RELEVANCE.get(
@@ -1186,6 +1189,14 @@ def event_feed_row(
         copy["evidence_label"]
         if public
         else STATUS_LABELS.get(canonical_status, "EVENT")
+    )
+    # A captured source is the common Public baseline and is already named in
+    # the context line. Repeating the same chip on nearly every row adds noise;
+    # retain chips only for evidence postures that materially differ from it.
+    status_markup = (
+        f'<span class="feed-chip status-{escape(status_key)}">{escape(status)}</span>'
+        if status and (not public or copy["evidence_posture"] != "SOURCE_CAPTURED")
+        else ""
     )
     subject = copy["subject"] if copy else (
         item.get("company_name") or item.get("ticker_at_event") or "Unknown"
@@ -1252,6 +1263,8 @@ def event_feed_row(
         risk_markup = (
             f'<span class="feed-chip {risk_class}">'
             f'{escape(str(copy["risk_label"]))}</span>'
+            f'<span class="feed-chip risk-basis">'
+            f'{escape(str(copy["risk_basis_label"]))}</span>'
             if copy["risk_route"]
             else ""
         )
@@ -1291,7 +1304,7 @@ def event_feed_row(
         f'<div class="feed-signal status-{escape(status_key)}" aria-hidden="true">{escape(status_glyph)}</div>'
         '<div class="feed-body">'
         '<div class="feed-meta">'
-        f'<span class="feed-chip status-{escape(status_key)}">{escape(status)}</span>'
+        f'{status_markup}'
         f'{risk_markup}'
         f'{disposition_markup}'
         f'{changed_markup}'

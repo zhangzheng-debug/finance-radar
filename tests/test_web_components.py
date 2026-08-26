@@ -97,7 +97,8 @@ def test_public_event_feed_row_hides_internal_codes_and_bounds_excerpt() -> None
         public=True,
     )
 
-    assert "来源摘录" in row
+    assert "来源已收录" not in row
+    assert "来源摘录" not in row
     assert "自动风险语义" not in row
     assert "risk-router-test-v1" not in row
     assert "债务融资" in row
@@ -178,7 +179,7 @@ def test_public_event_copy_never_promotes_raw_english_boilerplate() -> None:
     }
     copy = public_event_copy(event)
     assert public_event_state(event) == "rough_reviewed"
-    assert copy["evidence_label"] == "一手材料"
+    assert copy["evidence_label"] == "一手来源"
     assert "资本结构" in copy["headline"]
     assert copy["summary"] == ""
     assert "THIS WARRANT" not in copy["headline"]
@@ -203,7 +204,7 @@ def test_public_event_copy_labels_capture_excerpt_and_ignores_private_fallbacks(
         }
     )
 
-    assert copy["summary_provenance"] == "来源摘录"
+    assert copy["summary_provenance"] == "来源文本"
     assert copy["headline_mode"] == "ATTRIBUTED_SOURCE"
     assert copy["headline"] == "The source API reported a listing item."
     assert copy["summary"] == ""
@@ -244,7 +245,7 @@ def test_public_event_copy_suppresses_structured_fact_until_citation_ready() -> 
 
     assert copy["summary_provenance"] == "事件记录"
     assert "交易所公告称该公司收到上市合规通知" not in copy["headline"]
-    assert copy["evidence_label"] == "一手材料"
+    assert copy["evidence_label"] == "一手来源"
     assert copy["summary"] == ""
     assert "UNRELATED RAW ENGLISH EXCERPT" not in copy["headline"]
 
@@ -305,7 +306,7 @@ def test_public_evidence_posture_prefers_contract_and_uses_conservative_fallback
             ],
         }
     )
-    assert explicit["label"] == "一手材料"
+    assert explicit["label"] == "一手来源"
     assert explicit["gap_labels"] == ["可引用原文待补", "来源捕获待补"]
 
     # A source registry name alone proves neither a successful capture nor an
@@ -314,7 +315,7 @@ def test_public_evidence_posture_prefers_contract_and_uses_conservative_fallback
         {"discovery_source": "sec_current_filings", "citation_ready": False}
     )
     assert no_source["key"] == "NO_SOURCE"
-    assert no_source["label"] == "线索档案"
+    assert no_source["label"] == "事件记录"
 
     captured = public_event_evidence_posture(
         {"captured_source_count": 1, "citation_ready": False}
@@ -358,7 +359,8 @@ def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() ->
         }
     )
     assert qwen["label"] == "负面 · 下行风险强"
-    assert qwen["explanation"] == "基于来源摘录的风险语义判断。"
+    assert qwen["explanation"] == "基于来源文本的风险语义判断。"
+    assert qwen["basis_label"] == "基于来源文本"
     assert qwen["confidence"] == ""
 
 
@@ -473,7 +475,8 @@ def test_public_card_never_exposes_legacy_workflow_disposition() -> None:
         },
         public=True,
     )
-    assert "来源摘录" in ordinary
+    assert "来源已收录" not in ordinary
+    assert "来源摘录" not in ordinary
     assert ">已核验<" not in ordinary
 
     excluded = event_feed_row(
@@ -485,7 +488,7 @@ def test_public_card_never_exposes_legacy_workflow_disposition() -> None:
         },
         public=True,
     )
-    assert "线索档案" in excluded
+    assert "事件记录" in excluded
     assert ">已排除<" not in excluded
 
 

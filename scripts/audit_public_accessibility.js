@@ -157,6 +157,51 @@ async function domAudit(page) {
   });
 }
 
+async function publicShellLayoutAudit(page, viewport) {
+  await page.setViewportSize(viewport);
+  await page.waitForTimeout(180);
+  return page.evaluate((testedViewport) => {
+    const visible = (element) => {
+      if (!element) return false;
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    };
+    const streamlitHeader = document.querySelector('[data-testid="stHeader"]');
+    const publicHeader = document.querySelector(".public-reader-header");
+    const title = publicHeader?.querySelector("h1") || null;
+    const headerRect = streamlitHeader?.getBoundingClientRect() || null;
+    const publicRect = publicHeader?.getBoundingClientRect() || null;
+    const titleStyle = title ? getComputedStyle(title) : null;
+    const container = publicHeader?.closest('[data-testid="stElementContainer"]') || null;
+    let nextContainer = container?.nextElementSibling || null;
+    while (nextContainer && !visible(nextContainer)) nextContainer = nextContainer.nextElementSibling;
+    const nextRect = nextContainer?.getBoundingClientRect() || null;
+    const clearance = headerRect && publicRect ? publicRect.top - headerRect.bottom : null;
+    const followingGap = publicRect && nextRect ? nextRect.top - publicRect.bottom : null;
+    const overflow = Math.max(0, document.documentElement.scrollWidth - window.innerWidth);
+    return {
+      viewport: testedViewport,
+      streamlit_header_bottom: headerRect ? Math.round(headerRect.bottom * 10) / 10 : null,
+      public_header_top: publicRect ? Math.round(publicRect.top * 10) / 10 : null,
+      public_header_clearance: clearance === null ? null : Math.round(clearance * 10) / 10,
+      following_content_gap: followingGap === null ? null : Math.round(followingGap * 10) / 10,
+      title_visible: visible(title),
+      title_font_size_px: titleStyle ? Math.round(parseFloat(titleStyle.fontSize) * 10) / 10 : null,
+      horizontal_overflow_pixels: overflow,
+      pass: Boolean(
+        visible(streamlitHeader) &&
+        visible(publicHeader) &&
+        visible(title) &&
+        clearance !== null && clearance >= 8 &&
+        followingGap !== null && followingGap >= 0 &&
+        parseFloat(titleStyle?.fontSize || "0") >= 18 &&
+        overflow <= 2
+      ),
+    };
+  }, viewport);
+}
+
 async function focusAudit(page) {
   await page.evaluate(() => {
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -235,6 +280,20 @@ async function focusAudit(page) {
   }
   const browser = await chromium.launch({ headless: true, channel: "chrome" });
   const pages = [];
+  const responsiveViewports = [
+    { width: 1920, height: 1080 },
+    { width: 1440, height: 900 },
+    { width: 1366, height: 768 },
+    { width: 1280, height: 720 },
+    { width: 1024, height: 768 },
+    { width: 901, height: 800 },
+    { width: 900, height: 800 },
+    { width: 621, height: 844 },
+    { width: 620, height: 844 },
+    { width: 421, height: 844 },
+    { width: 420, height: 844 },
+    { width: 390, height: 844 },
+  ];
   try {
     for (const [name, url] of targets) {
       const page = await browser.newPage({
@@ -249,8 +308,10 @@ async function focusAudit(page) {
       await waitForStreamlit(page);
       const desktop = await domAudit(page);
       const focus = await focusAudit(page);
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.waitForTimeout(800);
+      const responsiveLayout = [];
+      for (const viewport of responsiveViewports) {
+        responsiveLayout.push(await publicShellLayoutAudit(page, viewport));
+      }
       const mobile = await domAudit(page);
       const blockers = [];
       if (!desktop.title.trim()) blockers.push("missing_document_title");
@@ -265,6 +326,9 @@ async function focusAudit(page) {
       if (desktop.horizontal_overflow_pixels > 2 || mobile.horizontal_overflow_pixels > 2) {
         blockers.push("horizontal_overflow");
       }
+      if (scope === "public" && responsiveLayout.some((item) => !item.pass)) {
+        blockers.push("public_shell_layout");
+      }
       if (focus.sampled < 3 || focus.ratio < 0.8) blockers.push("keyboard_focus_visibility");
       const advisories = [];
       if (!/^zh(?:-|$)/i.test(desktop.language)) advisories.push("document_language_not_zh_CN");
@@ -278,6 +342,7 @@ async function focusAudit(page) {
         page_errors: pageErrors,
         desktop,
         mobile,
+        responsive_layout: responsiveLayout,
         focus,
       });
       await page.close();
@@ -318,6 +383,9 @@ async function focusAudit(page) {
       all_visible_iframes_titled: true,
       no_heading_level_skips: true,
       no_horizontal_overflow_over_2px: true,
+      public_header_clearance_minimum_px: 8,
+      public_title_minimum_font_size_px: 18,
+      following_content_gap_minimum_px: 0,
       focus_indicator_ratio_minimum: 0.8,
       wcag_aa_normal_text_contrast: 4.5,
       touch_target_advisory_minimum_px: 24,

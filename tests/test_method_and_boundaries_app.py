@@ -20,10 +20,14 @@ def test_public_method_page_explains_evidence_without_internal_details() -> None
     assert "自动发现" in rendered
     assert "风险排序" in rendered
     assert "价格审计" in rendered
-    assert "信息依据" in rendered
+    assert "材料层级" in rendered
     assert "时间" in rendered
-    assert "AI 阅读辅助" in rendered
-    assert "只读研究工具" in rendered
+    assert "AI 解读" in rendered
+    assert "只读事件研究工具" in rendered
+    assert "千问模型结合人工金标" not in rendered
+    assert "风险信号仅在有效结果存在时显示" in rendered
+    for label in ("原文支持", "一手来源", "来源已收录", "事件记录"):
+        assert label in rendered
     assert "数据更新时间" in rendered
     assert "系统发现" not in rendered
     assert "待核验" not in rendered

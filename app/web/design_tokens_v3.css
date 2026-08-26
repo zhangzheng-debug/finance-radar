@@ -35,6 +35,8 @@
     --fr-touch-target: 44px;
     --fr-focus-ring: #a9ecff;
     --fr-content-gutter: clamp(.85rem, 2.5vw, 2.5rem);
+    --fr-streamlit-header-height: 3.75rem;
+    --fr-public-shell-gap: .75rem;
     --fr-radius-s: 5px;
     --fr-radius-m: 8px;
     --fr-ease: cubic-bezier(.2, .7, .3, 1);

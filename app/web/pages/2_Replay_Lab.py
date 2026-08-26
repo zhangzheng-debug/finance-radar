@@ -38,7 +38,7 @@ _OBSERVATION_TITLES = {
 
 _OBSERVATION_SUMMARIES = {
     "Company reportedly prepares a court-supervised restructuring": "此时可读材料只有聚合报道，事实层级停留在来源说法。",
-    "Issuer files Form 8-K under Item 1.03": "公司在官方申报中披露已启动美国破产法第 11 章程序，风险动作获得一手材料支持。",
+    "Issuer files Form 8-K under Item 1.03": "公司在官方申报中披露已启动美国破产法第 11 章程序，风险动作获得关键原文支持。",
     "Company raises guidance after record revenue": "公司披露收入与利润增长，并上调全年指引；这是一则正面经营消息。",
     "Unverified post claims imminent bankruptcy": "风险说法来自匿名社交账号，材料中未附可定位的一手文件。",
     "Issuer denies bankruptcy rumor": "公司正式公告直接否认破产与违约说法。",

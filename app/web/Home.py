@@ -27,7 +27,6 @@ from app.web.common import (
 from app.web.components import (
     EVENT_FAMILY_LABELS,
     FLOW_PRESETS,
-    PUBLIC_AUTHORITY_LABELS,
     PUBLIC_SOURCE_LABELS,
     facet_counts,
     facet_values,
@@ -125,50 +124,20 @@ def public_capture_url(sources: list[dict[str, object]]) -> str | None:
 
 
 def render_capture_explanation_payload(payload: dict[str, object]) -> None:
-    """Render source text immediately and AI assistance only when complete."""
+    """Render completed AI assistance without duplicating the source text."""
 
     if not payload.get("display"):
         return
-    source = payload.get("source")
-    source = source if isinstance(source, dict) else {}
-    source_title = " ".join(
-        str(source.get("source_title") or "已捕获一条 API 来源文本").split()
-    )
-    source_excerpt = " ".join(
-        str(source.get("source_excerpt") or "").split()
-    )
-    if len(source_excerpt) > 900:
-        source_excerpt = source_excerpt[:897].rstrip() + "…"
-    excerpt_markup = (
-        f'<p>{escape(source_excerpt)}</p>' if source_excerpt != source_title else ""
-    )
-    st.markdown(
-        '<section class="capture-ai-boundary" aria-label="来源摘录">'
-        '<div class="capture-ai-boundary-head"><span>来源摘录</span></div>'
-        '<div class="capture-ai-source">'
-        f'<h3>{escape(source_title)}</h3>'
-        f'{excerpt_markup}'
-        '</div>'
-        '</section>',
-        unsafe_allow_html=True,
-    )
-    source_url = public_capture_url([source]) if source else None
-    if source_url:
-        st.link_button(
-            "打开来源",
-            source_url,
-            width="stretch",
-        )
 
     state = str(payload.get("state") or "CHECKING")
     interpretation = payload.get("item")
     interpretation = interpretation if isinstance(interpretation, dict) else None
     if state == "READY" and interpretation:
         st.markdown(
-            '<section class="capture-ai-result" aria-label="AI 阅读辅助">'
+            '<section class="capture-ai-result" aria-label="AI 解读">'
             '<div class="capture-ai-boundary-head">'
-            '<span>AI 阅读辅助</span>'
-            '<strong>基于来源摘录 · 独立于风险信号</strong>'
+            '<span>AI 解读</span>'
+            '<strong>当前事件无关联证据，因此启用 AI 解读来源文本；结果不参与风险评级。</strong>'
             '</div>'
             f'<p>{escape(str(interpretation.get("one_line_zh") or ""))}</p>'
             '</section>',
@@ -1079,6 +1048,7 @@ if preview_event_id:
                 if ticker and ticker != preview_company:
                     meta_values.append(ticker)
                 meta_values.append(str(public_copy["family"]))
+                meta_values.append(str(public_copy["evidence_label"]))
                 if public_copy["headline_mode"] == "ATTRIBUTED_SOURCE":
                     headline_source = str(public_copy["headline_source"] or public_copy["source"])
                     if headline_source:
@@ -1087,6 +1057,7 @@ if preview_event_id:
                     f"<span>{escape(value)}</span>" for value in meta_values if value
                 )
                 top_public_passage = ""
+                top_public_title = ""
                 if preview_evidence:
                     top_public_passage = " ".join(
                         str(
@@ -1098,10 +1069,13 @@ if preview_event_id:
                     if len(top_public_passage) > 900:
                         top_public_passage = top_public_passage[:897].rstrip() + "…"
                 elif preview_sources:
+                    top_public_title = " ".join(
+                        str(preview_sources[0].get("source_title") or "").split()
+                    )
                     top_public_passage = " ".join(
                         str(
                             preview_sources[0].get("source_excerpt")
-                            or preview_sources[0].get("source_title")
+                            or top_public_title
                             or ""
                         ).split()
                     )
@@ -1125,43 +1099,27 @@ if preview_event_id:
                     if summary_text and not summary_duplicates_source
                     else ""
                 )
-                evidence_details = [str(public_copy["evidence_label"])]
-                if preview_evidence:
-                    evidence_authority = PUBLIC_AUTHORITY_LABELS.get(
-                        str(preview_evidence[0].get("authority_tier") or "P?"),
-                        "",
-                    )
-                    if evidence_authority:
-                        evidence_details.append(evidence_authority)
-                    evidence_details.append(f"{len(preview_evidence):,} 条关键材料")
-                elif preview_sources:
-                    evidence_details.append(f"{len(preview_sources):,} 条来源记录")
-                disposition_copy = (
-                    f" · {escape(str(public_copy['disposition_label']))}"
-                    if public_copy["disposition_label"]
-                    else ""
-                )
-                evidence_article = (
-                    '<article><span>信息依据</span><p><strong>'
-                    f'{escape(" · ".join(evidence_details))}</strong>{disposition_copy}</p></article>'
-                    if preview_evidence or not preview_sources
-                    else ""
-                )
                 risk_article = (
                     f'<article><span>{escape(str(public_copy["risk_heading"]))}</span>'
                     f'<p><strong>{escape(str(public_copy["risk_label"]))}</strong>'
-                    + (
-                        f' · {escape(str(public_copy["risk_explanation"]))}'
-                        if public_copy["risk_explanation"]
-                        else ""
-                    )
+                    f'<small class="risk-basis-label">{escape(str(public_copy["risk_basis_label"]))}</small>'
                     + '</p></article>'
                     if public_copy["risk_route"]
                     else ""
                 )
-                source_heading = "原始材料节选" if preview_evidence else "来源摘录"
+                source_heading = "关键原文" if preview_evidence else "来源文本"
+                source_title_markup = (
+                    f'<h3>{escape(top_public_title)}</h3>'
+                    if (
+                        top_public_title
+                        and top_public_title != top_public_passage
+                        and top_public_title != str(public_copy["headline"])
+                    )
+                    else ""
+                )
                 source_article = (
                     f'<article class="event-source-passage"><span>{source_heading}</span>'
+                    f'{source_title_markup}'
                     f'<p>{escape(top_public_passage)}</p></article>'
                     if top_public_passage
                     else ""
@@ -1173,7 +1131,6 @@ if preview_event_id:
                     '<div class="event-answer-grid">'
                     f'{summary_article}'
                     f'{risk_article}'
-                    f'{evidence_article}'
                     f'{source_article}'
                     '</div>'
                     '</section>',
@@ -1333,13 +1290,13 @@ if preview_event_id:
                 capture_url = public_capture_url(preview_sources)
                 if source_url:
                     method_col.link_button(
-                        "打开原始材料",
+                        "查看原始来源",
                         source_url,
                         width="stretch",
                     )
                 elif capture_url:
                     method_col.link_button(
-                        "打开来源",
+                        "查看原始来源",
                         capture_url,
                         width="stretch",
                     )
@@ -1516,5 +1473,5 @@ else:
 st.caption(
     "J/K 在人工复核中切换事件 · / 聚焦检索 · 所有行情只读 · 所有模型输出均为 shadow"
     if UI_ROLE == "admin"
-    else "只读事件研究工具 · 模型用于风险排序，原始材料用于事实核对"
+    else "只读事件研究工具 · 来源材料用于事实核对 · 风险信号仅在有效结果存在时显示"
 )

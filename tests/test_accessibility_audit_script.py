@@ -37,10 +37,16 @@ def test_accessibility_audit_keeps_core_gates_for_each_scoped_run() -> None:
         "keyboard_focus_visibility",
         "heading_level_skip",
         "horizontal_overflow",
+        "public_shell_layout",
     ):
         assert gate in source
     assert "wcag_aa_normal_text_contrast" in source
     assert "not a substitute for assistive-technology user testing" in source
+    for width in (1920, 1440, 1366, 1280, 1024, 901, 900, 621, 620, 421, 420, 390):
+        assert f"width: {width}" in source
+    assert "public_header_clearance" in source
+    assert "following_content_gap" in source
+    assert "title_font_size_px" in source
 
 
 def test_public_accessibility_audit_ignores_collapsed_off_canvas_touch_targets() -> None:

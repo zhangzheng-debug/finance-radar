@@ -5,6 +5,26 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.26.2
+
+- Reserve a stable top safe area for the Public Reader beneath Streamlit's
+  fixed header. Keep the page title visible from 1920-pixel desktop layouts
+  through the 390-pixel mobile breakpoint, without the former 420/421-pixel
+  visibility cliff or inherited miniature heading style.
+- Reduce the Public evidence vocabulary to four reader-facing postures:
+  original-text support, primary source, captured source and event record.
+  Remove repeated source cards, duplicated titles, repeated source buttons and
+  the common captured-source chip from the feed while preserving the posture
+  once in event detail.
+- Render DeepSeek reading help only after a current cached result is ready for
+  a zero-evidence event. Keep absent, queued, failed and stale model states out
+  of the Public UI. Keep Qwen disabled until the human-gold release contract is
+  complete; a future approved risk signal must retain its short evidence-basis
+  label.
+- Extend the deterministic accessibility audit with 12 responsive Public
+  shell viewports and explicit header clearance, title size, following-content
+  gap and horizontal-overflow gates.
+
 ## 2026.08.26.1
 
 - Rebuild the Public surface around one core path: discover downside events,

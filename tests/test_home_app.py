@@ -4,6 +4,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 import app.web.common as web_common
@@ -233,8 +234,8 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "Exact primary-source passage naming the issuer, action, and event stage." in rendered
     assert "监管执法" in rendered
     assert "SEC 官方文件" in rendered
-    assert "原始材料节选" in rendered
-    assert "信息依据" in rendered
+    assert "关键原文" in rendered
+    assert "信息依据" not in rendered
     assert "影响路径" not in rendered
     assert "原文支持" in rendered
     assert "<article><span>模型研判</span>" not in rendered
@@ -251,12 +252,55 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "sec_current_filings" not in rendered
     assert ">P0<" not in rendered
     assert any(
-        link.label == "打开原始材料" for link in page.get("link_button")
+        link.label == "查看原始来源" for link in page.get("link_button")
     )
     assert not any("工作台" in button.label or "人工复核" in button.label for button in page.button)
     assert not any(button.label == "收起当前页预览" for button in page.button)
     assert "返回原筛选位置" in rendered
     assert "本次浏览会话首次查看" not in "\n".join(str(item.value) for item in page.caption)
+
+
+@pytest.mark.parametrize(
+    ("assessment_scope", "basis_label"),
+    [
+        ("EVIDENCE_SUPPORTED", "基于关键原文"),
+        ("SOURCE_CONDITIONAL", "基于来源文本"),
+    ],
+)
+def test_public_valid_qwen_signal_keeps_its_evidence_basis(
+    monkeypatch,
+    assessment_scope: str,
+    basis_label: str,
+) -> None:
+    def qwen_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        payload = _fake_api(path, **kwargs)
+        semantic = {
+            "polarity": "ADVERSE",
+            "adverse_strength": "HIGH",
+            "semantic_priority": "PRIORITY_REVIEW",
+            "assessment_scope": assessment_scope,
+            "current": True,
+        }
+        parsed = urllib.parse.urlsplit(path)
+        if parsed.path == "/api/v1/events":
+            payload["items"][0] = {**payload["items"][0], "semantic_assessment": semantic}
+        elif parsed.path == "/api/v1/events/event-a":
+            payload["event"] = {**payload["event"], "semantic_assessment": semantic}
+        return payload
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", qwen_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "负面 · 下行风险强" in rendered
+    assert basis_label in rendered
+    assert "HUMAN_GOLD_TRAINED_QWEN" not in rendered
+    assert "PUBLIC_APPROVED" not in rendered
+    assert "等待模型研判" not in rendered
 
 
 def test_public_detail_shows_only_available_market_reaction(monkeypatch) -> None:
@@ -673,21 +717,21 @@ def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatc
     rendered = "\n".join(str(item.value) for item in page.markdown)
 
     assert not page.exception
-    assert "来源摘录" in rendered
+    assert "来源文本" in rendered
+    assert "来源摘录" not in rendered
     assert "0 条可读证据" not in rendered
     assert "A provider discovery summary, not a verified policy action." in rendered
     assert "1 条来源记录" not in rendered
-    assert "AI 阅读辅助" in rendered
-    assert "基于来源摘录 · 独立于风险信号" in rendered
+    assert "AI 解读" in rendered
+    assert "当前事件无关联证据，因此启用 AI 解读来源文本；结果不参与风险评级。" in rendered
     assert "Markets await central-bank minutes while gold rises" in rendered
+    assert rendered.count("Markets await central-bank minutes while gold rises") == 1
     assert "这是一条市场评论，不是一项已经发生的政策行动" in rendered
     assert "来源称市场正在等待央行会议纪要" in rendered
     assert "确定性预览 · 外部模型待接入" not in rendered
     assert "已排除" not in rendered
-    assert any(
-        link.label == "打开来源"
-        for link in page.get("link_button")
-    )
+    assert rendered.count("A provider discovery summary, not a verified policy action.") == 1
+    assert any(link.label == "查看原始来源" for link in page.get("link_button"))
 
 
 def test_public_event_feed_failure_never_substitutes_overview_events(monkeypatch) -> None:
