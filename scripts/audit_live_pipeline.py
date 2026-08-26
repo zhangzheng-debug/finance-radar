@@ -41,7 +41,122 @@ def audit(connection: Any) -> dict[str, Any]:
             connection,
             """SELECT COUNT(*) FROM event_asset_impacts i
                JOIN canonical_events e ON e.event_id=i.event_id
-               WHERE e.status!='verified' AND i.market_observation_allowed!=0""",
+               WHERE e.status!='verified' AND i.market_observation_allowed!=0
+                 AND i.assessment_source NOT LIKE 'automatic_asset_mapping_v1:%'""",
+        ),
+        "automatic_asset_mapping_contract_violations": scalar(
+            connection,
+            """SELECT COUNT(*) FROM event_asset_impacts
+               WHERE assessment_source LIKE 'automatic_asset_mapping_v1:%'
+                 AND (direction!='ABSTAIN' OR impact_score!=0 OR no_trading!=1)""",
+        ),
+        "automatic_asset_mapping_cap_violations": scalar(
+            connection,
+            """SELECT COUNT(*) FROM (
+                   SELECT event_id FROM event_asset_impacts
+                    WHERE assessment_source LIKE 'automatic_asset_mapping_v1:%'
+                      AND market_observation_allowed=1
+                    GROUP BY event_id HAVING COUNT(*)>3
+               )""",
+        ),
+        "mapping_receipt_boundary_violations": scalar(
+            connection,
+            """SELECT COUNT(*) FROM event_asset_mapping_receipts
+               WHERE no_trading!=1 OR mapping_rank NOT BETWEEN 1 AND 3
+                  OR LENGTH(policy_sha256)!=64
+                  OR LOWER(policy_sha256) GLOB '*[^0-9a-f]*'""",
+        ),
+        "mapping_decision_boundary_violations": scalar(
+            connection,
+            """SELECT COUNT(*) FROM event_asset_mapping_decisions
+               WHERE no_trading!=1 OR asset_count NOT BETWEEN 0 AND 3
+                  OR LENGTH(policy_sha256)!=64
+                  OR LOWER(policy_sha256) GLOB '*[^0-9a-f]*'
+                  OR LENGTH(source_content_sha256)!=64
+                  OR LOWER(source_content_sha256) GLOB '*[^0-9a-f]*'""",
+        ),
+        "automatic_asset_mapping_projection_violations": scalar(
+            connection,
+            """SELECT
+                 (SELECT COUNT(*)
+                    FROM event_asset_impacts impact
+                    JOIN canonical_events event ON event.event_id=impact.event_id
+                    LEFT JOIN event_asset_mapping_decisions decision
+                      ON decision.decision_id=impact.mapping_decision_id
+                     AND decision.event_id=impact.event_id
+                     AND decision.event_version=event.current_version
+                     AND decision.decision='MAPPED'
+                    LEFT JOIN event_asset_mapping_receipts receipt
+                      ON receipt.mapping_decision_id=impact.mapping_decision_id
+                     AND receipt.event_id=impact.event_id
+                     AND receipt.event_version=event.current_version
+                     AND receipt.asset_id=impact.asset_id
+                     AND receipt.relation_type=impact.relation_type
+                     AND receipt.decision='SELECTED'
+                   WHERE impact.assessment_source LIKE 'automatic_asset_mapping_v1:%'
+                     AND impact.market_observation_allowed=1
+                     AND (decision.decision_id IS NULL OR receipt.receipt_id IS NULL))
+                 +
+                 (SELECT COUNT(*)
+                    FROM event_asset_mapping_receipts receipt
+                    JOIN event_asset_mapping_decisions decision
+                      ON decision.decision_id=receipt.mapping_decision_id
+                    JOIN canonical_events event
+                      ON event.event_id=decision.event_id
+                     AND event.current_version=decision.event_version
+                    LEFT JOIN event_asset_impacts impact
+                      ON impact.mapping_decision_id=receipt.mapping_decision_id
+                     AND impact.event_id=receipt.event_id
+                     AND impact.asset_id=receipt.asset_id
+                     AND impact.relation_type=receipt.relation_type
+                     AND impact.assessment_source LIKE 'automatic_asset_mapping_v1:%'
+                     AND impact.market_observation_allowed=1
+                   WHERE decision.decision='MAPPED'
+                     AND receipt.decision='SELECTED'
+                     AND impact.impact_id IS NULL)""",
+        ),
+        "market_bar_boundary_violations": scalar(
+            connection,
+            "SELECT COUNT(*) FROM market_bars WHERE read_only!=1 OR no_trading!=1",
+        ),
+        "market_job_boundary_violations": scalar(
+            connection,
+            "SELECT COUNT(*) FROM market_jobs WHERE no_trading!=1",
+        ),
+        "market_job_anchor_violations": scalar(
+            connection,
+            """SELECT COUNT(*) FROM market_jobs job
+               LEFT JOIN market_job_anchor_links link
+                 ON link.market_job_id=job.market_job_id
+               LEFT JOIN market_event_anchors anchor
+                 ON anchor.anchor_id=link.anchor_id
+               WHERE job.status NOT LIKE 'CANCELLED_%'
+                 AND (link.market_job_id IS NULL OR anchor.anchor_id IS NULL
+                      OR anchor.reaction_anchor_at IS NULL
+                      OR link.offset_seconds IS NULL
+                      OR anchor.event_id!=job.event_id
+                      OR anchor.event_version!=job.event_version
+                      OR anchor.asset_id!=job.asset_id
+                      OR anchor.provider!=job.provider
+                      OR ABS(
+                           (JULIANDAY(job.scheduled_at)
+                            - JULIANDAY(anchor.reaction_anchor_at)) * 86400.0
+                           - link.offset_seconds
+                         ) > 1.0)""",
+        ),
+        "market_metric_current_version_violations": scalar(
+            connection,
+            """SELECT COUNT(*) FROM event_market_metrics metric
+               LEFT JOIN canonical_events event
+                 ON event.event_id=metric.event_id
+                AND event.current_version=metric.event_version
+               LEFT JOIN assets asset ON asset.asset_id=metric.stable_id
+               WHERE event.event_id IS NULL
+                  OR (metric.metric_name LIKE 'reaction_return_%'
+                      AND asset.asset_id IS NULL)
+                  OR metric.metric_scope!='post_event_audit_only'
+                  OR metric.allowed_for_discovery_rank!=0
+                  OR metric.allowed_as_model_feature!=0""",
         ),
         "candidate_outbox_violations": scalar(
             connection,

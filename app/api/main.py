@@ -98,6 +98,47 @@ def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
     rows = value.get("market_metrics")
     if not isinstance(rows, list):
         return None
+    raw_assets = value.get("assets")
+    raw_assets = raw_assets if isinstance(raw_assets, list) else []
+    asset_context: dict[str, dict[str, str]] = {}
+    role_labels = {
+        "DIRECT_SECURITY": "直接证券",
+        "MARKET_BENCHMARK": "市场基准",
+        "SECTOR_PROXY": "行业代理",
+        "THEMATIC_PROXY": "观察代理",
+    }
+    fallback_roles = {
+        "PRIMARY": "DIRECT_SECURITY",
+        "SECTOR": "SECTOR_PROXY",
+        "MACRO_PROXY": "THEMATIC_PROXY",
+        "ECOSYSTEM_PROXY": "THEMATIC_PROXY",
+    }
+    for asset in raw_assets:
+        if not isinstance(asset, dict):
+            continue
+        asset_id = str(asset.get("asset_id") or "").strip()
+        try:
+            active = int(asset.get("market_observation_allowed") or 0) == 1
+            no_trading = int(asset.get("no_trading") or 0) == 1
+        except (TypeError, ValueError):
+            continue
+        if not asset_id or not active or not no_trading:
+            continue
+        role = str(asset.get("display_role") or "").strip().upper()
+        if role not in role_labels:
+            role = fallback_roles.get(str(asset.get("relation_type") or "").upper(), "")
+        symbol = str(asset.get("symbol") or "").strip()
+        provider_symbol = str(asset.get("provider_symbol") or "").strip()
+        canonical_symbol = symbol or provider_symbol
+        if not canonical_symbol:
+            continue
+        asset_context[asset_id] = {
+            "role": role,
+            "role_label": role_labels.get(role, ""),
+            "proxy_label": str(asset.get("proxy_label") or "").strip()[:120],
+            "_symbol": canonical_symbol[:32],
+            "_provider_symbol": provider_symbol[:64],
+        }
     window_order = {
         window: index
         for index, (window, _label) in enumerate(PUBLIC_MARKET_REACTION_WINDOWS)
@@ -108,6 +149,11 @@ def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
         if not isinstance(row, dict):
             continue
         if str(row.get("metric_scope") or "") != "post_event_audit_only":
+            continue
+        if str(row.get("metric_value_type") or "") != "decimal_percent":
+            continue
+        context = asset_context.get(str(row.get("stable_id") or ""))
+        if context is None:
             continue
         try:
             if int(row.get("allowed_for_discovery_rank") or 0) != 0:
@@ -137,11 +183,21 @@ def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
             f"reaction_return_{window}_pct__",
             1,
         )[-1].strip()
-        symbol = str(
-            row.get("ticker_at_event") or suffix or row.get("stable_id") or ""
-        ).strip()
-        if not symbol:
+        metric_symbol = str(row.get("ticker_at_event") or "").strip()
+        accepted_symbols = {
+            candidate.upper()
+            for candidate in (
+                str(context.get("_symbol") or "").strip(),
+                str(context.get("_provider_symbol") or "").strip(),
+            )
+            if candidate
+        }
+        supplied_symbols = {
+            candidate.upper() for candidate in (metric_symbol, suffix) if candidate
+        }
+        if not accepted_symbols or not supplied_symbols.issubset(accepted_symbols):
             continue
+        symbol = str(context["_symbol"])
         item = {
             "window": window,
             "label": labels[window],
@@ -151,9 +207,12 @@ def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
             "event_trade_date": row.get("event_trade_date"),
             "benchmark_ticker": str(row.get("benchmark_ticker") or "")[:32] or None,
             "scope": "post_event_audit_only",
+            "role": context["role"],
+            "role_label": context["role_label"],
+            "proxy_label": context["proxy_label"],
             "_updated_at": row.get("updated_at"),
         }
-        key = (symbol, window)
+        key = (str(row.get("stable_id") or ""), window)
         previous = projected.get(key)
         if previous is None or str(item.get("_updated_at") or "") >= str(
             previous.get("_updated_at") or ""
@@ -2140,10 +2199,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     qwen_run=qwen_runs.get(str(event.get("event_id") or "")),
                 ),
                 "evidence": {"items": evidence},
-                "knowledge": knowledge_context(
-                    str(event.get("event_family") or ""),
-                    str(event.get("event_type") or ""),
-                ),
                 "capture_explanation": {
                     "display": bool(explanation_eligibility.get("display")),
                     "reason_code": explanation_eligibility.get("reason_code"),

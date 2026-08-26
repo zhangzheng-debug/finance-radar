@@ -5,6 +5,23 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.26.3
+
+- Add a compact Public research-signal projection that appears only when a
+  current, explicitly approved Qwen result satisfies the dual-human-gold,
+  automatic, non-shadow release contract. Empty and pending model states stay
+  out of the reader interface.
+- Add deterministic event-to-asset observation mappings for a bounded set of
+  ETF proxies including GLD, USO, BNO, SPY and TLT. Mappings remain
+  direction-neutral, carry zero impact and cannot enter ranking, model features
+  or any trading path.
+- Display only completed, reproducible post-publication reaction values, with
+  at most three assets and one comparable fixed window per event. Never replace
+  a missed historical window with a current quote.
+- Require exact one-minute market bars, bounded retries and cache reuse, and
+  migrate the ledger to Schema 15 with versioned policy and source-time
+  provenance for safe replay and restore.
+
 ## 2026.08.26.2
 
 - Reserve a stable top safe area for the Public Reader beneath Streamlit's

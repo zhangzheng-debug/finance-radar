@@ -94,7 +94,7 @@ def _overview() -> dict[str, Any]:
             },
         ],
         "audit": {"no_trading": 0, "no_auto_verify": 0, "no_leakage": 0},
-        "schema_version": 14,
+        "schema_version": 15,
         "quick_check": "ok",
     }
 
@@ -258,6 +258,8 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert not any(button.label == "收起当前页预览" for button in page.button)
     assert "返回原筛选位置" in rendered
     assert "本次浏览会话首次查看" not in "\n".join(str(item.value) for item in page.caption)
+    assert "核对清单" not in rendered
+    assert "改变判断的情形" not in rendered
 
 
 @pytest.mark.parametrize(
@@ -279,6 +281,12 @@ def test_public_valid_qwen_signal_keeps_its_evidence_basis(
             "adverse_strength": "HIGH",
             "semantic_priority": "PRIORITY_REVIEW",
             "assessment_scope": assessment_scope,
+            "publication_state": "PUBLIC_APPROVED",
+            "training_basis": "INDEPENDENT_DUAL_HUMAN_GOLD",
+            "automatic": True,
+            "shadow": False,
+            "no_trading": True,
+            "confirms_event_fact": False,
             "current": True,
         }
         parsed = urllib.parse.urlsplit(path)
@@ -296,7 +304,9 @@ def test_public_valid_qwen_signal_keeps_its_evidence_basis(
     rendered = "\n".join(str(item.value) for item in page.markdown)
 
     assert not page.exception
-    assert "负面 · 下行风险强" in rendered
+    assert "研究信号" in rendered
+    assert "千问" in rendered
+    assert "负面 · 强度高" in rendered
     assert basis_label in rendered
     assert "HUMAN_GOLD_TRAINED_QWEN" not in rendered
     assert "PUBLIC_APPROVED" not in rendered
@@ -320,9 +330,38 @@ def test_public_detail_shows_only_available_market_reaction(monkeypatch) -> None
                     {
                         "window": "t_plus_30m",
                         "label": "T+30m",
-                        "symbol": "ACME",
+                        "symbol": "GLD",
                         "return_pct": 1.25,
                         "provider": "twelve_data",
+                        "role_label": "观察代理",
+                        "proxy_label": "黄金ETF代理",
+                    },
+                    {
+                        "window": "t_plus_30m",
+                        "label": "T+30m",
+                        "symbol": "USO",
+                        "return_pct": -0.75,
+                        "provider": "twelve_data",
+                        "role_label": "观察代理",
+                        "proxy_label": "WTI原油ETF代理",
+                    },
+                    {
+                        "window": "t_plus_30m",
+                        "label": "T+30m",
+                        "symbol": "ZZZ",
+                        "return_pct": 9.99,
+                        "provider": "twelve_data",
+                        "role_label": "观察代理",
+                        "proxy_label": "测试代理",
+                    },
+                    {
+                        "window": "t_plus_30m",
+                        "label": "T+30m",
+                        "symbol": "SPY",
+                        "return_pct": 0.25,
+                        "provider": "twelve_data",
+                        "role_label": "市场基准",
+                        "proxy_label": "美国大盘ETF基准",
                     },
                 ],
             }
@@ -336,11 +375,17 @@ def test_public_detail_shows_only_available_market_reaction(monkeypatch) -> None
     rendered = "\n".join(str(item.value) for item in page.markdown)
 
     assert not page.exception
-    assert "价格反应" in rendered
-    assert "T+5m" in rendered
-    assert "-3.12%" in rendered
+    assert "消息发布后（T+30m）" in rendered
+    assert "GLD" in rendered
     assert "+1.25%" in rendered
-    assert "来源公开后的价格变化" in rendered
+    assert "USO" in rendered
+    assert "-0.75%" in rendered
+    assert "美国大盘ETF基准" in rendered
+    assert "黄金ETF代理" in rendered
+    assert "WTI原油ETF代理" in rendered
+    assert "ZZZ" not in rendered
+    assert "T+30m" in rendered
+    assert "-3.12%" not in rendered
 
 
 def test_public_detail_hides_empty_market_reaction(monkeypatch) -> None:
@@ -352,7 +397,8 @@ def test_public_detail_hides_empty_market_reaction(monkeypatch) -> None:
     rendered = "\n".join(str(item.value) for item in page.markdown)
 
     assert not page.exception
-    assert "价格反应" not in rendered
+    assert "消息发布后的市场变化" not in rendered
+    assert 'class="market-reaction research-signals"' not in rendered
     assert "PENDING" not in rendered
     assert "MISSED" not in rendered
 

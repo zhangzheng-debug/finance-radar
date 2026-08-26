@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import re
 import shutil
 import sqlite3
 from dataclasses import dataclass
@@ -13,7 +14,7 @@ from typing import Any, Iterable
 from app.evidence_policy import register_sqlite_integrity_functions
 
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -288,6 +289,7 @@ CREATE TABLE IF NOT EXISTS event_asset_impacts (
     confidence REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
     reason_codes_json TEXT NOT NULL,
     assessment_source TEXT NOT NULL,
+    mapping_decision_id TEXT,
     market_observation_allowed INTEGER NOT NULL DEFAULT 0 CHECK (market_observation_allowed IN (0,1)),
     no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
     created_at TEXT NOT NULL,
@@ -297,9 +299,55 @@ CREATE TABLE IF NOT EXISTS event_asset_impacts (
     UNIQUE (event_id, asset_id, relation_type)
 );
 
+CREATE TABLE IF NOT EXISTS event_asset_mapping_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    event_version INTEGER NOT NULL,
+    mapping_decision_id TEXT NOT NULL,
+    asset_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    display_role TEXT NOT NULL CHECK (display_role IN (
+        'DIRECT_SECURITY','MARKET_BENCHMARK','SECTOR_PROXY','THEMATIC_PROXY'
+    )),
+    proxy_label TEXT NOT NULL,
+    rule_id TEXT NOT NULL,
+    policy_version TEXT NOT NULL,
+    policy_sha256 TEXT NOT NULL,
+    mapping_rank INTEGER NOT NULL CHECK (mapping_rank BETWEEN 1 AND 3),
+    confidence REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+    decision TEXT NOT NULL CHECK (decision IN ('SELECTED','REJECTED_CAP','SUPERSEDED')),
+    reason_codes_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+    FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
+    FOREIGN KEY (event_id,event_version) REFERENCES event_versions(event_id,version),
+    FOREIGN KEY (mapping_decision_id) REFERENCES event_asset_mapping_decisions(decision_id),
+    FOREIGN KEY (asset_id) REFERENCES assets(asset_id)
+);
+
+CREATE TABLE IF NOT EXISTS event_asset_mapping_decisions (
+    decision_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    event_version INTEGER NOT NULL,
+    policy_version TEXT NOT NULL,
+    policy_sha256 TEXT NOT NULL,
+    observation_id TEXT NOT NULL,
+    source_content_sha256 TEXT NOT NULL,
+    source_published_at TEXT,
+    local_received_at TEXT,
+    decision TEXT NOT NULL CHECK (decision IN ('MAPPED','NO_MATCH')),
+    rule_id TEXT,
+    asset_count INTEGER NOT NULL CHECK (asset_count BETWEEN 0 AND 3),
+    created_at TEXT NOT NULL,
+    no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+    FOREIGN KEY (event_id,event_version) REFERENCES event_versions(event_id,version),
+    UNIQUE (event_id,event_version,policy_sha256,observation_id,source_content_sha256)
+);
+
 CREATE TABLE IF NOT EXISTS market_jobs (
     market_job_id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL,
+    event_version INTEGER NOT NULL,
     asset_id TEXT NOT NULL,
     provider TEXT NOT NULL,
     observation_window TEXT NOT NULL,
@@ -310,8 +358,9 @@ CREATE TABLE IF NOT EXISTS market_jobs (
     last_error TEXT,
     no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
     FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
+    FOREIGN KEY (event_id,event_version) REFERENCES event_versions(event_id,version),
     FOREIGN KEY (asset_id) REFERENCES assets(asset_id),
-    UNIQUE (event_id, asset_id, provider, observation_window)
+    UNIQUE (event_id, event_version, asset_id, provider, observation_window)
 );
 
 CREATE TABLE IF NOT EXISTS market_event_anchors (
@@ -373,6 +422,27 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
     UNIQUE (market_job_id, captured_at)
 );
 
+CREATE TABLE IF NOT EXISTS market_bars (
+    provider TEXT NOT NULL,
+    asset_id TEXT NOT NULL,
+    provider_symbol TEXT NOT NULL,
+    interval TEXT NOT NULL,
+    bar_time TEXT NOT NULL,
+    price TEXT NOT NULL,
+    open TEXT,
+    high TEXT,
+    low TEXT,
+    close TEXT,
+    volume TEXT,
+    currency TEXT,
+    raw_json TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    read_only INTEGER NOT NULL DEFAULT 1 CHECK (read_only=1),
+    no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+    FOREIGN KEY (asset_id) REFERENCES assets(asset_id),
+    PRIMARY KEY (provider,asset_id,interval,bar_time)
+);
+
 CREATE TABLE IF NOT EXISTS pipeline_jobs (
     job_id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL,
@@ -415,6 +485,7 @@ ON event_fact_workflow(workflow_state,updated_at);
 CREATE TABLE IF NOT EXISTS event_market_metrics (
     metric_id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL,
+    event_version INTEGER NOT NULL,
     provider TEXT NOT NULL,
     stable_id TEXT,
     ticker_at_event TEXT,
@@ -430,7 +501,8 @@ CREATE TABLE IF NOT EXISTS event_market_metrics (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
-    UNIQUE (event_id, provider, metric_name)
+    FOREIGN KEY (event_id,event_version) REFERENCES event_versions(event_id,version),
+    UNIQUE (event_id,event_version,provider,metric_name)
 );
 
 CREATE TABLE IF NOT EXISTS alert_outbox (
@@ -702,12 +774,1329 @@ def backup_database(path: Path, backup_dir: Path) -> Path | None:
     return backup_path
 
 
+def _table_columns(connection: sqlite3.Connection, table: str) -> tuple[str, ...]:
+    return tuple(
+        str(row["name"])
+        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+    )
+
+
+def _primary_key_columns(connection: sqlite3.Connection, table: str) -> tuple[str, ...]:
+    rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
+    return tuple(
+        str(row["name"])
+        for row in sorted(rows, key=lambda item: int(item["pk"] or 0))
+        if int(row["pk"] or 0) > 0
+    )
+
+
+def _unique_keys(connection: sqlite3.Connection, table: str) -> set[tuple[str, ...]]:
+    keys: set[tuple[str, ...]] = set()
+    for row in connection.execute(f"PRAGMA index_list({table})").fetchall():
+        if int(row["unique"] or 0) != 1:
+            continue
+        index_name = str(row["name"])
+        columns = tuple(
+            str(item["name"])
+            for item in sorted(
+                connection.execute(f"PRAGMA index_info({index_name})").fetchall(),
+                key=lambda item: int(item["seqno"] or 0),
+            )
+        )
+        if columns:
+            keys.add(columns)
+    return keys
+
+
+def _foreign_keys(
+    connection: sqlite3.Connection, table: str
+) -> set[tuple[str, tuple[str, ...], tuple[str, ...]]]:
+    grouped: dict[int, list[sqlite3.Row]] = {}
+    for row in connection.execute(f"PRAGMA foreign_key_list({table})").fetchall():
+        grouped.setdefault(int(row["id"]), []).append(row)
+    return {
+        (
+            str(sorted(rows, key=lambda item: int(item["seq"]))[0]["table"]),
+            tuple(str(item["from"]) for item in sorted(rows, key=lambda item: int(item["seq"]))),
+            tuple(str(item["to"]) for item in sorted(rows, key=lambda item: int(item["seq"]))),
+        )
+        for rows in grouped.values()
+    }
+
+
+def _archive_table(
+    connection: sqlite3.Connection, table: str, archive: str
+) -> None:
+    """Copy a legacy shape without carrying unsafe keys or foreign keys forward."""
+
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (archive,)
+    ).fetchone() is not None:
+        raise RuntimeError(f"stale {archive} migration archive exists")
+    connection.execute(f"CREATE TABLE {archive} AS SELECT * FROM {table}")
+    connection.execute(f"DROP TABLE {table}")
+
+
+def _create_event_asset_mapping_tables(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE event_asset_mapping_decisions (
+            decision_id TEXT PRIMARY KEY,
+            event_id TEXT NOT NULL,
+            event_version INTEGER NOT NULL,
+            policy_version TEXT NOT NULL,
+            policy_sha256 TEXT NOT NULL,
+            observation_id TEXT NOT NULL,
+            source_content_sha256 TEXT NOT NULL,
+            source_published_at TEXT,
+            local_received_at TEXT,
+            decision TEXT NOT NULL CHECK (decision IN ('MAPPED','NO_MATCH')),
+            rule_id TEXT,
+            asset_count INTEGER NOT NULL CHECK (asset_count BETWEEN 0 AND 3),
+            created_at TEXT NOT NULL,
+            no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+            FOREIGN KEY (event_id,event_version)
+                REFERENCES event_versions(event_id,version),
+            UNIQUE (event_id,event_version,policy_sha256,observation_id,source_content_sha256)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE event_asset_mapping_receipts (
+            receipt_id TEXT PRIMARY KEY,
+            event_id TEXT NOT NULL,
+            event_version INTEGER NOT NULL,
+            mapping_decision_id TEXT NOT NULL,
+            asset_id TEXT NOT NULL,
+            relation_type TEXT NOT NULL,
+            display_role TEXT NOT NULL CHECK (display_role IN (
+                'DIRECT_SECURITY','MARKET_BENCHMARK','SECTOR_PROXY','THEMATIC_PROXY'
+            )),
+            proxy_label TEXT NOT NULL,
+            rule_id TEXT NOT NULL,
+            policy_version TEXT NOT NULL,
+            policy_sha256 TEXT NOT NULL,
+            mapping_rank INTEGER NOT NULL CHECK (mapping_rank BETWEEN 1 AND 3),
+            confidence REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+            decision TEXT NOT NULL CHECK (decision IN ('SELECTED','REJECTED_CAP','SUPERSEDED')),
+            reason_codes_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+            FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
+            FOREIGN KEY (event_id,event_version)
+                REFERENCES event_versions(event_id,version),
+            FOREIGN KEY (mapping_decision_id)
+                REFERENCES event_asset_mapping_decisions(decision_id),
+            FOREIGN KEY (asset_id) REFERENCES assets(asset_id)
+        )
+        """
+    )
+
+
+def _mapping_tables_are_current(connection: sqlite3.Connection) -> bool:
+    decision_columns = {
+        "decision_id",
+        "event_id",
+        "event_version",
+        "policy_version",
+        "policy_sha256",
+        "observation_id",
+        "source_content_sha256",
+        "source_published_at",
+        "local_received_at",
+        "decision",
+        "rule_id",
+        "asset_count",
+        "created_at",
+        "no_trading",
+    }
+    receipt_columns = {
+        "receipt_id",
+        "event_id",
+        "event_version",
+        "mapping_decision_id",
+        "asset_id",
+        "relation_type",
+        "display_role",
+        "proxy_label",
+        "rule_id",
+        "policy_version",
+        "policy_sha256",
+        "mapping_rank",
+        "confidence",
+        "decision",
+        "reason_codes_json",
+        "created_at",
+        "no_trading",
+    }
+    decision_fks = _foreign_keys(connection, "event_asset_mapping_decisions")
+    receipt_fks = _foreign_keys(connection, "event_asset_mapping_receipts")
+    return (
+        decision_columns.issubset(_table_columns(connection, "event_asset_mapping_decisions"))
+        and receipt_columns.issubset(_table_columns(connection, "event_asset_mapping_receipts"))
+        and _primary_key_columns(connection, "event_asset_mapping_decisions")
+        == ("decision_id",)
+        and _primary_key_columns(connection, "event_asset_mapping_receipts")
+        == ("receipt_id",)
+        and (
+            "event_id",
+            "event_version",
+            "policy_sha256",
+            "observation_id",
+            "source_content_sha256",
+        )
+        in _unique_keys(connection, "event_asset_mapping_decisions")
+        and (
+            "event_versions",
+            ("event_id", "event_version"),
+            ("event_id", "version"),
+        )
+        in decision_fks
+        and (
+            "event_versions",
+            ("event_id", "event_version"),
+            ("event_id", "version"),
+        )
+        in receipt_fks
+        and (
+            "event_asset_mapping_decisions",
+            ("mapping_decision_id",),
+            ("decision_id",),
+        )
+        in receipt_fks
+        and ("assets", ("asset_id",), ("asset_id",)) in receipt_fks
+    )
+
+
+def _is_lower_sha256(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _integer_value(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
+    if isinstance(value, str) and value.strip() != str(parsed):
+        return None
+    return parsed
+
+
+def _legacy_mapping_bundles(
+    connection: sqlite3.Connection,
+    *,
+    decision_columns: set[str],
+    receipt_columns: set[str],
+) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
+    """Return only legacy mapping chains whose identity can be proven end to end."""
+
+    required_decision_columns = {
+        "decision_id",
+        "event_id",
+        "event_version",
+        "policy_version",
+        "policy_sha256",
+        "observation_id",
+        "source_content_sha256",
+        "decision",
+        "rule_id",
+        "asset_count",
+        "created_at",
+    }
+    required_receipt_columns = {
+        "receipt_id",
+        "event_id",
+        "event_version",
+        "mapping_decision_id",
+        "asset_id",
+        "relation_type",
+        "display_role",
+        "proxy_label",
+        "rule_id",
+        "policy_version",
+        "policy_sha256",
+        "mapping_rank",
+        "confidence",
+        "decision",
+        "reason_codes_json",
+        "created_at",
+    }
+    if not required_decision_columns.issubset(decision_columns) or not (
+        required_receipt_columns.issubset(receipt_columns)
+    ):
+        return []
+
+    decisions = [
+        dict(row)
+        for row in connection.execute(
+            "SELECT * FROM event_asset_mapping_decisions_legacy_schema15"
+        ).fetchall()
+    ]
+    receipts = [
+        dict(row)
+        for row in connection.execute(
+            "SELECT * FROM event_asset_mapping_receipts_legacy_schema15"
+        ).fetchall()
+    ]
+    versions = {
+        (str(row["event_id"]), int(row["version"]))
+        for row in connection.execute("SELECT event_id,version FROM event_versions")
+    }
+    asset_ids = {
+        str(row["asset_id"])
+        for row in connection.execute("SELECT asset_id FROM assets")
+    }
+    event_source_bindings = {
+        (
+            str(row["event_id"]),
+            str(row["observation_id"]),
+            str(row["content_sha256"]),
+        )
+        for row in connection.execute(
+            """SELECT eo.event_id,raw.observation_id,raw.content_sha256
+                 FROM event_observations eo
+                 JOIN raw_observations raw
+                   ON raw.observation_id=eo.observation_id
+                WHERE eo.relation_type!='filtered_aggregated_noise'
+                  AND raw.observation_status!='deleted'
+                UNION
+               SELECT eo.event_id,revision.observation_id,revision.content_sha256
+                 FROM event_observations eo
+                 JOIN source_revisions revision
+                   ON revision.observation_id=eo.observation_id
+                WHERE eo.relation_type!='filtered_aggregated_noise'
+                  AND revision.revision_kind!='delete'"""
+        ).fetchall()
+    }
+
+    def counts(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for row in rows:
+            value = str(row.get(key) or "")
+            result[value] = result.get(value, 0) + 1
+        return result
+
+    decision_id_counts = counts(decisions, "decision_id")
+    receipt_id_counts = counts(receipts, "receipt_id")
+    binding_counts: dict[tuple[str, int | None, str, str, str], int] = {}
+    receipts_by_decision: dict[str, list[dict[str, Any]]] = {}
+    for row in decisions:
+        version = _integer_value(row.get("event_version"))
+        binding = (
+            str(row.get("event_id") or ""),
+            version,
+            str(row.get("policy_sha256") or ""),
+            str(row.get("observation_id") or ""),
+            str(row.get("source_content_sha256") or ""),
+        )
+        binding_counts[binding] = binding_counts.get(binding, 0) + 1
+    for row in receipts:
+        decision_id = str(row.get("mapping_decision_id") or "")
+        receipts_by_decision.setdefault(decision_id, []).append(row)
+
+    valid_bundles: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+    for decision in decisions:
+        decision_id = str(decision.get("decision_id") or "")
+        event_id = str(decision.get("event_id") or "")
+        event_version = _integer_value(decision.get("event_version"))
+        policy_version = str(decision.get("policy_version") or "")
+        policy_sha256 = decision.get("policy_sha256")
+        source_sha256 = decision.get("source_content_sha256")
+        observation_id = str(decision.get("observation_id") or "")
+        decision_kind = str(decision.get("decision") or "")
+        rule_id_value = decision.get("rule_id")
+        rule_id = None if rule_id_value is None else str(rule_id_value)
+        asset_count = _integer_value(decision.get("asset_count"))
+        no_trading = (
+            _integer_value(decision.get("no_trading"))
+            if "no_trading" in decision_columns
+            else 1
+        )
+        binding = (
+            event_id,
+            event_version,
+            str(policy_sha256 or ""),
+            observation_id,
+            str(source_sha256 or ""),
+        )
+        linked_receipts = receipts_by_decision.get(decision_id, [])
+        if (
+            not decision_id
+            or decision_id_counts.get(decision_id) != 1
+            or binding_counts.get(binding) != 1
+            or event_version is None
+            or (event_id, event_version) not in versions
+            or not policy_version
+            or not _is_lower_sha256(policy_sha256)
+            or not _is_lower_sha256(source_sha256)
+            or (event_id, observation_id, str(source_sha256))
+            not in event_source_bindings
+            or decision_kind not in {"MAPPED", "NO_MATCH"}
+            or asset_count is None
+            or no_trading != 1
+        ):
+            continue
+
+        receipts_valid = True
+        for receipt in linked_receipts:
+            receipt_version = _integer_value(receipt.get("event_version"))
+            receipt_rank = _integer_value(receipt.get("mapping_rank"))
+            receipt_no_trading = (
+                _integer_value(receipt.get("no_trading"))
+                if "no_trading" in receipt_columns
+                else 1
+            )
+            try:
+                confidence = float(receipt.get("confidence"))
+            except (TypeError, ValueError, OverflowError):
+                confidence = -1.0
+            receipt_id = str(receipt.get("receipt_id") or "")
+            if (
+                not receipt_id
+                or receipt_id_counts.get(receipt_id) != 1
+                or str(receipt.get("event_id") or "") != event_id
+                or receipt_version != event_version
+                or str(receipt.get("mapping_decision_id") or "") != decision_id
+                or str(receipt.get("policy_version") or "") != policy_version
+                or receipt.get("policy_sha256") != policy_sha256
+                or not _is_lower_sha256(receipt.get("policy_sha256"))
+                or receipt.get("rule_id") != rule_id_value
+                or str(receipt.get("asset_id") or "") not in asset_ids
+                or str(receipt.get("display_role") or "")
+                not in {
+                    "DIRECT_SECURITY",
+                    "MARKET_BENCHMARK",
+                    "SECTOR_PROXY",
+                    "THEMATIC_PROXY",
+                }
+                or str(receipt.get("relation_type") or "")
+                not in {
+                    "PRIMARY",
+                    "SECTOR",
+                    "SUPPLIER",
+                    "CUSTOMER",
+                    "MACRO_PROXY",
+                    "ECOSYSTEM_PROXY",
+                }
+                or receipt_rank is None
+                or not 1 <= receipt_rank <= 3
+                or not 0 <= confidence <= 1
+                or str(receipt.get("decision") or "")
+                not in {"SELECTED", "REJECTED_CAP", "SUPERSEDED"}
+                or receipt_no_trading != 1
+            ):
+                receipts_valid = False
+                break
+        if not receipts_valid:
+            continue
+
+        selected = [
+            receipt
+            for receipt in linked_receipts
+            if str(receipt.get("decision") or "") == "SELECTED"
+        ]
+        selected_projection_keys = {
+            (
+                str(receipt.get("asset_id") or ""),
+                str(receipt.get("relation_type") or ""),
+            )
+            for receipt in selected
+        }
+        selected_ranks = {
+            _integer_value(receipt.get("mapping_rank")) for receipt in selected
+        }
+        if decision_kind == "MAPPED":
+            if (
+                not rule_id
+                or asset_count is None
+                or not 1 <= asset_count <= 3
+                or len(selected) != asset_count
+                or len(selected_projection_keys) != asset_count
+                or len(selected_ranks) != asset_count
+            ):
+                continue
+        elif asset_count != 0 or selected:
+            continue
+        valid_bundles.append((decision, linked_receipts))
+    return valid_bundles
+
+
+def _upgrade_event_asset_mapping_tables(connection: sqlite3.Connection) -> None:
+    """Repair pre-final Schema 15 mapping tables and preserve their raw rows."""
+
+    if _mapping_tables_are_current(connection):
+        return
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys=OFF")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        # Another process may have completed the rebuild while this connection
+        # waited for the writer lock.  All legacy-shape inspection and archive
+        # decisions must therefore be based on the locked schema snapshot.
+        if _mapping_tables_are_current(connection):
+            connection.commit()
+            return
+        decision_columns = set(
+            _table_columns(connection, "event_asset_mapping_decisions")
+        )
+        receipt_columns = set(
+            _table_columns(connection, "event_asset_mapping_receipts")
+        )
+        _archive_table(
+            connection,
+            "event_asset_mapping_receipts",
+            "event_asset_mapping_receipts_legacy_schema15",
+        )
+        _archive_table(
+            connection,
+            "event_asset_mapping_decisions",
+            "event_asset_mapping_decisions_legacy_schema15",
+        )
+        _create_event_asset_mapping_tables(connection)
+
+        for decision, receipts in _legacy_mapping_bundles(
+            connection,
+            decision_columns=decision_columns,
+            receipt_columns=receipt_columns,
+        ):
+            connection.execute(
+                """
+                INSERT INTO event_asset_mapping_decisions(
+                    decision_id,event_id,event_version,policy_version,policy_sha256,
+                    observation_id,source_content_sha256,source_published_at,
+                    local_received_at,decision,rule_id,asset_count,created_at,no_trading
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+                """,
+                (
+                    decision["decision_id"],
+                    decision["event_id"],
+                    decision["event_version"],
+                    decision["policy_version"],
+                    decision["policy_sha256"],
+                    decision["observation_id"],
+                    decision["source_content_sha256"],
+                    decision.get("source_published_at"),
+                    decision.get("local_received_at"),
+                    decision["decision"],
+                    decision.get("rule_id"),
+                    decision["asset_count"],
+                    decision["created_at"],
+                ),
+            )
+            for receipt in receipts:
+                connection.execute(
+                    """
+                    INSERT INTO event_asset_mapping_receipts(
+                        receipt_id,event_id,event_version,mapping_decision_id,asset_id,
+                        relation_type,display_role,proxy_label,rule_id,policy_version,
+                        policy_sha256,mapping_rank,confidence,decision,reason_codes_json,
+                        created_at,no_trading
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+                    """,
+                    (
+                        receipt["receipt_id"],
+                        receipt["event_id"],
+                        receipt["event_version"],
+                        receipt["mapping_decision_id"],
+                        receipt["asset_id"],
+                        receipt["relation_type"],
+                        receipt["display_role"],
+                        receipt["proxy_label"],
+                        receipt["rule_id"],
+                        receipt["policy_version"],
+                        receipt["policy_sha256"],
+                        receipt["mapping_rank"],
+                        receipt["confidence"],
+                        receipt["decision"],
+                        receipt["reason_codes_json"],
+                        receipt["created_at"],
+                    ),
+                )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+
+def _create_market_bars_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE market_bars (
+            provider TEXT NOT NULL,
+            asset_id TEXT NOT NULL,
+            provider_symbol TEXT NOT NULL,
+            interval TEXT NOT NULL,
+            bar_time TEXT NOT NULL,
+            price TEXT NOT NULL,
+            open TEXT,
+            high TEXT,
+            low TEXT,
+            close TEXT,
+            volume TEXT,
+            currency TEXT,
+            raw_json TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            read_only INTEGER NOT NULL DEFAULT 1 CHECK (read_only=1),
+            no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+            FOREIGN KEY (asset_id) REFERENCES assets(asset_id),
+            PRIMARY KEY (provider,asset_id,interval,bar_time)
+        )
+        """
+    )
+
+
+def _market_bars_are_current(connection: sqlite3.Connection) -> bool:
+    required = {
+        "provider",
+        "asset_id",
+        "provider_symbol",
+        "interval",
+        "bar_time",
+        "price",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "currency",
+        "raw_json",
+        "fetched_at",
+        "read_only",
+        "no_trading",
+    }
+    return (
+        required.issubset(_table_columns(connection, "market_bars"))
+        and _primary_key_columns(connection, "market_bars")
+        == ("provider", "asset_id", "interval", "bar_time")
+        and ("assets", ("asset_id",), ("asset_id",))
+        in _foreign_keys(connection, "market_bars")
+    )
+
+
+def _normalized_market_provider(value: Any) -> str:
+    return str(value or "").strip().casefold()
+
+
+def _normalized_market_symbol(value: Any) -> str:
+    # Do not discard punctuation here.  Symbols such as ETH/USD and ETHUSDT
+    # identify different provider instruments and must not collapse together.
+    return str(value or "").strip().upper()
+
+
+def _legacy_market_bar_matches_asset(
+    *, provider: Any, provider_symbol: Any, asset: sqlite3.Row
+) -> bool:
+    """Prove a legacy bar's instrument identity before current projection."""
+
+    normalized_provider = _normalized_market_provider(provider)
+    expected_provider = (
+        "binance_public"
+        if str(asset["asset_type"] or "").strip().casefold() == "crypto"
+        else "twelve_data"
+    )
+    if normalized_provider != expected_provider:
+        return False
+
+    stored_symbol = _normalized_market_symbol(provider_symbol)
+    if not stored_symbol:
+        return False
+
+    canonical_symbol = _normalized_market_symbol(asset["symbol"])
+    asset_provider_symbol = _normalized_market_symbol(asset["provider_symbol"])
+    expected_symbols = {
+        symbol for symbol in (canonical_symbol, asset_provider_symbol) if symbol
+    }
+    if normalized_provider == "binance_public":
+        # The observer intentionally derives public USDT spot pairs from the
+        # reviewed canonical crypto base symbol.  Accept that exact derivation,
+        # while preserving punctuation for every direct comparison above.
+        base = re.sub(r"[^A-Z0-9]", "", canonical_symbol)
+        derived = f"{base}USDT" if base else ""
+        if re.fullmatch(r"[A-Z0-9]{5,24}", derived):
+            expected_symbols.add(derived)
+
+    return stored_symbol in expected_symbols
+
+
+def _upgrade_market_bars(connection: sqlite3.Connection) -> None:
+    if _market_bars_are_current(connection):
+        return
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys=OFF")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if _market_bars_are_current(connection):
+            connection.commit()
+            return
+        columns = set(_table_columns(connection, "market_bars"))
+        _archive_table(connection, "market_bars", "market_bars_legacy_schema15")
+        _create_market_bars_table(connection)
+        required = {
+            "provider",
+            "asset_id",
+            "provider_symbol",
+            "interval",
+            "bar_time",
+            "price",
+            "raw_json",
+            "fetched_at",
+        }
+        if required.issubset(columns):
+            assets = {
+                str(row["asset_id"]): row
+                for row in connection.execute(
+                    "SELECT asset_id,asset_type,symbol,provider_symbol FROM assets"
+                ).fetchall()
+            }
+            for legacy in connection.execute(
+                "SELECT * FROM market_bars_legacy_schema15"
+            ).fetchall():
+                keys = set(legacy.keys())
+                try:
+                    read_only = int(legacy["read_only"]) if "read_only" in keys else 1
+                    no_trading = int(legacy["no_trading"]) if "no_trading" in keys else 1
+                except (TypeError, ValueError):
+                    continue
+                asset_id = str(legacy["asset_id"] or "").strip()
+                asset = assets.get(asset_id)
+                if (
+                    read_only != 1
+                    or no_trading != 1
+                    or asset is None
+                    or not _legacy_market_bar_matches_asset(
+                        provider=legacy["provider"],
+                        provider_symbol=legacy["provider_symbol"],
+                        asset=asset,
+                    )
+                ):
+                    continue
+                provider = _normalized_market_provider(legacy["provider"])
+                provider_symbol = _normalized_market_symbol(
+                    legacy["provider_symbol"]
+                )
+                interval = str(legacy["interval"] or "").strip().casefold()
+                required_values = (
+                    asset_id,
+                    provider,
+                    provider_symbol,
+                    interval,
+                    legacy["bar_time"],
+                    legacy["price"],
+                    legacy["raw_json"],
+                    legacy["fetched_at"],
+                )
+                if interval != "1min" or any(
+                    value is None or (isinstance(value, str) and not value.strip())
+                    for value in required_values
+                ):
+                    continue
+                optional = {
+                    name: legacy[name] if name in keys else None
+                    for name in ("open", "high", "low", "close", "volume", "currency")
+                }
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO market_bars(
+                        provider,asset_id,provider_symbol,interval,bar_time,price,
+                        open,high,low,close,volume,currency,raw_json,fetched_at,
+                        read_only,no_trading
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)
+                    """,
+                    (
+                        provider,
+                        asset_id,
+                        provider_symbol,
+                        interval,
+                        legacy["bar_time"],
+                        legacy["price"],
+                        optional["open"],
+                        optional["high"],
+                        optional["low"],
+                        optional["close"],
+                        optional["volume"],
+                        optional["currency"],
+                        legacy["raw_json"],
+                        legacy["fetched_at"],
+                    ),
+                )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+
+def _disable_unbound_automatic_asset_impacts(connection: sqlite3.Connection) -> None:
+    """Fail closed when a legacy automatic mapping cannot prove its receipt chain."""
+
+    invalid_predicate = """
+        impact.assessment_source LIKE 'automatic_asset_mapping_v1:%'
+        AND impact.market_observation_allowed=1
+        AND NOT EXISTS (
+            SELECT 1
+              FROM canonical_events event
+              JOIN event_asset_mapping_decisions decision
+                ON decision.decision_id=impact.mapping_decision_id
+               AND decision.event_id=impact.event_id
+               AND decision.event_version=event.current_version
+               AND decision.decision='MAPPED'
+               AND decision.asset_count BETWEEN 1 AND 3
+               AND length(decision.policy_sha256)=64
+               AND decision.policy_sha256 NOT GLOB '*[^0-9a-f]*'
+               AND length(decision.source_content_sha256)=64
+               AND decision.source_content_sha256 NOT GLOB '*[^0-9a-f]*'
+               AND length(decision.policy_version)>0
+               AND length(decision.rule_id)>0
+               AND decision.no_trading=1
+              JOIN event_observations source_link
+                ON source_link.event_id=decision.event_id
+               AND source_link.observation_id=decision.observation_id
+               AND source_link.relation_type!='filtered_aggregated_noise'
+              JOIN event_asset_mapping_receipts receipt
+                ON receipt.mapping_decision_id=decision.decision_id
+               AND receipt.event_id=impact.event_id
+               AND receipt.event_version=event.current_version
+               AND receipt.asset_id=impact.asset_id
+               AND receipt.relation_type=impact.relation_type
+               AND receipt.policy_sha256=decision.policy_sha256
+               AND receipt.policy_version=decision.policy_version
+               AND receipt.rule_id=decision.rule_id
+               AND receipt.decision='SELECTED'
+               AND receipt.no_trading=1
+             WHERE event.event_id=impact.event_id
+               AND event.no_trading=1
+               AND impact.no_trading=1
+               AND impact.assessment_source=
+                   'automatic_asset_mapping_v1:' || decision.rule_id
+               AND (
+                   EXISTS (
+                       SELECT 1 FROM raw_observations raw
+                        WHERE raw.observation_id=decision.observation_id
+                          AND raw.content_sha256=decision.source_content_sha256
+                          AND raw.observation_status!='deleted'
+                   )
+                   OR EXISTS (
+                       SELECT 1 FROM source_revisions revision
+                        WHERE revision.observation_id=decision.observation_id
+                          AND revision.content_sha256=decision.source_content_sha256
+                          AND revision.revision_kind!='delete'
+                   )
+               )
+               AND decision.asset_count=(
+                   SELECT COUNT(*)
+                     FROM event_asset_mapping_receipts selected
+                    WHERE selected.mapping_decision_id=decision.decision_id
+                      AND selected.decision='SELECTED'
+               )
+               AND decision.asset_count=(
+                   SELECT COUNT(DISTINCT selected.asset_id || char(31) || selected.relation_type)
+                     FROM event_asset_mapping_receipts selected
+                    WHERE selected.mapping_decision_id=decision.decision_id
+                      AND selected.decision='SELECTED'
+               )
+               AND decision.asset_count=(
+                   SELECT COUNT(DISTINCT selected.mapping_rank)
+                     FROM event_asset_mapping_receipts selected
+                    WHERE selected.mapping_decision_id=decision.decision_id
+                      AND selected.decision='SELECTED'
+               )
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM event_asset_mapping_receipts linked
+                     LEFT JOIN assets linked_asset
+                       ON linked_asset.asset_id=linked.asset_id
+                    WHERE linked.mapping_decision_id=decision.decision_id
+                      AND (
+                          linked.event_id IS NOT decision.event_id
+                          OR linked.event_version IS NOT decision.event_version
+                          OR linked.policy_sha256 IS NOT decision.policy_sha256
+                          OR linked.policy_version IS NOT decision.policy_version
+                          OR linked.rule_id IS NOT decision.rule_id
+                          OR length(linked.policy_sha256)!=64
+                          OR linked.policy_sha256 GLOB '*[^0-9a-f]*'
+                          OR linked.no_trading!=1
+                          OR linked.mapping_rank NOT BETWEEN 1 AND 3
+                          OR linked.confidence NOT BETWEEN 0 AND 1
+                          OR linked_asset.asset_id IS NULL
+                      )
+               )
+        )
+    """
+    now = utc_now()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        invalid_rows = connection.execute(
+            f"""SELECT impact.impact_id,impact.event_id,impact.asset_id
+                   FROM event_asset_impacts impact
+                  WHERE {invalid_predicate}"""
+        ).fetchall()
+        if invalid_rows:
+            connection.executemany(
+                """UPDATE event_asset_impacts
+                      SET market_observation_allowed=0,updated_at=?
+                    WHERE impact_id=? AND market_observation_allowed=1""",
+                ((now, str(row["impact_id"])) for row in invalid_rows),
+            )
+            for event_id, asset_id in {
+                (str(row["event_id"]), str(row["asset_id"])) for row in invalid_rows
+            }:
+                connection.execute(
+                    """UPDATE market_jobs AS job
+                          SET status='CANCELLED_MAPPING_MIGRATION_INVALID',
+                              completed_at=COALESCE(completed_at,?),
+                              last_error='automatic asset mapping lost its current decision/receipt chain'
+                        WHERE job.event_id=? AND job.asset_id=?
+                          AND job.status IN ('PENDING','RETRY')
+                          AND NOT EXISTS (
+                              SELECT 1 FROM event_asset_impacts active
+                               WHERE active.event_id=job.event_id
+                                 AND active.asset_id=job.asset_id
+                                 AND active.market_observation_allowed=1
+                                 AND active.no_trading=1
+                          )""",
+                    (now, event_id, asset_id),
+                )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+
+def _market_jobs_are_current(connection: sqlite3.Connection) -> bool:
+    columns = set(_table_columns(connection, "market_jobs"))
+    required = {
+        "market_job_id",
+        "event_id",
+        "event_version",
+        "asset_id",
+        "provider",
+        "observation_window",
+        "status",
+        "scheduled_at",
+        "completed_at",
+        "attempts",
+        "last_error",
+        "no_trading",
+    }
+    foreign_keys = _foreign_keys(connection, "market_jobs")
+    return (
+        required.issubset(columns)
+        and _primary_key_columns(connection, "market_jobs") == ("market_job_id",)
+        and (
+            "event_id",
+            "event_version",
+            "asset_id",
+            "provider",
+            "observation_window",
+        )
+        in _unique_keys(connection, "market_jobs")
+        and (
+            "event_versions",
+            ("event_id", "event_version"),
+            ("event_id", "version"),
+        )
+        in foreign_keys
+        and ("assets", ("asset_id",), ("asset_id",)) in foreign_keys
+    )
+
+
+def _upgrade_market_jobs_versioning(connection: sqlite3.Connection) -> None:
+    """Upgrade schema-14 market jobs without discarding historical rows.
+
+    The old uniqueness contract omitted ``event_version`` even though the
+    deterministic job id included it.  That silently blocked a second version
+    of the same event from receiving its own audit windows.
+    """
+
+    if _market_jobs_are_current(connection):
+        return
+
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys=OFF")
+    connection.execute("PRAGMA legacy_alter_table=ON")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if _market_jobs_are_current(connection):
+            connection.commit()
+            return
+        columns = set(_table_columns(connection, "market_jobs"))
+        required = {
+            "market_job_id",
+            "event_id",
+            "event_version",
+            "asset_id",
+            "provider",
+            "observation_window",
+            "status",
+            "scheduled_at",
+            "completed_at",
+            "attempts",
+            "last_error",
+            "no_trading",
+        }
+        legacy_required = required - {"event_version"}
+        if not legacy_required.issubset(columns):
+            missing = ", ".join(sorted(legacy_required - columns))
+            raise RuntimeError(
+                f"market_jobs legacy shape is missing required columns: {missing}"
+            )
+        stale = connection.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='market_jobs_schema14'"
+        ).fetchone()
+        if stale is not None:
+            raise RuntimeError("stale market_jobs_schema14 migration table exists")
+        connection.execute("ALTER TABLE market_jobs RENAME TO market_jobs_schema14")
+        migrated_at = utc_now()
+        connection.execute(
+            """
+            CREATE TABLE market_jobs (
+                market_job_id TEXT PRIMARY KEY,
+                event_id TEXT NOT NULL,
+                event_version INTEGER NOT NULL,
+                asset_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                observation_window TEXT NOT NULL,
+                status TEXT NOT NULL,
+                scheduled_at TEXT NOT NULL,
+                completed_at TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+                FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
+                FOREIGN KEY (event_id,event_version)
+                    REFERENCES event_versions(event_id,version),
+                FOREIGN KEY (asset_id) REFERENCES assets(asset_id),
+                UNIQUE (event_id,event_version,asset_id,provider,observation_window)
+            )
+            """
+        )
+        explicit_version = "legacy.event_version" if "event_version" in columns else "NULL"
+        connection.execute(
+            f"""
+            INSERT INTO market_jobs(
+                market_job_id,event_id,event_version,asset_id,provider,
+                observation_window,status,scheduled_at,completed_at,attempts,
+                last_error,no_trading
+            )
+            SELECT legacy.market_job_id,legacy.event_id,
+                   COALESCE(
+                     CASE WHEN {explicit_version} > 0 AND EXISTS (
+                       SELECT 1 FROM event_versions explicit_version_row
+                        WHERE explicit_version_row.event_id=legacy.event_id
+                          AND explicit_version_row.version={explicit_version}
+                     ) THEN {explicit_version} END,
+                     (SELECT anchor.event_version
+                        FROM market_job_anchor_links link
+                        JOIN market_event_anchors anchor
+                          ON anchor.anchor_id=link.anchor_id
+                       WHERE link.market_job_id=legacy.market_job_id
+                       LIMIT 1),
+                     (SELECT event.current_version
+                        FROM canonical_events event
+                       WHERE event.event_id=legacy.event_id),
+                     1
+                   ),
+                   legacy.asset_id,legacy.provider,legacy.observation_window,
+                   CASE WHEN (
+                     ({explicit_version} > 0 AND EXISTS (
+                       SELECT 1 FROM event_versions explicit_version_row
+                        WHERE explicit_version_row.event_id=legacy.event_id
+                          AND explicit_version_row.version={explicit_version}
+                     )) OR EXISTS (
+                     SELECT 1 FROM market_job_anchor_links link
+                      WHERE link.market_job_id=legacy.market_job_id
+                   )) THEN legacy.status ELSE 'CANCELLED_UNVERSIONED_LEGACY' END,
+                   legacy.scheduled_at,
+                   CASE WHEN (
+                     ({explicit_version} > 0 AND EXISTS (
+                       SELECT 1 FROM event_versions explicit_version_row
+                        WHERE explicit_version_row.event_id=legacy.event_id
+                          AND explicit_version_row.version={explicit_version}
+                     )) OR EXISTS (
+                     SELECT 1 FROM market_job_anchor_links link
+                      WHERE link.market_job_id=legacy.market_job_id
+                   )) THEN legacy.completed_at ELSE COALESCE(legacy.completed_at,?) END,
+                   legacy.attempts,
+                   CASE WHEN (
+                     ({explicit_version} > 0 AND EXISTS (
+                       SELECT 1 FROM event_versions explicit_version_row
+                        WHERE explicit_version_row.event_id=legacy.event_id
+                          AND explicit_version_row.version={explicit_version}
+                     )) OR EXISTS (
+                     SELECT 1 FROM market_job_anchor_links link
+                      WHERE link.market_job_id=legacy.market_job_id
+                   )) THEN legacy.last_error
+                     ELSE 'legacy market job lacked a version-bound anchor' END,
+                   legacy.no_trading
+              FROM market_jobs_schema14 legacy
+             WHERE EXISTS (
+                 SELECT 1 FROM canonical_events event
+                  JOIN event_versions version
+                    ON version.event_id=event.event_id
+                   AND version.version=event.current_version
+                 WHERE event.event_id=legacy.event_id
+             )
+            """,
+            (migrated_at,),
+        )
+        connection.execute("DROP TABLE market_jobs_schema14")
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA legacy_alter_table=OFF")
+        connection.execute("PRAGMA foreign_keys=ON")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_market_jobs_status ON market_jobs(status,scheduled_at)"
+    )
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        raise RuntimeError(f"market_jobs migration foreign-key violations: {violations[:3]}")
+
+
+def _v15_projection_columns_are_current(connection: sqlite3.Connection) -> bool:
+    impact_columns = set(_table_columns(connection, "event_asset_impacts"))
+    return not impact_columns or "mapping_decision_id" in impact_columns
+
+
+def _upgrade_v15_projection_columns(connection: sqlite3.Connection) -> None:
+    if _v15_projection_columns_are_current(connection):
+        return
+    connection.commit()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if not _v15_projection_columns_are_current(connection):
+            connection.execute(
+                "ALTER TABLE event_asset_impacts ADD COLUMN mapping_decision_id TEXT"
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+
+def _event_market_metrics_are_current(connection: sqlite3.Connection) -> bool:
+    columns = set(_table_columns(connection, "event_market_metrics"))
+    required = {
+        "metric_id",
+        "event_id",
+        "event_version",
+        "provider",
+        "stable_id",
+        "ticker_at_event",
+        "event_date",
+        "event_trade_date",
+        "benchmark_ticker",
+        "metric_name",
+        "metric_value",
+        "metric_value_type",
+        "metric_scope",
+        "allowed_for_discovery_rank",
+        "allowed_as_model_feature",
+        "created_at",
+        "updated_at",
+    }
+    foreign_keys = _foreign_keys(connection, "event_market_metrics")
+    return (
+        required.issubset(columns)
+        and _primary_key_columns(connection, "event_market_metrics") == ("metric_id",)
+        and ("event_id", "event_version", "provider", "metric_name")
+        in _unique_keys(connection, "event_market_metrics")
+        and (
+            "event_versions",
+            ("event_id", "event_version"),
+            ("event_id", "version"),
+        )
+        in foreign_keys
+    )
+
+
+def _upgrade_event_market_metrics_versioning(connection: sqlite3.Connection) -> None:
+    if _event_market_metrics_are_current(connection):
+        return
+
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys=OFF")
+    connection.execute("PRAGMA legacy_alter_table=ON")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if _event_market_metrics_are_current(connection):
+            connection.commit()
+            return
+        columns = set(_table_columns(connection, "event_market_metrics"))
+        required = {
+            "metric_id",
+            "event_id",
+            "event_version",
+            "provider",
+            "stable_id",
+            "ticker_at_event",
+            "event_date",
+            "event_trade_date",
+            "benchmark_ticker",
+            "metric_name",
+            "metric_value",
+            "metric_value_type",
+            "metric_scope",
+            "allowed_for_discovery_rank",
+            "allowed_as_model_feature",
+            "created_at",
+            "updated_at",
+        }
+        legacy_required = required - {"event_version"}
+        if not legacy_required.issubset(columns):
+            missing = ", ".join(sorted(legacy_required - columns))
+            raise RuntimeError(
+                f"event_market_metrics legacy shape is missing required columns: {missing}"
+            )
+        stale = connection.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='event_market_metrics_schema14'"
+        ).fetchone()
+        if stale is not None:
+            raise RuntimeError("stale event_market_metrics_schema14 migration table exists")
+        archive = connection.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='event_market_metrics_unversioned_archive'"
+        ).fetchone()
+        if archive is not None:
+            raise RuntimeError("unversioned market-metric archive exists before migration")
+        connection.execute(
+            "CREATE TABLE event_market_metrics_unversioned_archive "
+            "AS SELECT * FROM event_market_metrics"
+        )
+        connection.execute("DROP TABLE event_market_metrics")
+        connection.execute(
+            """
+            CREATE TABLE event_market_metrics (
+                metric_id TEXT PRIMARY KEY,
+                event_id TEXT NOT NULL,
+                event_version INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                stable_id TEXT,
+                ticker_at_event TEXT,
+                event_date TEXT NOT NULL,
+                event_trade_date TEXT,
+                benchmark_ticker TEXT,
+                metric_name TEXT NOT NULL,
+                metric_value TEXT NOT NULL,
+                metric_value_type TEXT NOT NULL,
+                metric_scope TEXT NOT NULL CHECK (metric_scope='post_event_audit_only'),
+                allowed_for_discovery_rank INTEGER NOT NULL DEFAULT 0
+                    CHECK (allowed_for_discovery_rank=0),
+                allowed_as_model_feature INTEGER NOT NULL DEFAULT 0
+                    CHECK (allowed_as_model_feature=0),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
+                FOREIGN KEY (event_id,event_version)
+                    REFERENCES event_versions(event_id,version),
+                UNIQUE (event_id,event_version,provider,metric_name)
+            )
+            """
+        )
+        explicit_version = (
+            "legacy.event_version" if "event_version" in columns else "NULL"
+        )
+        connection.execute(
+            f"""
+            WITH candidates AS (
+                SELECT legacy.*,
+                       CASE
+                         WHEN {explicit_version} > 0 AND EXISTS (
+                           SELECT 1 FROM event_versions explicit_version_row
+                            WHERE explicit_version_row.event_id=legacy.event_id
+                              AND explicit_version_row.version={explicit_version}
+                         ) THEN {explicit_version}
+                         WHEN ({explicit_version} IS NULL OR {explicit_version} <= 0)
+                              AND event.current_version=1
+                              AND EXISTS (
+                                SELECT 1 FROM event_versions version_one
+                                 WHERE version_one.event_id=legacy.event_id
+                                   AND version_one.version=1
+                              ) THEN 1
+                         ELSE NULL
+                       END AS inferred_event_version
+                  FROM event_market_metrics_unversioned_archive legacy
+                  JOIN canonical_events event ON event.event_id=legacy.event_id
+            )
+            INSERT INTO event_market_metrics(
+                metric_id,event_id,event_version,provider,stable_id,ticker_at_event,
+                event_date,event_trade_date,benchmark_ticker,metric_name,metric_value,
+                metric_value_type,metric_scope,allowed_for_discovery_rank,
+                allowed_as_model_feature,created_at,updated_at
+            )
+            SELECT candidate.metric_id,candidate.event_id,candidate.inferred_event_version,
+                   candidate.provider,candidate.stable_id,candidate.ticker_at_event,
+                   candidate.event_date,candidate.event_trade_date,candidate.benchmark_ticker,
+                   candidate.metric_name,candidate.metric_value,candidate.metric_value_type,
+                   candidate.metric_scope,candidate.allowed_for_discovery_rank,
+                   candidate.allowed_as_model_feature,candidate.created_at,candidate.updated_at
+              FROM candidates candidate
+             WHERE candidate.inferred_event_version IS NOT NULL
+               AND candidate.metric_scope='post_event_audit_only'
+               AND candidate.allowed_for_discovery_rank=0
+               AND candidate.allowed_as_model_feature=0
+            """
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA legacy_alter_table=OFF")
+        connection.execute("PRAGMA foreign_keys=ON")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_market_metrics_event_version "
+        "ON event_market_metrics(event_id,event_version,metric_name)"
+    )
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        raise RuntimeError(
+            f"event_market_metrics migration foreign-key violations: {violations[:3]}"
+        )
+
+
 def open_ledger(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path)
+    # A first open can legitimately spend more than SQLite's five-second
+    # default timeout rebuilding a large legacy ledger.  Other processes must
+    # wait for that serialized migration instead of failing with "database is
+    # locked" and retrying against a half-observed compatibility state.
+    connection = sqlite3.connect(path, timeout=60.0)
     connection.row_factory = sqlite3.Row
     register_sqlite_integrity_functions(connection)
     connection.executescript(SCHEMA)
+    _upgrade_v15_projection_columns(connection)
+    _upgrade_event_asset_mapping_tables(connection)
+    _upgrade_market_bars(connection)
+    _upgrade_market_jobs_versioning(connection)
+    _disable_unbound_automatic_asset_impacts(connection)
+    _upgrade_event_market_metrics_versioning(connection)
+    connection.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_asset_mapping_receipts_event
+            ON event_asset_mapping_receipts(event_id,event_version,mapping_rank);
+        CREATE INDEX IF NOT EXISTS idx_asset_mapping_decisions_event
+            ON event_asset_mapping_decisions(event_id,event_version,decision);
+        CREATE INDEX IF NOT EXISTS idx_market_bars_lookup
+            ON market_bars(provider,asset_id,bar_time);
+        CREATE INDEX IF NOT EXISTS idx_market_metrics_event_version
+            ON event_market_metrics(event_id,event_version,metric_name);
+        CREATE INDEX IF NOT EXISTS idx_market_metrics_event
+            ON event_market_metrics(event_id,metric_name);
+        """
+    )
     view_row = connection.execute(
         "SELECT sql FROM sqlite_master WHERE type='view' AND name='latest_source_content'"
     ).fetchone()
@@ -1408,10 +2797,11 @@ def import_active_research(
     for market in market_rows:
         event_id = canonical_event_id(market["event_candidate_id"])
         exists = connection.execute(
-            "SELECT 1 FROM canonical_events WHERE event_id=?", (event_id,)
+            "SELECT current_version FROM canonical_events WHERE event_id=?", (event_id,)
         ).fetchone()
         if exists is None:
             continue
+        event_version = int(exists["current_version"])
         if market.get("allowed_for_discovery_rank", "false").lower() != "false":
             raise ValueError("Market outcome cannot be allowed in discovery ranking")
         if market.get("allowed_as_model_feature", "false").lower() != "false":
@@ -1419,17 +2809,18 @@ def import_active_research(
         metric_id = stable_id(
             "MKT",
             event_id,
+            str(event_version),
             market.get("provider", "sharadar"),
             market["metric_name"],
         )
         connection.execute(
             """
             INSERT INTO event_market_metrics(
-                metric_id,event_id,provider,stable_id,ticker_at_event,event_date,event_trade_date,
+                metric_id,event_id,event_version,provider,stable_id,ticker_at_event,event_date,event_trade_date,
                 benchmark_ticker,metric_name,metric_value,metric_value_type,metric_scope,
                 allowed_for_discovery_rank,allowed_as_model_feature,created_at,updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?)
-            ON CONFLICT(event_id,provider,metric_name) DO UPDATE SET
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?)
+            ON CONFLICT(event_id,event_version,provider,metric_name) DO UPDATE SET
                 metric_value=excluded.metric_value,
                 metric_value_type=excluded.metric_value_type,
                 metric_scope='post_event_audit_only',
@@ -1440,6 +2831,7 @@ def import_active_research(
             (
                 metric_id,
                 event_id,
+                event_version,
                 market.get("provider", "sharadar"),
                 market.get("stable_id"),
                 market.get("ticker_at_event"),
@@ -1496,10 +2888,13 @@ def ledger_summary(connection: sqlite3.Connection) -> dict[str, Any]:
         "assets",
         "event_entities",
         "event_asset_impacts",
+        "event_asset_mapping_receipts",
+        "event_asset_mapping_decisions",
         "market_jobs",
         "market_event_anchors",
         "market_job_anchor_links",
         "market_snapshots",
+        "market_bars",
         "event_market_metrics",
         "observation_jobs",
         "pipeline_jobs",

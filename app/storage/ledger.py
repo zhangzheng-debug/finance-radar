@@ -2786,8 +2786,16 @@ class LedgerRepository:
                 dict(row)
                 for row in connection.execute(
                     """SELECT i.*, a.asset_type, a.symbol, a.provider_symbol, a.currency,
-                              a.venue, a.metadata_json
-                       FROM event_asset_impacts i JOIN assets a ON a.asset_id=i.asset_id
+                              a.venue, a.metadata_json,
+                              receipt.display_role,receipt.proxy_label
+                       FROM event_asset_impacts i
+                       JOIN assets a ON a.asset_id=i.asset_id
+                       LEFT JOIN event_asset_mapping_receipts receipt
+                         ON receipt.mapping_decision_id=i.mapping_decision_id
+                        AND receipt.event_id=i.event_id
+                        AND receipt.asset_id=i.asset_id
+                        AND receipt.relation_type=i.relation_type
+                        AND receipt.decision='SELECTED'
                        WHERE i.event_id=? ORDER BY i.impact_score DESC""",
                     (event_id,),
                 )
@@ -2798,8 +2806,9 @@ class LedgerRepository:
             metrics = [
                 dict(row)
                 for row in connection.execute(
-                    "SELECT * FROM event_market_metrics WHERE event_id=? ORDER BY metric_name",
-                    (event_id,),
+                    """SELECT * FROM event_market_metrics
+                        WHERE event_id=? AND event_version=? ORDER BY metric_name""",
+                    (event_id, event["current_version"]),
                 )
             ]
             snapshots = [
@@ -2812,7 +2821,7 @@ class LedgerRepository:
             market_jobs = [
                 dict(row)
                 for row in connection.execute(
-                    """SELECT j.market_job_id,j.event_id,j.asset_id,j.provider,
+                    """SELECT j.market_job_id,j.event_id,j.event_version,j.asset_id,j.provider,
                               j.observation_window,j.status,j.scheduled_at,j.completed_at,
                               j.attempts,j.last_error,j.no_trading,
                               anchor.event_version AS anchor_event_version,

@@ -347,7 +347,7 @@ def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() ->
     assert shadow["current"] is False
     assert shadow["explanation"] == ""
 
-    qwen = public_event_risk_assessment(
+    unapproved_semantic = public_event_risk_assessment(
         {
             "semantic_assessment": {
                 "polarity": "ADVERSE",
@@ -358,7 +358,27 @@ def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() ->
             }
         }
     )
-    assert qwen["label"] == "负面 · 下行风险强"
+    assert unapproved_semantic["label"] == ""
+    assert unapproved_semantic["current"] is False
+
+    qwen = public_event_risk_assessment(
+        {
+            "semantic_assessment": {
+                "polarity": "ADVERSE",
+                "adverse_strength": "HIGH",
+                "semantic_priority": "PRIORITY_REVIEW",
+                "assessment_scope": "SOURCE_CONDITIONAL",
+                "publication_state": "PUBLIC_APPROVED",
+                "training_basis": "INDEPENDENT_DUAL_HUMAN_GOLD",
+                "automatic": True,
+                "shadow": False,
+                "no_trading": True,
+                "confirms_event_fact": False,
+                "current": True,
+            }
+        }
+    )
+    assert qwen["label"] == "负面 · 强度高"
     assert qwen["explanation"] == "基于来源文本的风险语义判断。"
     assert qwen["basis_label"] == "基于来源文本"
     assert qwen["confidence"] == ""
@@ -380,7 +400,7 @@ def test_public_risk_assessment_hides_internal_rules_fallback_and_unknown_source
             }
         }
     )
-    assert evidence_gate["heading"] == "风险信号"
+    assert evidence_gate["heading"] == "研究信号"
     assert evidence_gate["label"] == ""
     assert evidence_gate["confidence"] == ""
     assert evidence_gate["model_version"] == ""

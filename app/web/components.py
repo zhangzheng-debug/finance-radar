@@ -90,9 +90,9 @@ QWEN_POLARITY_LABELS = {
 }
 
 QWEN_STRENGTH_LABELS = {
-    "HIGH": "下行风险强",
-    "LOW": "下行风险弱",
-    "NONE": "下行风险低",
+    "HIGH": "强度高",
+    "LOW": "强度低",
+    "NONE": "强度低",
     "UNCLEAR": "",
 }
 
@@ -883,7 +883,16 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
     """
 
     semantic = item.get("semantic_assessment")
-    if isinstance(semantic, dict) and semantic.get("current") is True:
+    if (
+        isinstance(semantic, dict)
+        and semantic.get("current") is True
+        and semantic.get("publication_state") == "PUBLIC_APPROVED"
+        and semantic.get("training_basis") == "INDEPENDENT_DUAL_HUMAN_GOLD"
+        and semantic.get("automatic") is True
+        and semantic.get("shadow") is False
+        and semantic.get("no_trading") is True
+        and semantic.get("confirms_event_fact") is False
+    ):
         polarity = str(semantic.get("polarity") or "").strip().upper()
         strength = str(semantic.get("adverse_strength") or "").strip().upper()
         priority = str(semantic.get("semantic_priority") or "").strip().upper()
@@ -908,7 +917,7 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
                     + " · "
                     + QWEN_STRENGTH_LABELS[strength]
                 ),
-                "heading": "风险信号",
+                "heading": "研究信号",
                 "explanation": (
                     "基于来源文本的风险语义判断。"
                     if conditional
@@ -920,13 +929,13 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
                 "decision_source": "HUMAN_GOLD_TRAINED_QWEN",
                 "decision_source_label": "人类金标训练模型",
                 "trained_model": True,
-                "shadow": _public_bool(semantic.get("shadow")),
+                "shadow": False,
                 "current": True,
             }
     return {
         "route": "",
         "label": "",
-        "heading": "风险信号",
+        "heading": "研究信号",
         "explanation": "",
         "basis_label": "",
         "confidence": "",

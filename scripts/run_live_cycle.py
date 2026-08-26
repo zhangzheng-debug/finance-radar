@@ -36,6 +36,7 @@ from build_live_review_triage import write_outputs as write_triage_outputs
 from event_ledger import open_ledger, record_source_poll, stable_json, upsert_source, utc_now
 from live_candidate_extractor import process_pending, write_report as write_candidate_report
 from link_sec_issuer_assets import link_sec_issuer_assets
+from map_event_assets import map_event_assets
 from observe_live_event_markets import run_pending, schedule_followup_jobs, schedule_jobs
 from official_event_collector import collect_all as collect_official_sources
 from official_primary_page_enricher import enrich as enrich_official_primary_pages
@@ -634,13 +635,41 @@ def run_cycle(
             "errors": ["missing_SEC_USER_AGENT"],
         }
 
+    asset_mapping_mode = os.environ.get(
+        "FINANCE_RADAR_ASSET_MAPPING_MODE", "disabled"
+    ).strip().lower()
+    if asset_mapping_mode in {"shadow", "apply"}:
+        result["automatic_asset_mapping"] = map_event_assets(
+            connection,
+            freshness_days=14,
+            today=dt.datetime.now(dt.timezone.utc).date(),
+            apply=asset_mapping_mode == "apply",
+        )
+    else:
+        result["automatic_asset_mapping"] = {
+            "mode": "DISABLED",
+            "reason": "FINANCE_RADAR_ASSET_MAPPING_MODE_not_shadow_or_apply",
+        }
+
     today = dt.datetime.now(dt.timezone.utc).date()
     scheduled = schedule_jobs(connection, freshness_days=14, today=today)
     followups_before = schedule_followup_jobs(connection)
     api_key = os.environ.get("TWELVE_DATA_API_KEY", "").strip()
+    try:
+        market_request_limit = max(
+            1,
+            int(os.environ.get("MARKET_EXACT_BAR_REQUEST_LIMIT", "6") or "6"),
+        )
+    except ValueError:
+        market_request_limit = 6
     # Binance public crypto observations require no credentials and must still
     # run when the optional Twelve Data key is absent.
-    market = run_pending(connection, api_key=api_key, timeout=timeout)
+    market = run_pending(
+        connection,
+        api_key=api_key,
+        timeout=timeout,
+        max_exact_requests_per_provider=market_request_limit,
+    )
     market["scheduled"] = scheduled
     market["followups_scheduled"] = followups_before + schedule_followup_jobs(connection)
     result["market"] = market

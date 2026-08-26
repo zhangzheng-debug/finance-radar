@@ -441,7 +441,7 @@ def test_empty_post_migration_relation_tables_fail_closed_but_expose_safe_subset
 ) -> None:
     ledger = _ledger(tmp_path / "ledger.sqlite3")
     # Reproduce a Schema 12 ledger that predates the two semantic-gate tables,
-    # then let the real migration path create empty Schema 14 tables.
+    # then let the real migration path create empty Schema 15 tables.
     with sqlite3.connect(ledger) as connection:
         connection.execute("PRAGMA foreign_keys=OFF")
         connection.execute("DROP TABLE event_evidence_relations")
@@ -455,7 +455,7 @@ def test_empty_post_migration_relation_tables_fail_closed_but_expose_safe_subset
     with open_ledger(ledger) as migrated:
         assert migrated.execute(
             "SELECT MAX(version) FROM event_ledger_schema"
-        ).fetchone()[0] == 14
+        ).fetchone()[0] == 15
         assert migrated.execute(
             "SELECT COUNT(*) FROM event_evidence_relations"
         ).fetchone()[0] == 0

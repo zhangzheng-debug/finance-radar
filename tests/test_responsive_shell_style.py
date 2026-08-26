@@ -67,6 +67,8 @@ def test_shell_has_explicit_layout_contracts_for_all_target_widths() -> None:
     assert "margin-bottom: 0 !important;" in style
     assert ".public-reader-header { display: none; }" not in style
     assert "scroll-margin-top: calc(var(--fr-streamlit-header-height) + 1rem);" in style
+    assert re.search(r"\.research-signal-row\s*\{[^}]*flex-wrap:\s*wrap", style, re.S)
+    assert re.search(r"\.market-reaction-inline\s*\{[^}]*flex-wrap:\s*wrap", style, re.S)
 
 
 def test_accessibility_contract_covers_focus_contrast_and_reduced_motion() -> None:

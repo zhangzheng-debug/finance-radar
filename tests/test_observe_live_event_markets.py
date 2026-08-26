@@ -71,8 +71,13 @@ class LiveMarketObserverTests(unittest.TestCase):
             (now, now),
         )
         self.connection.execute(
-            """INSERT INTO event_asset_impacts VALUES (
-               'impact','evt','asset','ECOSYSTEM_PROXY','ABSTAIN',20,0.3,'[]','test',1,1,?,?)""",
+            """INSERT INTO event_asset_impacts(
+               impact_id,event_id,asset_id,relation_type,direction,impact_score,
+               confidence,reason_codes_json,assessment_source,mapping_decision_id,
+               market_observation_allowed,no_trading,created_at,updated_at
+               ) VALUES (
+               'impact','evt','asset','ECOSYSTEM_PROXY','ABSTAIN',20,0.3,
+               '[]','test',NULL,1,1,?,?)""",
             (now, now),
         )
         self.connection.commit()
@@ -160,7 +165,11 @@ class LiveMarketObserverTests(unittest.TestCase):
 
         result = observer.run_pending(
             self.connection,
-            now=self.ANCHOR + dt.timedelta(minutes=1),
+            now=(
+                self.ANCHOR
+                + dt.timedelta(minutes=1)
+                + observer.EXACT_BAR_INGESTION_GRACE
+            ),
             binance_bar_requester=minute_bar,
         )
         self.assertEqual(result["completed"], 1)
@@ -169,20 +178,120 @@ class LiveMarketObserverTests(unittest.TestCase):
         self.assertIn('"interval":"1min"', snapshot["raw_json"])
         self.assertIn('"price_kind":"bar_close"', snapshot["raw_json"])
 
+    def test_exact_bar_waits_for_minute_close_and_ingestion_grace(self) -> None:
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+        requests = []
+
+        def minute_bar(symbol, scheduled_at, timeout):
+            requests.append((symbol, scheduled_at))
+            return {
+                "symbol": symbol,
+                "price": "101",
+                "provider_as_of": scheduled_at,
+                "interval": "1min",
+                "price_kind": "bar_close",
+                "close": "101",
+            }
+
+        before_ready = observer.run_pending(
+            self.connection,
+            now=(
+                self.ANCHOR
+                + dt.timedelta(minutes=1)
+                + observer.EXACT_BAR_INGESTION_GRACE
+                - dt.timedelta(microseconds=1)
+            ),
+            binance_bar_requester=minute_bar,
+        )
+        self.assertEqual(before_ready["requested"], 0)
+        self.assertEqual(requests, [])
+        pending = self.connection.execute(
+            "SELECT status,attempts FROM market_jobs WHERE observation_window='initial'"
+        ).fetchone()
+        self.assertEqual((pending["status"], pending["attempts"]), ("PENDING", 0))
+
+        ready = observer.run_pending(
+            self.connection,
+            now=(
+                self.ANCHOR
+                + dt.timedelta(minutes=1)
+                + observer.EXACT_BAR_INGESTION_GRACE
+            ),
+            binance_bar_requester=minute_bar,
+        )
+        self.assertEqual(ready["requested"], 1)
+        self.assertEqual(ready["completed"], 1)
+        self.assertEqual(requests, [("ETHUSDT", self.ANCHOR.isoformat())])
+
     def test_binance_minute_bar_rejects_wrong_timestamp(self) -> None:
         start_ms = int(self.ANCHOR.timestamp() * 1000)
         payload = [[start_ms, "100", "102", "99", "101", "10", start_ms + 59_999]]
         normalized = observer.normalize_binance_minute_bar(
-            payload, symbol="ETHUSDT", scheduled_at=self.ANCHOR.isoformat()
+            payload,
+            symbol="ETHUSDT",
+            scheduled_at=self.ANCHOR.isoformat(),
+            observed_at=(
+                self.ANCHOR
+                + dt.timedelta(minutes=1)
+                + observer.EXACT_BAR_INGESTION_GRACE
+            ),
         )
         self.assertEqual(normalized["price"], "101")
         self.assertEqual(normalized["volume"], "10")
 
-        with self.assertRaisesRegex(RuntimeError, "outside requested window"):
+        with self.assertRaisesRegex(
+            observer.PermanentMarketDataError,
+            "BAR_TIMESTAMP_OUTSIDE_REQUESTED_WINDOW",
+        ):
             observer.normalize_binance_minute_bar(
                 payload,
                 symbol="ETHUSDT",
                 scheduled_at=(self.ANCHOR + dt.timedelta(minutes=1)).isoformat(),
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "BAR_NOT_CLOSED_YET"):
+            observer.normalize_binance_minute_bar(
+                payload,
+                symbol="ETHUSDT",
+                scheduled_at=self.ANCHOR.isoformat(),
+                observed_at=self.ANCHOR + dt.timedelta(seconds=30),
+            )
+
+    def test_near_time_empty_exact_bar_is_retryable(self) -> None:
+        observed_at = (
+            self.ANCHOR
+            + dt.timedelta(minutes=1)
+            + observer.EXACT_BAR_INGESTION_GRACE
+        )
+        with self.assertRaisesRegex(RuntimeError, "BAR_NOT_AVAILABLE_YET"):
+            observer.normalize_binance_minute_bar(
+                [],
+                symbol="ETHUSDT",
+                scheduled_at=self.ANCHOR.isoformat(),
+                observed_at=observed_at,
+            )
+        with self.assertRaisesRegex(RuntimeError, "BAR_NOT_AVAILABLE_YET"):
+            observer.normalize_twelve_minute_bar(
+                {"values": []},
+                symbol="SPY",
+                scheduled_at=self.ANCHOR.isoformat(),
+                observed_at=observed_at,
+            )
+
+        stale_at = self.ANCHOR + dt.timedelta(minutes=17)
+        with self.assertRaisesRegex(
+            observer.PermanentMarketDataError, "NO_BAR_PROVIDER_UNAVAILABLE"
+        ):
+            observer.normalize_binance_minute_bar(
+                [],
+                symbol="ETHUSDT",
+                scheduled_at=self.ANCHOR.isoformat(),
+                observed_at=stale_at,
             )
 
     def test_evidence_ready_candidate_is_observed_before_formal_adjudication(self) -> None:
@@ -213,8 +322,13 @@ class LiveMarketObserverTests(unittest.TestCase):
             (now, now),
         )
         self.connection.execute(
-            """INSERT INTO event_asset_impacts VALUES (
-               'impact-etf','evt','asset-etf','MACRO_PROXY','ABSTAIN',25,0.3,'[]','test',1,1,?,?)""",
+            """INSERT INTO event_asset_impacts(
+               impact_id,event_id,asset_id,relation_type,direction,impact_score,
+               confidence,reason_codes_json,assessment_source,mapping_decision_id,
+               market_observation_allowed,no_trading,created_at,updated_at
+               ) VALUES (
+               'impact-etf','evt','asset-etf','MACRO_PROXY','ABSTAIN',25,0.3,
+               '[]','test',NULL,1,1,?,?)""",
             (now, now),
         )
         self.connection.commit()
@@ -230,7 +344,11 @@ class LiveMarketObserverTests(unittest.TestCase):
 
         first = observer.run_pending(
             self.connection,
-            now=self.ANCHOR + dt.timedelta(minutes=1),
+            now=(
+                self.ANCHOR
+                + dt.timedelta(minutes=1)
+                + observer.EXACT_BAR_INGESTION_GRACE
+            ),
             api_key="",
             binance_requester=lambda symbols, timeout: {
                 "ETHUSDT": {"symbol": "ETHUSDT", "price": "2000"}
@@ -249,7 +367,11 @@ class LiveMarketObserverTests(unittest.TestCase):
 
         second = observer.run_pending(
             self.connection,
-            now=self.ANCHOR + dt.timedelta(minutes=1),
+            now=(
+                self.ANCHOR
+                + dt.timedelta(minutes=1)
+                + observer.EXACT_BAR_INGESTION_GRACE
+            ),
             api_key="test-key",
             requester=lambda symbols, api_key, timeout: {"USO": {"price": "80.5"}},
         )
@@ -260,6 +382,38 @@ class LiveMarketObserverTests(unittest.TestCase):
             for row in self.connection.execute("SELECT provider FROM market_snapshots")
         }
         self.assertEqual(providers, {"binance_public", "twelve_data"})
+
+    def test_missing_price_stops_after_three_attempts(self) -> None:
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+
+        def missing_price(symbols, timeout):
+            return {"ETHUSDT": {"message": "price missing"}}
+
+        expected = [
+            ("RETRY", 1, 1),
+            ("RETRY", 2, 1),
+            ("UNAVAILABLE", observer.MAX_MARKET_ATTEMPTS, 1),
+            ("UNAVAILABLE", observer.MAX_MARKET_ATTEMPTS, 0),
+        ]
+        for retry_no, (status, attempts, requested) in enumerate(expected):
+            result = observer.run_pending(
+                self.connection,
+                now=(
+                    self.ANCHOR
+                    + dt.timedelta(minutes=1, seconds=retry_no * 10)
+                ),
+                binance_requester=missing_price,
+            )
+            job = self.connection.execute(
+                "SELECT status,attempts FROM market_jobs WHERE observation_window='initial'"
+            ).fetchone()
+            self.assertEqual(result["requested"], requested)
+            self.assertEqual((job["status"], job["attempts"]), (status, attempts))
 
     def test_real_followup_capture_creates_observer_relative_return(self) -> None:
         baseline_at = self.ANCHOR
@@ -355,6 +509,306 @@ class LiveMarketObserverTests(unittest.TestCase):
             0,
         )
 
+    def test_late_exact_minute_bars_are_recovered_without_latest_price_substitution(self) -> None:
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+        requested_minutes = []
+
+        def minute_bar(symbol, scheduled_at, timeout):
+            requested_minutes.append(scheduled_at)
+            return {
+                "symbol": symbol,
+                "price": "100",
+                "provider_as_of": scheduled_at,
+                "interval": "1min",
+                "price_kind": "bar_close",
+                "open": "99",
+                "high": "101",
+                "low": "98",
+                "close": "100",
+                "volume": "10",
+            }
+
+        result = observer.run_pending(
+            self.connection,
+            now=self.ANCHOR + dt.timedelta(minutes=8),
+            binance_bar_requester=minute_bar,
+        )
+        self.assertEqual(result["missed_windows"], 0)
+        self.assertEqual(result["completed"], 2)
+        self.assertCountEqual(
+            requested_minutes,
+            [self.ANCHOR.isoformat(), (self.ANCHOR + dt.timedelta(minutes=5)).isoformat()],
+        )
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM market_bars").fetchone()[0], 2
+        )
+        freshness = {
+            row[0]
+            for row in self.connection.execute(
+                "SELECT DISTINCT freshness_status FROM market_snapshots"
+            )
+        }
+        self.assertEqual(freshness, {"HISTORICAL_EXACT_BAR"})
+
+    def test_exact_bar_provider_budget_defers_remaining_windows(self) -> None:
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+
+        def minute_bar(symbol, scheduled_at, timeout):
+            return {
+                "symbol": symbol,
+                "price": "100",
+                "provider_as_of": scheduled_at,
+                "interval": "1min",
+                "price_kind": "bar_close",
+                "close": "100",
+            }
+
+        result = observer.run_pending(
+            self.connection,
+            now=self.ANCHOR + dt.timedelta(minutes=8),
+            binance_bar_requester=minute_bar,
+            max_exact_requests_per_provider=1,
+        )
+        self.assertEqual(result["completed"], 1)
+        self.assertEqual(result["deferred"], 1)
+        self.assertEqual(result["providers"]["binance_public"]["status"], "DEFERRED")
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM market_jobs WHERE status='PENDING'"
+            ).fetchone()[0],
+            5,
+        )
+
+    def test_exact_bar_cache_is_shared_across_events_for_the_same_symbol_and_minute(self) -> None:
+        now = utc_now()
+        self.connection.execute(
+            """INSERT INTO canonical_events VALUES (
+               'evt2',1,'verified','verified','security','incident','2026-07-15',?,?,NULL,NULL,
+               'Example 2','A','A','test',1)""",
+            (now, now),
+        )
+        self.connection.execute(
+            """INSERT INTO event_versions VALUES (
+               'evt2',1,?,'verified','verified','security','incident',NULL,?,?)""",
+            (now, stable_json({"public_fact_summary": "Example 2 incident."}), "test"),
+        )
+        self.connection.execute(
+            """INSERT INTO event_evidence VALUES (
+               'evd2','evt2','obs','https://example.test/evidence','2026-07-16',NULL,NULL,
+               'Example 2 incident.',NULL,100,'primary_exact',0,?,?)""",
+            (now, now),
+        )
+        self.connection.execute(
+            """INSERT INTO event_evidence_relations VALUES (
+               'evt2','evd2',1,'SCOPED_MATCH',1,1,1,'CONFIRMED','fingerprint2',
+               'event-relation-v1','test',?)""",
+            (now,),
+        )
+        self.connection.execute(
+            """INSERT INTO event_fact_workflow VALUES (
+               'evt2',1,'EVIDENCE_READY','[]','fingerprint2','event-admission-v1',?)""",
+            (now,),
+        )
+        self.connection.execute(
+            """INSERT INTO event_asset_impacts(
+               impact_id,event_id,asset_id,relation_type,direction,impact_score,
+               confidence,reason_codes_json,assessment_source,mapping_decision_id,
+               market_observation_allowed,no_trading,created_at,updated_at
+               ) VALUES (
+               'impact2','evt2','asset','ECOSYSTEM_PROXY','ABSTAIN',0,0.3,
+               '[]','test',NULL,1,1,?,?)""",
+            (now, now),
+        )
+        self.connection.commit()
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+        requests = []
+
+        def minute_bar(symbol, scheduled_at, timeout):
+            requests.append((symbol, scheduled_at))
+            return {
+                "symbol": symbol,
+                "price": "100",
+                "provider_as_of": scheduled_at,
+                "interval": "1min",
+                "price_kind": "bar_close",
+                "close": "100",
+            }
+
+        result = observer.run_pending(
+            self.connection,
+            now=(
+                self.ANCHOR
+                + dt.timedelta(minutes=1)
+                + observer.EXACT_BAR_INGESTION_GRACE
+            ),
+            binance_bar_requester=minute_bar,
+        )
+        self.assertEqual(result["completed"], 2)
+        self.assertEqual(requests, [("ETHUSDT", self.ANCHOR.isoformat())])
+        self.assertEqual(result["providers"]["binance_public"]["provider_requests"], 1)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM market_bars").fetchone()[0], 1
+        )
+
+    def test_exact_bar_cache_accepts_only_case_and_outer_space_symbol_variants(self) -> None:
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+        self.connection.execute(
+            """INSERT INTO market_bars(
+                   provider,asset_id,provider_symbol,interval,bar_time,price,
+                   open,high,low,close,volume,currency,raw_json,fetched_at,
+                   read_only,no_trading
+               ) VALUES (
+                   'binance_public','asset',' ethusdt ','1min',?,'123.45',
+                   NULL,NULL,NULL,'123.45',NULL,'USDT','{}',?,1,1)""",
+            (self.ANCHOR.isoformat(), utc_now()),
+        )
+        self.connection.commit()
+
+        def must_not_fetch(symbol, scheduled_at, timeout):
+            raise AssertionError("case-only cache match must not call provider")
+
+        result = observer.run_pending(
+            self.connection,
+            now=(
+                self.ANCHOR
+                + dt.timedelta(minutes=1)
+                + observer.EXACT_BAR_INGESTION_GRACE
+            ),
+            binance_bar_requester=must_not_fetch,
+        )
+        self.assertEqual(result["completed"], 1)
+        self.assertEqual(result["providers"]["binance_public"]["cache_hits"], 1)
+        self.assertEqual(result["providers"]["binance_public"]["provider_requests"], 0)
+        snapshot = self.connection.execute("SELECT * FROM market_snapshots").fetchone()
+        self.assertEqual(snapshot["provider_symbol"], "ETHUSDT")
+        self.assertEqual(snapshot["price"], "123.45")
+
+    def test_exact_bar_cache_symbol_mismatch_is_refetched_not_relabelled(self) -> None:
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+        self.connection.execute(
+            """INSERT INTO market_bars(
+                   provider,asset_id,provider_symbol,interval,bar_time,price,
+                   open,high,low,close,volume,currency,raw_json,fetched_at,
+                   read_only,no_trading
+               ) VALUES (
+                   'binance_public','asset','BTCUSDT','1min',?,'999',
+                   NULL,NULL,NULL,'999',NULL,'USDT','{}',?,1,1)""",
+            (self.ANCHOR.isoformat(), utc_now()),
+        )
+        self.connection.commit()
+        requests = []
+
+        def minute_bar(symbol, scheduled_at, timeout):
+            requests.append((symbol, scheduled_at))
+            return {
+                "symbol": symbol,
+                "price": "100",
+                "provider_as_of": scheduled_at,
+                "interval": "1min",
+                "price_kind": "bar_close",
+                "close": "100",
+            }
+
+        result = observer.run_pending(
+            self.connection,
+            now=(
+                self.ANCHOR
+                + dt.timedelta(minutes=1)
+                + observer.EXACT_BAR_INGESTION_GRACE
+            ),
+            binance_bar_requester=minute_bar,
+        )
+        self.assertEqual(requests, [("ETHUSDT", self.ANCHOR.isoformat())])
+        self.assertEqual(result["providers"]["binance_public"]["cache_hits"], 0)
+        self.assertEqual(result["providers"]["binance_public"]["provider_requests"], 1)
+        snapshot = self.connection.execute("SELECT * FROM market_snapshots").fetchone()
+        self.assertEqual(snapshot["provider_symbol"], "ETHUSDT")
+        self.assertEqual(snapshot["price"], "100")
+        cached = self.connection.execute("SELECT * FROM market_bars").fetchone()
+        self.assertEqual(cached["provider_symbol"], "ETHUSDT")
+        self.assertEqual(cached["price"], "100")
+
+    def test_new_event_version_receives_distinct_market_jobs(self) -> None:
+        self.assertEqual(
+            observer.schedule_jobs(
+                self.connection,
+                freshness_days=3,
+                today=dt.date(2026, 7, 16),
+                now=self.ANCHOR,
+            ),
+            6,
+        )
+        now = utc_now()
+        self.connection.execute(
+            "UPDATE canonical_events SET current_version=2 WHERE event_id='evt'"
+        )
+        self.connection.execute(
+            """INSERT INTO event_versions VALUES (
+               'evt',2,?,'verified','verified','security','incident',NULL,?,?)""",
+            (now, stable_json({"public_fact_summary": "Updated incident."}), "update"),
+        )
+        self.connection.execute(
+            """INSERT INTO event_evidence_relations VALUES (
+               'evt','evd',2,'SCOPED_MATCH',1,1,1,'CONFIRMED','fingerprint-v2',
+               'event-relation-v1','test',?)""",
+            (now,),
+        )
+        self.connection.execute(
+            """INSERT INTO event_fact_workflow VALUES (
+               'evt',2,'EVIDENCE_READY','[]','fingerprint-v2','event-admission-v1',?)""",
+            (now,),
+        )
+        self.connection.commit()
+        self.assertEqual(
+            observer.schedule_jobs(
+                self.connection,
+                freshness_days=3,
+                today=dt.date(2026, 7, 16),
+                now=self.ANCHOR,
+            ),
+            6,
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM market_jobs WHERE event_id='evt'"
+            ).fetchone()[0],
+            12,
+        )
+        self.assertEqual(
+            {
+                row[0]
+                for row in self.connection.execute(
+                    "SELECT DISTINCT event_version FROM market_jobs WHERE event_id='evt'"
+                )
+            },
+            {1, 2},
+        )
+
     def test_legacy_observer_relative_snapshots_are_not_relabelled_as_reaction_metrics(self) -> None:
         captured = self.ANCHOR.isoformat()
         for job_id, window, price in (
@@ -363,7 +817,7 @@ class LiveMarketObserverTests(unittest.TestCase):
         ):
             self.connection.execute(
                 """INSERT INTO market_jobs VALUES (
-                   ?,'evt','asset','binance_public',?,'COMPLETED',?,?,1,NULL,1)""",
+                   ?,'evt',1,'asset','binance_public',?,'COMPLETED',?,?,1,NULL,1)""",
                 (job_id, window, captured, captured),
             )
             self.connection.execute(
@@ -412,8 +866,13 @@ class LiveMarketObserverTests(unittest.TestCase):
             (metadata, now, now),
         )
         self.connection.execute(
-            """INSERT INTO event_asset_impacts VALUES (
-               'impact-equity','evt','equity','PRIMARY','ABSTAIN',25,0.3,'[]','test',1,1,?,?)""",
+            """INSERT INTO event_asset_impacts(
+               impact_id,event_id,asset_id,relation_type,direction,impact_score,
+               confidence,reason_codes_json,assessment_source,mapping_decision_id,
+               market_observation_allowed,no_trading,created_at,updated_at
+               ) VALUES (
+               'impact-equity','evt','equity','PRIMARY','ABSTAIN',25,0.3,
+               '[]','test',NULL,1,1,?,?)""",
             (now, now),
         )
         self.connection.commit()

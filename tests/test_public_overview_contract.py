@@ -1086,6 +1086,7 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
         dossier_data = dossier.json()["data"]
         assert dossier_data["detail"] == detail.json()["data"]
         assert dossier_data["evidence"] == evidence.json()["data"]
+        assert "knowledge" not in dossier_data
         assert "sources" not in dossier_data
         assert "source_interpretations" not in dossier_data
         assert dossier_data["capture_explanation"] == {
@@ -1593,12 +1594,26 @@ def test_event_detail_bounds_public_state_projection_to_selected_event() -> None
 
 def test_public_market_reaction_exposes_only_completed_isolated_returns() -> None:
     value = {
+        "assets": [
+            {
+                "asset_id": "asset-acme",
+                "symbol": "ACME",
+                "provider_symbol": "ACME",
+                "relation_type": "PRIMARY",
+                "market_observation_allowed": 1,
+                "no_trading": 1,
+                "display_role": "DIRECT_SECURITY",
+                "proxy_label": "",
+            }
+        ],
         "market_metrics": [
             {
                 "provider": "twelve_data",
+                "stable_id": "asset-acme",
                 "ticker_at_event": "ACME",
                 "metric_name": "reaction_return_t_plus_5m_pct__ACME",
                 "metric_value": "-3.125",
+                "metric_value_type": "decimal_percent",
                 "metric_scope": "post_event_audit_only",
                 "allowed_for_discovery_rank": 0,
                 "allowed_as_model_feature": 0,
@@ -1607,27 +1622,33 @@ def test_public_market_reaction_exposes_only_completed_isolated_returns() -> Non
             },
             {
                 "provider": "twelve_data",
+                "stable_id": "asset-acme",
                 "ticker_at_event": "ACME",
                 "metric_name": "observer_return_t_plus_30m_pct__ACME",
                 "metric_value": "99",
+                "metric_value_type": "decimal_percent",
                 "metric_scope": "post_event_audit_only",
                 "allowed_for_discovery_rank": 0,
                 "allowed_as_model_feature": 0,
             },
             {
                 "provider": "twelve_data",
+                "stable_id": "asset-acme",
                 "ticker_at_event": "ACME",
                 "metric_name": "reaction_return_t_plus_2h_pct__ACME",
                 "metric_value": "4.2",
+                "metric_value_type": "decimal_percent",
                 "metric_scope": "post_event_audit_only",
                 "allowed_for_discovery_rank": 0,
                 "allowed_as_model_feature": 1,
             },
             {
                 "provider": "twelve_data",
+                "stable_id": "asset-acme",
                 "ticker_at_event": "ACME",
                 "metric_name": "reaction_return_t_plus_1d_pct__ACME",
                 "metric_value": "not-a-number",
+                "metric_value_type": "decimal_percent",
                 "metric_scope": "post_event_audit_only",
                 "allowed_for_discovery_rank": 0,
                 "allowed_as_model_feature": 0,
@@ -1653,6 +1674,9 @@ def test_public_market_reaction_exposes_only_completed_isolated_returns() -> Non
                 "event_trade_date": "2026-08-03",
                 "benchmark_ticker": None,
                 "scope": "post_event_audit_only",
+                "role": "DIRECT_SECURITY",
+                "role_label": "直接证券",
+                "proxy_label": "",
             }
         ],
         "scope": "post_event_audit_only",
@@ -1664,6 +1688,78 @@ def test_public_market_reaction_exposes_only_completed_isolated_returns() -> Non
     assert "PENDING" not in serialized
     assert "MISSED_WINDOW" not in serialized
     assert "private" not in serialized
+
+
+def test_public_market_reaction_projects_only_safe_asset_role_context() -> None:
+    reaction = _public_market_reaction(
+        {
+            "assets": [
+                {
+                    "asset_id": "asset-gld",
+                    "symbol": "GLD",
+                    "provider_symbol": "GLD",
+                    "relation_type": "MACRO_PROXY",
+                    "market_observation_allowed": 1,
+                    "no_trading": 1,
+                    "display_role": "THEMATIC_PROXY",
+                    "proxy_label": "黄金ETF代理",
+                }
+            ],
+            "market_metrics": [
+                {
+                    "provider": "twelve_data",
+                    "stable_id": "asset-gld",
+                    "ticker_at_event": "GLD",
+                    "metric_name": "reaction_return_t_plus_30m_pct__GLD",
+                    "metric_value": "0.75",
+                    "metric_value_type": "decimal_percent",
+                    "metric_scope": "post_event_audit_only",
+                    "allowed_for_discovery_rank": 0,
+                    "allowed_as_model_feature": 0,
+                }
+            ],
+        }
+    )
+
+    assert reaction is not None
+    assert reaction["items"][0]["role"] == "THEMATIC_PROXY"
+    assert reaction["items"][0]["role_label"] == "观察代理"
+    assert reaction["items"][0]["proxy_label"] == "黄金ETF代理"
+    assert "policy_sha256" not in json.dumps(reaction)
+
+
+def test_public_market_reaction_rejects_metric_symbol_mismatch() -> None:
+    reaction = _public_market_reaction(
+        {
+            "assets": [
+                {
+                    "asset_id": "asset-gld",
+                    "symbol": "GLD",
+                    "provider_symbol": "GLD",
+                    "relation_type": "MACRO_PROXY",
+                    "market_observation_allowed": 1,
+                    "no_trading": 1,
+                    "display_role": "THEMATIC_PROXY",
+                    "proxy_label": "黄金ETF代理",
+                }
+            ],
+            "market_metrics": [
+                {
+                    "provider": "twelve_data",
+                    "stable_id": "asset-gld",
+                    "ticker_at_event": "USO",
+                    "metric_name": "reaction_return_t_plus_30m_pct__USO",
+                    "metric_value": "0.75",
+                    "metric_value_type": "decimal_percent",
+                    "metric_scope": "post_event_audit_only",
+                    "allowed_for_discovery_rank": 0,
+                    "allowed_as_model_feature": 0,
+                }
+            ],
+        }
+    )
+
+    assert reaction is None
 
 
 def test_large_public_state_page_has_bounded_query_work() -> None:

@@ -12,12 +12,14 @@ import pytest
 from scripts.audit_migration_restore import (
     CAPTURE_LIMIT,
     MAX_UNPACKED_BYTES,
+    _database_report,
     _stream_regular_file,
     _validate_link,
     audit_archive,
     render_markdown,
 )
 from scripts.backup_crypto import encrypt_file
+from scripts.event_ledger import open_ledger
 
 
 STAMP = "20260718T010203Z"
@@ -32,33 +34,8 @@ def _write(path: Path, content: str) -> None:
 
 
 def _ledger(path: Path) -> None:
-    with sqlite3.connect(path) as connection:
-        connection.executescript(
-            """
-            CREATE TABLE event_ledger_schema(version INTEGER);
-            INSERT INTO event_ledger_schema VALUES (14);
-            CREATE TABLE sources(id INTEGER);
-            INSERT INTO sources VALUES (1);
-            CREATE TABLE raw_observations(id INTEGER);
-            INSERT INTO raw_observations VALUES (1);
-            CREATE TABLE canonical_events(id INTEGER, no_trading INTEGER);
-            INSERT INTO canonical_events VALUES (1, 1);
-            CREATE TABLE event_versions(id INTEGER);
-            INSERT INTO event_versions VALUES (1);
-            CREATE TABLE event_evidence(id INTEGER, auto_verification_allowed INTEGER);
-            INSERT INTO event_evidence VALUES (1, 0);
-            CREATE TABLE event_market_metrics(id INTEGER, allowed_as_model_feature INTEGER);
-            INSERT INTO event_market_metrics VALUES (1, 0);
-            CREATE TABLE pipeline_jobs(id INTEGER);
-            INSERT INTO pipeline_jobs VALUES (1);
-            CREATE TABLE alert_outbox(id INTEGER);
-            CREATE TABLE discovery_leads(id INTEGER);
-            CREATE TABLE event_evidence_relations(id INTEGER);
-            CREATE TABLE event_fact_workflow(id INTEGER);
-            CREATE TABLE market_event_anchors(id INTEGER);
-            CREATE TABLE market_job_anchor_links(id INTEGER);
-            """
-        )
+    connection = open_ledger(path)
+    connection.close()
 
 
 def _operations(path: Path, *, schema_version: int = 4) -> None:
@@ -264,7 +241,8 @@ def test_full_encrypted_migration_restore_audit(tmp_path: Path) -> None:
     )
     assert result["status"] == "PASS"
     assert result["archive"]["manifest_all_match"] is True
-    assert result["ledger_restore"]["schema_version"] == 14
+    assert result["ledger_restore"]["schema_version"] == 15
+    assert result["ledger_restore"]["foreign_key_check"] == "ok"
     assert result["ledger_restore"]["audit"] == {
         "trading_boundary_violations": 0,
         "auto_verification_violations": 0,
@@ -282,6 +260,95 @@ def test_full_encrypted_migration_restore_audit(tmp_path: Path) -> None:
     assert "Trading project included: `False`" in markdown
     assert "risk-router-v4-test" in markdown
     assert "Artifact/card/report SHA-256 chain matched: `True`" in markdown
+
+
+def test_restore_database_report_rejects_missing_schema_15_columns(tmp_path: Path) -> None:
+    path = tmp_path / "missing-column.sqlite3"
+    _ledger(path)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute("DROP TABLE market_bars")
+        connection.execute(
+            """CREATE TABLE market_bars(
+                   provider TEXT,provider_symbol TEXT,interval TEXT,bar_time TEXT,
+                   price TEXT,raw_json TEXT,fetched_at TEXT,read_only INTEGER,
+                   no_trading INTEGER
+               )"""
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(ValueError, match="market_bars.*asset_id"):
+        _database_report(path, ledger=True)
+
+
+def test_restore_database_report_requires_schema_15_asset_table(tmp_path: Path) -> None:
+    path = tmp_path / "missing-assets.sqlite3"
+    _ledger(path)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute("DROP TABLE assets")
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(ValueError, match="missing required table.*assets"):
+        _database_report(path, ledger=True)
+
+
+def test_restore_database_report_rejects_missing_schema_15_primary_key(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "missing-key.sqlite3"
+    _ledger(path)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute("DROP TABLE market_bars")
+        connection.execute(
+            """CREATE TABLE market_bars(
+                   provider TEXT NOT NULL,asset_id TEXT NOT NULL,
+                   provider_symbol TEXT NOT NULL,interval TEXT NOT NULL,
+                   bar_time TEXT NOT NULL,price TEXT NOT NULL,open TEXT,high TEXT,
+                   low TEXT,close TEXT,volume TEXT,currency TEXT,raw_json TEXT NOT NULL,
+                   fetched_at TEXT NOT NULL,read_only INTEGER NOT NULL,
+                   no_trading INTEGER NOT NULL,
+                   FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
+               )"""
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(ValueError, match="market_bars has invalid primary key"):
+        _database_report(path, ledger=True)
+
+
+def test_restore_database_report_runs_foreign_key_check(tmp_path: Path) -> None:
+    path = tmp_path / "foreign-key-violation.sqlite3"
+    _ledger(path)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute(
+            """INSERT INTO market_bars(
+                   provider,asset_id,provider_symbol,interval,bar_time,price,
+                   raw_json,fetched_at,read_only,no_trading
+               ) VALUES (
+                   'fixture','missing-asset','MISSING','1min',
+                   '2026-08-26T00:00:00+00:00','100','{}',
+                   '2026-08-26T00:01:00+00:00',1,1
+               )"""
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(ValueError, match="foreign-key check failed"):
+        _database_report(path, ledger=True)
 
 
 def test_restore_audit_uses_and_cleans_an_explicit_workspace_root(tmp_path: Path) -> None:

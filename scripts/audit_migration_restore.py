@@ -81,6 +81,117 @@ LEDGER_V14_TABLES = (
     "market_event_anchors",
     "market_job_anchor_links",
 )
+LEDGER_V15_TABLES = (
+    "assets",
+    "event_asset_impacts",
+    "event_asset_mapping_receipts",
+    "event_asset_mapping_decisions",
+    "market_jobs",
+    "market_bars",
+)
+EXPECTED_LEDGER_SCHEMA_VERSION = 15
+LEDGER_V15_REQUIRED_COLUMNS = {
+    "assets": ("asset_id", "asset_type", "symbol", "provider_symbol"),
+    "event_asset_impacts": (
+        "event_id",
+        "asset_id",
+        "mapping_decision_id",
+        "market_observation_allowed",
+        "no_trading",
+    ),
+    "event_asset_mapping_decisions": (
+        "decision_id",
+        "event_id",
+        "event_version",
+        "policy_sha256",
+        "observation_id",
+        "source_content_sha256",
+        "decision",
+        "asset_count",
+        "no_trading",
+    ),
+    "event_asset_mapping_receipts": (
+        "receipt_id",
+        "event_id",
+        "event_version",
+        "mapping_decision_id",
+        "asset_id",
+        "display_role",
+        "proxy_label",
+        "mapping_rank",
+        "decision",
+        "no_trading",
+    ),
+    "market_jobs": ("market_job_id", "event_id", "event_version", "asset_id"),
+    "market_bars": (
+        "provider",
+        "asset_id",
+        "provider_symbol",
+        "interval",
+        "bar_time",
+        "price",
+        "raw_json",
+        "fetched_at",
+        "read_only",
+        "no_trading",
+    ),
+    "event_market_metrics": (
+        "metric_id",
+        "event_id",
+        "event_version",
+        "provider",
+        "metric_name",
+        "metric_scope",
+        "allowed_for_discovery_rank",
+        "allowed_as_model_feature",
+    ),
+}
+LEDGER_V15_REQUIRED_PRIMARY_KEYS = {
+    "event_asset_mapping_decisions": ("decision_id",),
+    "event_asset_mapping_receipts": ("receipt_id",),
+    "market_jobs": ("market_job_id",),
+    "market_bars": ("provider", "asset_id", "interval", "bar_time"),
+    "event_market_metrics": ("metric_id",),
+}
+LEDGER_V15_REQUIRED_UNIQUE_KEYS = {
+    "event_asset_mapping_decisions": (
+        "event_id",
+        "event_version",
+        "policy_sha256",
+        "observation_id",
+        "source_content_sha256",
+    ),
+    "market_jobs": (
+        "event_id",
+        "event_version",
+        "asset_id",
+        "provider",
+        "observation_window",
+    ),
+    "event_market_metrics": ("event_id", "event_version", "provider", "metric_name"),
+}
+LEDGER_V15_REQUIRED_FOREIGN_KEYS = {
+    "event_asset_mapping_decisions": (
+        ("event_versions", ("event_id", "event_version"), ("event_id", "version")),
+    ),
+    "event_asset_mapping_receipts": (
+        ("event_versions", ("event_id", "event_version"), ("event_id", "version")),
+        (
+            "event_asset_mapping_decisions",
+            ("mapping_decision_id",),
+            ("decision_id",),
+        ),
+        ("assets", ("asset_id",), ("asset_id",)),
+    ),
+    "market_jobs": (
+        ("event_versions", ("event_id", "event_version"), ("event_id", "version")),
+        ("assets", ("asset_id",), ("asset_id",)),
+    ),
+    "market_bars": (("assets", ("asset_id",), ("asset_id",)),),
+    "event_market_metrics": (
+        ("event_versions", ("event_id", "event_version"), ("event_id", "version")),
+    ),
+}
 OPERATIONS_TABLES = (
     "replay_runs",
     "model_runs",
@@ -446,8 +557,96 @@ def _parse_manifest(raw: bytes) -> dict[str, str]:
     return entries
 
 
+def _sqlite_table_columns(
+    connection: sqlite3.Connection, table: str
+) -> tuple[str, ...]:
+    return tuple(
+        str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})")
+    )
+
+
+def _sqlite_primary_key(
+    connection: sqlite3.Connection, table: str
+) -> tuple[str, ...]:
+    rows = list(connection.execute(f"PRAGMA table_info({table})"))
+    return tuple(
+        str(row[1])
+        for row in sorted(rows, key=lambda item: int(item[5] or 0))
+        if int(row[5] or 0) > 0
+    )
+
+
+def _sqlite_unique_keys(
+    connection: sqlite3.Connection, table: str
+) -> set[tuple[str, ...]]:
+    result: set[tuple[str, ...]] = set()
+    for row in connection.execute(f"PRAGMA index_list({table})"):
+        if int(row[2] or 0) != 1:
+            continue
+        columns = tuple(
+            str(item[2])
+            for item in sorted(
+                connection.execute(f"PRAGMA index_info({row[1]})"),
+                key=lambda item: int(item[0] or 0),
+            )
+        )
+        if columns:
+            result.add(columns)
+    return result
+
+
+def _sqlite_foreign_keys(
+    connection: sqlite3.Connection, table: str
+) -> set[tuple[str, tuple[str, ...], tuple[str, ...]]]:
+    grouped: dict[int, list[tuple[Any, ...]]] = {}
+    for row in connection.execute(f"PRAGMA foreign_key_list({table})"):
+        grouped.setdefault(int(row[0]), []).append(row)
+    result = set()
+    for rows in grouped.values():
+        ordered = sorted(rows, key=lambda item: int(item[1]))
+        result.add(
+            (
+                str(ordered[0][2]),
+                tuple(str(item[3]) for item in ordered),
+                tuple(str(item[4]) for item in ordered),
+            )
+        )
+    return result
+
+
+def _validate_ledger_v15_contract(connection: sqlite3.Connection) -> None:
+    for table, required_columns in LEDGER_V15_REQUIRED_COLUMNS.items():
+        columns = set(_sqlite_table_columns(connection, table))
+        missing = sorted(set(required_columns) - columns)
+        if missing:
+            raise ValueError(
+                f"ledger schema 15 table {table} is missing required columns: "
+                + ", ".join(missing)
+            )
+    for table, expected in LEDGER_V15_REQUIRED_PRIMARY_KEYS.items():
+        actual = _sqlite_primary_key(connection, table)
+        if actual != expected:
+            raise ValueError(
+                f"ledger schema 15 table {table} has invalid primary key: "
+                f"expected={expected} actual={actual}"
+            )
+    for table, expected in LEDGER_V15_REQUIRED_UNIQUE_KEYS.items():
+        if expected not in _sqlite_unique_keys(connection, table):
+            raise ValueError(
+                f"ledger schema 15 table {table} is missing required unique key: {expected}"
+            )
+    for table, expected_keys in LEDGER_V15_REQUIRED_FOREIGN_KEYS.items():
+        actual = _sqlite_foreign_keys(connection, table)
+        for expected in expected_keys:
+            if expected not in actual:
+                raise ValueError(
+                    f"ledger schema 15 table {table} is missing required foreign key: {expected}"
+                )
+
+
 def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
     uri = f"file:{path.as_posix()}?mode=ro&immutable=1"
+    foreign_key_check = "not_applicable"
     with closing(sqlite3.connect(uri, uri=True, timeout=30)) as connection:
         quick_check = connection.execute("PRAGMA quick_check").fetchone()[0]
         integrity_check = connection.execute("PRAGMA integrity_check").fetchone()[0]
@@ -460,6 +659,8 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
             tables += LEDGER_V13_TABLES
         if ledger and schema_version >= 14:
             tables += LEDGER_V14_TABLES
+        if ledger and schema_version >= 15:
+            tables += LEDGER_V15_TABLES
         if not ledger and schema_version >= 3:
             tables += OPERATIONS_V3_TABLES
         if not ledger and schema_version >= 6:
@@ -482,6 +683,18 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
                     f"{database_name} database is missing required table for schema "
                     f"{schema_version}: {table}"
                 ) from exc
+        if ledger and schema_version >= 15:
+            _validate_ledger_v15_contract(connection)
+            foreign_key_violations = list(
+                connection.execute("PRAGMA foreign_key_check")
+            )
+            if foreign_key_violations:
+                raise ValueError(
+                    "ledger foreign-key check failed: "
+                    f"count={len(foreign_key_violations)} "
+                    f"sample={foreign_key_violations[:3]}"
+                )
+            foreign_key_check = "ok"
         audit = {}
         if ledger:
             audit = {
@@ -520,7 +733,7 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
                 )
     if quick_check != "ok" or integrity_check != "ok":
         raise ValueError(f"SQLite integrity failure: quick={quick_check} integrity={integrity_check}")
-    if ledger and (schema_version != 14 or any(audit.values())):
+    if ledger and (schema_version != EXPECTED_LEDGER_SCHEMA_VERSION or any(audit.values())):
         raise ValueError(f"ledger safety/schema failure: schema={schema_version} audit={audit}")
     if not ledger and schema_version not in SUPPORTED_OPERATIONS_SCHEMA_VERSIONS:
         expected_versions = ", ".join(str(version) for version in sorted(SUPPORTED_OPERATIONS_SCHEMA_VERSIONS))
@@ -532,6 +745,7 @@ def _database_report(path: Path, *, ledger: bool) -> dict[str, Any]:
         "sha256": sha256_file(path),
         "quick_check": quick_check,
         "integrity_check": integrity_check,
+        "foreign_key_check": foreign_key_check,
         "schema_version": schema_version,
         "counts": counts,
         "audit": audit,

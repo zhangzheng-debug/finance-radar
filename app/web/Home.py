@@ -155,16 +155,16 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
                 )
 
 
-def public_market_reaction_markup(detail: dict[str, object]) -> str:
-    """Render only completed post-event returns; empty work stays invisible."""
+def public_research_signal_markup(
+    detail: dict[str, object], public_copy: dict[str, object]
+) -> str:
+    """Render approved model semantics and completed returns in one compact block."""
 
     reaction = detail.get("market_reaction")
     reaction = reaction if isinstance(reaction, dict) else {}
     items = reaction.get("items")
     items = items if isinstance(items, list) else []
-    cards: list[str] = []
-    providers: set[str] = set()
-    symbols: set[str] = set()
+    normalized: list[dict[str, object]] = []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -178,26 +178,83 @@ def public_market_reaction_markup(detail: dict[str, object]) -> str:
         symbol = " ".join(str(item.get("symbol") or "").split())
         if not label or not symbol:
             continue
-        providers.add(" ".join(str(item.get("provider") or "").split()))
-        symbols.add(symbol)
-        tone = "positive" if value > 0 else "negative" if value < 0 else "flat"
-        cards.append(
-            '<div class="market-reaction-item">'
-            f'<span>{escape(label)}</span><strong class="{tone}">{value:+.2f}%</strong>'
-            '</div>'
+        window = " ".join(str(item.get("window") or "").split())
+        if not window:
+            continue
+        normalized.append(
+            {
+                "window": window,
+                "label": label,
+                "symbol": symbol,
+                "return_pct": value,
+                "role_label": " ".join(str(item.get("role_label") or "").split()),
+                "proxy_label": " ".join(str(item.get("proxy_label") or "").split()),
+            }
         )
-    if not cards:
+    signal_rows: list[str] = []
+    if public_copy.get("risk_route") and public_copy.get("risk_label"):
+        basis = " ".join(str(public_copy.get("risk_basis_label") or "").split())
+        signal_rows.append(
+            '<div class="research-signal-row"'
+            + (f' title="{escape(basis)}"' if basis else "")
+            + '><span>千问</span>'
+            f'<strong>{escape(str(public_copy["risk_label"]))}</strong></div>'
+        )
+
+    if normalized:
+        # Select one shared window so values are comparable. Coverage wins;
+        # among equally covered windows the public research order is 30m, 2h,
+        # 1d, then the remaining available horizons.
+        preferred = (
+            "t_plus_30m",
+            "t_plus_2h",
+            "t_plus_1d",
+            "t_plus_5m",
+            "next_close",
+            "t_plus_5d",
+        )
+        by_window: dict[str, list[dict[str, object]]] = {}
+        for item in normalized:
+            by_window.setdefault(str(item["window"]), []).append(item)
+        selected_window = max(
+            by_window,
+            key=lambda window: (
+                len(by_window[window]),
+                -preferred.index(window) if window in preferred else -len(preferred),
+            ),
+        )
+        selected = sorted(
+            by_window[selected_window], key=lambda item: str(item["symbol"])
+        )[:3]
+        window_label = str(selected[0]["label"])
+        values: list[str] = []
+        for item in selected:
+            value = float(item["return_pct"])
+            tone = "positive" if value > 0 else "negative" if value < 0 else "flat"
+            symbol = str(item["symbol"])
+            proxy_label = str(item.get("proxy_label") or "")
+            role = proxy_label or str(item.get("role_label") or "")
+            role_markup = f'<small>{escape(role)}</small>' if role else ""
+            values.append(
+                '<span class="market-reaction-inline-item">'
+                f'{escape(symbol)} {role_markup}<strong class="{tone}">{value:+.2f}%</strong>'
+                '</span>'
+            )
+        signal_rows.append(
+            '<div class="research-signal-row market-signal-row">'
+            f'<span>消息发布后（{escape(window_label)}）</span>'
+            '<div class="market-reaction-inline">'
+            + "".join(values)
+            + '</div></div>'
+        )
+
+    if not signal_rows:
         return ""
-    provider_text = "、".join(sorted(value for value in providers if value))
-    symbol_text = "、".join(sorted(symbols))
-    context = " · ".join(value for value in (symbol_text, provider_text) if value)
     return (
-        '<section class="market-reaction" aria-label="价格反应">'
-        '<div class="market-reaction-head"><span>价格反应</span>'
-        f'<small>{escape(context)}</small></div>'
-        '<div class="market-reaction-grid">'
-        + "".join(cards)
-        + '</div><p>来源公开后的价格变化</p></section>'
+        '<section class="market-reaction research-signals" aria-label="研究信号">'
+        '<div class="market-reaction-head"><span>研究信号</span></div>'
+        + "".join(signal_rows)
+        + '</section>'
     )
 
 
@@ -875,14 +932,6 @@ if preview_event_id:
                         key=public_evidence_sort_key,
                     )
                     try:
-                        knowledge_response = api_request(
-                            f"/api/v1/events/{preview_event_path_id}/knowledge"
-                        )
-                        if isinstance(knowledge_response, dict):
-                            preview_knowledge = knowledge_response
-                    except Exception:
-                        preview_knowledge = {}
-                    try:
                         source_response = api_request(
                             f"/api/v1/events/{preview_event_path_id}/sources"
                         )
@@ -913,9 +962,6 @@ if preview_event_id:
                     (dossier.get("evidence") or {}).get("items", []),
                     key=public_evidence_sort_key,
                 )
-                knowledge_response = dossier.get("knowledge") or {}
-                if isinstance(knowledge_response, dict):
-                    preview_knowledge = knowledge_response
                 explanation_state = dossier.get("capture_explanation") or {}
                 if isinstance(explanation_state, dict):
                     preview_capture_explanation = explanation_state
@@ -1099,14 +1145,6 @@ if preview_event_id:
                     if summary_text and not summary_duplicates_source
                     else ""
                 )
-                risk_article = (
-                    f'<article><span>{escape(str(public_copy["risk_heading"]))}</span>'
-                    f'<p><strong>{escape(str(public_copy["risk_label"]))}</strong>'
-                    f'<small class="risk-basis-label">{escape(str(public_copy["risk_basis_label"]))}</small>'
-                    + '</p></article>'
-                    if public_copy["risk_route"]
-                    else ""
-                )
                 source_heading = "关键原文" if preview_evidence else "来源文本"
                 source_title_markup = (
                     f'<h3>{escape(top_public_title)}</h3>'
@@ -1130,7 +1168,6 @@ if preview_event_id:
                     f'<h2>{escape(str(public_copy["headline"]))}</h2>'
                     '<div class="event-answer-grid">'
                     f'{summary_article}'
-                    f'{risk_article}'
                     f'{source_article}'
                     '</div>'
                     '</section>',
@@ -1140,9 +1177,11 @@ if preview_event_id:
                     public_time_markup(preview_event, preview_detail),
                     unsafe_allow_html=True,
                 )
-                market_reaction_markup = public_market_reaction_markup(preview_detail)
-                if market_reaction_markup:
-                    st.markdown(market_reaction_markup, unsafe_allow_html=True)
+                research_signal_markup = public_research_signal_markup(
+                    preview_detail, public_copy
+                )
+                if research_signal_markup:
+                    st.markdown(research_signal_markup, unsafe_allow_html=True)
                 if previous_snapshot is not None and changes_since_view:
                     st.markdown("**自上次查看后的变化**")
                     for change in changes_since_view:
@@ -1246,27 +1285,6 @@ if preview_event_id:
                         event_version,
                         preview_capture_explanation,
                     )
-            if preview_knowledge.get("covered"):
-                with st.expander("核对清单", expanded=False):
-                    st.markdown(
-                        f"**为什么重要：** {escape(str(preview_knowledge.get('why_it_matters') or ''))}"
-                    )
-                    facts = preview_knowledge.get("facts_to_confirm") or []
-                    if facts:
-                        st.markdown("**核对清单**")
-                        for item in facts:
-                            st.markdown(f"- {escape(str(item))}")
-                    missing = preview_knowledge.get("still_missing_when") or []
-                    if missing:
-                        st.markdown("**判断边界**")
-                        for item in missing:
-                            st.markdown(f"- {escape(str(item))}")
-                    counterexamples = preview_knowledge.get("what_would_change_the_view") or []
-                    if counterexamples:
-                        st.markdown("**改变判断的情形**")
-                        for item in counterexamples:
-                            st.markdown(f"- {escape(str(item))}")
-                    st.caption("规则卡用于理解事件机制与核对要点。")
             if UI_ROLE == "admin":
                 render_next_action_prompt(
                     next_action_guidance(preview_event, preview_evidence, preview_model)

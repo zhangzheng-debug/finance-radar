@@ -100,7 +100,7 @@ class ProductLayerTests(unittest.TestCase):
     def test_repository_exposes_evidence_linked_event(self) -> None:
         repository = LedgerRepository(self.ledger_path)
         health = repository.health()
-        self.assertEqual(health["schema_version"], 14)
+        self.assertEqual(health["schema_version"], 15)
         self.assertEqual(health["audit"]["trading_boundary_violations"], 0)
         detail = repository.event_detail("evt-1")
         self.assertEqual(detail["event"]["no_trading"], 1)
@@ -211,7 +211,7 @@ class ProductLayerTests(unittest.TestCase):
         )
         connection.execute(
             """INSERT INTO market_jobs VALUES (
-               'job-crypto','evt-1','asset-crypto','binance_public','initial','COMPLETED',?,?,1,NULL,1)""",
+               'job-crypto','evt-1',1,'asset-crypto','binance_public','initial','COMPLETED',?,?,1,NULL,1)""",
             (now, now),
         )
         connection.execute(
