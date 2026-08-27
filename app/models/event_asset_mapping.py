@@ -29,6 +29,15 @@ ALLOWED_ROLES = frozenset(
     {"DIRECT_SECURITY", "MARKET_BENCHMARK", "SECTOR_PROXY", "THEMATIC_PROXY"}
 )
 TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,14}$")
+EXCHANGE_TICKER_PATTERN = re.compile(
+    r"\b(NEW\s+YORK\s+STOCK\s+EXCHANGE|NYSE(?:\s+AMERICAN)?|"
+    r"NASDAQ(?:\s+(?:CAPITAL|GLOBAL)(?:\s+SELECT)?\s+MARKET)?)"
+    r"\s*[:\-]\s*([A-Z][A-Z0-9.-]{0,14})\b",
+    re.IGNORECASE,
+)
+GENERIC_COMPANY_TOKENS = frozenset(
+    {"company", "corporation", "corp", "inc", "incorporated", "limited", "ltd", "holdings"}
+)
 
 TOP_LEVEL_FIELDS = frozenset(
     {
@@ -433,6 +442,46 @@ def _ticker(event: Mapping[str, Any]) -> str | None:
         value = str(source.get("ticker_at_event") or source.get("ticker") or "").strip().upper()
         if value and TICKER_PATTERN.fullmatch(value):
             return value
+    explicit = _explicit_exchange_ticker(event)
+    return explicit[0] if explicit is not None else None
+
+
+def _explicit_exchange_ticker(event: Mapping[str, Any]) -> tuple[str, str] | None:
+    """Read a ticker only from an exchange-qualified source capture.
+
+    A bare uppercase token in news text is never sufficient.  When a company
+    name is available, the same captured field must also mention a distinctive
+    company-name token (or the company name itself is the ticker).
+    """
+
+    company_name = _company_name(event)
+    normalized_company = re.sub(r"[^a-z0-9]+", " ", company_name.casefold()).strip()
+    company_tokens = [
+        token
+        for token in normalized_company.split()
+        if len(token) >= 4 and token not in GENERIC_COMPANY_TOKENS
+    ]
+    for field in ("source_title", "source_summary"):
+        text = str(event.get(field) or "").strip()
+        if not text:
+            continue
+        for match in EXCHANGE_TICKER_PATTERN.finditer(text):
+            ticker = match.group(2).upper()
+            if not TICKER_PATTERN.fullmatch(ticker):
+                continue
+            normalized_text = re.sub(r"[^a-z0-9]+", " ", text.casefold()).strip()
+            captured_tokens = set(normalized_text.split())
+            company_matches = company_name.upper() == ticker or any(
+                token in captured_tokens for token in company_tokens
+            )
+            if not company_matches:
+                continue
+            venue = re.sub(r"\s+", " ", match.group(1)).upper()
+            if venue == "NEW YORK STOCK EXCHANGE":
+                venue = "NYSE"
+            elif venue.startswith("NASDAQ"):
+                venue = "NASDAQ"
+            return ticker, venue
     return None
 
 
@@ -476,6 +525,9 @@ def _direct_asset(event: Mapping[str, Any], template: AssetTemplate) -> AssetDef
         or facts.get("venue")
         or ""
     ).strip()
+    if not venue:
+        explicit = _explicit_exchange_ticker(event)
+        venue = explicit[1] if explicit is not None else ""
     return AssetDefinition(
         asset_type=template.asset_type,
         symbol=ticker,
@@ -556,6 +608,12 @@ def resolve_event_assets(
                     f"RULE:{matched_rule.id}",
                     f"POLICY:{selected_policy.policy_version}",
                     f"ROLE:{asset.role}",
+                    *(
+                        ["SOURCE_EXCHANGE_TICKER"]
+                        if asset.role == "DIRECT_SECURITY"
+                        and not str(event.get("ticker_at_event") or "").strip()
+                        else []
+                    ),
                 ],
             }
         )

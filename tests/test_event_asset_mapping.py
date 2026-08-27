@@ -32,7 +32,7 @@ def test_default_policy_is_strict_versioned_and_content_addressed() -> None:
     load_asset_mapping_policy.cache_clear()
     policy = load_asset_mapping_policy()
 
-    assert policy.policy_version == "event-asset-mapping-v1.0.0"
+    assert policy.policy_version == "event-asset-mapping-v1.1.0"
     assert policy.policy_sha256 == hashlib.sha256(MAPPING_PATH.read_bytes()).hexdigest()
     assert policy.max_assets_per_event == 3
     assert policy.direction == "ABSTAIN"
@@ -74,6 +74,61 @@ def test_company_mapping_deduplicates_spy_when_spy_is_the_direct_security() -> N
     assert _symbols(items) == ["SPY"]
     assert items[0]["role"] == "DIRECT_SECURITY"
     assert items[0]["rank"] == 1
+
+
+def test_exchange_qualified_source_ticker_maps_company_without_canonical_ticker() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "regulatory",
+            "event_type": "product_recall",
+            "company_name": "Baxter International Inc.",
+            "source_title": "Baxter International Inc. (NYSE:BAX) announces a recall",
+            "source_summary": "The company published the affected product lots.",
+        }
+    )
+
+    assert _symbols(items) == ["BAX", "SPY"]
+    assert items[0]["venue"] == "NYSE"
+    assert "SOURCE_EXCHANGE_TICKER" in items[0]["reason_codes"]
+
+
+def test_exchange_ticker_for_another_company_does_not_map_current_subject() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "regulatory",
+            "event_type": "product_recall",
+            "company_name": "Baxter International Inc.",
+            "source_title": "Unrelated Medical Corp. (NYSE:UMC) announces a recall",
+        }
+    )
+
+    assert items == []
+
+
+def test_bare_source_ticker_does_not_create_a_direct_asset() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "regulatory",
+            "event_type": "product_recall",
+            "company_name": "Baxter International Inc.",
+            "source_title": "BAX announces a recall",
+        }
+    )
+
+    assert items == []
+
+
+def test_exchange_ticker_requires_an_exact_company_token_not_a_substring() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "governance",
+            "event_type": "management_change",
+            "company_name": "Power Solutions International Inc.",
+            "source_title": "Empowered board update (NASDAQ:PSIX)",
+        }
+    )
+
+    assert items == []
 
 
 def test_high_confidence_geopolitical_energy_maps_to_oil_and_gold_proxies() -> None:
@@ -213,7 +268,7 @@ def test_all_mappings_obey_read_only_directionless_contract(event: dict[str, str
         assert item["direction"] == "ABSTAIN"
         assert item["impact_score"] == 0
         assert item["no_trading"] == 1
-        assert item["policy_version"] == "event-asset-mapping-v1.0.0"
+        assert item["policy_version"] == "event-asset-mapping-v1.1.0"
         assert len(str(item["policy_sha256"])) == 64
         assert item["rule_id"]
         assert item["role"]

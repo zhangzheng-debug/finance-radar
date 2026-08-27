@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sys
 import tempfile
 import unittest
@@ -92,6 +93,13 @@ class EventAssetMappingPersistenceTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(decision["decision"], "MAPPED")
         self.assertEqual(decision["asset_count"], 3)
+        metadata_rows = self.connection.execute(
+            "SELECT symbol,metadata_json FROM assets ORDER BY symbol"
+        ).fetchall()
+        for row in metadata_rows:
+            metadata = json.loads(row["metadata_json"])
+            self.assertEqual(metadata["session_timezone"], "America/New_York")
+            self.assertEqual(metadata["regular_close_local"], "16:00")
 
     def test_apply_is_incremental_and_idempotent(self) -> None:
         first = map_event_assets(
@@ -119,7 +127,7 @@ class EventAssetMappingPersistenceTests(unittest.TestCase):
             today=self.TODAY,
             now=self.PUBLISHED + dt.timedelta(days=1),
         )
-        self.assertEqual(scheduled, 18)
+        self.assertEqual(scheduled, 21)
         now = utc_now()
         self.connection.execute(
             """UPDATE canonical_events
@@ -169,7 +177,7 @@ class EventAssetMappingPersistenceTests(unittest.TestCase):
                 """SELECT COUNT(*) FROM market_jobs
                     WHERE event_id='evt' AND status='CANCELLED_MAPPING_SUPERSEDED'"""
             ).fetchone()[0],
-            18,
+            21,
         )
         self.assertEqual(
             self.connection.execute(
@@ -284,7 +292,7 @@ class EventAssetMappingPersistenceTests(unittest.TestCase):
             today=self.TODAY,
             now=self.PUBLISHED + dt.timedelta(days=1),
         )
-        self.assertEqual(inserted, 18)
+        self.assertEqual(inserted, 21)
         uso = self.connection.execute(
             "SELECT asset_id FROM assets WHERE provider_symbol='USO' AND venue='TwelveData'"
         ).fetchone()
@@ -337,7 +345,7 @@ class EventAssetMappingPersistenceTests(unittest.TestCase):
                     WHERE event_id='evt' AND asset_id=? AND status='PENDING'""",
                 (uso_asset_id,),
             ).fetchone()[0],
-            6,
+            7,
         )
         self.assertEqual(
             self.connection.execute(
@@ -376,12 +384,12 @@ class EventAssetMappingPersistenceTests(unittest.TestCase):
             today=self.TODAY,
             now=self.PUBLISHED + dt.timedelta(days=1),
         )
-        self.assertEqual(inserted, 18)
+        self.assertEqual(inserted, 21)
         self.assertEqual(
             self.connection.execute(
                 "SELECT COUNT(*) FROM market_jobs WHERE status='PENDING'"
             ).fetchone()[0],
-            18,
+            21,
         )
         anchors = self.connection.execute(
             "SELECT DISTINCT declared_anchor_kind,anchor_status FROM market_event_anchors"

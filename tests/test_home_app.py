@@ -403,6 +403,53 @@ def test_public_detail_hides_empty_market_reaction(monkeypatch) -> None:
     assert "MISSED" not in rendered
 
 
+def test_public_detail_shows_price_context_before_return_exists(monkeypatch) -> None:
+    def market_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        data = _fake_api(path, **kwargs)
+        if urllib.parse.urlsplit(path).path == "/api/v1/events/event-a":
+            data["market_context"] = {
+                "scope": "event_relative_price_observation",
+                "is_live_quote": False,
+                "items": [
+                    {
+                        "symbol": "ACME",
+                        "price": 23.4567,
+                        "currency": "USD",
+                        "observed_at": "2026-08-03T14:35:00+00:00",
+                        "role_label": "直接证券",
+                    }
+                ],
+            }
+            data["market_reaction"] = {
+                "scope": "post_event_audit_only",
+                "items": [
+                    {
+                        "window": "t_plus_30m",
+                        "label": "T+30m",
+                        "symbol": "ACME",
+                        "return_pct": -1.25,
+                        "provider": "twelve_data",
+                    }
+                ],
+            }
+        return data
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", market_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "价格截面" in rendered
+    assert "ACME" in rendered
+    assert "23.46 USD" in rendered
+    assert "-1.25%" in rendered
+    assert "PENDING" not in rendered
+    assert "UNAVAILABLE" not in rendered
+
+
 def test_public_preview_timeout_keeps_feed_summary_without_legacy_retry(monkeypatch) -> None:
     requests: list[str] = []
 

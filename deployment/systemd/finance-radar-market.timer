@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh Finance Radar event-relative market observations
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=60s
+RandomizedDelaySec=3s
+AccuracySec=5s
+Persistent=true
+Unit=finance-radar-market.service
+
+[Install]
+WantedBy=timers.target

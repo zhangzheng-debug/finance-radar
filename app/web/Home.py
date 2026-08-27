@@ -158,7 +158,7 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
 def public_research_signal_markup(
     detail: dict[str, object], public_copy: dict[str, object]
 ) -> str:
-    """Render approved model semantics and completed returns in one compact block."""
+    """Render approved model semantics and available market observations compactly."""
 
     reaction = detail.get("market_reaction")
     reaction = reaction if isinstance(reaction, dict) else {}
@@ -191,6 +191,29 @@ def public_research_signal_markup(
                 "proxy_label": " ".join(str(item.get("proxy_label") or "").split()),
             }
         )
+    context = detail.get("market_context")
+    context = context if isinstance(context, dict) else {}
+    context_items = context.get("items")
+    context_items = context_items if isinstance(context_items, list) else []
+    prices: dict[str, dict[str, object]] = {}
+    for item in context_items:
+        if not isinstance(item, dict):
+            continue
+        symbol = " ".join(str(item.get("symbol") or "").split())
+        try:
+            price = float(item.get("price"))
+        except (TypeError, ValueError):
+            continue
+        if not symbol or price <= 0 or price != price or price in {float("inf"), float("-inf")}:
+            continue
+        prices[symbol] = {
+            "price": price,
+            "currency": " ".join(str(item.get("currency") or "").split()),
+            "observed_at": " ".join(str(item.get("observed_at") or "").split()),
+            "role_label": " ".join(str(item.get("role_label") or "").split()),
+            "proxy_label": " ".join(str(item.get("proxy_label") or "").split()),
+        }
+
     signal_rows: list[str] = []
     if public_copy.get("risk_route") and public_copy.get("risk_label"):
         basis = " ".join(str(public_copy.get("risk_basis_label") or "").split())
@@ -246,6 +269,27 @@ def public_research_signal_markup(
             '<div class="market-reaction-inline">'
             + "".join(values)
             + '</div></div>'
+        )
+    if prices:
+        values: list[str] = []
+        for symbol, item in sorted(prices.items())[:3]:
+            role = str(item.get("proxy_label") or item.get("role_label") or "")
+            role_markup = f'<small>{escape(role)}</small>' if role else ""
+            currency = str(item.get("currency") or "")
+            price = float(item["price"])
+            precision = 2 if price >= 1 else 4
+            values.append(
+                '<span class="market-reaction-inline-item">'
+                f'{escape(symbol)} {role_markup}<strong class="flat">{price:,.{precision}f}'
+                f'{(" " + escape(currency)) if currency else ""}</strong></span>'
+            )
+        observed = max(str(item.get("observed_at") or "") for item in prices.values())
+        signal_rows.append(
+            '<div class="research-signal-row market-signal-row"'
+            + (f' title="价格时间 {escape(observed)}；非实时行情"' if observed else "")
+            + '><span>价格截面</span><div class="market-reaction-inline">'
+            + "".join(values)
+            + "</div></div>"
         )
 
     if not signal_rows:

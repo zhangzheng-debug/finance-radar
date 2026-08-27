@@ -2806,16 +2806,32 @@ class LedgerRepository:
             metrics = [
                 dict(row)
                 for row in connection.execute(
-                    """SELECT * FROM event_market_metrics
-                        WHERE event_id=? AND event_version=? ORDER BY metric_name""",
+                    """SELECT metric.*,anchor.timestamp_precision
+                         FROM event_market_metrics metric
+                         LEFT JOIN market_event_anchors anchor
+                           ON anchor.event_id=metric.event_id
+                          AND anchor.event_version=metric.event_version
+                          AND anchor.asset_id=metric.stable_id
+                          AND anchor.provider=metric.provider
+                        WHERE metric.event_id=? AND metric.event_version=?
+                        ORDER BY metric.metric_name""",
                     (event_id, event["current_version"]),
                 )
             ]
             snapshots = [
                 dict(row)
                 for row in connection.execute(
-                    "SELECT * FROM market_snapshots WHERE event_id=? ORDER BY captured_at DESC",
-                    (event_id,),
+                    """SELECT s.*,j.event_version,j.observation_window,
+                              j.status AS market_job_status,anchor.timestamp_precision
+                       FROM market_snapshots s
+                       JOIN market_jobs j ON j.market_job_id=s.market_job_id
+                       LEFT JOIN market_job_anchor_links link
+                         ON link.market_job_id=j.market_job_id
+                       LEFT JOIN market_event_anchors anchor
+                         ON anchor.anchor_id=link.anchor_id
+                       WHERE s.event_id=? AND j.event_version=?
+                       ORDER BY s.captured_at DESC""",
+                    (event_id, event["current_version"]),
                 )
             ]
             market_jobs = [

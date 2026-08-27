@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from app.api.main import _public_market_reaction, create_app
+from app.api.main import _public_market_context, _public_market_reaction, create_app
 from app.config import Settings
 from app.storage import LedgerRepository, OperationsRepository
 from app.storage.ledger import PUBLIC_EVENT_STATE_CTE
@@ -1688,6 +1688,121 @@ def test_public_market_reaction_exposes_only_completed_isolated_returns() -> Non
     assert "PENDING" not in serialized
     assert "MISSED_WINDOW" not in serialized
     assert "private" not in serialized
+
+
+def test_public_market_context_exposes_only_completed_current_safe_prices() -> None:
+    value = {
+        "assets": [
+            {
+                "asset_id": "asset-acme",
+                "symbol": "ACME",
+                "provider_symbol": "ACME",
+                "relation_type": "PRIMARY",
+                "market_observation_allowed": 1,
+                "no_trading": 1,
+                "display_role": "DIRECT_SECURITY",
+                "proxy_label": "",
+            }
+        ],
+        "market_snapshots": [
+            {
+                "asset_id": "asset-acme",
+                "provider": "twelve_data",
+                "provider_symbol": "ACME",
+                "price": "23.4567",
+                "currency": "usd",
+                "provider_as_of": "2026-08-03T14:35:00+00:00",
+                "captured_at": "2026-08-03T14:36:00+00:00",
+                "observation_window": "t_plus_5m",
+                "market_job_status": "COMPLETED",
+                "read_only": 1,
+                "no_trading": 1,
+                "raw_json": "private-payload",
+            },
+            {
+                "asset_id": "asset-acme",
+                "provider": "twelve_data",
+                "provider_symbol": "ACME",
+                "price": "99",
+                "currency": "USD",
+                "captured_at": "2026-08-03T14:40:00+00:00",
+                "market_job_status": "PENDING",
+                "read_only": 1,
+                "no_trading": 1,
+            },
+            {
+                "asset_id": "asset-acme",
+                "provider": "unknown",
+                "provider_symbol": "ACME",
+                "price": "100",
+                "captured_at": "2026-08-03T14:41:00+00:00",
+                "market_job_status": "COMPLETED",
+                "read_only": 1,
+                "no_trading": 1,
+            },
+        ],
+    }
+
+    context = _public_market_context(value)
+
+    assert context == {
+        "items": [
+            {
+                "symbol": "ACME",
+                "price": 23.4567,
+                "currency": "USD",
+                "observed_at": "2026-08-03T14:35:00+00:00",
+                "provider": "twelve_data",
+                "observation_window": "t_plus_5m",
+                "role": "DIRECT_SECURITY",
+                "role_label": "直接证券",
+                "proxy_label": "",
+            }
+        ],
+        "scope": "event_relative_price_observation",
+        "is_live_quote": False,
+        "uses_event_truth": False,
+        "used_as_model_feature": False,
+        "used_for_discovery_rank": False,
+    }
+    serialized = json.dumps(context, ensure_ascii=False)
+    assert "private-payload" not in serialized
+    assert "PENDING" not in serialized
+
+
+def test_public_market_reaction_labels_date_only_session_windows_honestly() -> None:
+    reaction = _public_market_reaction(
+        {
+            "assets": [
+                {
+                    "asset_id": "asset-acme",
+                    "symbol": "ACME",
+                    "provider_symbol": "ACME",
+                    "relation_type": "PRIMARY",
+                    "market_observation_allowed": 1,
+                    "no_trading": 1,
+                }
+            ],
+            "market_metrics": [
+                {
+                    "provider": "twelve_data",
+                    "stable_id": "asset-acme",
+                    "ticker_at_event": "ACME",
+                    "metric_name": "reaction_return_next_close_pct__ACME",
+                    "metric_value": "1.5",
+                    "metric_value_type": "decimal_percent",
+                    "metric_scope": "post_event_audit_only",
+                    "allowed_for_discovery_rank": 0,
+                    "allowed_as_model_feature": 0,
+                    "timestamp_precision": "DATE_ONLY",
+                }
+            ],
+        }
+    )
+
+    assert reaction is not None
+    assert reaction["items"][0]["label"] == "首个完整交易日收盘"
+    assert reaction["items"][0]["timestamp_precision"] == "DATE_ONLY"
 
 
 def test_public_market_reaction_projects_only_safe_asset_role_context() -> None:

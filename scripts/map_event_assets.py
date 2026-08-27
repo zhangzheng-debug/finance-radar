@@ -173,6 +173,15 @@ def _upsert_asset(
         "SELECT metadata_json FROM assets WHERE asset_id=?", (asset_id,)
     ).fetchone()
     metadata = _json_object(existing["metadata_json"] if existing is not None else "{}")
+    if (
+        str(mapping["asset_type"]).lower() in {"equity", "etf"}
+        and str(mapping["venue"]).strip().upper()
+        in {"", "NYSE", "NYSE AMERICAN", "NASDAQ", "TWELVEDATA"}
+    ):
+        metadata.setdefault("session_timezone", "America/New_York")
+        metadata.setdefault("regular_close_local", "16:00")
+        metadata.setdefault("trading_weekdays", [0, 1, 2, 3, 4])
+        metadata.setdefault("holidays", [])
     connection.execute(
         """
         INSERT INTO assets(

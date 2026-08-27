@@ -1149,6 +1149,7 @@ ROLLBACK_SERVICE_UNITS=(
     finance-radar-api
     finance-radar-overview-snapshot.service
     finance-radar-overview-snapshot.timer
+    finance-radar-market.timer
     finance-radar-web
     finance-radar-worker
     # The backup oneshot is externally scheduled and may run for 90 minutes.
@@ -1172,6 +1173,8 @@ ROLLBACK_PATHS=(
     /etc/systemd/system/finance-radar-api.service
     /etc/systemd/system/finance-radar-overview-snapshot.service
     /etc/systemd/system/finance-radar-overview-snapshot.timer
+    /etc/systemd/system/finance-radar-market.service
+    /etc/systemd/system/finance-radar-market.timer
     /etc/systemd/system/finance-radar-web.service
     /etc/systemd/system/finance-radar-admin.service
     /etc/systemd/system/finance-radar-reviewer.service
@@ -2377,6 +2380,18 @@ if [ "$DEPLOY_MODE" = full ]; then
     fi
     assert_qwen_risk_worker_quiescent || \
         abort_cutover 'Qwen risk worker remained active before protected bridge backup' 4
+    if systemctl cat finance-radar-market.timer >/dev/null 2>&1; then
+        systemctl stop finance-radar-market.timer || \
+            abort_cutover 'market timer failed to stop before protected bridge backup' 4
+    fi
+    if systemctl is-active --quiet finance-radar-market.service; then
+        for _ in $(seq 1 60); do
+            systemctl is-active --quiet finance-radar-market.service || break
+            sleep 1
+        done
+    fi
+    systemctl is-active --quiet finance-radar-market.service && \
+        abort_cutover 'market observation cycle remained active before protected bridge backup' 4
     inhibit_worker_resume || \
         abort_cutover 'unable to inhibit worker resume during protected bridge backup' 4
     systemctl stop finance-radar-worker || \
@@ -2551,6 +2566,10 @@ install -m 0644 "$RELEASE/deployment/systemd/finance-radar-overview-snapshot.ser
     /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-overview-snapshot.timer" \
     /etc/systemd/system/
+install -m 0644 "$RELEASE/deployment/systemd/finance-radar-market.service" \
+    /etc/systemd/system/
+install -m 0644 "$RELEASE/deployment/systemd/finance-radar-market.timer" \
+    /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-web.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-admin.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-reviewer.service" /etc/systemd/system/
@@ -2641,7 +2660,8 @@ ln -sfn "$RELEASE" "$BASE/current"
 systemctl start finance-radar-overview-snapshot.service || \
     abort_cutover 'external overview snapshot publication failed before API restart' 6
 systemctl enable finance-radar-api finance-radar-overview-snapshot.service \
-    finance-radar-overview-snapshot.timer finance-radar-web finance-radar-worker \
+    finance-radar-overview-snapshot.timer finance-radar-market.timer \
+    finance-radar-web finance-radar-worker \
     finance-radar-backup.timer
 systemctl restart finance-radar-api finance-radar-web
 systemctl start finance-radar-overview-snapshot.timer
@@ -2851,10 +2871,14 @@ else
     systemctl start finance-radar-worker || \
         abort_cutover 'worker failed to start after the short code-only activation window' 6
 fi
+systemctl start finance-radar-market.timer || \
+    abort_cutover 'market observation timer failed to start after the protected postcutover backup' 6
 systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker || \
     abort_cutover 'required services are not active after protected postcutover backup' 6
 systemctl is-active --quiet finance-radar-overview-snapshot.timer || \
     abort_cutover 'overview snapshot timer is not active after protected postcutover backup' 6
+systemctl is-active --quiet finance-radar-market.timer || \
+    abort_cutover 'market observation timer is not active after protected postcutover backup' 6
 assert_active_service_cgroup finance-radar-worker || \
     abort_cutover 'worker cgroup is not protected by the aggregate budget' 6
 if systemctl is-active --quiet finance-radar-evidence-llm.service || \
@@ -2922,10 +2946,11 @@ fi
 systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker || \
     abort_cutover 'required services are not active at final acceptance' 6
 systemctl is-active --quiet finance-radar-overview-snapshot.timer \
-    finance-radar-backup.timer || \
+    finance-radar-market.timer finance-radar-backup.timer || \
     abort_cutover 'required timers are not active at final acceptance' 6
 systemctl is-enabled --quiet finance-radar-api finance-radar-web finance-radar-worker \
-    finance-radar-overview-snapshot.timer finance-radar-backup.timer || \
+    finance-radar-overview-snapshot.timer finance-radar-market.timer \
+    finance-radar-backup.timer || \
     abort_cutover 'required services or timers are not enabled at final acceptance' 6
 write_public_release_marker ACCEPTED || \
     abort_cutover 'unable to publish the accepted release state' 6

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_version": "event-asset-mapping-v1.0.0",
+  "policy_version": "event-asset-mapping-v1.1.0",
   "max_assets_per_event": 3,
   "direction": "ABSTAIN",
   "impact_score": 0,

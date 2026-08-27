@@ -136,6 +136,83 @@ def _next_regular_close(
     return None
 
 
+def _previous_regular_close_for_date(
+    event_date: dt.date, *, asset_type: str, metadata: dict[str, Any]
+) -> dt.datetime | None:
+    if asset_type.lower() == "crypto":
+        return None
+    timezone_name = str(metadata.get("session_timezone") or "").strip()
+    close_text = str(metadata.get("regular_close_local") or "").strip()
+    if not timezone_name or not re.fullmatch(r"\d{2}:\d{2}", close_text):
+        return None
+    try:
+        zone = ZoneInfo(timezone_name)
+        close_hour, close_minute = (int(part) for part in close_text.split(":"))
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    weekdays = metadata.get("trading_weekdays", [0, 1, 2, 3, 4])
+    holidays = {str(value) for value in metadata.get("holidays", [])}
+    if not isinstance(weekdays, list) or not all(isinstance(value, int) for value in weekdays):
+        return None
+    for day_offset in range(1, 16):
+        date = event_date - dt.timedelta(days=day_offset)
+        if date.weekday() not in weekdays or date.isoformat() in holidays:
+            continue
+        close_local = dt.datetime.combine(
+            date, dt.time(close_hour, close_minute), tzinfo=zone
+        )
+        return close_local.astimezone(dt.timezone.utc)
+    return None
+
+
+def _first_regular_close_after_date(
+    event_date: dt.date, *, asset_type: str, metadata: dict[str, Any]
+) -> dt.datetime | None:
+    """Return the first full regular-session close after a date-only event."""
+
+    if asset_type.lower() == "crypto":
+        return None
+    timezone_name = str(metadata.get("session_timezone") or "").strip()
+    close_text = str(metadata.get("regular_close_local") or "").strip()
+    if not timezone_name or not re.fullmatch(r"\d{2}:\d{2}", close_text):
+        return None
+    try:
+        zone = ZoneInfo(timezone_name)
+        close_hour, close_minute = (int(part) for part in close_text.split(":"))
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    weekdays = metadata.get("trading_weekdays", [0, 1, 2, 3, 4])
+    holidays = {str(value) for value in metadata.get("holidays", [])}
+    if not isinstance(weekdays, list) or not all(isinstance(value, int) for value in weekdays):
+        return None
+    for day_offset in range(1, 16):
+        date = event_date + dt.timedelta(days=day_offset)
+        if date.weekday() not in weekdays or date.isoformat() in holidays:
+            continue
+        close_local = dt.datetime.combine(
+            date, dt.time(close_hour, close_minute), tzinfo=zone
+        )
+        return close_local.astimezone(dt.timezone.utc)
+    return None
+
+
+def _nth_regular_close_after(
+    anchor: dt.datetime,
+    *,
+    count: int,
+    asset_type: str,
+    metadata: dict[str, Any],
+) -> dt.datetime | None:
+    current = anchor
+    for _ in range(max(1, count)):
+        current = _next_regular_close(
+            current, asset_type=asset_type, metadata=metadata
+        )
+        if current is None:
+            return None
+    return current
+
+
 def _anchor_from_row(row: Any) -> MarketAnchorDecision:
     assessment_source = str(row.get("assessment_source") or "")
     declared = (
@@ -166,6 +243,20 @@ def _anchor_from_row(row: Any) -> MarketAnchorDecision:
     anchor, parsed_precision = _precise_timestamp(raw_anchor)
     if precision == "MISSING":
         precision = parsed_precision
+    metadata = _json_object(row["metadata_json"])
+    if anchor is None and precision == "DATE_ONLY" and declared is not None:
+        try:
+            published_date = dt.date.fromisoformat(str(raw_anchor))
+        except (TypeError, ValueError):
+            published_date = None
+        if published_date is not None:
+            anchor = _previous_regular_close_for_date(
+                published_date,
+                asset_type=str(row["asset_type"]),
+                metadata=metadata,
+            )
+            if anchor is not None:
+                declared = f"{declared}_date"
     if reason is None and anchor is None:
         reason = f"{declared or 'anchor'}_{precision.lower()}"
     if reason is None and received is None:
@@ -173,8 +264,9 @@ def _anchor_from_row(row: Any) -> MarketAnchorDecision:
     if reason is None and known is None:
         reason = "known_at_missing"
 
-    metadata = _json_object(row["metadata_json"])
     unsupported: list[str] = []
+    if precision == "DATE_ONLY" and anchor is not None:
+        unsupported.extend(("t_plus_5m", "t_plus_30m", "t_plus_2h"))
     if str(row["asset_type"]).lower() != "crypto" and anchor is not None:
         if _next_regular_close(
             anchor, asset_type=str(row["asset_type"]), metadata=metadata
@@ -182,7 +274,7 @@ def _anchor_from_row(row: Any) -> MarketAnchorDecision:
             unsupported.append("next_close")
 
     lag = None
-    if anchor is not None and known is not None:
+    if anchor is not None and known is not None and precision == "EXACT_TIMESTAMP":
         lag = int((known - anchor).total_seconds())
     return MarketAnchorDecision(
         event_id=str(row["event_id"]),
@@ -191,7 +283,15 @@ def _anchor_from_row(row: Any) -> MarketAnchorDecision:
         provider=str(row["provider"]),
         declared_anchor_kind=declared,
         reaction_anchor_at=anchor.isoformat() if anchor else None,
-        source_published_at=published.isoformat() if published else None,
+        source_published_at=(
+            published.isoformat()
+            if published
+            else (
+                str(row["source_published_at"])
+                if published_precision == "DATE_ONLY" and row["source_published_at"]
+                else None
+            )
+        ),
         local_received_at=received.isoformat() if received else None,
         known_at=known.isoformat() if known else None,
         timestamp_precision=precision,
@@ -220,28 +320,40 @@ def _upsert_anchor(connection: Any, decision: MarketAnchorDecision, *, now: str)
            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
            ON CONFLICT(event_id,event_version,asset_id,provider) DO UPDATE SET
                declared_anchor_kind=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.declared_anchor_kind ELSE excluded.declared_anchor_kind END,
                reaction_anchor_at=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.reaction_anchor_at ELSE excluded.reaction_anchor_at END,
                source_published_at=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.source_published_at ELSE excluded.source_published_at END,
                local_received_at=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.local_received_at ELSE excluded.local_received_at END,
                known_at=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.known_at ELSE excluded.known_at END,
                timestamp_precision=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.timestamp_precision ELSE excluded.timestamp_precision END,
                anchor_status=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.anchor_status ELSE excluded.anchor_status END,
                anchor_lag_seconds=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.anchor_lag_seconds ELSE excluded.anchor_lag_seconds END,
                unsupported_windows_json=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.unsupported_windows_json ELSE excluded.unsupported_windows_json END,
                reason_code=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.reason_code ELSE excluded.reason_code END,
                contract_version=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.contract_version ELSE excluded.contract_version END,
                updated_at=CASE WHEN market_event_anchors.anchor_status='EXACT'
+                    AND market_event_anchors.timestamp_precision='EXACT_TIMESTAMP'
                    THEN market_event_anchors.updated_at ELSE excluded.updated_at END,
                no_trading=1""",
         (
@@ -354,7 +466,7 @@ def schedule_jobs(
                AND receipt.decision='SELECTED'
                AND receipt.no_trading=1
         )
-        SELECT e.event_id,e.current_version AS event_version,
+        SELECT e.event_id,e.current_version AS event_version,e.event_date,
                e.event_family,e.event_type,ev.facts_json,
                a.asset_id,a.asset_type,a.metadata_json,
                COALESCE(ranked.source_published_at,mapping.source_published_at)
@@ -407,7 +519,9 @@ def schedule_jobs(
         decision = _anchor_from_row(row_payload)
         anchor_id = _upsert_anchor(connection, decision, now=persisted_at)
         persisted_anchor = connection.execute(
-            """SELECT anchor_status,reaction_anchor_at FROM market_event_anchors
+            """SELECT anchor_status,reaction_anchor_at,timestamp_precision,
+                      declared_anchor_kind,source_published_at
+                 FROM market_event_anchors
                  WHERE anchor_id=?""",
             (anchor_id,),
         ).fetchone()
@@ -418,20 +532,57 @@ def schedule_jobs(
         ):
             continue
         anchor = _as_utc(str(persisted_anchor["reaction_anchor_at"]))
-        windows: list[tuple[str, dt.datetime]] = [
-            ("initial", anchor),
-            *[
-                (window, anchor + offset)
-                for window, (offset, _grace) in HORIZON_WINDOWS.items()
-            ],
-        ]
-        close = _next_regular_close(
-            anchor,
-            asset_type=str(row["asset_type"]),
-            metadata=_json_object(row["metadata_json"]),
-        )
-        if close is not None:
-            windows.append(("next_close", close))
+        metadata = _json_object(row["metadata_json"])
+        if persisted_anchor["timestamp_precision"] == "DATE_ONLY":
+            windows = [("initial", anchor)]
+            date_basis = row["event_date"]
+            if str(persisted_anchor["declared_anchor_kind"] or "").startswith(
+                "source_published_date"
+            ):
+                date_basis = persisted_anchor["source_published_at"]
+            try:
+                event_date = dt.date.fromisoformat(str(date_basis))
+            except (TypeError, ValueError):
+                event_date = None
+            first_close = (
+                _first_regular_close_after_date(
+                    event_date,
+                    asset_type=str(row["asset_type"]),
+                    metadata=metadata,
+                )
+                if event_date is not None
+                else None
+            )
+            if first_close is not None:
+                windows.append(("next_close", first_close))
+            for window, close_count in (("t_plus_1d", 1), ("t_plus_5d", 5)):
+                close = (
+                    _nth_regular_close_after(
+                        first_close,
+                        count=close_count,
+                        asset_type=str(row["asset_type"]),
+                        metadata=metadata,
+                    )
+                    if first_close is not None
+                    else None
+                )
+                if close is not None:
+                    windows.append((window, close))
+        else:
+            windows = [
+                ("initial", anchor),
+                *[
+                    (window, anchor + offset)
+                    for window, (offset, _grace) in HORIZON_WINDOWS.items()
+                ],
+            ]
+            close = _next_regular_close(
+                anchor,
+                asset_type=str(row["asset_type"]),
+                metadata=metadata,
+            )
+            if close is not None:
+                windows.append(("next_close", close))
 
         for window, scheduled in windows:
             status = "PENDING"

@@ -37,6 +37,18 @@ OVERVIEW_SNAPSHOT_TIMER = (
     / "systemd"
     / "finance-radar-overview-snapshot.timer"
 )
+MARKET_UNIT = (
+    Path(__file__).parents[1]
+    / "deployment"
+    / "systemd"
+    / "finance-radar-market.service"
+)
+MARKET_TIMER = (
+    Path(__file__).parents[1]
+    / "deployment"
+    / "systemd"
+    / "finance-radar-market.timer"
+)
 RECEIPT_VALIDATOR = Path(__file__).parents[1] / "deployment" / "systemd" / "verify_backup_receipt.py"
 CODE_ONLY_VALIDATOR = (
     Path(__file__).parents[1]
@@ -249,9 +261,31 @@ def test_prepared_restore_creates_root_backup_attestation_directory() -> None:
     ).read_text(encoding="utf-8")
 
     create_marker = "install -d -m 0700 -o root -g root /var/lib/finance-radar"
-    start_marker = "systemctl enable --now finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer"
+    start_marker = "systemctl enable --now finance-radar-api finance-radar-web finance-radar-worker"
     assert create_marker in source
     assert source.index(create_marker) < source.index(start_marker)
+
+
+def test_market_observation_runs_as_a_bounded_independent_timer() -> None:
+    service = MARKET_UNIT.read_text(encoding="utf-8")
+    timer = MARKET_TIMER.read_text(encoding="utf-8")
+    worker = WORKER_UNIT.read_text(encoding="utf-8")
+    installer = INSTALLER.read_text(encoding="utf-8")
+    backup_wrapper = BACKUP_QUIESCE_WRAPPER.read_text(encoding="utf-8")
+
+    assert "Type=oneshot" in service
+    assert "scripts/run_market_cycle.py" in service
+    assert "FINANCE_RADAR_ASSET_MAPPING_MODE=apply" in service
+    assert "MARKET_EXACT_BAR_REQUEST_LIMIT=6" in service
+    assert "/usr/bin/flock -n /run/finance-radar-market/market.lock" in service
+    assert "MemoryMax=280M" in service
+    assert "ReadWritePaths=/opt/finance-radar/shared/data" in service
+    assert "OnUnitInactiveSec=60s" in timer
+    assert "FINANCE_RADAR_MARKET_CYCLE_EXTERNAL=1" in worker
+    assert "finance-radar-market.service" in installer
+    assert "finance-radar-market.timer" in installer
+    assert "finance-radar-market.timer" in backup_wrapper
+    assert "finance-radar-market.service" in backup_wrapper
 
 
 def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() -> None:
@@ -647,6 +681,7 @@ def test_restore_accepts_historic_archives_without_a_slice_or_optional_llm_unit(
     assert "MemorySwapMax=384M" in source
     assert "TasksMax=256" in source
     assert "optional evidence LLM unit is absent from this prepared archive" in source
+    assert "optional market observation units are absent from this prepared archive" in source
 
 
 def test_restore_rollback_removes_all_new_units_and_configuration_after_a_failed_gate() -> None:

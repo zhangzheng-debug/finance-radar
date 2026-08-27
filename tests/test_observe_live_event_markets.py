@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sys
 import tempfile
 import unittest
@@ -849,6 +850,69 @@ class LiveMarketObserverTests(unittest.TestCase):
         self.assertEqual(anchor["anchor_status"], "UNAVAILABLE")
         self.assertEqual(anchor["timestamp_precision"], "DATE_ONLY")
         self.assertEqual(anchor["reason_code"], "source_published_date_only")
+
+    def test_date_only_equity_schedules_session_close_windows_only(self) -> None:
+        now = utc_now()
+        metadata = stable_json(
+            {
+                "session_timezone": "America/New_York",
+                "regular_close_local": "16:00",
+                "trading_weekdays": [0, 1, 2, 3, 4],
+                "holidays": [],
+            }
+        )
+        self.connection.execute(
+            "UPDATE raw_observations SET source_published_at='2026-07-16' WHERE observation_id='obs'"
+        )
+        self.connection.execute(
+            """INSERT INTO assets VALUES (
+               'equity-date','equity','TEST','TEST','NYSE','USD',?,?,?)""",
+            (metadata, now, now),
+        )
+        self.connection.execute(
+            """INSERT INTO event_asset_impacts(
+               impact_id,event_id,asset_id,relation_type,direction,impact_score,
+               confidence,reason_codes_json,assessment_source,mapping_decision_id,
+               market_observation_allowed,no_trading,created_at,updated_at
+               ) VALUES (
+               'impact-equity-date','evt','equity-date','PRIMARY','ABSTAIN',25,0.3,
+               '[]','test',NULL,1,1,?,?)""",
+            (now, now),
+        )
+        self.connection.commit()
+
+        inserted = observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+
+        self.assertEqual(inserted, 4)
+        anchor = self.connection.execute(
+            "SELECT * FROM market_event_anchors WHERE asset_id='equity-date'"
+        ).fetchone()
+        self.assertEqual(anchor["anchor_status"], "EXACT")
+        self.assertEqual(anchor["timestamp_precision"], "DATE_ONLY")
+        self.assertEqual(anchor["declared_anchor_kind"], "source_published_date")
+        self.assertEqual(anchor["reaction_anchor_at"], "2026-07-15T20:00:00+00:00")
+        self.assertEqual(
+            json.loads(anchor["unsupported_windows_json"]),
+            ["t_plus_5m", "t_plus_30m", "t_plus_2h"],
+        )
+        jobs = self.connection.execute(
+            """SELECT observation_window,scheduled_at FROM market_jobs
+                WHERE asset_id='equity-date' ORDER BY scheduled_at"""
+        ).fetchall()
+        self.assertEqual(
+            [(row["observation_window"], row["scheduled_at"]) for row in jobs],
+            [
+                ("initial", "2026-07-15T20:00:00+00:00"),
+                ("next_close", "2026-07-17T20:00:00+00:00"),
+                ("t_plus_1d", "2026-07-20T20:00:00+00:00"),
+                ("t_plus_5d", "2026-07-24T20:00:00+00:00"),
+            ],
+        )
 
     def test_equity_next_close_requires_explicit_exchange_calendar_metadata(self) -> None:
         now = utc_now()

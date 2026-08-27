@@ -3,20 +3,23 @@
 ## Product contract
 
 The public event page may show one compact **研究信号** block. It is omitted
-entirely when neither of these results exists:
+entirely when none of these results exists:
 
 - a current, `PUBLIC_APPROVED` Qwen semantic result trained from independent
   dual-human gold labels;
+- a completed, current-version read-only price observation for an explicitly
+  mapped asset or proxy;
 - a completed, timestamp-bound post-publication return.
 
-The price line says **消息发布后**, not “the event caused”. Asset mapping selects
-instruments worth observing; it never predicts direction, magnitude, or a
-trade.
+Completed return lines say **消息发布后**, not “the event caused”; absolute-price
+lines are explicitly presented as non-live price context. Asset mapping selects
+instruments worth observing; it never predicts direction, magnitude, or a trade.
 
 The public hierarchy remains deliberately short:
 
 1. what happened and the key source passage;
-2. optional **研究信号** (approved Qwen routing and/or completed market moves);
+2. optional **研究信号** (approved Qwen routing, current price context and/or
+   completed market moves);
 3. source link and timestamps.
 
 Internal review checklists, pending jobs, provider failures and empty model
@@ -55,8 +58,8 @@ Transient failures have a bounded retry budget. Older metrics without a
 provable event-version binding remain in a legacy archive and are never
 projected into the current public event.
 
-The worker defaults to at most six uncached exact-bar requests per provider per
-cycle. Override only after checking provider quota:
+The independent market timer defaults to at most six uncached exact-bar
+requests per provider per cycle. Override only after checking provider quota:
 
 ```text
 MARKET_EXACT_BAR_REQUEST_LIMIT=6
@@ -64,8 +67,8 @@ MARKET_EXACT_BAR_REQUEST_LIMIT=6
 
 ## Rollout controls
 
-Automatic mapping is disabled by default in the continuous worker. Run the
-versioned mapper in shadow mode first:
+Automatic mapping remains disabled by default when the legacy continuous worker
+is run directly. Run the versioned mapper in shadow mode first:
 
 ```powershell
 python scripts/map_event_assets.py --db data/finance_radar.sqlite3 --dry-run
@@ -80,10 +83,19 @@ FINANCE_RADAR_ASSET_MAPPING_MODE=shadow
 FINANCE_RADAR_ASSET_MAPPING_MODE=apply
 ```
 
-Before switching production to `apply`, review a 50–100 event sample for rule
-precision, proxy clarity, exact-bar availability, provider quota and public
-display rights. Mode activation and production deployment remain separate
-operator actions.
+Before enabling `finance-radar-market.timer`, review a 50–100 event sample for
+rule precision, proxy clarity, exact-bar availability, provider quota and public
+display rights. The production timer runs the mapper in `apply` mode and keeps
+mapping, scheduling and exact-bar capture outside the five-minute collection
+cycle. Mode activation and production deployment remain separate operator
+actions.
+
+Events whose source exposes only a calendar date do not receive intraday
+T+5m/T+30m/T+2h claims. For exchange-traded assets the market worker instead
+uses the prior close as its baseline, then observes the first full trading-day
+close after the event date, the next trading close and the five-day close;
+the public UI labels those session windows explicitly. A provider miss remains
+missing and is never filled with a current quote.
 
 The checked-in shadow report is a local snapshot, not a production claim. Its
 low match rate is expected from a precision-first V1 and should be expanded by

@@ -198,9 +198,17 @@ def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
         if not accepted_symbols or not supplied_symbols.issubset(accepted_symbols):
             continue
         symbol = str(context["_symbol"])
+        timestamp_precision = str(row.get("timestamp_precision") or "")
+        label = labels[window]
+        if timestamp_precision == "DATE_ONLY":
+            label = {
+                "next_close": "首个完整交易日收盘",
+                "t_plus_1d": "下一交易日收盘",
+                "t_plus_5d": "5个交易日后",
+            }.get(window, label)
         item = {
             "window": window,
-            "label": labels[window],
+            "label": label,
             "symbol": symbol[:32],
             "return_pct": round(value_percent, 6),
             "provider": str(row.get("provider") or "")[:64],
@@ -212,6 +220,8 @@ def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
             "proxy_label": context["proxy_label"],
             "_updated_at": row.get("updated_at"),
         }
+        if timestamp_precision:
+            item["timestamp_precision"] = timestamp_precision
         key = (str(row.get("stable_id") or ""), window)
         previous = projected.get(key)
         if previous is None or str(item.get("_updated_at") or "") >= str(
@@ -232,6 +242,126 @@ def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "items": items,
         "scope": "post_event_audit_only",
+        "uses_event_truth": False,
+        "used_as_model_feature": False,
+        "used_for_discovery_rank": False,
+    }
+
+
+def _public_market_context(value: dict[str, Any]) -> dict[str, Any] | None:
+    """Project completed read-only price observations for public reading.
+
+    These are event-relative price snapshots, not live quotes. The projection
+    excludes pending jobs, provider errors, raw payloads and snapshots attached
+    to obsolete event versions.
+    """
+
+    raw_assets = value.get("assets")
+    raw_assets = raw_assets if isinstance(raw_assets, list) else []
+    role_labels = {
+        "DIRECT_SECURITY": "直接证券",
+        "MARKET_BENCHMARK": "市场基准",
+        "SECTOR_PROXY": "行业代理",
+        "THEMATIC_PROXY": "观察代理",
+    }
+    fallback_roles = {
+        "PRIMARY": "DIRECT_SECURITY",
+        "SECTOR": "SECTOR_PROXY",
+        "MACRO_PROXY": "THEMATIC_PROXY",
+        "ECOSYSTEM_PROXY": "THEMATIC_PROXY",
+    }
+    asset_context: dict[str, dict[str, str]] = {}
+    for asset in raw_assets:
+        if not isinstance(asset, dict):
+            continue
+        asset_id = str(asset.get("asset_id") or "").strip()
+        try:
+            allowed = int(asset.get("market_observation_allowed") or 0) == 1
+            no_trading = int(asset.get("no_trading") or 0) == 1
+        except (TypeError, ValueError):
+            continue
+        if not asset_id or not allowed or not no_trading:
+            continue
+        symbol = str(asset.get("symbol") or "").strip()
+        provider_symbol = str(asset.get("provider_symbol") or "").strip()
+        canonical_symbol = symbol or provider_symbol
+        if not canonical_symbol:
+            continue
+        role = str(asset.get("display_role") or "").strip().upper()
+        if role not in role_labels:
+            role = fallback_roles.get(str(asset.get("relation_type") or "").upper(), "")
+        asset_context[asset_id] = {
+            "symbol": canonical_symbol[:32],
+            "provider_symbol": provider_symbol[:64],
+            "role": role,
+            "role_label": role_labels.get(role, ""),
+            "proxy_label": str(asset.get("proxy_label") or "").strip()[:120],
+        }
+
+    rows = value.get("market_snapshots")
+    if not isinstance(rows, list):
+        return None
+    projected: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        context = asset_context.get(str(row.get("asset_id") or ""))
+        if context is None:
+            continue
+        try:
+            if int(row.get("read_only") or 0) != 1:
+                continue
+            if int(row.get("no_trading") or 0) != 1:
+                continue
+            price = float(str(row.get("price") or ""))
+        except (TypeError, ValueError):
+            continue
+        if price <= 0 or price != price or price in {float("inf"), float("-inf")}:
+            continue
+        if str(row.get("market_job_status") or "").upper() != "COMPLETED":
+            continue
+        provider = str(row.get("provider") or "").strip().lower()
+        if provider not in {"twelve_data", "binance_public"}:
+            continue
+        provider_symbol = str(row.get("provider_symbol") or "").strip()
+        accepted_symbols = {
+            candidate.upper()
+            for candidate in (context["symbol"], context["provider_symbol"])
+            if candidate
+        }
+        if not provider_symbol or provider_symbol.upper() not in accepted_symbols:
+            continue
+        observed_at = str(row.get("provider_as_of") or row.get("captured_at") or "").strip()
+        if not observed_at:
+            continue
+        currency = str(row.get("currency") or "").strip().upper()
+        if currency and (not currency.replace("_", "").isalnum() or len(currency) > 12):
+            continue
+        item = {
+            "symbol": context["symbol"],
+            "price": round(price, 8),
+            "currency": currency or None,
+            "observed_at": observed_at[:40],
+            "provider": provider,
+            "observation_window": str(row.get("observation_window") or "")[:32],
+            "role": context["role"],
+            "role_label": context["role_label"],
+            "proxy_label": context["proxy_label"],
+        }
+        timestamp_precision = str(row.get("timestamp_precision") or "")
+        if timestamp_precision:
+            item["timestamp_precision"] = timestamp_precision
+        asset_id = str(row.get("asset_id") or "")
+        previous = projected.get(asset_id)
+        if previous is None or str(item["observed_at"]) >= str(previous["observed_at"]):
+            projected[asset_id] = item
+    items = sorted(projected.values(), key=lambda item: str(item["symbol"]))
+    if not items:
+        return None
+    return {
+        "items": items,
+        "scope": "event_relative_price_observation",
+        "is_live_quote": False,
         "uses_event_truth": False,
         "used_as_model_feature": False,
         "used_for_discovery_rank": False,
@@ -1577,6 +1707,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         market_reaction = _public_market_reaction(value)
         if market_reaction is not None:
             result["market_reaction"] = market_reaction
+        market_context = _public_market_context(value)
+        if market_context is not None:
+            result["market_context"] = market_context
         verification = value.get("verification_method")
         if isinstance(verification, dict):
             eligible_ids = {

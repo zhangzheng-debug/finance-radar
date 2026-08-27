@@ -10,6 +10,7 @@ Group=finance-radar
 WorkingDirectory=/opt/finance-radar/current
 Slice=finance-radar.slice
 EnvironmentFile=/etc/finance-radar.env
+Environment=FINANCE_RADAR_MARKET_CYCLE_EXTERNAL=1
 # Formal light-verification is deliberately opt-in and must be started through
 # a separately scoped, auditable batch.  The continuous collector may keep
 # ingesting and enriching evidence, but it may not autonomously mutate a
