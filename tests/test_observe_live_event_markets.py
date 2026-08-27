@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import io
 import json
 import sys
 import tempfile
@@ -352,6 +353,71 @@ class LiveMarketObserverTests(unittest.TestCase):
                     "SPY", self.ANCHOR.isoformat(), "secret", timeout=7
                 )
 
+    def test_twelve_rate_limit_is_distinct_from_a_job_failure(self) -> None:
+        error = observer.urllib.error.HTTPError(
+            "https://api.twelvedata.com/time_series",
+            429,
+            "Too Many Requests",
+            {},
+            io.BytesIO(b'{"message":"API credits exhausted"}'),
+        )
+        with patch.object(observer.urllib.request, "urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                observer.MarketRateLimitError,
+                "TWELVE_DATA_RATE_LIMITED: API credits exhausted",
+            ):
+                observer.fetch_twelve_minute_bar(
+                    "SPY", self.ANCHOR.isoformat(), "secret", timeout=7
+                )
+
+    def test_twelve_bad_request_and_missing_data_are_permanent(self) -> None:
+        for code, expected in ((400, "BAD_REQUEST"), (404, "NO_DATA")):
+            error = observer.urllib.error.HTTPError(
+                "https://api.twelvedata.com/time_series",
+                code,
+                "Provider error",
+                {},
+                io.BytesIO(b'{"message":"symbol or minute unavailable"}'),
+            )
+            with self.subTest(code=code), patch.object(
+                observer.urllib.request, "urlopen", side_effect=error
+            ):
+                with self.assertRaisesRegex(
+                    observer.PermanentMarketDataError,
+                    f"TWELVE_DATA_{expected}",
+                ):
+                    observer.fetch_twelve_minute_bar(
+                        "SPY", self.ANCHOR.isoformat(), "secret", timeout=7
+                    )
+
+    def test_known_us_non_trading_minutes_are_rejected_before_provider_call(self) -> None:
+        metadata = {
+            "session_timezone": "America/New_York",
+            "trading_weekdays": [0, 1, 2, 3, 4],
+            "holidays": [],
+        }
+        self.assertFalse(
+            observer._supports_exact_market_minute(
+                dt.datetime(2026, 7, 16, 7, 5, tzinfo=dt.timezone.utc),
+                asset_type="equity",
+                metadata=metadata,
+            )
+        )
+        self.assertTrue(
+            observer._supports_exact_market_minute(
+                dt.datetime(2026, 7, 16, 8, 0, tzinfo=dt.timezone.utc),
+                asset_type="equity",
+                metadata=metadata,
+            )
+        )
+        self.assertFalse(
+            observer._supports_exact_market_minute(
+                dt.datetime(2026, 7, 18, 15, 0, tzinfo=dt.timezone.utc),
+                asset_type="equity",
+                metadata=metadata,
+            )
+        )
+
     def test_equity_after_hours_uses_last_regular_close_as_initial_reference(self) -> None:
         after_hours = dt.datetime(2026, 7, 16, 20, 42, tzinfo=dt.timezone.utc)
         metadata = stable_json(
@@ -400,7 +466,7 @@ class LiveMarketObserverTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(job["scheduled_at"], "2026-07-16T19:59:00+00:00")
         self.assertEqual(job["offset_seconds"], -(43 * 60))
-        self.assertEqual(job["window_contract_version"], "market-windows-v3")
+        self.assertEqual(job["window_contract_version"], "market-windows-v4")
 
         self.connection.execute(
             """UPDATE market_jobs
@@ -436,7 +502,7 @@ class LiveMarketObserverTests(unittest.TestCase):
         self.assertEqual(repaired["scheduled_at"], "2026-07-16T19:59:00+00:00")
         self.assertEqual(repaired["status"], "PENDING")
         self.assertEqual(repaired["attempts"], 0)
-        self.assertEqual(repaired["window_contract_version"], "market-windows-v3")
+        self.assertEqual(repaired["window_contract_version"], "market-windows-v4")
 
     def test_near_time_empty_exact_bar_is_retryable(self) -> None:
         observed_at = (
@@ -764,6 +830,117 @@ class LiveMarketObserverTests(unittest.TestCase):
             ).fetchone()[0],
             5,
         )
+
+    def test_rate_limit_defers_without_consuming_job_attempts(self) -> None:
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+        requests = []
+
+        def rate_limited(symbol, scheduled_at, timeout):
+            requests.append((symbol, scheduled_at))
+            raise observer.MarketRateLimitError("TWELVE_DATA_RATE_LIMITED")
+
+        result = observer.run_pending(
+            self.connection,
+            now=self.ANCHOR + dt.timedelta(minutes=8),
+            binance_bar_requester=rate_limited,
+        )
+
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(result["errors"], 0)
+        self.assertEqual(result["deferred"], 2)
+        self.assertEqual(
+            result["providers"]["binance_public"]["status"], "RATE_LIMITED"
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT SUM(attempts) FROM market_jobs WHERE scheduled_at<=?",
+                ((self.ANCHOR + dt.timedelta(minutes=5)).isoformat(),),
+            ).fetchone()[0],
+            0,
+        )
+
+    def test_legacy_rate_limit_and_missing_data_outcomes_are_repaired(self) -> None:
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+        self.connection.execute(
+            """UPDATE market_jobs
+                  SET provider='twelve_data',status='RETRY',attempts=2,
+                      last_error='Twelve Data minute bars HTTP 429'
+                WHERE observation_window='initial'"""
+        )
+        self.connection.execute(
+            """UPDATE market_jobs
+                  SET provider='twelve_data',status='RETRY',attempts=1,
+                      last_error='Twelve Data minute bars HTTP 404'
+                WHERE observation_window='t_plus_5m'"""
+        )
+        self.connection.commit()
+
+        repaired = observer.repair_legacy_provider_outcomes(
+            self.connection, completed_at=self.ANCHOR.isoformat()
+        )
+
+        self.assertEqual(repaired, {"rate_limits_reset": 1, "no_data_closed": 1})
+        jobs = {
+            row["observation_window"]: row
+            for row in self.connection.execute(
+                """SELECT observation_window,status,attempts,last_error,completed_at
+                     FROM market_jobs
+                    WHERE observation_window IN ('initial','t_plus_5m')"""
+            )
+        }
+        self.assertEqual(
+            (jobs["initial"]["status"], jobs["initial"]["attempts"]),
+            ("PENDING", 1),
+        )
+        self.assertIsNone(jobs["initial"]["last_error"])
+        self.assertEqual(jobs["t_plus_5m"]["status"], "UNAVAILABLE")
+        self.assertEqual(
+            jobs["t_plus_5m"]["last_error"], "TWELVE_DATA_NO_DATA_LEGACY"
+        )
+
+    def test_due_scan_prioritizes_new_baseline_before_horizons(self) -> None:
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+        requested = []
+
+        def minute_bar(symbol, scheduled_at, timeout):
+            requested.append(scheduled_at)
+            return {
+                "symbol": symbol,
+                "price": "100",
+                "provider_as_of": scheduled_at,
+                "interval": "1min",
+                "price_kind": "bar_close",
+                "close": "100",
+            }
+
+        result = observer.run_pending(
+            self.connection,
+            now=self.ANCHOR + dt.timedelta(minutes=8),
+            binance_bar_requester=minute_bar,
+            max_due_jobs=1,
+        )
+
+        self.assertEqual(result["requested"], 1)
+        self.assertEqual(requested, [self.ANCHOR.isoformat()])
+        completed = self.connection.execute(
+            "SELECT observation_window FROM market_jobs WHERE status='COMPLETED'"
+        ).fetchone()
+        self.assertEqual(completed["observation_window"], "initial")
 
     def test_exact_bar_cache_is_shared_across_events_for_the_same_symbol_and_minute(self) -> None:
         now = utc_now()
@@ -1131,6 +1308,16 @@ class LiveMarketObserverTests(unittest.TestCase):
             (close_job["market_job_id"],),
         ).fetchone()
         self.assertEqual(link["offset_seconds"], 8 * 60 * 60 - 60)
+        horizons = {
+            row["observation_window"]: row["scheduled_at"]
+            for row in self.connection.execute(
+                """SELECT observation_window,scheduled_at FROM market_jobs
+                    WHERE asset_id='equity'
+                      AND observation_window IN ('t_plus_1d','t_plus_5d')"""
+            )
+        }
+        self.assertEqual(horizons["t_plus_1d"], "2026-07-17T19:59:00+00:00")
+        self.assertEqual(horizons["t_plus_5d"], "2026-07-23T19:59:00+00:00")
 
 
 if __name__ == "__main__":

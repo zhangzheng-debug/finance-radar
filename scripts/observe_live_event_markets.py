@@ -18,7 +18,6 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from zoneinfo import ZoneInfo
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -37,9 +36,10 @@ DEFAULT_REPORT = ROOT / "reports" / "live_market_observation_latest.md"
 BINANCE_MARKET_DATA_URL = "https://data-api.binance.vision/api/v3/klines"
 BINANCE_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]{5,24}$")
 ANCHOR_CONTRACT_VERSION = "market-anchor-v1"
-WINDOW_CONTRACT_VERSION = "market-windows-v3"
+WINDOW_CONTRACT_VERSION = "market-windows-v4"
 INITIAL_GRACE = dt.timedelta(minutes=2)
 MAX_MARKET_ATTEMPTS = 3
+MAX_DUE_JOB_SCAN = 1000
 EXACT_BAR_INGESTION_GRACE = dt.timedelta(seconds=30)
 EXACT_BAR_EMPTY_RETRY_WINDOW = dt.timedelta(minutes=15)
 HORIZON_WINDOWS: dict[str, tuple[dt.timedelta, dt.timedelta]] = {
@@ -53,6 +53,10 @@ HORIZON_WINDOWS: dict[str, tuple[dt.timedelta, dt.timedelta]] = {
 
 class PermanentMarketDataError(RuntimeError):
     """The provider cannot supply the requested exact minute."""
+
+
+class MarketRateLimitError(RuntimeError):
+    """The provider budget is temporarily exhausted; jobs remain untouched."""
 
 
 @dataclass(frozen=True)
@@ -199,6 +203,40 @@ def _regular_session_initial_reference(
         local_anchor.date(), asset_type=asset_type, metadata=metadata
     )
     return _closing_minute_start(previous_close) if previous_close else anchor
+
+
+def _supports_exact_market_minute(
+    scheduled_at: dt.datetime,
+    *,
+    asset_type: str,
+    metadata: dict[str, Any],
+) -> bool:
+    """Reject known non-trading minutes before spending a provider credit.
+
+    Crypto is continuous. For configured US exchange assets, the widest
+    provider-supported window is 04:00-20:00 New York time on a trading day.
+    Unknown calendars remain eligible so this guard never invents a schedule.
+    """
+
+    if asset_type.lower() == "crypto":
+        return True
+    timezone_name = str(metadata.get("session_timezone") or "").strip()
+    if timezone_name != "America/New_York":
+        return True
+    try:
+        local = _as_utc(scheduled_at).astimezone(ZoneInfo(timezone_name))
+    except ZoneInfoNotFoundError:
+        return True
+    weekdays = metadata.get("trading_weekdays", [0, 1, 2, 3, 4])
+    holidays = {str(value) for value in metadata.get("holidays", [])}
+    if not isinstance(weekdays, list) or not all(
+        isinstance(value, int) for value in weekdays
+    ):
+        return True
+    if local.weekday() not in weekdays or local.date().isoformat() in holidays:
+        return False
+    minute_of_day = local.hour * 60 + local.minute
+    return 4 * 60 <= minute_of_day < 20 * 60
 
 
 def _previous_regular_close_for_date(
@@ -639,13 +677,17 @@ def schedule_jobs(
                 asset_type=str(row["asset_type"]),
                 metadata=metadata,
             )
-            windows = [
-                ("initial", initial_reference),
-                *[
-                    (window, anchor + offset)
-                    for window, (offset, _grace) in HORIZON_WINDOWS.items()
-                ],
-            ]
+            windows = [("initial", initial_reference)]
+            intraday_windows = ("t_plus_5m", "t_plus_30m", "t_plus_2h")
+            windows.extend(
+                (window, anchor + HORIZON_WINDOWS[window][0])
+                for window in intraday_windows
+            )
+            if str(row["asset_type"]).lower() == "crypto":
+                windows.extend(
+                    (window, anchor + HORIZON_WINDOWS[window][0])
+                    for window in ("t_plus_1d", "t_plus_5d")
+                )
             close = _next_regular_close(
                 anchor,
                 asset_type=str(row["asset_type"]),
@@ -653,11 +695,35 @@ def schedule_jobs(
             )
             if close is not None:
                 windows.append(("next_close", _closing_minute_start(close)))
+                for window, close_count in (("t_plus_1d", 1), ("t_plus_5d", 5)):
+                    horizon_close = _nth_regular_close_after(
+                        close,
+                        count=close_count,
+                        asset_type=str(row["asset_type"]),
+                        metadata=metadata,
+                    )
+                    if horizon_close is not None:
+                        windows.append(
+                            (window, _closing_minute_start(horizon_close))
+                        )
+            elif str(row["asset_type"]).lower() != "crypto":
+                # Preserve the exact elapsed-time contract for assets whose
+                # exchange calendar is genuinely unknown. The provider, not a
+                # guessed calendar, remains the authority for availability.
+                windows.extend(
+                    (window, anchor + HORIZON_WINDOWS[window][0])
+                    for window in ("t_plus_1d", "t_plus_5d")
+                )
 
         for window, scheduled in windows:
-            status = "PENDING"
-            completed_at = None
-            last_error = None
+            minute_supported = _supports_exact_market_minute(
+                scheduled,
+                asset_type=str(row["asset_type"]),
+                metadata=metadata,
+            )
+            status = "PENDING" if minute_supported else "UNAVAILABLE"
+            completed_at = None if minute_supported else persisted_at
+            last_error = None if minute_supported else "NO_TRADABLE_MINUTE_FOR_WINDOW"
             market_job_id = stable_id(
                 "MJOB",
                 row["event_id"],
@@ -699,6 +765,32 @@ def schedule_jobs(
                     "SELECT 1 FROM market_snapshots WHERE market_job_id=? LIMIT 1",
                     (market_job_id,),
                 ).fetchone()
+                if (
+                    existing is not None
+                    and snapshot_exists is None
+                    and not minute_supported
+                    and str(existing["status"]) in {"PENDING", "RETRY"}
+                ):
+                    connection.execute(
+                        """UPDATE market_jobs
+                              SET status='UNAVAILABLE',completed_at=?,
+                                  last_error='NO_TRADABLE_MINUTE_FOR_WINDOW',no_trading=1
+                            WHERE market_job_id=?""",
+                        (persisted_at, market_job_id),
+                    )
+                    connection.execute(
+                        """UPDATE market_job_anchor_links
+                              SET anchor_id=?,offset_seconds=?,window_contract_version=?
+                            WHERE market_job_id=?""",
+                        (
+                            anchor_id,
+                            int((scheduled - anchor).total_seconds()),
+                            WINDOW_CONTRACT_VERSION,
+                            market_job_id,
+                        ),
+                    )
+                    inserted += 1
+                    continue
                 can_retarget_initial = (
                     window == "initial"
                     and existing is not None
@@ -1028,6 +1120,25 @@ def normalize_twelve_minute_bar(
     }
 
 
+def _http_error_message(exc: urllib.error.HTTPError) -> str:
+    """Extract a bounded provider message without logging request credentials."""
+
+    try:
+        raw = exc.read(2048)
+    except (AttributeError, OSError):
+        return ""
+    if not raw:
+        return ""
+    text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        payload = None
+    if isinstance(payload, dict):
+        text = str(payload.get("message") or payload.get("status") or "")
+    return re.sub(r"\s+", " ", text).strip()[:300]
+
+
 def fetch_twelve_minute_bar(
     symbol: str, scheduled_at: str, api_key: str, timeout: float = 20.0
 ) -> dict[str, Any]:
@@ -1063,11 +1174,24 @@ def fetch_twelve_minute_bar(
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
+        detail = _http_error_message(exc)
         if exc.code == 403 and request_parameters.get("prepost") == "true":
             raise PermanentMarketDataError(
                 "EXTENDED_HOURS_NOT_AVAILABLE_FROM_PROVIDER"
             ) from exc
-        raise RuntimeError(f"Twelve Data minute bars HTTP {exc.code}") from exc
+        if exc.code == 429:
+            raise MarketRateLimitError(
+                "TWELVE_DATA_RATE_LIMITED" + (f": {detail}" if detail else "")
+            ) from exc
+        if exc.code in {400, 404}:
+            label = "BAD_REQUEST" if exc.code == 400 else "NO_DATA"
+            raise PermanentMarketDataError(
+                f"TWELVE_DATA_{label}" + (f": {detail}" if detail else "")
+            ) from exc
+        raise RuntimeError(
+            f"Twelve Data minute bars HTTP {exc.code}"
+            + (f": {detail}" if detail else "")
+        ) from exc
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise RuntimeError("Twelve Data minute bars request failed") from exc
     if not isinstance(payload, dict):
@@ -1220,6 +1344,40 @@ def _mark_unavailable(connection: Any, rows: list[Any], error: str) -> None:
     connection.commit()
 
 
+def repair_legacy_provider_outcomes(
+    connection: Any, *, completed_at: str
+) -> dict[str, int]:
+    """Repair outcomes written before provider errors had explicit semantics."""
+
+    before = connection.total_changes
+    connection.execute(
+        """UPDATE market_jobs
+              SET status='PENDING',completed_at=NULL,
+                  attempts=MAX(attempts-1,0),last_error=NULL,no_trading=1
+            WHERE provider='twelve_data'
+              AND status IN ('RETRY','UNAVAILABLE')
+              AND last_error LIKE 'Twelve Data minute bars HTTP 429%'"""
+    )
+    rate_limits_reset = connection.total_changes - before
+
+    before = connection.total_changes
+    connection.execute(
+        """UPDATE market_jobs
+              SET status='UNAVAILABLE',completed_at=?,
+                  last_error='TWELVE_DATA_NO_DATA_LEGACY',no_trading=1
+            WHERE provider='twelve_data'
+              AND status IN ('PENDING','RETRY','UNAVAILABLE')
+              AND last_error LIKE 'Twelve Data minute bars HTTP 404%'""",
+        (completed_at,),
+    )
+    no_data_closed = connection.total_changes - before
+    connection.commit()
+    return {
+        "rate_limits_reset": rate_limits_reset,
+        "no_data_closed": no_data_closed,
+    }
+
+
 def _persist_quotes(
     connection: Any,
     rows: list[Any],
@@ -1328,7 +1486,7 @@ def _exact_historical_payload(
     fetcher: Callable[[str, str], dict[str, Any]] | None,
     fetched_at: str,
     max_provider_requests: int,
-) -> tuple[dict[str, Any], list[Any], int, int, int, int]:
+) -> tuple[dict[str, Any], list[Any], int, int, int, int, int, int, str | None]:
     """Fetch each provider/symbol/minute once and fan it out to event jobs."""
 
     grouped: dict[tuple[str, str, str, str, str], list[Any]] = {}
@@ -1342,9 +1500,13 @@ def _exact_historical_payload(
     payload: dict[str, Any] = {}
     ready_rows: list[Any] = []
     errors = 0
+    unavailable = 0
     provider_requests = 0
     cache_hits = 0
     deferred = 0
+    rate_limited = 0
+    rate_limit_reason = None
+    provider_blocked = False
     for (_provider, asset_id, _interval, _bar_time, symbol), grouped_rows in grouped.items():
         scheduled_at = str(grouped_rows[0]["scheduled_at"])
         quote = _cached_market_bar(
@@ -1357,7 +1519,7 @@ def _exact_historical_payload(
         if quote is not None:
             cache_hits += 1
         else:
-            if fetcher is None:
+            if fetcher is None or provider_blocked:
                 deferred += len(grouped_rows)
                 continue
             if provider_requests >= max_provider_requests:
@@ -1378,9 +1540,17 @@ def _exact_historical_payload(
                     quote=quote,
                     fetched_at=fetched_at,
                 )
+            except MarketRateLimitError as exc:
+                # A provider quota is not a failed event job. Preserve attempts
+                # and stop spending requests for the rest of this cycle.
+                provider_blocked = True
+                rate_limited += 1
+                rate_limit_reason = str(exc)[:300]
+                deferred += len(grouped_rows)
+                continue
             except PermanentMarketDataError as exc:
                 _mark_unavailable(connection, grouped_rows, str(exc))
-                errors += len(grouped_rows)
+                unavailable += len(grouped_rows)
                 continue
             except (RuntimeError, ValueError) as exc:
                 _mark_retry(connection, grouped_rows, str(exc))
@@ -1390,7 +1560,17 @@ def _exact_historical_payload(
             payload[str(row["market_job_id"])] = quote
             ready_rows.append(row)
     connection.commit()
-    return payload, ready_rows, errors, provider_requests, cache_hits, deferred
+    return (
+        payload,
+        ready_rows,
+        errors,
+        unavailable,
+        provider_requests,
+        cache_hits,
+        deferred,
+        rate_limited,
+        rate_limit_reason,
+    )
 
 
 def upsert_horizon_metrics(connection: Any, *, updated_at: str | None = None) -> int:
@@ -1498,8 +1678,12 @@ def run_pending(
     timeout: float = 20.0,
     now: dt.datetime | None = None,
     max_exact_requests_per_provider: int = 6,
+    max_due_jobs: int = MAX_DUE_JOB_SCAN,
 ) -> dict[str, Any]:
     now = _as_utc(now or dt.datetime.now(dt.timezone.utc))
+    legacy_repairs = repair_legacy_provider_outcomes(
+        connection, completed_at=now.isoformat()
+    )
     superseded_version_jobs = cancel_superseded_version_jobs(
         connection, completed_at=now.isoformat()
     )
@@ -1538,11 +1722,21 @@ def run_pending(
         WHERE j.status IN ('PENDING','RETRY')
           AND j.provider IN ('twelve_data','binance_public')
           AND j.no_trading=1
-          AND datetime(j.scheduled_at)<=datetime(?)
-          AND datetime(anchor.known_at)<=datetime(?)
-        ORDER BY j.attempts ASC,j.scheduled_at DESC,j.market_job_id
+          AND j.scheduled_at<=?
+          AND anchor.known_at<=?
+        ORDER BY CASE j.observation_window
+                   WHEN 'initial' THEN 0
+                   WHEN 'next_close' THEN 1
+                   WHEN 't_plus_5m' THEN 2
+                   WHEN 't_plus_30m' THEN 3
+                   WHEN 't_plus_2h' THEN 4
+                   WHEN 't_plus_1d' THEN 5
+                   WHEN 't_plus_5d' THEN 6
+                   ELSE 99 END,
+                 j.scheduled_at DESC,j.attempts ASC,j.market_job_id
+        LIMIT ?
         """,
-        (now.isoformat(), now.isoformat()),
+        (now.isoformat(), now.isoformat(), max(1, int(max_due_jobs))),
     ).fetchall()
     rows = [
         row
@@ -1554,6 +1748,7 @@ def run_pending(
         "requested": len(rows),
         "completed": 0,
         "errors": 0,
+        "unavailable": 0,
         "skipped_missing_key": 0,
         "providers": {},
         "missed_windows": missed_windows,
@@ -1561,6 +1756,7 @@ def run_pending(
         "superseded_version_jobs": superseded_version_jobs,
         "deferred": 0,
         "metrics_upserted": 0,
+        "legacy_repairs": legacy_repairs,
     }
     if not rows:
         result["metrics_upserted"] = upsert_horizon_metrics(
@@ -1576,9 +1772,12 @@ def run_pending(
             "requested": len(provider_rows),
             "completed": 0,
             "errors": 0,
+            "unavailable": 0,
             "provider_requests": 0,
             "cache_hits": 0,
             "deferred": 0,
+            "rate_limited": 0,
+            "rate_limit_reason": None,
             "status": "PENDING",
         }
         result["providers"][provider] = provider_result
@@ -1610,9 +1809,12 @@ def run_pending(
                     payload,
                     ready_rows,
                     fetch_errors,
+                    unavailable,
                     provider_requests,
                     cache_hits,
                     deferred,
+                    rate_limited,
+                    rate_limit_reason,
                 ) = _exact_historical_payload(
                     connection,
                     provider_rows,
@@ -1620,7 +1822,7 @@ def run_pending(
                     symbol_for_row=symbol_for_row,
                     fetcher=fetcher,
                     fetched_at=now.isoformat(),
-                    max_provider_requests=max(1, max_exact_requests_per_provider),
+                    max_provider_requests=max(0, max_exact_requests_per_provider),
                 )
                 completed, persist_errors = _persist_quotes(
                     connection,
@@ -1634,7 +1836,11 @@ def run_pending(
                 provider_result["provider_requests"] = provider_requests
                 provider_result["cache_hits"] = cache_hits
                 provider_result["deferred"] = deferred
+                provider_result["unavailable"] = unavailable
+                provider_result["rate_limited"] = rate_limited
+                provider_result["rate_limit_reason"] = rate_limit_reason
                 result["deferred"] += deferred
+                result["unavailable"] += unavailable
                 if provider == "twelve_data" and not api_key.strip():
                     result["skipped_missing_key"] += deferred
             elif provider == "binance_public":
@@ -1669,6 +1875,8 @@ def run_pending(
                 "status": (
                     "DEGRADED"
                     if errors
+                    else "RATE_LIMITED"
+                    if provider_result.get("rate_limited")
                     else "SKIPPED_MISSING_KEY"
                     if (
                         provider == "twelve_data"
@@ -1787,7 +1995,9 @@ def main() -> int:
         write_report(args.report, connection, scheduled, result)
         print(f"scheduled={scheduled} {stable_json(result)}")
         print(f"REPORT={args.report}")
-        return 1 if result["errors"] else 0
+        # Handled market-data outcomes belong in the report; only an unhandled
+        # exception should make the process fail at the service-manager layer.
+        return 0
     finally:
         connection.close()
 

@@ -174,7 +174,10 @@ def main() -> int:
     write_report(report_path, result)
     print(stable_json(result))
     print(f"REPORT={report_path}")
-    return 1 if result["market"].get("errors") else 0
+    # Per-job/provider errors are already persisted in the cycle receipt and
+    # must not make systemd label a completed bounded cycle as a crashed unit.
+    # Unhandled infrastructure failures still raise and exit non-zero.
+    return 0
 
 
 if __name__ == "__main__":

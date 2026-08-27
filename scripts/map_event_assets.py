@@ -311,7 +311,7 @@ def _deactivate_old_automatic_impacts(
                    last_error='mapping_superseded'
              WHERE event_id=?
                AND asset_id IN ({placeholders})
-               AND status IN ('PENDING','RETRY')
+               AND status IN ('PENDING','RETRY','UNAVAILABLE')
             """,
             (now, event_id, *removed_asset_ids),
         )
