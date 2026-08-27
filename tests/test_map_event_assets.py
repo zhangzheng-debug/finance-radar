@@ -100,6 +100,7 @@ class EventAssetMappingPersistenceTests(unittest.TestCase):
         for row in metadata_rows:
             metadata = json.loads(row["metadata_json"])
             self.assertEqual(metadata["session_timezone"], "America/New_York")
+            self.assertEqual(metadata["regular_open_local"], "09:30")
             self.assertEqual(metadata["regular_close_local"], "16:00")
 
     def test_apply_is_incremental_and_idempotent(self) -> None:

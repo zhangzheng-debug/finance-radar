@@ -339,6 +339,105 @@ class LiveMarketObserverTests(unittest.TestCase):
         query = parse_qs(urlparse(captured_url).query)
         self.assertNotIn("prepost", query)
 
+    def test_twelve_extended_hours_403_is_permanent(self) -> None:
+        error = observer.urllib.error.HTTPError(
+            "https://api.twelvedata.com/time_series", 403, "Forbidden", {}, None
+        )
+        with patch.object(observer.urllib.request, "urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                observer.PermanentMarketDataError,
+                "EXTENDED_HOURS_NOT_AVAILABLE_FROM_PROVIDER",
+            ):
+                observer.fetch_twelve_minute_bar(
+                    "SPY", self.ANCHOR.isoformat(), "secret", timeout=7
+                )
+
+    def test_equity_after_hours_uses_last_regular_close_as_initial_reference(self) -> None:
+        after_hours = dt.datetime(2026, 7, 16, 20, 42, tzinfo=dt.timezone.utc)
+        metadata = stable_json(
+            {
+                "session_timezone": "America/New_York",
+                "regular_close_local": "16:00",
+                "trading_weekdays": [0, 1, 2, 3, 4],
+                "holidays": [],
+            }
+        )
+        now = utc_now()
+        self.connection.execute(
+            "UPDATE raw_observations SET source_published_at=? WHERE observation_id='obs'",
+            (after_hours.isoformat(),),
+        )
+        self.connection.execute(
+            """INSERT INTO assets VALUES (
+               'equity-after-hours','equity','NVDA','NVDA','NASDAQ','USD',?,?,?)""",
+            (metadata, now, now),
+        )
+        self.connection.execute(
+            """INSERT INTO event_asset_impacts(
+               impact_id,event_id,asset_id,relation_type,direction,impact_score,
+               confidence,reason_codes_json,assessment_source,mapping_decision_id,
+               market_observation_allowed,no_trading,created_at,updated_at
+               ) VALUES (
+               'impact-equity-after-hours','evt','equity-after-hours','PRIMARY',
+               'ABSTAIN',0,0.98,'[]','test',NULL,1,1,?,?)""",
+            (now, now),
+        )
+        self.connection.commit()
+
+        observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=after_hours + dt.timedelta(minutes=2),
+        )
+        job = self.connection.execute(
+            """SELECT j.*,link.offset_seconds,link.window_contract_version
+                 FROM market_jobs j
+                 JOIN market_job_anchor_links link
+                   ON link.market_job_id=j.market_job_id
+                WHERE j.asset_id='equity-after-hours'
+                  AND j.observation_window='initial'"""
+        ).fetchone()
+        self.assertEqual(job["scheduled_at"], "2026-07-16T19:59:00+00:00")
+        self.assertEqual(job["offset_seconds"], -(43 * 60))
+        self.assertEqual(job["window_contract_version"], "market-windows-v3")
+
+        self.connection.execute(
+            """UPDATE market_jobs
+                  SET scheduled_at=?,status='RETRY',attempts=1,last_error='legacy'
+                WHERE market_job_id=?""",
+            (after_hours.isoformat(), job["market_job_id"]),
+        )
+        self.connection.execute(
+            """UPDATE market_job_anchor_links
+                  SET offset_seconds=0,window_contract_version='market-windows-v2'
+                WHERE market_job_id=?""",
+            (job["market_job_id"],),
+        )
+        self.connection.commit()
+
+        self.assertGreaterEqual(
+            observer.schedule_jobs(
+                self.connection,
+                freshness_days=3,
+                today=dt.date(2026, 7, 16),
+                now=after_hours + dt.timedelta(minutes=3),
+            ),
+            1,
+        )
+        repaired = self.connection.execute(
+            """SELECT j.*,link.offset_seconds,link.window_contract_version
+                 FROM market_jobs j
+                 JOIN market_job_anchor_links link
+                   ON link.market_job_id=j.market_job_id
+                WHERE j.market_job_id=?""",
+            (job["market_job_id"],),
+        ).fetchone()
+        self.assertEqual(repaired["scheduled_at"], "2026-07-16T19:59:00+00:00")
+        self.assertEqual(repaired["status"], "PENDING")
+        self.assertEqual(repaired["attempts"], 0)
+        self.assertEqual(repaired["window_contract_version"], "market-windows-v3")
+
     def test_near_time_empty_exact_bar_is_retryable(self) -> None:
         observed_at = (
             self.ANCHOR

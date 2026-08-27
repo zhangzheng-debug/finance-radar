@@ -181,6 +181,7 @@ def _upsert_asset(
         in {"", "NYSE", "NYSE AMERICAN", "NASDAQ", "TWELVEDATA"}
     ):
         metadata.setdefault("session_timezone", "America/New_York")
+        metadata.setdefault("regular_open_local", "09:30")
         metadata.setdefault("regular_close_local", "16:00")
         metadata.setdefault("trading_weekdays", [0, 1, 2, 3, 4])
         metadata.setdefault("holidays", [])

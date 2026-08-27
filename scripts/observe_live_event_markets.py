@@ -37,7 +37,7 @@ DEFAULT_REPORT = ROOT / "reports" / "live_market_observation_latest.md"
 BINANCE_MARKET_DATA_URL = "https://data-api.binance.vision/api/v3/klines"
 BINANCE_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]{5,24}$")
 ANCHOR_CONTRACT_VERSION = "market-anchor-v1"
-WINDOW_CONTRACT_VERSION = "market-windows-v2"
+WINDOW_CONTRACT_VERSION = "market-windows-v3"
 INITIAL_GRACE = dt.timedelta(minutes=2)
 MAX_MARKET_ATTEMPTS = 3
 EXACT_BAR_INGESTION_GRACE = dt.timedelta(seconds=30)
@@ -141,6 +141,64 @@ def _closing_minute_start(close_at: dt.datetime) -> dt.datetime:
     """Return the start timestamp of the one-minute bar ending at a close."""
 
     return close_at - dt.timedelta(minutes=1)
+
+
+def _regular_session_initial_reference(
+    anchor: dt.datetime, *, asset_type: str, metadata: dict[str, Any]
+) -> dt.datetime:
+    """Use the event minute in-session, otherwise the latest regular close.
+
+    An after-hours issuer announcement must still have a useful, auditable
+    baseline even when the provider plan does not include extended-hours bars.
+    The latest regular-session closing minute is observable before the event,
+    so it cannot leak a later market reaction into the baseline.
+    """
+
+    if asset_type.lower() == "crypto":
+        return anchor
+    timezone_name = str(metadata.get("session_timezone") or "").strip()
+    open_text = str(
+        metadata.get("regular_open_local")
+        or ("09:30" if timezone_name == "America/New_York" else "")
+    ).strip()
+    close_text = str(metadata.get("regular_close_local") or "").strip()
+    if (
+        not timezone_name
+        or not re.fullmatch(r"\d{2}:\d{2}", open_text)
+        or not re.fullmatch(r"\d{2}:\d{2}", close_text)
+    ):
+        return anchor
+    try:
+        zone = ZoneInfo(timezone_name)
+        open_hour, open_minute = (int(part) for part in open_text.split(":"))
+        close_hour, close_minute = (int(part) for part in close_text.split(":"))
+    except (ZoneInfoNotFoundError, ValueError):
+        return anchor
+    weekdays = metadata.get("trading_weekdays", [0, 1, 2, 3, 4])
+    holidays = {str(value) for value in metadata.get("holidays", [])}
+    if not isinstance(weekdays, list) or not all(
+        isinstance(value, int) for value in weekdays
+    ):
+        return anchor
+    local_anchor = anchor.astimezone(zone)
+    open_local = dt.datetime.combine(
+        local_anchor.date(), dt.time(open_hour, open_minute), tzinfo=zone
+    )
+    close_local = dt.datetime.combine(
+        local_anchor.date(), dt.time(close_hour, close_minute), tzinfo=zone
+    )
+    is_trading_day = (
+        local_anchor.weekday() in weekdays
+        and local_anchor.date().isoformat() not in holidays
+    )
+    if is_trading_day and open_local <= local_anchor < close_local:
+        return anchor
+    if is_trading_day and local_anchor >= close_local:
+        return _closing_minute_start(close_local.astimezone(dt.timezone.utc))
+    previous_close = _previous_regular_close_for_date(
+        local_anchor.date(), asset_type=asset_type, metadata=metadata
+    )
+    return _closing_minute_start(previous_close) if previous_close else anchor
 
 
 def _previous_regular_close_for_date(
@@ -576,8 +634,13 @@ def schedule_jobs(
                 if close is not None:
                     windows.append((window, _closing_minute_start(close)))
         else:
+            initial_reference = _regular_session_initial_reference(
+                anchor,
+                asset_type=str(row["asset_type"]),
+                metadata=metadata,
+            )
             windows = [
-                ("initial", anchor),
+                ("initial", initial_reference),
                 *[
                     (window, anchor + offset)
                     for window, (offset, _grace) in HORIZON_WINDOWS.items()
@@ -624,6 +687,49 @@ def schedule_jobs(
             )
             was_inserted = connection.total_changes > before
             if not was_inserted:
+                existing = connection.execute(
+                    """SELECT j.status,j.scheduled_at,link.window_contract_version
+                         FROM market_jobs j
+                         LEFT JOIN market_job_anchor_links link
+                           ON link.market_job_id=j.market_job_id
+                        WHERE j.market_job_id=?""",
+                    (market_job_id,),
+                ).fetchone()
+                snapshot_exists = connection.execute(
+                    "SELECT 1 FROM market_snapshots WHERE market_job_id=? LIMIT 1",
+                    (market_job_id,),
+                ).fetchone()
+                can_retarget_initial = (
+                    window == "initial"
+                    and existing is not None
+                    and snapshot_exists is None
+                    and str(existing["status"]) in {"PENDING", "RETRY", "UNAVAILABLE"}
+                    and (
+                        str(existing["scheduled_at"]) != scheduled.isoformat()
+                        or str(existing["window_contract_version"] or "")
+                        != WINDOW_CONTRACT_VERSION
+                    )
+                )
+                if can_retarget_initial:
+                    connection.execute(
+                        """UPDATE market_jobs
+                              SET scheduled_at=?,status='PENDING',completed_at=NULL,
+                                  attempts=0,last_error=NULL,no_trading=1
+                            WHERE market_job_id=?""",
+                        (scheduled.isoformat(), market_job_id),
+                    )
+                    connection.execute(
+                        """UPDATE market_job_anchor_links
+                              SET anchor_id=?,offset_seconds=?,window_contract_version=?
+                            WHERE market_job_id=?""",
+                        (
+                            anchor_id,
+                            int((scheduled - anchor).total_seconds()),
+                            WINDOW_CONTRACT_VERSION,
+                            market_job_id,
+                        ),
+                    )
+                    inserted += 1
                 continue
             connection.execute(
                 """INSERT INTO market_job_anchor_links(
@@ -957,6 +1063,10 @@ def fetch_twelve_minute_bar(
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
+        if exc.code == 403 and request_parameters.get("prepost") == "true":
+            raise PermanentMarketDataError(
+                "EXTENDED_HOURS_NOT_AVAILABLE_FROM_PROVIDER"
+            ) from exc
         raise RuntimeError(f"Twelve Data minute bars HTTP {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise RuntimeError("Twelve Data minute bars request failed") from exc
