@@ -35,13 +35,13 @@ def test_market_cycle_maps_schedules_and_drains_bounded_jobs(monkeypatch) -> Non
 
     mapping.assert_called_once_with(
         connection,
-        freshness_days=14,
+        freshness_days=0,
         today=date(2026, 8, 27),
         apply=True,
     )
     schedule.assert_called_once_with(
         connection,
-        freshness_days=14,
+        freshness_days=0,
         today=date(2026, 8, 27),
     )
     pending.assert_called_once_with(
@@ -52,6 +52,11 @@ def test_market_cycle_maps_schedules_and_drains_bounded_jobs(monkeypatch) -> Non
     )
     assert result["market"]["scheduled"] == 4
     assert result["market"]["followups_scheduled"] == 4
+    assert result["configuration"] == {
+        "mapping_mode": "apply",
+        "freshness_days": 0,
+        "request_limit": 7,
+    }
     assert result["no_trading"] is True
 
 

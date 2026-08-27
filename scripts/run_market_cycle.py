@@ -33,7 +33,7 @@ def run_market_cycle(
     api_key: str,
     timeout: float,
     request_limit: int,
-    freshness_days: int = 14,
+    freshness_days: int = 0,
     today: dt.date | None = None,
 ) -> dict[str, Any]:
     """Map high-confidence assets and drain a bounded set of due price jobs."""
@@ -46,7 +46,7 @@ def run_market_cycle(
     if mode in {"shadow", "apply"}:
         mapping = map_event_assets(
             connection,
-            freshness_days=max(1, int(freshness_days)),
+            freshness_days=max(0, int(freshness_days)),
             today=today,
             apply=mode == "apply",
         )
@@ -57,7 +57,7 @@ def run_market_cycle(
         }
     scheduled = schedule_jobs(
         connection,
-        freshness_days=max(1, int(freshness_days)),
+        freshness_days=max(0, int(freshness_days)),
         today=today,
     )
     followups_before = schedule_followup_jobs(connection)
@@ -75,6 +75,11 @@ def run_market_cycle(
         "finished_at": utc_now(),
         "mapping": mapping,
         "market": market,
+        "configuration": {
+            "mapping_mode": mode,
+            "freshness_days": max(0, int(freshness_days)),
+            "request_limit": max(1, int(request_limit)),
+        },
         "no_trading": True,
     }
 
@@ -103,7 +108,7 @@ def main() -> int:
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV)
     parser.add_argument("--report", type=Path)
     parser.add_argument("--timeout", type=float, default=30.0)
-    parser.add_argument("--freshness-days", type=int, default=14)
+    parser.add_argument("--freshness-days", type=int)
     args = parser.parse_args()
     load_dotenv(args.env_file)
     settings = Settings.from_env()
@@ -119,8 +124,18 @@ def main() -> int:
     except ValueError:
         request_limit = 6
     mapping_mode = os.environ.get(
-        "FINANCE_RADAR_ASSET_MAPPING_MODE", "apply"
+        "FINANCE_RADAR_ASSET_MAPPING_MODE", "shadow"
     ).strip().lower()
+    if args.freshness_days is None:
+        try:
+            freshness_days = max(
+                0,
+                int(os.environ.get("MARKET_MAPPING_FRESHNESS_DAYS", "0") or "0"),
+            )
+        except ValueError:
+            freshness_days = 0
+    else:
+        freshness_days = max(0, int(args.freshness_days))
     connection = open_ledger(db_path)
     try:
         result = run_market_cycle(
@@ -129,7 +144,7 @@ def main() -> int:
             api_key=os.environ.get("TWELVE_DATA_API_KEY", "").strip(),
             timeout=args.timeout,
             request_limit=request_limit,
-            freshness_days=args.freshness_days,
+            freshness_days=freshness_days,
         )
     finally:
         connection.close()

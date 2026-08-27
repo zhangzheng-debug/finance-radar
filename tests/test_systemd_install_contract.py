@@ -275,8 +275,9 @@ def test_market_observation_runs_as_a_bounded_independent_timer() -> None:
 
     assert "Type=oneshot" in service
     assert "scripts/run_market_cycle.py" in service
-    assert "FINANCE_RADAR_ASSET_MAPPING_MODE=apply" in service
-    assert "MARKET_EXACT_BAR_REQUEST_LIMIT=6" in service
+    assert "EnvironmentFile=/etc/finance-radar.env" in service
+    assert "FINANCE_RADAR_ASSET_MAPPING_MODE=" not in service
+    assert "MARKET_EXACT_BAR_REQUEST_LIMIT=" not in service
     assert "/usr/bin/flock -n /run/finance-radar-market/market.lock" in service
     assert "MemoryMax=280M" in service
     assert "ReadWritePaths=/opt/finance-radar/shared/data" in service

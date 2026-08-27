@@ -73,6 +73,18 @@ requests per provider per cycle. Override only after checking provider quota:
 MARKET_EXACT_BAR_REQUEST_LIMIT=6
 ```
 
+Initial production activation is deliberately current-day first:
+
+```text
+MARKET_MAPPING_FRESHNESS_DAYS=0
+```
+
+After the current-day queue drains and public samples are verified, expand the
+same setting to `1`, `7` and finally `14`. Mapping a production-sized 14-day
+history in one first cycle is forbidden because it can create many more exact
+bar jobs than the provider budget can drain promptly. The cycle report records
+the effective mode, freshness window and request cap without exposing secrets.
+
 ## Rollout controls
 
 Automatic mapping remains disabled by default when the legacy continuous worker
@@ -93,10 +105,11 @@ FINANCE_RADAR_ASSET_MAPPING_MODE=apply
 
 Before enabling `finance-radar-market.timer`, review a 50–100 event sample for
 rule precision, proxy clarity, exact-bar availability, provider quota and public
-display rights. The production timer runs the mapper in `apply` mode and keeps
-mapping, scheduling and exact-bar capture outside the five-minute collection
-cycle. Mode activation and production deployment remain separate operator
-actions.
+display rights. The production timer keeps mapping, scheduling and exact-bar
+capture outside the five-minute collection cycle. The script defaults to
+`shadow` when the environment setting is absent; production must explicitly
+set `apply` before new mapping decisions are written. Mode activation and
+production deployment remain separate operator actions.
 
 Events whose source exposes only a calendar date do not receive intraday
 T+5m/T+30m/T+2h claims. For exchange-traded assets the market worker instead
