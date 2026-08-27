@@ -39,6 +39,14 @@ selected asset, including rule id, policy version, policy SHA-256, rank and
 display role. A company ticker is a direct security. GLD, USO, BNO, SPY and TLT
 are observation proxies or benchmarks, not evidence that an event occurred.
 
+A canonical company/ticker pair is not enough to create a direct-security
+mapping. The selected source capture must name the same company, and V1 admits
+canonical tickers only from the configured SEC, Sharadar research or FDA source
+families. This prevents country names, ordinary uppercase words and unrelated
+companies mentioned in an aggregator headline from being treated as securities.
+Public-news company mapping stays fail-closed until an independently tested
+issuer-resolution contract exists.
+
 V1 is deliberately narrow: direct company securities, armed-conflict/energy
 transmission, monetary-policy decisions and inflation releases. It does not
 guess an asset for every story. Sector ETFs, currencies, rates futures and

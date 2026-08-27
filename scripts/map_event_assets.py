@@ -120,6 +120,7 @@ def _selected_events(
         )
         SELECT e.event_id,e.current_version,e.status,e.event_family,e.event_type,
                e.event_date,e.ticker_at_event,e.company_name,ev.facts_json,
+               e.discovery_source,
                capture.observation_id,capture.title AS source_title,
                capture.summary AS source_summary,capture.content_sha256,
                capture.source_published_at,

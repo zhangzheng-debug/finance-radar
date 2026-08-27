@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_version": "event-asset-mapping-v1.1.0",
+  "policy_version": "event-asset-mapping-v1.1.1",
   "max_assets_per_event": 3,
   "direction": "ABSTAIN",
   "impact_score": 0,
@@ -78,7 +78,10 @@
       "priority": 10,
       "match": {
         "company_ticker": true,
-        "company_name_required": true
+        "company_name_required": true,
+        "source_patterns": [
+          "^(?:sec_current_filings|sharadar_active_research|fda_medwatch)$"
+        ]
       },
       "assets": ["$TICKER", "SPY"]
     },

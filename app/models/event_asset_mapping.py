@@ -80,6 +80,7 @@ MATCH_FIELDS = frozenset(
     {
         "company_ticker",
         "company_name_required",
+        "source_patterns",
         "event_family_patterns",
         "event_type_patterns",
         "any_patterns",
@@ -133,6 +134,7 @@ class MappingRule:
     priority: int
     company_ticker: bool
     company_name_required: bool
+    source_patterns: tuple[Pattern[str], ...]
     event_family_patterns: tuple[Pattern[str], ...]
     event_type_patterns: tuple[Pattern[str], ...]
     any_patterns: tuple[Pattern[str], ...]
@@ -280,6 +282,9 @@ def _parse_rule(
     if company_name_required and not company_ticker:
         raise ValueError(f"mapping rule {rule_id} requires a ticker before a company name")
 
+    source_patterns = _compile_patterns(
+        match.get("source_patterns"), label=f"mapping rule {rule_id}.source_patterns"
+    )
     event_family_patterns = _compile_patterns(
         match.get("event_family_patterns"),
         label=f"mapping rule {rule_id}.event_family_patterns",
@@ -301,6 +306,7 @@ def _parse_rule(
         )
     if (
         not company_ticker
+        and not source_patterns
         and not event_family_patterns
         and not event_type_patterns
         and not any_patterns
@@ -329,6 +335,7 @@ def _parse_rule(
         priority=priority,
         company_ticker=company_ticker,
         company_name_required=company_name_required,
+        source_patterns=source_patterns,
         event_family_patterns=event_family_patterns,
         event_type_patterns=event_type_patterns,
         any_patterns=any_patterns,
@@ -437,13 +444,52 @@ def _event_text(event: Mapping[str, Any]) -> str:
 
 
 def _ticker(event: Mapping[str, Any]) -> str | None:
+    explicit = _explicit_exchange_ticker(event)
+    if explicit is not None:
+        return explicit[0]
+
     facts = _facts(event)
     for source in (event, facts):
         value = str(source.get("ticker_at_event") or source.get("ticker") or "").strip().upper()
-        if value and TICKER_PATTERN.fullmatch(value):
+        if (
+            value
+            and TICKER_PATTERN.fullmatch(value)
+            and _source_mentions_company(event, ticker=value)
+        ):
             return value
-    explicit = _explicit_exchange_ticker(event)
-    return explicit[0] if explicit is not None else None
+    return None
+
+
+def _source_mentions_company(event: Mapping[str, Any], *, ticker: str = "") -> bool:
+    """Require a captured source field to identify the direct-security subject.
+
+    Canonical company/ticker fields can be stale or inherited from a different
+    story.  They are therefore insufficient on their own.  A direct-security
+    mapping is admitted only when the same source capture names a distinctive
+    company token (or the company's name is itself the ticker).
+    """
+
+    company_name = _company_name(event)
+    normalized_company = re.sub(r"[^a-z0-9]+", " ", company_name.casefold()).strip()
+    if not normalized_company:
+        return False
+    company_tokens = {
+        token
+        for token in normalized_company.split()
+        if len(token) >= 4 and token not in GENERIC_COMPANY_TOKENS
+    }
+    ticker_is_company_name = bool(ticker) and normalized_company.upper() == ticker.upper()
+    for field in ("source_title", "source_summary"):
+        text = str(event.get(field) or "").strip()
+        if not text:
+            continue
+        normalized_text = re.sub(r"[^a-z0-9]+", " ", text.casefold()).strip()
+        captured_tokens = set(normalized_text.split())
+        if ticker_is_company_name and ticker.casefold() in captured_tokens:
+            return True
+        if any(token in captured_tokens for token in company_tokens):
+            return True
+    return False
 
 
 def _explicit_exchange_ticker(event: Mapping[str, Any]) -> tuple[str, str] | None:
@@ -454,13 +500,6 @@ def _explicit_exchange_ticker(event: Mapping[str, Any]) -> tuple[str, str] | Non
     company-name token (or the company name itself is the ticker).
     """
 
-    company_name = _company_name(event)
-    normalized_company = re.sub(r"[^a-z0-9]+", " ", company_name.casefold()).strip()
-    company_tokens = [
-        token
-        for token in normalized_company.split()
-        if len(token) >= 4 and token not in GENERIC_COMPANY_TOKENS
-    ]
     for field in ("source_title", "source_summary"):
         text = str(event.get(field) or "").strip()
         if not text:
@@ -469,12 +508,7 @@ def _explicit_exchange_ticker(event: Mapping[str, Any]) -> tuple[str, str] | Non
             ticker = match.group(2).upper()
             if not TICKER_PATTERN.fullmatch(ticker):
                 continue
-            normalized_text = re.sub(r"[^a-z0-9]+", " ", text.casefold()).strip()
-            captured_tokens = set(normalized_text.split())
-            company_matches = company_name.upper() == ticker or any(
-                token in captured_tokens for token in company_tokens
-            )
-            if not company_matches:
+            if not _source_mentions_company(event, ticker=ticker):
                 continue
             venue = re.sub(r"\s+", " ", match.group(1)).upper()
             if venue == "NEW YORK STOCK EXCHANGE":
@@ -496,6 +530,11 @@ def _rule_matches(rule: MappingRule, event: Mapping[str, Any], *, text: str) -> 
             return False
         if rule.company_name_required and not _company_name(event):
             return False
+    source_id = str(event.get("source_id") or event.get("discovery_source") or "").strip()
+    if rule.source_patterns and not any(
+        pattern.fullmatch(source_id) for pattern in rule.source_patterns
+    ):
+        return False
     event_family = re.sub(
         r"[^a-z0-9]+", " ", str(event.get("event_family") or "").casefold()
     )
@@ -608,6 +647,11 @@ def resolve_event_assets(
                     f"RULE:{matched_rule.id}",
                     f"POLICY:{selected_policy.policy_version}",
                     f"ROLE:{asset.role}",
+                    *(
+                        ["SOURCE_SUBJECT_COHERENT"]
+                        if asset.role == "DIRECT_SECURITY"
+                        else []
+                    ),
                     *(
                         ["SOURCE_EXCHANGE_TICKER"]
                         if asset.role == "DIRECT_SECURITY"

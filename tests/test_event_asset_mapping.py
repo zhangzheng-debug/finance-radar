@@ -32,7 +32,7 @@ def test_default_policy_is_strict_versioned_and_content_addressed() -> None:
     load_asset_mapping_policy.cache_clear()
     policy = load_asset_mapping_policy()
 
-    assert policy.policy_version == "event-asset-mapping-v1.1.0"
+    assert policy.policy_version == "event-asset-mapping-v1.1.1"
     assert policy.policy_sha256 == hashlib.sha256(MAPPING_PATH.read_bytes()).hexdigest()
     assert policy.max_assets_per_event == 3
     assert policy.direction == "ABSTAIN"
@@ -48,8 +48,10 @@ def test_company_maps_to_direct_ticker_and_spy_only() -> None:
             "event_type": "chief_financial_officer_appointment",
             "company_name": "NVIDIA Corporation",
             "ticker_at_event": "NVDA",
+            "discovery_source": "sec_current_filings",
             "exchange": "Nasdaq",
             "title": "NVIDIA appointed a new chief financial officer",
+            "source_title": "NVIDIA appointed a new chief financial officer",
         }
     )
 
@@ -68,6 +70,8 @@ def test_company_mapping_deduplicates_spy_when_spy_is_the_direct_security() -> N
             "event_type": "fund_report",
             "company_name": "SPDR S&P 500 ETF Trust",
             "ticker_at_event": "SPY",
+            "discovery_source": "sharadar_active_research",
+            "source_title": "SPDR S&P 500 ETF Trust files its annual report",
         }
     )
 
@@ -82,6 +86,7 @@ def test_exchange_qualified_source_ticker_maps_company_without_canonical_ticker(
             "event_family": "regulatory",
             "event_type": "product_recall",
             "company_name": "Baxter International Inc.",
+            "discovery_source": "fda_medwatch",
             "source_title": "Baxter International Inc. (NYSE:BAX) announces a recall",
             "source_summary": "The company published the affected product lots.",
         }
@@ -112,6 +117,64 @@ def test_bare_source_ticker_does_not_create_a_direct_asset() -> None:
             "event_type": "product_recall",
             "company_name": "Baxter International Inc.",
             "source_title": "BAX announces a recall",
+        }
+    )
+
+    assert items == []
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {
+            "event_family": "governance",
+            "event_type": "management_change",
+            "company_name": "OpenAI",
+            "ticker_at_event": "NVDA",
+            "discovery_source": "sec_current_filings",
+            "source_title": "NVIDIA reports quarterly earnings",
+        },
+        {
+            "event_family": "macro_policy",
+            "event_type": "central_bank_policy",
+            "company_name": "Federal Reserve",
+            "ticker_at_event": "NEAR",
+            "discovery_source": "sec_current_filings",
+            "source_title": "NVIDIA earnings arrive ahead of the Fed decision",
+        },
+    ],
+)
+def test_canonical_ticker_without_same_source_company_match_fails_closed(
+    event: dict[str, str],
+) -> None:
+    assert resolve_event_assets(event) == []
+
+
+def test_canonical_ticker_with_same_source_company_match_is_admitted() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "regulatory",
+            "event_type": "sec_filing",
+            "company_name": "HSBC Holdings plc",
+            "ticker_at_event": "HSBC",
+            "discovery_source": "sec_current_filings",
+            "source_title": "HSBC Holdings plc files Form 6-K",
+        }
+    )
+
+    assert _symbols(items) == ["HSBC", "SPY"]
+    assert "SOURCE_SUBJECT_COHERENT" in items[0]["reason_codes"]
+
+
+def test_public_news_company_and_ticker_do_not_bypass_trusted_source_gate() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "earnings",
+            "event_type": "earnings_or_guidance",
+            "company_name": "OpenAI",
+            "ticker_at_event": "NVDA",
+            "discovery_source": "opennews_free",
+            "source_title": "OpenAI investment discussed in an NVDA earnings preview",
         }
     )
 
@@ -245,6 +308,8 @@ def test_company_earnings_text_that_mentions_inflation_is_not_a_macro_release() 
             "event_type": "management_change",
             "company_name": "Example Inc.",
             "ticker_at_event": "EXM",
+            "discovery_source": "sec_current_filings",
+            "source_title": "Example Inc. announced a management change",
         },
         {
             "event_family": "geopolitical",
@@ -268,7 +333,7 @@ def test_all_mappings_obey_read_only_directionless_contract(event: dict[str, str
         assert item["direction"] == "ABSTAIN"
         assert item["impact_score"] == 0
         assert item["no_trading"] == 1
-        assert item["policy_version"] == "event-asset-mapping-v1.1.0"
+        assert item["policy_version"] == "event-asset-mapping-v1.1.1"
         assert len(str(item["policy_sha256"])) == 64
         assert item["rule_id"]
         assert item["role"]
