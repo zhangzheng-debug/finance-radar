@@ -61,6 +61,9 @@ is not eligible until its minute has closed and the provider ingestion grace
 has elapsed. Bars are cached by provider, stable asset identity, interval and
 target minute, so multiple events mapped to the same registered instrument can
 reuse one provider response without mixing identically named instruments.
+Twelve Data's inclusive date bounds are queried with equal start/end minutes;
+regular-session close observations request the final one-minute bar ending at
+the declared close, rather than the non-trading minute beginning at the close.
 
 Transient failures have a bounded retry budget. Older metrics without a
 provable event-version binding remain in a legacy archive and are never

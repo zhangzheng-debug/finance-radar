@@ -6,6 +6,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -262,6 +264,45 @@ class LiveMarketObserverTests(unittest.TestCase):
                 scheduled_at=self.ANCHOR.isoformat(),
                 observed_at=self.ANCHOR + dt.timedelta(seconds=30),
             )
+
+    def test_twelve_exact_bar_uses_equal_inclusive_bounds(self) -> None:
+        captured_url = ""
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "status": "ok",
+                        "values": [
+                            {
+                                "datetime": "2026-07-16 12:00:00",
+                                "close": "101",
+                            }
+                        ],
+                    }
+                ).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            nonlocal captured_url
+            captured_url = request.full_url
+            self.assertEqual(timeout, 7)
+            return Response()
+
+        with patch.object(observer.urllib.request, "urlopen", fake_urlopen):
+            bar = observer.fetch_twelve_minute_bar(
+                "SPY", self.ANCHOR.isoformat(), "secret", timeout=7
+            )
+
+        query = parse_qs(urlparse(captured_url).query)
+        self.assertEqual(query["start_date"], ["2026-07-16 12:00:00"])
+        self.assertEqual(query["end_date"], ["2026-07-16 12:00:00"])
+        self.assertNotIn("secret", json.dumps(bar))
 
     def test_near_time_empty_exact_bar_is_retryable(self) -> None:
         observed_at = (
@@ -907,10 +948,10 @@ class LiveMarketObserverTests(unittest.TestCase):
         self.assertEqual(
             [(row["observation_window"], row["scheduled_at"]) for row in jobs],
             [
-                ("initial", "2026-07-15T20:00:00+00:00"),
-                ("next_close", "2026-07-17T20:00:00+00:00"),
-                ("t_plus_1d", "2026-07-20T20:00:00+00:00"),
-                ("t_plus_5d", "2026-07-24T20:00:00+00:00"),
+                ("initial", "2026-07-15T19:59:00+00:00"),
+                ("next_close", "2026-07-17T19:59:00+00:00"),
+                ("t_plus_1d", "2026-07-20T19:59:00+00:00"),
+                ("t_plus_5d", "2026-07-24T19:59:00+00:00"),
             ],
         )
 
@@ -950,12 +991,12 @@ class LiveMarketObserverTests(unittest.TestCase):
         close_job = self.connection.execute(
             "SELECT * FROM market_jobs WHERE asset_id='equity' AND observation_window='next_close'"
         ).fetchone()
-        self.assertEqual(close_job["scheduled_at"], "2026-07-16T20:00:00+00:00")
+        self.assertEqual(close_job["scheduled_at"], "2026-07-16T19:59:00+00:00")
         link = self.connection.execute(
             "SELECT * FROM market_job_anchor_links WHERE market_job_id=?",
             (close_job["market_job_id"],),
         ).fetchone()
-        self.assertEqual(link["offset_seconds"], 8 * 60 * 60)
+        self.assertEqual(link["offset_seconds"], 8 * 60 * 60 - 60)
 
 
 if __name__ == "__main__":

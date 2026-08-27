@@ -136,6 +136,12 @@ def _next_regular_close(
     return None
 
 
+def _closing_minute_start(close_at: dt.datetime) -> dt.datetime:
+    """Return the start timestamp of the one-minute bar ending at a close."""
+
+    return close_at - dt.timedelta(minutes=1)
+
+
 def _previous_regular_close_for_date(
     event_date: dt.date, *, asset_type: str, metadata: dict[str, Any]
 ) -> dt.datetime | None:
@@ -534,7 +540,7 @@ def schedule_jobs(
         anchor = _as_utc(str(persisted_anchor["reaction_anchor_at"]))
         metadata = _json_object(row["metadata_json"])
         if persisted_anchor["timestamp_precision"] == "DATE_ONLY":
-            windows = [("initial", anchor)]
+            windows = [("initial", _closing_minute_start(anchor))]
             date_basis = row["event_date"]
             if str(persisted_anchor["declared_anchor_kind"] or "").startswith(
                 "source_published_date"
@@ -554,7 +560,7 @@ def schedule_jobs(
                 else None
             )
             if first_close is not None:
-                windows.append(("next_close", first_close))
+                windows.append(("next_close", _closing_minute_start(first_close)))
             for window, close_count in (("t_plus_1d", 1), ("t_plus_5d", 5)):
                 close = (
                     _nth_regular_close_after(
@@ -567,7 +573,7 @@ def schedule_jobs(
                     else None
                 )
                 if close is not None:
-                    windows.append((window, close))
+                    windows.append((window, _closing_minute_start(close)))
         else:
             windows = [
                 ("initial", anchor),
@@ -582,7 +588,7 @@ def schedule_jobs(
                 metadata=metadata,
             )
             if close is not None:
-                windows.append(("next_close", close))
+                windows.append(("next_close", _closing_minute_start(close)))
 
         for window, scheduled in windows:
             status = "PENDING"
@@ -918,13 +924,16 @@ def normalize_twelve_minute_bar(
 def fetch_twelve_minute_bar(
     symbol: str, scheduled_at: str, api_key: str, timeout: float = 20.0
 ) -> dict[str, Any]:
-    start, end = _minute_bounds(scheduled_at)
+    start, _end = _minute_bounds(scheduled_at)
     params = urllib.parse.urlencode(
         {
             "symbol": symbol,
             "interval": "1min",
             "start_date": start.strftime("%Y-%m-%d %H:%M:%S"),
-            "end_date": end.strftime("%Y-%m-%d %H:%M:%S"),
+            # Twelve Data treats end_date as inclusive.  Using the next minute
+            # with outputsize=1 can therefore return that next bar instead of
+            # the requested bar.  Equal bounds request exactly one minute.
+            "end_date": start.strftime("%Y-%m-%d %H:%M:%S"),
             "timezone": "UTC",
             "order": "ASC",
             "outputsize": 1,
