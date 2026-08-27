@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_version": "event-asset-mapping-v1.1.1",
+  "policy_version": "event-asset-mapping-v1.2.0",
   "max_assets_per_event": 3,
   "direction": "ABSTAIN",
   "impact_score": 0,
@@ -73,6 +73,19 @@
     }
   },
   "rules": [
+    {
+      "id": "resolved-public-company-v1",
+      "priority": 5,
+      "match": {
+        "company_ticker": true,
+        "company_name_required": true,
+        "issuer_resolution_required": true,
+        "source_patterns": [
+          "^(?:opennews_free|[a-z0-9_]+_official_news)$"
+        ]
+      },
+      "assets": ["$TICKER", "SPY"]
+    },
     {
       "id": "company-direct-market-v1",
       "priority": 10,

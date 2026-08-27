@@ -17,6 +17,7 @@ from map_event_assets import map_event_assets  # noqa: E402
 import observe_live_event_markets as observer  # noqa: E402
 from audit_live_pipeline import audit  # noqa: E402
 from app.models.event_asset_mapping import load_asset_mapping_policy  # noqa: E402
+from app.models.issuer_directory import IssuerDirectory  # noqa: E402
 
 
 class EventAssetMappingPersistenceTests(unittest.TestCase):
@@ -116,6 +117,57 @@ class EventAssetMappingPersistenceTests(unittest.TestCase):
             ).fetchone()[0],
             3,
         )
+
+    def test_public_issuer_directory_mapping_persists_direct_security(self) -> None:
+        self.connection.execute(
+            """UPDATE canonical_events
+                  SET event_family='earnings',event_type='earnings_or_guidance',
+                      discovery_source='opennews_free'
+                WHERE event_id='evt'"""
+        )
+        self.connection.execute(
+            """UPDATE event_versions
+                  SET event_family='earnings',event_type='earnings_or_guidance'
+                WHERE event_id='evt' AND version=1"""
+        )
+        self.connection.execute(
+            """UPDATE raw_observations
+                  SET title='NVIDIA Q2 EARNINGS - REVENUE BEATS ESTIMATES',
+                      summary='Data-center revenue and guidance were reported.'
+                WHERE observation_id='obs'"""
+        )
+        self.connection.commit()
+        directory = IssuerDirectory.from_document(
+            {
+                "fields": ["cik", "name", "ticker", "exchange"],
+                "data": [[1045810, "NVIDIA CORP", "NVDA", "Nasdaq"]],
+            },
+            source_sha256="b" * 64,
+        )
+
+        result = map_event_assets(
+            self.connection,
+            freshness_days=14,
+            today=self.TODAY,
+            issuer_directory=directory,
+            apply=True,
+        )
+
+        self.assertEqual(result["issuer_resolved_events"], 1)
+        self.assertEqual(result["mapped_assets"], 2)
+        self.assertEqual(
+            [
+                row["symbol"]
+                for row in self.connection.execute(
+                    "SELECT symbol FROM assets ORDER BY symbol"
+                ).fetchall()
+            ],
+            ["NVDA", "SPY"],
+        )
+        decision = self.connection.execute(
+            "SELECT decision,rule_id,asset_count FROM event_asset_mapping_decisions"
+        ).fetchone()
+        self.assertEqual(tuple(decision), ("MAPPED", "resolved-public-company-v1", 2))
 
     def test_new_event_version_no_match_deactivates_prior_automatic_mappings(self) -> None:
         first = map_event_assets(

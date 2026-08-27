@@ -17,6 +17,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Pattern
 
+from app.models.issuer_directory import IssuerDirectory
+
 
 ROOT = Path(__file__).resolve().parents[2]
 MAPPING_PATH = ROOT / "config" / "event_asset_mapping_v1.json"
@@ -80,6 +82,7 @@ MATCH_FIELDS = frozenset(
     {
         "company_ticker",
         "company_name_required",
+        "issuer_resolution_required",
         "source_patterns",
         "event_family_patterns",
         "event_type_patterns",
@@ -134,6 +137,7 @@ class MappingRule:
     priority: int
     company_ticker: bool
     company_name_required: bool
+    issuer_resolution_required: bool
     source_patterns: tuple[Pattern[str], ...]
     event_family_patterns: tuple[Pattern[str], ...]
     event_type_patterns: tuple[Pattern[str], ...]
@@ -279,8 +283,13 @@ def _parse_rule(
     company_name_required = _optional_boolean(
         match, "company_name_required", label=f"mapping rule {rule_id}.match"
     )
+    issuer_resolution_required = _optional_boolean(
+        match, "issuer_resolution_required", label=f"mapping rule {rule_id}.match"
+    )
     if company_name_required and not company_ticker:
         raise ValueError(f"mapping rule {rule_id} requires a ticker before a company name")
+    if issuer_resolution_required and not company_ticker:
+        raise ValueError(f"mapping rule {rule_id} requires a ticker before issuer resolution")
 
     source_patterns = _compile_patterns(
         match.get("source_patterns"), label=f"mapping rule {rule_id}.source_patterns"
@@ -335,6 +344,7 @@ def _parse_rule(
         priority=priority,
         company_ticker=company_ticker,
         company_name_required=company_name_required,
+        issuer_resolution_required=issuer_resolution_required,
         source_patterns=source_patterns,
         event_family_patterns=event_family_patterns,
         event_type_patterns=event_type_patterns,
@@ -444,6 +454,10 @@ def _event_text(event: Mapping[str, Any]) -> str:
 
 
 def _ticker(event: Mapping[str, Any]) -> str | None:
+    if event.get("_issuer_resolution_reason"):
+        resolved = str(event.get("ticker_at_event") or "").strip().upper()
+        if resolved and TICKER_PATTERN.fullmatch(resolved):
+            return resolved
     explicit = _explicit_exchange_ticker(event)
     if explicit is not None:
         return explicit[0]
@@ -530,6 +544,8 @@ def _rule_matches(rule: MappingRule, event: Mapping[str, Any], *, text: str) -> 
             return False
         if rule.company_name_required and not _company_name(event):
             return False
+    if rule.issuer_resolution_required and not event.get("_issuer_resolution_reason"):
+        return False
     source_id = str(event.get("source_id") or event.get("discovery_source") or "").strip()
     if rule.source_patterns and not any(
         pattern.fullmatch(source_id) for pattern in rule.source_patterns
@@ -585,6 +601,7 @@ def resolve_event_assets(
     *,
     policy: AssetMappingPolicy | None = None,
     config_path: str | None = None,
+    issuer_directory: IssuerDirectory | None = None,
 ) -> list[dict[str, Any]]:
     """Return at most three de-duplicated, directionless observation relations.
 
@@ -596,9 +613,22 @@ def resolve_event_assets(
     if policy is not None and config_path is not None:
         raise ValueError("provide either policy or config_path, not both")
     selected_policy = policy or load_asset_mapping_policy(config_path)
-    text = _event_text(event)
+    resolved_event = dict(event)
+    if issuer_directory is not None:
+        resolution = issuer_directory.resolve(event)
+        if resolution is not None:
+            resolved_event["company_name"] = resolution.company_name
+            resolved_event["ticker_at_event"] = resolution.ticker
+            resolved_event["exchange"] = resolution.exchange
+            resolved_event["_issuer_resolution_reason"] = resolution.reason_code
+            resolved_event["_issuer_directory_sha256"] = resolution.directory_sha256
+    text = _event_text(resolved_event)
     matched_rule = next(
-        (rule for rule in selected_policy.rules if _rule_matches(rule, event, text=text)),
+        (
+            rule
+            for rule in selected_policy.rules
+            if _rule_matches(rule, resolved_event, text=text)
+        ),
         None,
     )
     if matched_rule is None:
@@ -611,7 +641,7 @@ def resolve_event_assets(
     seen: set[str] = set()
     for reference in matched_rule.assets:
         asset = (
-            _direct_asset(event, selected_policy.ticker_template)
+            _direct_asset(resolved_event, selected_policy.ticker_template)
             if reference == "$TICKER"
             else selected_policy.asset_registry[reference]
         )
@@ -655,7 +685,20 @@ def resolve_event_assets(
                     *(
                         ["SOURCE_EXCHANGE_TICKER"]
                         if asset.role == "DIRECT_SECURITY"
-                        and not str(event.get("ticker_at_event") or "").strip()
+                        and not str(resolved_event.get("ticker_at_event") or "").strip()
+                        else []
+                    ),
+                    *(
+                        [str(resolved_event["_issuer_resolution_reason"])]
+                        if resolved_event.get("_issuer_resolution_reason")
+                        else []
+                    ),
+                    *(
+                        [
+                            "ISSUER_DIRECTORY_SHA256:"
+                            + str(resolved_event["_issuer_directory_sha256"])
+                        ]
+                        if resolved_event.get("_issuer_directory_sha256")
                         else []
                     ),
                 ],

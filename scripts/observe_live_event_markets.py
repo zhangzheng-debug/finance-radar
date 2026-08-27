@@ -18,6 +18,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from zoneinfo import ZoneInfo
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -925,21 +926,29 @@ def fetch_twelve_minute_bar(
     symbol: str, scheduled_at: str, api_key: str, timeout: float = 20.0
 ) -> dict[str, Any]:
     start, _end = _minute_bounds(scheduled_at)
-    params = urllib.parse.urlencode(
-        {
-            "symbol": symbol,
-            "interval": "1min",
-            "start_date": start.strftime("%Y-%m-%d %H:%M:%S"),
-            # Twelve Data treats end_date as inclusive.  Using the next minute
-            # with outputsize=1 can therefore return that next bar instead of
-            # the requested bar.  Equal bounds request exactly one minute.
-            "end_date": start.strftime("%Y-%m-%d %H:%M:%S"),
-            "timezone": "UTC",
-            "order": "ASC",
-            "outputsize": 1,
-            "apikey": api_key,
-        }
-    )
+    request_parameters = {
+        "symbol": symbol,
+        "interval": "1min",
+        "start_date": start.strftime("%Y-%m-%d %H:%M:%S"),
+        # Twelve Data treats end_date as inclusive.  Using the next minute
+        # with outputsize=1 can therefore return that next bar instead of
+        # the requested bar.  Equal bounds request exactly one minute.
+        "end_date": start.strftime("%Y-%m-%d %H:%M:%S"),
+        "timezone": "UTC",
+        "order": "ASC",
+        "outputsize": 1,
+        "apikey": api_key,
+    }
+    eastern = start.astimezone(ZoneInfo("America/New_York"))
+    minute_of_day = eastern.hour * 60 + eastern.minute
+    if eastern.weekday() < 5 and (
+        4 * 60 <= minute_of_day < 9 * 60 + 30
+        or 16 * 60 <= minute_of_day < 20 * 60
+    ):
+        # Earnings and issuer announcements often arrive outside the regular
+        # session. Twelve Data excludes those bars unless this flag is explicit.
+        request_parameters["prepost"] = "true"
+    params = urllib.parse.urlencode(request_parameters)
     request = urllib.request.Request(
         f"https://api.twelvedata.com/time_series?{params}",
         headers={"User-Agent": "FinanceRadar/1.0", "Accept": "application/json"},

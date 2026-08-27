@@ -302,7 +302,42 @@ class LiveMarketObserverTests(unittest.TestCase):
         query = parse_qs(urlparse(captured_url).query)
         self.assertEqual(query["start_date"], ["2026-07-16 12:00:00"])
         self.assertEqual(query["end_date"], ["2026-07-16 12:00:00"])
+        self.assertEqual(query["prepost"], ["true"])
         self.assertNotIn("secret", json.dumps(bar))
+
+    def test_twelve_regular_session_does_not_require_extended_hours_plan(self) -> None:
+        captured_url = ""
+        scheduled = dt.datetime(2026, 7, 16, 15, 0, tzinfo=dt.timezone.utc)
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "status": "ok",
+                        "values": [
+                            {"datetime": "2026-07-16 15:00:00", "close": "101"}
+                        ],
+                    }
+                ).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            nonlocal captured_url
+            captured_url = request.full_url
+            return Response()
+
+        with patch.object(observer.urllib.request, "urlopen", fake_urlopen):
+            observer.fetch_twelve_minute_bar(
+                "SPY", scheduled.isoformat(), "secret", timeout=7
+            )
+
+        query = parse_qs(urlparse(captured_url).query)
+        self.assertNotIn("prepost", query)
 
     def test_near_time_empty_exact_bar_is_retryable(self) -> None:
         observed_at = (

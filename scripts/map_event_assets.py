@@ -21,6 +21,7 @@ from app.models.event_asset_mapping import (  # noqa: E402
     load_asset_mapping_policy,
     resolve_event_assets,
 )
+from app.models.issuer_directory import IssuerDirectory, load_issuer_directory  # noqa: E402
 from event_ledger import open_ledger, stable_id, stable_json, utc_now  # noqa: E402
 
 
@@ -324,6 +325,7 @@ def map_event_assets(
     event_ids: Iterable[str] | None = None,
     policy: AssetMappingPolicy | None = None,
     config_path: str | None = None,
+    issuer_directory: IssuerDirectory | None = None,
     apply: bool = True,
 ) -> dict[str, Any]:
     today = today or dt.datetime.now(dt.timezone.utc).date()
@@ -352,10 +354,18 @@ def map_event_assets(
         "exact_source_timestamps": 0,
         "date_only_or_missing_timestamps": 0,
         "rule_hits": {},
+        "issuer_directory_records": (
+            issuer_directory.record_count if issuer_directory is not None else 0
+        ),
+        "issuer_resolved_events": 0,
         "sample": [],
     }
     for event in events:
-        mappings = resolve_event_assets(event, policy=selected_policy)
+        mappings = resolve_event_assets(
+            event,
+            policy=selected_policy,
+            issuer_directory=issuer_directory,
+        )
         decision_id, _observation_id, _source_hash = _decision_binding(
             event, selected_policy
         )
@@ -411,6 +421,16 @@ def map_event_assets(
 
         result["mapped_events"] += 1
         result["mapped_assets"] += len(effective)
+        if any(
+            any(
+                str(code).startswith(
+                    ("SOURCE_VALIDATED_CASHTAG", "SOURCE_LEADING_ISSUER")
+                )
+                for code in mapping.get("reason_codes", [])
+            )
+            for _asset_id, mapping in effective
+        ):
+            result["issuer_resolved_events"] += 1
         source_time = str(event.get("source_published_at") or "")
         try:
             parsed_time = dt.datetime.fromisoformat(source_time.replace("Z", "+00:00"))
@@ -525,6 +545,8 @@ def write_report(path: Path, result: dict[str, Any]) -> None:
         f"- Selected events: `{result['selected_events']}`",
         f"- Mapped / unmapped: `{result['mapped_events']}` / `{result['unmapped_events']}`",
         f"- Assets selected: `{result['mapped_assets']}`",
+        f"- Issuer directory records: `{result['issuer_directory_records']}`",
+        f"- Events resolved through issuer directory: `{result['issuer_resolved_events']}`",
         f"- Exact source timestamps: `{result['exact_source_timestamps']}`",
         f"- Date-only or missing timestamps: `{result['date_only_or_missing_timestamps']}`",
         "- Boundary: mappings select read-only observation instruments only; direction is ABSTAIN, impact is zero, and no trading path is created.",
@@ -550,15 +572,23 @@ def main() -> int:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--freshness-days", type=int, default=14)
     parser.add_argument("--event-id", action="append", default=[])
+    parser.add_argument("--issuer-index", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     connection = open_ledger(args.db)
     try:
+        issuer_index = args.issuer_index or (
+            args.db.parent
+            / "cache"
+            / "sec_company_tickers"
+            / "company_tickers_exchange.json"
+        )
         result = map_event_assets(
             connection,
             freshness_days=max(0, args.freshness_days),
             event_ids=args.event_id,
             config_path=str(args.config),
+            issuer_directory=load_issuer_directory(issuer_index),
             apply=not args.dry_run,
         )
         write_report(args.report, result)

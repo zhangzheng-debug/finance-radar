@@ -5,7 +5,7 @@
 - 时间锚使用事件家族声明的 `source_published / filing_effective / event_occurred`；`known_at=max(source_published_at, local_received_at)` 防止后见信息进入旧时点。
 - 只有精确时间戳才允许分钟窗口；只有日期时，T+5m、T+30m、T+2h 均为不可用。
 - 固定窗口为 initial、T+5m、T+30m、T+2h、下个收盘、T+1d、T+5d。
-- 默认供应商路径请求指定分钟的 1m OHLCV bar：非加密资产使用 Twelve Data `/time_series`，加密资产使用 Binance public `/klines`。
+- 默认供应商路径请求指定分钟的 1m OHLCV bar：非加密资产使用 Twelve Data `/time_series`，加密资产使用 Binance public `/klines`。美股请求显式携带 `prepost=true`；供应商套餐不支持扩展时段时仍失败关闭，不用常规收盘价冒充盘后价格。
 - 每个快照保存供应商 bar 时间和系统采集时间；供应商时间不在所请求分钟内时失败关闭。
 - 错过宽限期写 `MISSED_WINDOW`，绝不拿最新价格回填。
 - 结果只属于 `post_event_audit_only`，数据库约束要求 `allowed_for_discovery_rank=0`、`allowed_as_model_feature=0`，且没有账户、订单、持仓或余额接口。

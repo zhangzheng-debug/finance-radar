@@ -56,6 +56,8 @@ def test_market_cycle_maps_schedules_and_drains_bounded_jobs(monkeypatch) -> Non
         "mapping_mode": "apply",
         "freshness_days": 0,
         "request_limit": 7,
+        "issuer_directory_loaded": False,
+        "issuer_directory_error": None,
     }
     assert result["no_trading"] is True
 
@@ -92,3 +94,71 @@ def test_market_cycle_report_is_valid_json(tmp_path: Path) -> None:
         "market": {"completed": 2}
     }
     assert list(target.parent.glob("*.tmp")) == []
+
+
+def test_market_cycle_loads_runtime_issuer_directory(tmp_path: Path, monkeypatch) -> None:
+    index = tmp_path / "company_tickers_exchange.json"
+    index.write_text(
+        json.dumps(
+            {
+                "fields": ["cik", "name", "ticker", "exchange"],
+                "data": [[1045810, "NVIDIA CORP", "NVDA", "Nasdaq"]],
+            }
+        ),
+        encoding="utf-8",
+    )
+    mapping = Mock(return_value={"mode": "APPLY", "issuer_directory_records": 1})
+    monkeypatch.setattr(market_cycle, "map_event_assets", mapping)
+    monkeypatch.setattr(market_cycle, "schedule_jobs", Mock(return_value=0))
+    monkeypatch.setattr(
+        market_cycle, "schedule_followup_jobs", Mock(side_effect=[0, 0])
+    )
+    monkeypatch.setattr(
+        market_cycle, "run_pending", Mock(return_value={"completed": 0, "errors": 0})
+    )
+
+    result = market_cycle.run_market_cycle(
+        Mock(),
+        mapping_mode="apply",
+        api_key="unit-key",
+        timeout=10,
+        request_limit=6,
+        today=date(2026, 8, 27),
+        issuer_index_path=index,
+    )
+
+    assert mapping.call_args.kwargs["issuer_directory"].record_count == 1
+    assert result["configuration"]["issuer_directory_loaded"] is True
+
+
+def test_malformed_issuer_directory_does_not_stop_macro_market_cycle(
+    tmp_path: Path, monkeypatch
+) -> None:
+    index = tmp_path / "company_tickers_exchange.json"
+    index.write_text("{not-json", encoding="utf-8")
+    mapping = Mock(return_value={"mode": "APPLY", "issuer_directory_records": 0})
+    monkeypatch.setattr(market_cycle, "map_event_assets", mapping)
+    monkeypatch.setattr(market_cycle, "schedule_jobs", Mock(return_value=0))
+    monkeypatch.setattr(
+        market_cycle, "schedule_followup_jobs", Mock(side_effect=[0, 0])
+    )
+    monkeypatch.setattr(
+        market_cycle, "run_pending", Mock(return_value={"completed": 0, "errors": 0})
+    )
+
+    result = market_cycle.run_market_cycle(
+        Mock(),
+        mapping_mode="apply",
+        api_key="unit-key",
+        timeout=10,
+        request_limit=6,
+        today=date(2026, 8, 27),
+        issuer_index_path=index,
+    )
+
+    mapping.assert_called_once()
+    assert "issuer_directory" not in mapping.call_args.kwargs
+    assert result["configuration"]["issuer_directory_loaded"] is False
+    assert result["configuration"]["issuer_directory_error"].startswith(
+        "JSONDecodeError:"
+    )

@@ -40,12 +40,15 @@ display role. A company ticker is a direct security. GLD, USO, BNO, SPY and TLT
 are observation proxies or benchmarks, not evidence that an event occurred.
 
 A canonical company/ticker pair is not enough to create a direct-security
-mapping. The selected source capture must name the same company, and V1 admits
-canonical tickers only from the configured SEC, Sharadar research or FDA source
-families. This prevents country names, ordinary uppercase words and unrelated
-companies mentioned in an aggregator headline from being treated as securities.
-Public-news company mapping stays fail-closed until an independently tested
-issuer-resolution contract exists.
+mapping. The selected source capture must name the same company. Configured SEC,
+Sharadar research and FDA captures may use their canonical issuer fields. Public
+news uses a separate deterministic issuer directory built from the SEC
+company/ticker index: an exchange-registered issuer name must lead an
+issuer-centric headline, or the headline must contain exactly one directory-
+validated cashtag. Ambiguous share classes, incidental company mentions, bare
+uppercase words and macro/geopolitical stories fail closed. The directory file
+is content-addressed in each selected mapping receipt. This resolves the
+observation instrument only; it does not upgrade the source or verify the event.
 
 V1 is deliberately narrow: direct company securities, armed-conflict/energy
 transmission, monetary-policy decisions and inflation releases. It does not
@@ -54,7 +57,10 @@ commodity futures require separate, tested mapping rules before activation.
 
 ## Historical bars and cache
 
-The production provider path requests the exact target one-minute bar. A late
+The production provider path requests the exact target one-minute bar. U.S.
+equity requests explicitly opt into pre/post-market bars so after-close earnings
+announcements can be observed when the provider plan supplies extended-hours
+data. A late
 request may therefore recover a historical window as `HISTORICAL_EXACT_BAR`.
 Using a current/latest quote as an old window remains forbidden. A target bar
 is not eligible until its minute has closed and the provider ingestion grace

@@ -12,6 +12,7 @@ from app.models.event_asset_mapping import (
     load_asset_mapping_policy,
     resolve_event_assets,
 )
+from app.models.issuer_directory import IssuerDirectory
 
 
 def _symbols(items: list[dict[str, object]]) -> list[str]:
@@ -28,17 +29,92 @@ def _write_policy(tmp_path: Path, payload: dict[str, object]) -> Path:
     return path
 
 
+def _issuer_directory() -> IssuerDirectory:
+    return IssuerDirectory.from_document(
+        {
+            "fields": ["cik", "name", "ticker", "exchange"],
+            "data": [
+                [1045810, "NVIDIA CORP", "NVDA", "Nasdaq"],
+                [1652044, "Alphabet Inc.", "GOOG", "Nasdaq"],
+                [1652044, "Alphabet Inc.", "GOOGL", "Nasdaq"],
+            ],
+        },
+        source_sha256="a" * 64,
+    )
+
+
 def test_default_policy_is_strict_versioned_and_content_addressed() -> None:
     load_asset_mapping_policy.cache_clear()
     policy = load_asset_mapping_policy()
 
-    assert policy.policy_version == "event-asset-mapping-v1.1.1"
+    assert policy.policy_version == "event-asset-mapping-v1.2.0"
     assert policy.policy_sha256 == hashlib.sha256(MAPPING_PATH.read_bytes()).hexdigest()
     assert policy.max_assets_per_event == 3
     assert policy.direction == "ABSTAIN"
     assert policy.impact_score == 0
     assert policy.no_trading == 1
-    assert [rule.priority for rule in policy.rules] == [10, 20, 30, 40, 50]
+    assert [rule.priority for rule in policy.rules] == [5, 10, 20, 30, 40, 50]
+
+
+def test_public_earnings_leading_issuer_resolves_to_direct_security() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "earnings",
+            "event_type": "earnings_or_guidance",
+            "discovery_source": "opennews_free",
+            "source_title": "NVIDIA Q2 EARNINGS — REVENUE BEATS ESTIMATES",
+            "source_summary": "Data-center revenue and guidance were reported.",
+        },
+        issuer_directory=_issuer_directory(),
+    )
+
+    assert _symbols(items) == ["NVDA", "SPY"]
+    assert items[0]["rule_id"] == "resolved-public-company-v1"
+    assert "SOURCE_LEADING_ISSUER_EXACT" in items[0]["reason_codes"]
+    assert "ISSUER_DIRECTORY_SHA256:" + "a" * 64 in items[0]["reason_codes"]
+
+
+def test_validated_public_cashtag_resolves_without_guessing_bare_uppercase() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "earnings",
+            "event_type": "earnings_or_guidance",
+            "discovery_source": "opennews_free",
+            "source_title": "$NVDA reports quarterly results",
+        },
+        issuer_directory=_issuer_directory(),
+    )
+
+    assert _symbols(items) == ["NVDA", "SPY"]
+    assert "SOURCE_VALIDATED_CASHTAG" in items[0]["reason_codes"]
+
+
+def test_ambiguous_issuer_name_does_not_choose_a_share_class() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "earnings",
+            "event_type": "earnings_or_guidance",
+            "discovery_source": "opennews_free",
+            "source_title": "Alphabet reports quarterly results",
+        },
+        issuer_directory=_issuer_directory(),
+    )
+
+    assert items == []
+
+
+def test_public_issuer_resolution_does_not_override_macro_subject() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "macro_policy",
+            "event_type": "central_bank_commentary",
+            "discovery_source": "opennews_free",
+            "source_title": "NVIDIA earnings arrive before a central-bank speech",
+        },
+        issuer_directory=_issuer_directory(),
+    )
+
+    assert items == []
 
 
 def test_company_maps_to_direct_ticker_and_spy_only() -> None:
@@ -333,7 +409,7 @@ def test_all_mappings_obey_read_only_directionless_contract(event: dict[str, str
         assert item["direction"] == "ABSTAIN"
         assert item["impact_score"] == 0
         assert item["no_trading"] == 1
-        assert item["policy_version"] == "event-asset-mapping-v1.1.1"
+        assert item["policy_version"] == "event-asset-mapping-v1.2.0"
         assert len(str(item["policy_sha256"])) == 64
         assert item["rule_id"]
         assert item["role"]
@@ -348,7 +424,7 @@ def test_all_mappings_obey_read_only_directionless_contract(event: dict[str, str
         (lambda payload: payload.update({"no_trading": 0}), "no_trading must equal one"),
         (lambda payload: payload.update({"unexpected": True}), "unknown fields"),
         (
-            lambda payload: payload["rules"][1]["assets"].append("SPY"),
+            lambda payload: payload["rules"][1]["assets"].extend(["SPY", "GLD"]),
             "exceeds max_assets_per_event",
         ),
     ],
