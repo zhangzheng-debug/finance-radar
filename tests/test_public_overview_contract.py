@@ -1778,6 +1778,116 @@ def test_public_market_context_exposes_only_completed_current_safe_prices() -> N
     assert "PENDING" not in serialized
 
 
+def test_public_market_context_keeps_btc_provider_symbol_and_direct_before_ibit() -> None:
+    value = {
+        "assets": [
+            {
+                "asset_id": "asset-ibit",
+                "symbol": "IBIT",
+                "provider_symbol": "IBIT",
+                "relation_type": "ECOSYSTEM_PROXY",
+                "market_observation_allowed": 1,
+                "no_trading": 1,
+                "display_role": "US_LISTED_PROXY",
+                "proxy_label": "美国现货比特币ETP代理（NASDAQ时段）",
+                "mapping_rank": 2,
+            },
+            {
+                "asset_id": "asset-btc",
+                "symbol": "BTC",
+                "provider_symbol": "BTCUSDT",
+                "relation_type": "PRIMARY",
+                "market_observation_allowed": 1,
+                "no_trading": 1,
+                "display_role": "DIRECT_ASSET",
+                "proxy_label": "BTC现货参考（BTC/USDT，24×7）",
+                "mapping_rank": 1,
+            },
+        ],
+        "market_snapshots": [
+            {
+                "asset_id": "asset-ibit",
+                "provider": "twelve_data",
+                "provider_symbol": "IBIT",
+                "price": "61.25",
+                "currency": "USD",
+                "provider_as_of": "2026-08-28T14:30:00+00:00",
+                "observation_window": "t_plus_30m",
+                "market_job_status": "COMPLETED",
+                "read_only": 1,
+                "no_trading": 1,
+            },
+            {
+                "asset_id": "asset-btc",
+                "provider": "binance_public",
+                "provider_symbol": "BTCUSDT",
+                "price": "81234.5",
+                "currency": "USDT",
+                "provider_as_of": "2026-08-28T14:30:00+00:00",
+                "observation_window": "t_plus_30m",
+                "market_job_status": "COMPLETED",
+                "read_only": 1,
+                "no_trading": 1,
+            },
+        ],
+    }
+
+    context = _public_market_context(value)
+
+    assert context is not None
+    assert [item["symbol"] for item in context["items"]] == ["BTC", "IBIT"]
+    assert context["items"][0] == {
+        "symbol": "BTC",
+        "price": 81234.5,
+        "currency": "USDT",
+        "observed_at": "2026-08-28T14:30:00+00:00",
+        "provider": "binance_public",
+        "observation_window": "t_plus_30m",
+        "role": "DIRECT_ASSET",
+        "role_label": "直接资产",
+        "proxy_label": "BTC现货参考（BTC/USDT，24×7）",
+    }
+    assert context["items"][1]["role"] == "US_LISTED_PROXY"
+
+
+def test_public_market_reaction_accepts_btcusdt_for_btc_direct_asset() -> None:
+    reaction = _public_market_reaction(
+        {
+            "assets": [
+                {
+                    "asset_id": "asset-btc",
+                    "symbol": "BTC",
+                    "provider_symbol": "BTCUSDT",
+                    "relation_type": "PRIMARY",
+                    "market_observation_allowed": 1,
+                    "no_trading": 1,
+                    "display_role": "DIRECT_ASSET",
+                    "proxy_label": "BTC现货参考（BTC/USDT，24×7）",
+                    "mapping_rank": 1,
+                }
+            ],
+            "market_metrics": [
+                {
+                    "provider": "binance_public",
+                    "stable_id": "asset-btc",
+                    "ticker_at_event": "BTCUSDT",
+                    "metric_name": "reaction_return_t_plus_30m_pct__BTCUSDT",
+                    "metric_value": "2.5",
+                    "metric_value_type": "decimal_percent",
+                    "metric_scope": "post_event_audit_only",
+                    "allowed_for_discovery_rank": 0,
+                    "allowed_as_model_feature": 0,
+                }
+            ],
+        }
+    )
+
+    assert reaction is not None
+    assert reaction["items"][0]["symbol"] == "BTC"
+    assert reaction["items"][0]["return_pct"] == 2.5
+    assert reaction["items"][0]["role"] == "DIRECT_ASSET"
+
+
 def test_public_market_reaction_labels_date_only_session_windows_honestly() -> None:
     reaction = _public_market_reaction(
         {

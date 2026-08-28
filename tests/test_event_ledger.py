@@ -183,6 +183,107 @@ class EventLedgerTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(migrated["event_version"], 1)
         self.assertEqual(self.connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_schema_16_expands_mapping_roles_without_losing_current_rows(self) -> None:
+        now = ledger.utc_now()
+        self.connection.execute(
+            """INSERT INTO canonical_events VALUES (
+               'role-event',1,'candidate','candidate','macro_policy','policy_decision',
+               '2026-08-28',?,?,NULL,NULL,NULL,NULL,NULL,'test',1)""",
+            (now, now),
+        )
+        self.connection.execute(
+            """INSERT INTO event_versions VALUES (
+               'role-event',1,?,'candidate','candidate','macro_policy',
+               'policy_decision',NULL,'{}','fixture')""",
+            (now,),
+        )
+        self.connection.execute(
+            """INSERT INTO assets VALUES (
+               'asset-role','etf','SPY','SPY','TwelveData','USD','{}',?,?)""",
+            (now, now),
+        )
+        self.connection.commit()
+        self.connection.close()
+
+        legacy = sqlite3.connect(self.db_path)
+        legacy.execute("PRAGMA foreign_keys=OFF")
+        legacy.executescript(
+            """
+            DROP TABLE event_asset_mapping_receipts;
+            DROP TABLE event_asset_mapping_decisions;
+            CREATE TABLE event_asset_mapping_decisions (
+                decision_id TEXT PRIMARY KEY,event_id TEXT NOT NULL,
+                event_version INTEGER NOT NULL,policy_version TEXT NOT NULL,
+                policy_sha256 TEXT NOT NULL,observation_id TEXT NOT NULL,
+                source_content_sha256 TEXT NOT NULL,source_published_at TEXT,
+                local_received_at TEXT,
+                decision TEXT NOT NULL CHECK (decision IN ('MAPPED','NO_MATCH')),
+                rule_id TEXT,asset_count INTEGER NOT NULL CHECK (asset_count BETWEEN 0 AND 3),
+                created_at TEXT NOT NULL,
+                no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+                FOREIGN KEY (event_id,event_version) REFERENCES event_versions(event_id,version),
+                UNIQUE (event_id,event_version,policy_sha256,observation_id,source_content_sha256)
+            );
+            CREATE TABLE event_asset_mapping_receipts (
+                receipt_id TEXT PRIMARY KEY,event_id TEXT NOT NULL,
+                event_version INTEGER NOT NULL,mapping_decision_id TEXT NOT NULL,
+                asset_id TEXT NOT NULL,relation_type TEXT NOT NULL,
+                display_role TEXT NOT NULL CHECK (display_role IN (
+                    'DIRECT_SECURITY','MARKET_BENCHMARK','SECTOR_PROXY','THEMATIC_PROXY'
+                )),
+                proxy_label TEXT NOT NULL,rule_id TEXT NOT NULL,
+                policy_version TEXT NOT NULL,policy_sha256 TEXT NOT NULL,
+                mapping_rank INTEGER NOT NULL CHECK (mapping_rank BETWEEN 1 AND 3),
+                confidence REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+                decision TEXT NOT NULL CHECK (decision IN ('SELECTED','REJECTED_CAP','SUPERSEDED')),
+                reason_codes_json TEXT NOT NULL,created_at TEXT NOT NULL,
+                no_trading INTEGER NOT NULL DEFAULT 1 CHECK (no_trading=1),
+                FOREIGN KEY (event_id) REFERENCES canonical_events(event_id),
+                FOREIGN KEY (event_id,event_version) REFERENCES event_versions(event_id,version),
+                FOREIGN KEY (mapping_decision_id) REFERENCES event_asset_mapping_decisions(decision_id),
+                FOREIGN KEY (asset_id) REFERENCES assets(asset_id)
+            );
+            """
+        )
+        legacy.execute(
+            """INSERT INTO event_asset_mapping_decisions VALUES (
+               'role-decision','role-event',1,'mapping-v1',?,'role-observation',?,
+               '2026-08-28T00:00:00+00:00','2026-08-28T00:01:00+00:00',
+               'MAPPED','role-rule',1,?,1)""",
+            ("a" * 64, "b" * 64, now),
+        )
+        legacy.execute(
+            """INSERT INTO event_asset_mapping_receipts VALUES (
+               'role-receipt','role-event',1,'role-decision','asset-role','MACRO_PROXY',
+               'THEMATIC_PROXY','市场代理','role-rule','mapping-v1',?,1,0.9,
+               'SELECTED','[]',?,1)""",
+            ("a" * 64, now),
+        )
+        legacy.commit()
+        legacy.close()
+
+        self.connection = ledger.open_ledger(self.db_path)
+
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT display_role FROM event_asset_mapping_receipts"
+            ).fetchone()[0],
+            "THEMATIC_PROXY",
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM event_asset_mapping_receipts_legacy_schema16_roles"
+            ).fetchone()[0],
+            1,
+        )
+        self.connection.execute(
+            "UPDATE event_asset_mapping_receipts SET display_role='DIRECT_ASSET'"
+        )
+        self.connection.execute(
+            "UPDATE event_asset_mapping_receipts SET display_role='US_LISTED_PROXY'"
+        )
+        self.assertEqual(self.connection.execute("PRAGMA foreign_key_check").fetchall(), [])
         linked_tables = {
             row["table"]
             for row in self.connection.execute(

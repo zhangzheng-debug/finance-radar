@@ -170,6 +170,61 @@ class EventAssetMappingPersistenceTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(tuple(decision), ("MAPPED", "resolved-public-company-v1", 2))
 
+    def test_country_proxy_persists_and_schedules_twelve_data_jobs(self) -> None:
+        self.connection.execute(
+            """UPDATE canonical_events
+                  SET event_family='macro_policy',event_type='country_policy_action',
+                      discovery_source='opennews_free',company_name='South Korea'
+                WHERE event_id='evt'"""
+        )
+        self.connection.execute(
+            """UPDATE event_versions
+                  SET event_family='macro_policy',event_type='country_policy_action',
+                      facts_json=?
+                WHERE event_id='evt' AND version=1""",
+            (
+                json.dumps(
+                    {
+                        "source_shape": "SINGLE_EVENT",
+                        "event_claim_text": (
+                            "South Korea raises interest rates after an inflation surprise"
+                        ),
+                    }
+                ),
+            ),
+        )
+        self.connection.execute(
+            """UPDATE raw_observations
+                  SET title='South Korea raises interest rates after an inflation surprise',
+                      summary='The Bank of Korea announced a country policy action.'
+                WHERE observation_id='obs'"""
+        )
+        self.connection.commit()
+
+        result = map_event_assets(
+            self.connection, freshness_days=14, today=self.TODAY, apply=True
+        )
+
+        self.assertEqual(result["mapped_events"], 1)
+        self.assertEqual(result["mapped_assets"], 1)
+        self.assertEqual(result["rule_hits"], {"south-korea-country-market-v1": 1})
+        asset = self.connection.execute(
+            "SELECT asset_type,symbol,provider_symbol,venue FROM assets"
+        ).fetchone()
+        self.assertEqual(tuple(asset), ("etf", "EWY", "EWY", "TwelveData"))
+
+        inserted = observer.schedule_jobs(
+            self.connection,
+            freshness_days=14,
+            today=self.TODAY,
+            now=self.PUBLISHED + dt.timedelta(days=1),
+        )
+        self.assertEqual(inserted, 7)
+        providers = self.connection.execute(
+            "SELECT DISTINCT provider FROM market_jobs"
+        ).fetchall()
+        self.assertEqual([row["provider"] for row in providers], ["twelve_data"])
+
     def test_new_event_version_no_match_deactivates_prior_automatic_mappings(self) -> None:
         first = map_event_assets(
             self.connection, freshness_days=14, today=self.TODAY, apply=True

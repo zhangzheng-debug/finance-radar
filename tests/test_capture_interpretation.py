@@ -9,6 +9,8 @@ from app.services.capture_interpretation import (
     CAPTURE_INTERPRETATION_CONTRACT,
     CAPTURE_INTERPRETATION_PROMPT_SHA256,
     CAPTURE_INTERPRETATION_PROMPT_VERSION,
+    LEGACY_CAPTURE_INTERPRETATION_PROMPT_SHA256,
+    LEGACY_CAPTURE_INTERPRETATION_PROMPT_VERSION,
     CaptureInterpretationContractError,
     capture_source_text,
     deterministic_interpretation,
@@ -74,6 +76,23 @@ def test_normalized_provider_input_excludes_raw_payload_scores_and_signals() -> 
     assert len(payload["source_text_sha256"]) == 64
 
 
+def test_capture_input_cleans_provider_markup_social_tail_and_marks_digest_shape() -> None:
+    raw = (
+        "Nvidia beats estimates; bitcoin hits a supply wall; markets await the Fed."
+        "<br/><br/>@uyendoo has what you need to know. https://t.co/abc123"
+    )
+    capture = _capture(source_title=raw, source_excerpt=raw)
+
+    payload = normalized_capture_input(_event(), capture)
+    source_text = capture_source_text(capture)
+
+    assert "<br" not in source_text
+    assert "t.co" not in source_text
+    assert "what you need to know" not in source_text
+    assert source_text.count("Nvidia beats estimates") == 1
+    assert payload["source_shape"] == "MULTI_TOPIC_DIGEST"
+
+
 def test_gold_preview_distinguishes_market_commentary_asset_and_formal_evidence() -> None:
     result = deterministic_interpretation(
         _event(), _capture(), generated_at="2026-08-21T00:00:00+00:00"
@@ -90,7 +109,9 @@ def test_gold_preview_distinguishes_market_commentary_asset_and_formal_evidence(
     assert all(item["role"] != "ACTOR" for item in result["actors"] if item["text"] == "GOLD")
     rendered = str(result)
     assert "美联储已经发布" not in rendered
-    assert "正式事件已经发生" in rendered
+    assert result["boundary_zh"] == "AI仅解释来源文本，不参与事件评级或价格判断。"
+    assert result["what_source_does_not_prove_zh"] == []
+    assert result["missing_to_change_state_zh"] == []
     assert result["safety"]["formal_status_mutated"] is False
     assert result["safety"]["used_as_model_feature"] is False
     assert result["safety"]["no_trading"] is True
@@ -354,6 +375,74 @@ def test_bulk_capture_interpretations_preserve_external_then_newest_preference(
     )
     assert (str(event["event_id"]), "d" * 64, 2) in terminal
     assert (str(event["event_id"]), "d" * 64, 3) not in terminal
+
+
+def test_bulk_capture_interpretations_prefers_current_generation_over_newer_legacy(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    event = _event(event_id="FR-LIVE-generation")
+    capture = _capture(
+        observation_id="obs-generation",
+        capture_receipt_sha256="e" * 64,
+    )
+    normalized = normalized_capture_input(event, capture)
+    created: dict[str, str] = {}
+    for label, prompt_version, prompt_sha in (
+        (
+            "current",
+            CAPTURE_INTERPRETATION_PROMPT_VERSION,
+            CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        ),
+        (
+            "legacy",
+            LEGACY_CAPTURE_INTERPRETATION_PROMPT_VERSION,
+            LEGACY_CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        ),
+    ):
+        run_id, inserted = operations.enqueue_capture_interpretation(
+            str(event["event_id"]),
+            "obs-generation",
+            normalized,
+            contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+            prompt_version=prompt_version,
+            prompt_sha256=prompt_sha,
+            provider="deepseek",
+            model_snapshot="deepseek-v4-flash",
+            external_call=True,
+        )
+        assert inserted is True
+        output = deterministic_interpretation(event, capture)
+        output["prompt_version"] = prompt_version
+        output["prompt_sha256"] = prompt_sha
+        output["one_line_zh"] = label
+        operations.complete_capture_interpretation(
+            run_id,
+            output,
+            guardrails={"canonical_mutation": False},
+        )
+        created[label] = run_id
+
+    selected = operations.latest_capture_interpretations(
+        str(event["event_id"]),
+        ["e" * 64],
+        generation_priority=(
+            (
+                CAPTURE_INTERPRETATION_CONTRACT,
+                CAPTURE_INTERPRETATION_PROMPT_VERSION,
+                CAPTURE_INTERPRETATION_PROMPT_SHA256,
+                "deepseek-v4-flash",
+            ),
+            (
+                CAPTURE_INTERPRETATION_CONTRACT,
+                LEGACY_CAPTURE_INTERPRETATION_PROMPT_VERSION,
+                LEGACY_CAPTURE_INTERPRETATION_PROMPT_SHA256,
+                "deepseek-v4-flash",
+            ),
+        ),
+    )
+
+    assert selected["e" * 64]["interpretation_id"] == created["current"]
 
 
 def _enqueue_external(operations: OperationsRepository, suffix: str) -> str:

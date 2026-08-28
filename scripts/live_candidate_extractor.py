@@ -13,7 +13,7 @@ import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -26,6 +26,7 @@ from event_ledger import open_ledger, stable_id, stable_json, utc_now
 DEFAULT_DB = ROOT / "data" / "finance_radar.sqlite3"
 DEFAULT_REPORT = ROOT / "reports" / "live_candidate_extraction_latest.md"
 DISCOVERY_ADMISSION_CONTRACT = "event-admission-v1"
+SOURCE_SHAPE_CONTRACT = "opennews-source-shape-v1"
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,15 @@ class EventRule:
     event_family: str
     event_type: str
     pattern: re.Pattern[str]
+
+
+@dataclass(frozen=True)
+class OpenNewsSourceAssessment:
+    shape: str
+    matched_rule: EventRule | None
+    event_claim_text: str | None
+    reasons: tuple[str, ...]
+    segments: tuple[str, ...]
 
 
 def rule(family: str, event_type: str, expression: str) -> EventRule:
@@ -198,6 +208,24 @@ OPENNEWS_LIVE_OR_ROUNDUP = re.compile(
     r"what\s+happened\s+today|daily\s+roundup|news\s+roundup|week\s+in\s+review)\b",
     re.I,
 )
+OPENNEWS_DIGEST_GENRE = re.compile(
+    r"\b(?:market\s+wrap|what\s+to\s+know|top\s+stories|headlines?|"
+    r"daily\s+roundup|news\s+roundup|week\s+in\s+review|morning\s+brief|"
+    r"closing\s+bell|opening\s+bell)\b|"
+    r"^\s*(?:live|liveblog|live\s+updates?)\s*[:\-]",
+    re.I,
+)
+OPENNEWS_MARKET_DIGEST_CUE = re.compile(
+    r"\b(?:asian|european|global|u\.?s\.?)\s+(?:stocks?|markets?)\b|"
+    r"\b(?:stocks?|markets?|shares?|indices|index|msci|kospi|nikkei|hang\s+seng)\b"
+    r".{0,100}\b(?:rise|rose|fall|fell|drop|dropped|edge|edged|gain|gained|lower|higher)\b",
+    re.I | re.S,
+)
+OPENNEWS_CAUSAL_CONTINUATION = re.compile(
+    r"^(?:sending|pushing|lifting|driving|causing|leaving|after|as|following|"
+    r"amid|on|because|which)\b",
+    re.I,
+)
 OPENNEWS_MONETARY_ACTION = re.compile(
     r"\b(?:cuts?|raise[sd]?|hikes?|holds?|keeps?|maintains?)\s+"
     r"(?:the\s+)?(?:(?:policy|interest)\s+)?rates?\b|"
@@ -264,6 +292,22 @@ class DiscoveryAdmission:
 
 
 def opennews_admission(row: Any, matched: EventRule) -> DiscoveryAdmission:
+    source_assessment = assess_opennews_source_shape(row)
+    if source_assessment.shape != "SINGLE_EVENT":
+        return DiscoveryAdmission(
+            False,
+            "REJECT_NOISE",
+            (f"source_shape:{source_assessment.shape.casefold()}", *source_assessment.reasons),
+        )
+    if (
+        source_assessment.matched_rule is None
+        or source_assessment.matched_rule.event_type != matched.event_type
+    ):
+        return DiscoveryAdmission(
+            False,
+            "REJECT_NOISE",
+            ("source_shape:event_rule_span_conflict",),
+        )
     discovery_text = opennews_discovery_text(row)
     if not discovery_text:
         return DiscoveryAdmission(False, "REJECT_NOISE", ("not_a_headline_event",))
@@ -339,11 +383,169 @@ def recognized_entity(text: str) -> str | None:
     return next((name for name, pattern in ENTITY_PATTERNS if pattern.search(text)), None)
 
 
-def classify(text: str) -> EventRule | None:
-    normalized = " ".join(text.split())
+def split_opennews_topic_segments(text: str) -> tuple[str, ...]:
+    """Split source text into bounded topic clauses without splitting numbers.
+
+    The split is deliberately conservative: a comma inside ``80,000`` remains
+    intact, while headline coordinators and sentence boundaries expose the
+    independent subjects commonly found in market roundups.
+    """
+
+    cleaned = html.unescape(re.sub(r"<br\s*/?>", "\n", str(text or ""), flags=re.I))
+    raw_segments = re.split(
+        r"(?:\r?\n+|(?<=[.!?。！？;；])\s+|(?<!\d),(?!\d)\s+|"
+        r"\s+(?:and|while|whereas|but)\s+)",
+        cleaned,
+        flags=re.I,
+    )
+    result: list[str] = []
+    seen: set[str] = set()
+    for segment in raw_segments:
+        normalized = " ".join(segment.strip(" -–—:：•▪●\t").split())
+        key = normalized.casefold()
+        if len(normalized) < 4 or key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return tuple(result)
+
+
+def classify_matches(text: str) -> tuple[tuple[EventRule, int, int], ...]:
+    """Return every rule hit in source order rather than rule-table order."""
+
+    normalized = " ".join(str(text or "").split())
     if re.search(r"section-news|<span\b|^\s*premarket\s+movers\b", text, re.I):
-        return None
-    return next((candidate for candidate in RULES if candidate.pattern.search(normalized)), None)
+        return ()
+    matches: list[tuple[int, int, int, EventRule]] = []
+    for rule_order, candidate in enumerate(RULES):
+        for match in candidate.pattern.finditer(normalized):
+            matches.append((match.start(), rule_order, match.end(), candidate))
+    matches.sort(key=lambda item: (item[0], item[1], item[2]))
+    return tuple((candidate, start, end) for start, _, end, candidate in matches)
+
+
+def classify(text: str) -> EventRule | None:
+    matches = classify_matches(text)
+    return matches[0][0] if matches else None
+
+
+def assess_opennews_source_shape(row: Any) -> OpenNewsSourceAssessment:
+    """Bind one event rule, subject context and affected assets to one text span.
+
+    OpenNews frequently publishes market roundups whose title mentions several
+    unrelated issuers or assets.  Such a capture remains in ``raw_observations``
+    but must not become one canonical event with fields borrowed from different
+    clauses.
+    """
+
+    analysis_text = opennews_analysis_text(row) or ""
+    discovery_text = opennews_discovery_text(row)
+    segments = split_opennews_topic_segments(analysis_text)
+    if not analysis_text:
+        return OpenNewsSourceAssessment(
+            "UNKNOWN", None, None, ("empty_source_text",), segments
+        )
+
+    if OPENNEWS_DIGEST_GENRE.search(analysis_text) or len(
+        re.findall(r"(?:^|\s)[•▪●]\s+", analysis_text)
+    ) >= 3:
+        return OpenNewsSourceAssessment(
+            "MULTI_TOPIC_DIGEST",
+            None,
+            None,
+            ("explicit_digest_genre",),
+            segments,
+        )
+
+    # ``opennews_discovery_text`` is the existing headline-quality contract.
+    # If it rejects a conditional, non-event control or long-form primer, rule
+    # words buried elsewhere must not resurrect the capture as an event.
+    if discovery_text is None:
+        return OpenNewsSourceAssessment(
+            "COMMENTARY",
+            None,
+            None,
+            ("headline_quality_gate_rejected",),
+            segments,
+        )
+
+    rule_hits: list[tuple[int, EventRule, int, int]] = []
+    for segment_index, segment in enumerate(segments):
+        for candidate, start, end in classify_matches(segment):
+            rule_hits.append((segment_index, candidate, start, end))
+    if not rule_hits:
+        return OpenNewsSourceAssessment(
+            "COMMENTARY" if discovery_text is None else "UNKNOWN",
+            None,
+            None,
+            ("no_atomic_event_rule",),
+            segments,
+        )
+
+    first_segment, matched_rule, _, _ = min(
+        rule_hits, key=lambda item: (item[0], item[2], RULES.index(item[1]))
+    )
+    hit_types_by_segment = {
+        (segment_index, candidate.event_type)
+        for segment_index, candidate, _, _ in rule_hits
+    }
+    event_segments = {segment_index for segment_index, _ in hit_types_by_segment}
+    if len(event_segments) > 1 and len({event_type for _, event_type in hit_types_by_segment}) > 1:
+        return OpenNewsSourceAssessment(
+            "MULTI_TOPIC_DIGEST",
+            None,
+            None,
+            ("multiple_independent_event_rules",),
+            segments,
+        )
+
+    asset_segments: set[int] = set()
+    for segment_index, segment in enumerate(segments):
+        if _validated_opennews_assets(str(row["raw_json"] or ""), segment):
+            asset_segments.add(segment_index)
+    if asset_segments and first_segment not in asset_segments:
+        independent_asset_segments = {
+            index
+            for index in asset_segments
+            if index >= len(segments)
+            or not OPENNEWS_CAUSAL_CONTINUATION.search(segments[index])
+        }
+        if independent_asset_segments:
+            return OpenNewsSourceAssessment(
+                "MULTI_TOPIC_DIGEST",
+                None,
+                None,
+                ("event_rule_asset_span_conflict",),
+                segments,
+            )
+
+    numeric_markers = re.findall(
+        r"(?:[$€£¥]\s*\d[\d,.]*|\b\d+(?:\.\d+)?\s*%)", analysis_text
+    )
+    if (
+        len(segments) >= 3
+        and len(numeric_markers) >= 2
+        and OPENNEWS_MARKET_DIGEST_CUE.search(analysis_text)
+    ):
+        return OpenNewsSourceAssessment(
+            "MULTI_TOPIC_DIGEST",
+            None,
+            None,
+            ("multi_metric_market_digest",),
+            segments,
+        )
+
+    if discovery_text and matched_rule.pattern.search(" ".join(discovery_text.split())):
+        event_claim_text = discovery_text
+    else:
+        event_claim_text = segments[first_segment]
+    return OpenNewsSourceAssessment(
+        "SINGLE_EVENT",
+        matched_rule,
+        event_claim_text,
+        ("atomic_rule_subject_asset_span",),
+        segments,
+    )
 
 
 def classify_observation(row: Any) -> EventRule | None:
@@ -362,9 +564,8 @@ def classify_observation(row: Any) -> EventRule | None:
         return None
 
     if source_id == "opennews_free":
-        discovery_text = opennews_discovery_text(row)
-        analysis_text = opennews_analysis_text(row)
-        return classify(analysis_text) if discovery_text and analysis_text else None
+        assessment = assess_opennews_source_shape(row)
+        return assessment.matched_rule if assessment.shape == "SINGLE_EVENT" else None
 
     if source_id == "cftc_enforcement":
         return CFTC_ENFORCEMENT_RULE if CFTC_ENFORCEMENT_TRIGGER.search(text) else None
@@ -851,14 +1052,12 @@ def reconcile_opennews_candidate_duplicates(connection: Any) -> int:
     return reconciled
 
 
-def extract_symbol(raw_json: str, source_text: str = "") -> str | None:
-    """Return an OpenNews asset only when the story itself identifies it.
+def _validated_opennews_assets(raw_json: str, source_text: str = "") -> tuple[str, ...]:
+    """Return provider assets explicitly corroborated by this exact text span."""
 
-    Provider tags are useful retrieval hints, but they are not reliable evidence
-    that the tagged asset is the subject of a story.
-    """
     original = html.unescape(source_text)
     normalized = " ".join(original.casefold().split())
+    result: list[str] = []
     for provider_symbol in _opennews_coin_tags(raw_json):
         symbol = provider_symbol.removeprefix("XYZ-")
         if symbol in OPENNEWS_INVALID_ASSET_TAGS or not symbol:
@@ -867,11 +1066,25 @@ def extract_symbol(raw_json: str, source_text: str = "") -> str | None:
         # token.  This prevents ordinary prose such as "Red Sea" or "bridge"
         # from being promoted to the unrelated RED/BRIDGE assets.
         if re.search(rf"(?<![A-Za-z0-9]){re.escape(symbol)}(?:\.[A-Z]{{1,4}})?(?![A-Za-z0-9])", original):
-            return symbol
+            if symbol not in result:
+                result.append(symbol)
+            continue
         aliases = OPENNEWS_ASSET_ALIASES.get(symbol, ())
         if any(re.search(rf"\b{re.escape(alias)}\b", normalized) for alias in aliases):
-            return symbol
-    return None
+            if symbol not in result:
+                result.append(symbol)
+    return tuple(result)
+
+
+def extract_symbol(raw_json: str, source_text: str = "") -> str | None:
+    """Return an OpenNews asset only when the same event span identifies it.
+
+    Provider tags are useful retrieval hints, but they are not reliable evidence
+    that the tagged asset is the subject of a story.
+    """
+
+    assets = _validated_opennews_assets(raw_json, source_text)
+    return assets[0] if assets else None
 
 
 def extract_company(raw_json: str) -> str | None:
@@ -888,6 +1101,8 @@ def extract_company(raw_json: str) -> str | None:
 def extract_canonical_subject(
     row: Any,
     matched: EventRule | None = None,
+    *,
+    source_text: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Return a displayable subject only when the source text identifies it.
 
@@ -898,18 +1113,19 @@ def extract_canonical_subject(
     enter the canonical event ledger.
     """
 
-    source_text = (
-        opennews_analysis_text(row)
+    bounded_source_text = (
+        source_text
+        or opennews_analysis_text(row)
         or opennews_discovery_text(row)
         or f"{str(row['title'] or '')}\n{str(row['summary'] or '')}"
     )
-    ticker = extract_symbol(str(row["raw_json"] or ""), source_text)
+    ticker = extract_symbol(str(row["raw_json"] or ""), bounded_source_text)
     company = extract_company(str(row["raw_json"] or ""))
     if not company:
-        legal_name = LEGAL_COMPANY_NAME.search(html.unescape(source_text))
+        legal_name = LEGAL_COMPANY_NAME.search(html.unescape(bounded_source_text))
         company = legal_name.group(1).strip() if legal_name else None
     if not company:
-        entity = recognized_entity(source_text)
+        entity = recognized_entity(bounded_source_text)
         company = ENTITY_DISPLAY_NAMES.get(str(entity or ""))
     if matched and matched.event_family in {"macro_policy", "macro_data", "geopolitical"}:
         # GOLD/BTC/index tags are affected assets in macro/geopolitical stories,
@@ -922,7 +1138,7 @@ def extract_canonical_subject(
             company.strip().upper() in provider_assets
             or company.strip().upper() in MACRO_ASSET_PSEUDO_SUBJECTS
         ):
-            actor = recognized_entity(source_text)
+            actor = recognized_entity(bounded_source_text)
             company = ENTITY_DISPLAY_NAMES.get(str(actor or ""))
         ticker = None
     return company, ticker
@@ -950,10 +1166,28 @@ def _filter_candidate_event(connection: Any, event_id: str, *, reason: str, now:
         facts = json.loads(version_row["facts_json"]) if version_row else {}
     except (json.JSONDecodeError, TypeError):
         facts = {}
+    active_automatic_impacts = int(
+        connection.execute(
+            """SELECT COUNT(*) FROM event_asset_impacts
+               WHERE event_id=?
+                 AND assessment_source LIKE 'automatic_asset_mapping_v1:%'
+                 AND market_observation_allowed=1""",
+            (event_id,),
+        ).fetchone()[0]
+    )
+    unfinished_market_jobs = int(
+        connection.execute(
+            """SELECT COUNT(*) FROM market_jobs
+               WHERE event_id=? AND status IN ('PENDING','RETRY','UNAVAILABLE')""",
+            (event_id,),
+        ).fetchone()[0]
+    )
     facts["discovery_filter"] = {
         "reason": reason,
         "filtered_at": now,
         "raw_observations_preserved": True,
+        "automatic_impacts_deactivated": active_automatic_impacts,
+        "unfinished_market_jobs_cancelled": unfinished_market_jobs,
     }
     new_version = int(event["current_version"]) + 1
     connection.execute(
@@ -977,6 +1211,26 @@ def _filter_candidate_event(connection: Any, event_id: str, *, reason: str, now:
            SET current_version=?,status='rejected',label_status='rejected',last_updated_at=?
            WHERE event_id=?""",
         (new_version, now, event_id),
+    )
+    # Asset impacts are an unversioned current-state projection.  Once the
+    # event claim has been rejected, leaving an automatic impact active would
+    # let a historical mapping keep scheduling or displaying price work.
+    # Receipts, completed snapshots and raw captures remain immutable audit
+    # history; only the current projection and unfinished work are retired.
+    connection.execute(
+        """UPDATE event_asset_impacts
+           SET market_observation_allowed=0,no_trading=1,updated_at=?
+           WHERE event_id=?
+             AND assessment_source LIKE 'automatic_asset_mapping_v1:%'
+             AND market_observation_allowed=1""",
+        (now, event_id),
+    )
+    connection.execute(
+        """UPDATE market_jobs
+           SET status='CANCELLED_EVENT_REJECTED',completed_at=?,
+               last_error=?,no_trading=1
+           WHERE event_id=? AND status IN ('PENDING','RETRY','UNAVAILABLE')""",
+        (now, reason, event_id),
     )
     return True
 
@@ -1072,10 +1326,20 @@ def pending_opennews_reviews(connection: Any) -> int:
     )
 
 
-def repair_opennews_asset_tags(connection: Any) -> int:
+def repair_opennews_asset_tags(
+    connection: Any, *, event_ids: Iterable[str] | None = None
+) -> int:
     """Remove provider retrieval tags that the story text does not substantiate."""
+    requested = sorted(
+        {str(value) for value in (event_ids or []) if str(value).strip()}
+    )
+    event_filter = ""
+    parameters: list[Any] = []
+    if requested:
+        event_filter = f" AND e.event_id IN ({','.join('?' for _ in requested)})"
+        parameters.extend(requested)
     rows = connection.execute(
-        """SELECT e.event_id,e.current_version,e.event_family,e.event_type,e.manual_grade,
+        f"""SELECT e.event_id,e.current_version,e.event_family,e.event_type,e.manual_grade,
                   e.ticker_at_event,r.title,r.summary,r.raw_json
            FROM canonical_events e
            JOIN event_observations eo ON eo.event_id=e.event_id
@@ -1083,7 +1347,9 @@ def repair_opennews_asset_tags(connection: Any) -> int:
            WHERE e.status='candidate' AND e.discovery_source='opennews_free'
              AND eo.relation_type!='filtered_aggregated_noise'
              AND r.source_id='opennews_free'
-           ORDER BY e.event_id,r.local_received_at DESC"""
+             {event_filter}
+           ORDER BY e.event_id,r.local_received_at DESC""",
+        parameters,
     ).fetchall()
     grouped: dict[str, list[Any]] = {}
     for row in rows:
@@ -1191,6 +1457,7 @@ def process_pending(
         "discovery_leads": 0,
         "no_candidate": 0,
         "scope_filtered": 0,
+        "source_shape_filtered": 0,
         "subject_filtered": 0,
         "backpressure_filtered": 0,
         "new_events": 0,
@@ -1208,7 +1475,34 @@ def process_pending(
     p2_admitted = 0
     for row in rows:
         result["processed"] += 1
-        matched = classify_observation(row)
+        source_assessment: OpenNewsSourceAssessment | None = None
+        if str(row["source_id"]) == "opennews_free":
+            source_assessment = assess_opennews_source_shape(row)
+            if source_assessment.shape == "MULTI_TOPIC_DIGEST":
+                connection.execute(
+                    """UPDATE observation_jobs
+                       SET status='COMPLETED_SCOPE_FILTERED',attempts=attempts+1,
+                           last_error=?,updated_at=? WHERE job_id=?""",
+                    (
+                        ";".join(
+                            (
+                                "source_shape:multi_topic_digest",
+                                *source_assessment.reasons,
+                            )
+                        ),
+                        now,
+                        row["job_id"],
+                    ),
+                )
+                result["scope_filtered"] += 1
+                result["source_shape_filtered"] += 1
+                continue
+        matched = (
+            source_assessment.matched_rule
+            if source_assessment is not None
+            and source_assessment.shape == "SINGLE_EVENT"
+            else classify_observation(row)
+        )
         if matched is None:
             connection.execute(
                 """UPDATE observation_jobs SET status='COMPLETED_NO_CANDIDATE',attempts=attempts+1,
@@ -1230,7 +1524,16 @@ def process_pending(
             result["discovery_leads"] += 1
             continue
 
-        company_name, ticker_at_event = extract_canonical_subject(row, matched)
+        event_claim_text = (
+            source_assessment.event_claim_text
+            if source_assessment is not None
+            else None
+        )
+        company_name, ticker_at_event = extract_canonical_subject(
+            row,
+            matched,
+            source_text=event_claim_text,
+        )
         if not company_name and not ticker_at_event:
             connection.execute(
                 """UPDATE observation_jobs
@@ -1291,13 +1594,25 @@ def process_pending(
             "no_trading": True,
         }
         if str(row["source_id"]) == "opennews_free":
-            affected_assets = sorted(
+            facts.update(
                 {
-                    symbol.removeprefix("XYZ-")
-                    for symbol in _opennews_coin_tags(str(row["raw_json"] or ""))
-                    if symbol.removeprefix("XYZ-")
-                    and symbol.removeprefix("XYZ-") not in OPENNEWS_INVALID_ASSET_TAGS
+                    "source_shape_contract": SOURCE_SHAPE_CONTRACT,
+                    "source_shape": (
+                        source_assessment.shape
+                        if source_assessment is not None
+                        else "UNKNOWN"
+                    ),
+                    "source_shape_reasons": list(
+                        source_assessment.reasons if source_assessment is not None else ()
+                    ),
+                    "event_claim_text": event_claim_text,
                 }
+            )
+            affected_assets = sorted(
+                _validated_opennews_assets(
+                    str(row["raw_json"] or ""),
+                    event_claim_text or "",
+                )
             )
             if affected_assets:
                 facts["affected_assets"] = affected_assets

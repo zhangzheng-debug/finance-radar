@@ -143,6 +143,113 @@ class LiveMarketObserverTests(unittest.TestCase):
             0,
         )
 
+    def test_btc_direct_asset_and_ibit_proxy_schedule_separate_providers(self) -> None:
+        now = utc_now()
+        self.connection.execute(
+            """UPDATE assets
+                  SET asset_type='crypto',symbol='BTC',provider_symbol='BTCUSDT',
+                      venue='Binance',currency='USDT',metadata_json='{}',updated_at=?
+                WHERE asset_id='asset'""",
+            (now,),
+        )
+        self.connection.execute(
+            """INSERT INTO assets VALUES (
+               'asset-ibit','etf','IBIT','IBIT','NASDAQ','USD',?, ?, ?)""",
+            (
+                stable_json(
+                    {
+                        "session_timezone": "America/New_York",
+                        "regular_open_local": "09:30",
+                        "regular_close_local": "16:00",
+                        "trading_weekdays": [0, 1, 2, 3, 4],
+                    }
+                ),
+                now,
+                now,
+            ),
+        )
+        self.connection.execute(
+            """INSERT INTO event_asset_impacts(
+               impact_id,event_id,asset_id,relation_type,direction,impact_score,
+               confidence,reason_codes_json,assessment_source,mapping_decision_id,
+               market_observation_allowed,no_trading,created_at,updated_at
+               ) VALUES (
+               'impact-ibit','evt','asset-ibit','ECOSYSTEM_PROXY','ABSTAIN',0,0.92,
+               '[]','test',NULL,1,1,?,?)""",
+            (now, now),
+        )
+        self.connection.commit()
+
+        inserted = observer.schedule_jobs(
+            self.connection,
+            freshness_days=3,
+            today=dt.date(2026, 7, 16),
+            now=self.ANCHOR,
+        )
+
+        self.assertEqual(inserted, 13)
+        jobs = self.connection.execute(
+            """SELECT a.symbol,j.provider,j.observation_window,j.status
+                 FROM market_jobs j JOIN assets a ON a.asset_id=j.asset_id
+                ORDER BY a.symbol,j.observation_window"""
+        ).fetchall()
+        by_symbol = {
+            symbol: [dict(row) for row in jobs if row["symbol"] == symbol]
+            for symbol in {row["symbol"] for row in jobs}
+        }
+        self.assertEqual(len(by_symbol["BTC"]), 6)
+        self.assertEqual({row["provider"] for row in by_symbol["BTC"]}, {"binance_public"})
+        self.assertEqual(len(by_symbol["IBIT"]), 7)
+        self.assertEqual({row["provider"] for row in by_symbol["IBIT"]}, {"twelve_data"})
+        self.assertTrue(all(row["status"] == "PENDING" for row in jobs))
+
+        binance_requests = []
+        twelve_requests = []
+
+        def binance_bar(symbol, scheduled_at, timeout):
+            binance_requests.append((symbol, scheduled_at))
+            return {
+                "symbol": symbol,
+                "price": "81234.5",
+                "provider_as_of": scheduled_at,
+                "interval": "1min",
+                "price_kind": "bar_close",
+                "close": "81234.5",
+            }
+
+        def twelve_bar(symbol, scheduled_at, api_key, timeout):
+            twelve_requests.append((symbol, scheduled_at, api_key))
+            return {
+                "symbol": symbol,
+                "price": "61.25",
+                "provider_as_of": scheduled_at,
+                "interval": "1min",
+                "price_kind": "bar_close",
+                "close": "61.25",
+            }
+
+        result = observer.run_pending(
+            self.connection,
+            now=self.ANCHOR + dt.timedelta(minutes=1) + observer.EXACT_BAR_INGESTION_GRACE,
+            api_key="fixture-key",
+            binance_bar_requester=binance_bar,
+            twelve_bar_requester=twelve_bar,
+        )
+
+        self.assertEqual(result["completed"], 2)
+        self.assertEqual([request[0] for request in binance_requests], ["BTCUSDT"])
+        self.assertEqual([request[0] for request in twelve_requests], ["IBIT"])
+        snapshots = self.connection.execute(
+            "SELECT provider,provider_symbol,currency FROM market_snapshots ORDER BY provider"
+        ).fetchall()
+        self.assertEqual(
+            [tuple(row) for row in snapshots],
+            [
+                ("binance_public", "BTCUSDT", "USDT"),
+                ("twelve_data", "IBIT", "USD"),
+            ],
+        )
+
     def test_default_provider_path_uses_timestamped_minute_bar(self) -> None:
         observer.schedule_jobs(
             self.connection,

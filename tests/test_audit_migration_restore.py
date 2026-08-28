@@ -241,7 +241,7 @@ def test_full_encrypted_migration_restore_audit(tmp_path: Path) -> None:
     )
     assert result["status"] == "PASS"
     assert result["archive"]["manifest_all_match"] is True
-    assert result["ledger_restore"]["schema_version"] == 15
+    assert result["ledger_restore"]["schema_version"] == 16
     assert result["ledger_restore"]["foreign_key_check"] == "ok"
     assert result["ledger_restore"]["audit"] == {
         "trading_boundary_violations": 0,

@@ -455,7 +455,7 @@ def test_empty_post_migration_relation_tables_fail_closed_but_expose_safe_subset
     with open_ledger(ledger) as migrated:
         assert migrated.execute(
             "SELECT MAX(version) FROM event_ledger_schema"
-        ).fetchone()[0] == 15
+        ).fetchone()[0] == 16
         assert migrated.execute(
             "SELECT COUNT(*) FROM event_evidence_relations"
         ).fetchone()[0] == 0
