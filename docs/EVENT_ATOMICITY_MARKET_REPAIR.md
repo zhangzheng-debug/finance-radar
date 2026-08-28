@@ -1,5 +1,7 @@
 # 事件原子化与市场映射修复
 
+完整的候选资产覆盖及启用边界见 [ASSET_UNIVERSE_V1.md](ASSET_UNIVERSE_V1.md)。
+
 ## 当前合同
 
 - 一条 canonical event 只能绑定一个原子事件跨度；事件规则、主体和受影响资产必须来自同一段来源文本。

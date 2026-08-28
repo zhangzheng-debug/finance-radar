@@ -49,6 +49,17 @@ GENERIC_COMPANY_TOKENS = frozenset(
 )
 DIRECT_ASSET_ALIASES: Mapping[str, tuple[str, ...]] = {
     "BTC": ("bitcoin", "btc"),
+    "ETH": ("ethereum", "ether", "eth"),
+    "SOL": ("solana", "sol"),
+    "XRP": ("xrp", "ripple"),
+    "BNB": ("bnb", "binance coin"),
+    "ADA": ("ada", "cardano"),
+    "DOGE": ("doge", "dogecoin"),
+    "AVAX": ("avax", "avalanche"),
+    "LINK": ("link", "chainlink"),
+    "DOT": ("dot", "polkadot"),
+    "LTC": ("ltc", "litecoin"),
+    "BCH": ("bch", "bitcoin cash"),
 }
 
 TOP_LEVEL_FIELDS = frozenset(
@@ -98,6 +109,7 @@ MATCH_FIELDS = frozenset(
         "event_family_patterns",
         "event_type_patterns",
         "any_patterns",
+        "none_patterns",
         "all_pattern_groups",
     }
 )
@@ -155,6 +167,7 @@ class MappingRule:
     event_family_patterns: tuple[Pattern[str], ...]
     event_type_patterns: tuple[Pattern[str], ...]
     any_patterns: tuple[Pattern[str], ...]
+    none_patterns: tuple[Pattern[str], ...]
     all_pattern_groups: tuple[tuple[Pattern[str], ...], ...]
     assets: tuple[str, ...]
 
@@ -322,6 +335,9 @@ def _parse_rule(
     any_patterns = _compile_patterns(
         match.get("any_patterns"), label=f"mapping rule {rule_id}.any_patterns"
     )
+    none_patterns = _compile_patterns(
+        match.get("none_patterns"), label=f"mapping rule {rule_id}.none_patterns"
+    )
     raw_groups = match.get("all_pattern_groups")
     groups: tuple[tuple[Pattern[str], ...], ...] = ()
     if raw_groups is not None:
@@ -338,6 +354,7 @@ def _parse_rule(
         and not event_family_patterns
         and not event_type_patterns
         and not any_patterns
+        and not none_patterns
         and not groups
     ):
         raise ValueError(f"mapping rule {rule_id} has no match condition")
@@ -369,6 +386,7 @@ def _parse_rule(
         event_family_patterns=event_family_patterns,
         event_type_patterns=event_type_patterns,
         any_patterns=any_patterns,
+        none_patterns=none_patterns,
         all_pattern_groups=groups,
         assets=tuple(normalized_refs),
     )
@@ -645,6 +663,8 @@ def _rule_matches(rule: MappingRule, event: Mapping[str, Any], *, text: str) -> 
     if rule.event_type_patterns and not any(pattern.search(event_type) for pattern in rule.event_type_patterns):
         return False
     if rule.any_patterns and not any(pattern.search(text) for pattern in rule.any_patterns):
+        return False
+    if rule.none_patterns and any(pattern.search(text) for pattern in rule.none_patterns):
         return False
     if any(not any(pattern.search(text) for pattern in group) for group in rule.all_pattern_groups):
         return False

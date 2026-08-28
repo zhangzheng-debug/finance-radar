@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_version": "event-asset-mapping-v1.3.0",
+  "policy_version": "event-asset-mapping-v1.5.0",
   "max_assets_per_event": 3,
   "direction": "ABSTAIN",
   "impact_score": 0,
@@ -16,179 +16,208 @@
     }
   },
   "asset_registry": {
-    "BTC": {
-      "asset_type": "crypto",
-      "symbol": "BTC",
-      "provider_symbol": "BTCUSDT",
-      "venue": "Binance",
-      "currency": "USDT",
-      "relation_type": "PRIMARY",
-      "role": "DIRECT_ASSET",
-      "proxy_label": "BTC现货参考（BTC/USDT，24×7）",
-      "confidence": 0.99
-    },
-    "IBIT": {
-      "asset_type": "etf",
-      "symbol": "IBIT",
-      "provider_symbol": "IBIT",
-      "venue": "NASDAQ",
-      "currency": "USD",
-      "relation_type": "ECOSYSTEM_PROXY",
-      "role": "US_LISTED_PROXY",
-      "proxy_label": "美国现货比特币ETP代理（NASDAQ时段）",
-      "confidence": 0.92
-    },
-    "SPY": {
-      "asset_type": "etf",
-      "symbol": "SPY",
-      "provider_symbol": "SPY",
-      "venue": "TwelveData",
-      "currency": "USD",
-      "relation_type": "MACRO_PROXY",
-      "role": "MARKET_BENCHMARK",
-      "proxy_label": "美国大盘ETF基准",
-      "confidence": 0.95
-    },
-    "GLD": {
-      "asset_type": "etf",
-      "symbol": "GLD",
-      "provider_symbol": "GLD",
-      "venue": "TwelveData",
-      "currency": "USD",
-      "relation_type": "MACRO_PROXY",
-      "role": "THEMATIC_PROXY",
-      "proxy_label": "黄金ETF代理",
-      "confidence": 0.9
-    },
-    "USO": {
-      "asset_type": "etf",
-      "symbol": "USO",
-      "provider_symbol": "USO",
-      "venue": "TwelveData",
-      "currency": "USD",
-      "relation_type": "MACRO_PROXY",
-      "role": "THEMATIC_PROXY",
-      "proxy_label": "WTI原油ETF代理",
-      "confidence": 0.88
-    },
-    "BNO": {
-      "asset_type": "etf",
-      "symbol": "BNO",
-      "provider_symbol": "BNO",
-      "venue": "TwelveData",
-      "currency": "USD",
-      "relation_type": "MACRO_PROXY",
-      "role": "THEMATIC_PROXY",
-      "proxy_label": "Brent原油ETF代理",
-      "confidence": 0.88
-    },
-    "TLT": {
-      "asset_type": "etf",
-      "symbol": "TLT",
-      "provider_symbol": "TLT",
-      "venue": "TwelveData",
-      "currency": "USD",
-      "relation_type": "MACRO_PROXY",
-      "role": "THEMATIC_PROXY",
-      "proxy_label": "美国长期国债ETF代理",
-      "confidence": 0.9
-    }
+    "BTC": {"asset_type":"crypto","symbol":"BTC","provider_symbol":"BTCUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"BTC现货参考（BTC/USDT，24×7）","confidence":0.99},
+    "IBIT": {"asset_type":"etf","symbol":"IBIT","provider_symbol":"IBIT","venue":"NASDAQ","currency":"USD","relation_type":"ECOSYSTEM_PROXY","role":"US_LISTED_PROXY","proxy_label":"美国现货比特币ETP代理（NASDAQ时段）","confidence":0.92},
+    "ETH": {"asset_type":"crypto","symbol":"ETH","provider_symbol":"ETHUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"ETH现货参考（ETH/USDT，24×7）","confidence":0.99},
+    "ETHA": {"asset_type":"etf","symbol":"ETHA","provider_symbol":"ETHA","venue":"NASDAQ","currency":"USD","relation_type":"ECOSYSTEM_PROXY","role":"US_LISTED_PROXY","proxy_label":"美国现货以太坊ETP代理（NASDAQ时段）","confidence":0.9},
+    "SOL": {"asset_type":"crypto","symbol":"SOL","provider_symbol":"SOLUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"SOL现货参考（SOL/USDT，24×7）","confidence":0.99},
+    "XRP": {"asset_type":"crypto","symbol":"XRP","provider_symbol":"XRPUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"XRP现货参考（XRP/USDT，24×7）","confidence":0.99},
+    "BNB": {"asset_type":"crypto","symbol":"BNB","provider_symbol":"BNBUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"BNB现货参考（BNB/USDT，24×7）","confidence":0.98},
+    "ADA": {"asset_type":"crypto","symbol":"ADA","provider_symbol":"ADAUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"ADA现货参考（ADA/USDT，24×7）","confidence":0.98},
+    "DOGE": {"asset_type":"crypto","symbol":"DOGE","provider_symbol":"DOGEUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"DOGE现货参考（DOGE/USDT，24×7）","confidence":0.98},
+    "AVAX": {"asset_type":"crypto","symbol":"AVAX","provider_symbol":"AVAXUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"AVAX现货参考（AVAX/USDT，24×7）","confidence":0.98},
+    "LINK": {"asset_type":"crypto","symbol":"LINK","provider_symbol":"LINKUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"LINK现货参考（LINK/USDT，24×7）","confidence":0.98},
+    "DOT": {"asset_type":"crypto","symbol":"DOT","provider_symbol":"DOTUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"DOT现货参考（DOT/USDT，24×7）","confidence":0.98},
+    "LTC": {"asset_type":"crypto","symbol":"LTC","provider_symbol":"LTCUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"LTC现货参考（LTC/USDT，24×7）","confidence":0.98},
+    "BCH": {"asset_type":"crypto","symbol":"BCH","provider_symbol":"BCHUSDT","venue":"Binance","currency":"USDT","relation_type":"PRIMARY","role":"DIRECT_ASSET","proxy_label":"BCH现货参考（BCH/USDT，24×7）","confidence":0.98},
+    "SPY": {"asset_type":"etf","symbol":"SPY","provider_symbol":"SPY","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"MARKET_BENCHMARK","proxy_label":"美国大盘ETF基准","confidence":0.95},
+    "QQQ": {"asset_type":"etf","symbol":"QQQ","provider_symbol":"QQQ","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"MARKET_BENCHMARK","proxy_label":"美国纳斯达克100 ETF基准","confidence":0.94},
+    "IWM": {"asset_type":"etf","symbol":"IWM","provider_symbol":"IWM","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"MARKET_BENCHMARK","proxy_label":"美国小盘股ETF基准","confidence":0.92},
+    "DIA": {"asset_type":"etf","symbol":"DIA","provider_symbol":"DIA","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"MARKET_BENCHMARK","proxy_label":"美国道琼斯ETF基准","confidence":0.91},
+    "EFA": {"asset_type":"etf","symbol":"EFA","provider_symbol":"EFA","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"MARKET_BENCHMARK","proxy_label":"发达市场（美国以外）ETF基准","confidence":0.9},
+    "EEM": {"asset_type":"etf","symbol":"EEM","provider_symbol":"EEM","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"MARKET_BENCHMARK","proxy_label":"新兴市场ETF基准","confidence":0.9},
+    "VTI": {"asset_type":"etf","symbol":"VTI","provider_symbol":"VTI","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"MARKET_BENCHMARK","proxy_label":"美国全市场ETF基准","confidence":0.93},
+    "VT": {"asset_type":"etf","symbol":"VT","provider_symbol":"VT","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"MARKET_BENCHMARK","proxy_label":"全球股票ETF基准","confidence":0.92},
+    "ACWI": {"asset_type":"etf","symbol":"ACWI","provider_symbol":"ACWI","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"MARKET_BENCHMARK","proxy_label":"全球股票ETF基准（ACWI）","confidence":0.92},
+    "RSP": {"asset_type":"etf","symbol":"RSP","provider_symbol":"RSP","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"MARKET_BENCHMARK","proxy_label":"标普500等权ETF基准","confidence":0.9},
+    "MDY": {"asset_type":"etf","symbol":"MDY","provider_symbol":"MDY","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"MARKET_BENCHMARK","proxy_label":"美国中盘股ETF基准","confidence":0.9},
+    "EWJ": {"asset_type":"etf","symbol":"EWJ","provider_symbol":"EWJ","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"日本股票ETF代理","confidence":0.94},
+    "EWY": {"asset_type":"etf","symbol":"EWY","provider_symbol":"EWY","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"韩国股票ETF代理","confidence":0.94},
+    "MCHI": {"asset_type":"etf","symbol":"MCHI","provider_symbol":"MCHI","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"中国股票ETF代理","confidence":0.92},
+    "FXI": {"asset_type":"etf","symbol":"FXI","provider_symbol":"FXI","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"中国大型股ETF代理","confidence":0.89},
+    "EWH": {"asset_type":"etf","symbol":"EWH","provider_symbol":"EWH","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"香港股票ETF代理","confidence":0.93},
+    "EWT": {"asset_type":"etf","symbol":"EWT","provider_symbol":"EWT","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"台湾股票ETF代理","confidence":0.93},
+    "INDA": {"asset_type":"etf","symbol":"INDA","provider_symbol":"INDA","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"印度股票ETF代理","confidence":0.93},
+    "EWA": {"asset_type":"etf","symbol":"EWA","provider_symbol":"EWA","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"澳大利亚股票ETF代理","confidence":0.92},
+    "EWC": {"asset_type":"etf","symbol":"EWC","provider_symbol":"EWC","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"加拿大股票ETF代理","confidence":0.92},
+    "EWZ": {"asset_type":"etf","symbol":"EWZ","provider_symbol":"EWZ","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"巴西股票ETF代理","confidence":0.93},
+    "EWW": {"asset_type":"etf","symbol":"EWW","provider_symbol":"EWW","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"墨西哥股票ETF代理","confidence":0.91},
+    "EWU": {"asset_type":"etf","symbol":"EWU","provider_symbol":"EWU","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"英国股票ETF代理","confidence":0.93},
+    "VGK": {"asset_type":"etf","symbol":"VGK","provider_symbol":"VGK","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"欧洲股票ETF代理","confidence":0.92},
+    "FEZ": {"asset_type":"etf","symbol":"FEZ","provider_symbol":"FEZ","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"欧元区大型股ETF代理","confidence":0.91},
+    "EWG": {"asset_type":"etf","symbol":"EWG","provider_symbol":"EWG","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"德国股票ETF代理","confidence":0.92},
+    "EWQ": {"asset_type":"etf","symbol":"EWQ","provider_symbol":"EWQ","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"法国股票ETF代理","confidence":0.91},
+    "EWI": {"asset_type":"etf","symbol":"EWI","provider_symbol":"EWI","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"意大利股票ETF代理","confidence":0.9},
+    "EWP": {"asset_type":"etf","symbol":"EWP","provider_symbol":"EWP","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"西班牙股票ETF代理","confidence":0.9},
+    "EWL": {"asset_type":"etf","symbol":"EWL","provider_symbol":"EWL","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"瑞士股票ETF代理","confidence":0.9},
+    "EZA": {"asset_type":"etf","symbol":"EZA","provider_symbol":"EZA","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"南非股票ETF代理","confidence":0.9},
+    "EIS": {"asset_type":"etf","symbol":"EIS","provider_symbol":"EIS","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"以色列股票ETF代理","confidence":0.9},
+    "TUR": {"asset_type":"etf","symbol":"TUR","provider_symbol":"TUR","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"土耳其股票ETF代理","confidence":0.9},
+    "KSA": {"asset_type":"etf","symbol":"KSA","provider_symbol":"KSA","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"沙特阿拉伯股票ETF代理","confidence":0.9},
+    "UAE": {"asset_type":"etf","symbol":"UAE","provider_symbol":"UAE","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"阿联酋股票ETF代理","confidence":0.89},
+    "QAT": {"asset_type":"etf","symbol":"QAT","provider_symbol":"QAT","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"卡塔尔股票ETF代理","confidence":0.89},
+    "EWS": {"asset_type":"etf","symbol":"EWS","provider_symbol":"EWS","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"新加坡股票ETF代理","confidence":0.89},
+    "EIDO": {"asset_type":"etf","symbol":"EIDO","provider_symbol":"EIDO","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"印度尼西亚股票ETF代理","confidence":0.89},
+    "EWM": {"asset_type":"etf","symbol":"EWM","provider_symbol":"EWM","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"马来西亚股票ETF代理","confidence":0.88},
+    "THD": {"asset_type":"etf","symbol":"THD","provider_symbol":"THD","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"泰国股票ETF代理","confidence":0.88},
+    "VNM": {"asset_type":"etf","symbol":"VNM","provider_symbol":"VNM","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"越南股票ETF代理","confidence":0.87},
+    "EPHE": {"asset_type":"etf","symbol":"EPHE","provider_symbol":"EPHE","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"菲律宾股票ETF代理","confidence":0.87},
+    "ENZL": {"asset_type":"etf","symbol":"ENZL","provider_symbol":"ENZL","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"新西兰股票ETF代理","confidence":0.87},
+    "EWN": {"asset_type":"etf","symbol":"EWN","provider_symbol":"EWN","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"荷兰股票ETF代理","confidence":0.88},
+    "EWO": {"asset_type":"etf","symbol":"EWO","provider_symbol":"EWO","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"奥地利股票ETF代理","confidence":0.87},
+    "EWK": {"asset_type":"etf","symbol":"EWK","provider_symbol":"EWK","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"比利时股票ETF代理","confidence":0.87},
+    "EWD": {"asset_type":"etf","symbol":"EWD","provider_symbol":"EWD","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"瑞典股票ETF代理","confidence":0.88},
+    "ENOR": {"asset_type":"etf","symbol":"ENOR","provider_symbol":"ENOR","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"挪威股票ETF代理","confidence":0.87},
+    "EDEN": {"asset_type":"etf","symbol":"EDEN","provider_symbol":"EDEN","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"丹麦股票ETF代理","confidence":0.87},
+    "EFNL": {"asset_type":"etf","symbol":"EFNL","provider_symbol":"EFNL","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"芬兰股票ETF代理","confidence":0.86},
+    "EPOL": {"asset_type":"etf","symbol":"EPOL","provider_symbol":"EPOL","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"波兰股票ETF代理","confidence":0.87},
+    "GREK": {"asset_type":"etf","symbol":"GREK","provider_symbol":"GREK","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"希腊股票ETF代理","confidence":0.86},
+    "EIRL": {"asset_type":"etf","symbol":"EIRL","provider_symbol":"EIRL","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"爱尔兰股票ETF代理","confidence":0.86},
+    "PGAL": {"asset_type":"etf","symbol":"PGAL","provider_symbol":"PGAL","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"葡萄牙股票ETF代理","confidence":0.85},
+    "ECH": {"asset_type":"etf","symbol":"ECH","provider_symbol":"ECH","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"智利股票ETF代理","confidence":0.87},
+    "EPU": {"asset_type":"etf","symbol":"EPU","provider_symbol":"EPU","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"秘鲁股票ETF代理","confidence":0.86},
+    "ARGT": {"asset_type":"etf","symbol":"ARGT","provider_symbol":"ARGT","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"阿根廷股票ETF代理","confidence":0.87},
+    "GXG": {"asset_type":"etf","symbol":"GXG","provider_symbol":"GXG","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"哥伦比亚股票ETF代理","confidence":0.85},
+    "EGPT": {"asset_type":"etf","symbol":"EGPT","provider_symbol":"EGPT","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"埃及股票ETF代理","confidence":0.85},
+    "PAK": {"asset_type":"etf","symbol":"PAK","provider_symbol":"PAK","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"巴基斯坦股票ETF代理","confidence":0.84},
+    "KWT": {"asset_type":"etf","symbol":"KWT","provider_symbol":"KWT","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"科威特股票ETF代理","confidence":0.84},
+    "NGE": {"asset_type":"etf","symbol":"NGE","provider_symbol":"NGE","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"尼日利亚股票ETF代理","confidence":0.84},
+    "XLK": {"asset_type":"etf","symbol":"XLK","provider_symbol":"XLK","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国科技行业ETF代理","confidence":0.9},
+    "XLF": {"asset_type":"etf","symbol":"XLF","provider_symbol":"XLF","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国金融行业ETF代理","confidence":0.9},
+    "XLE": {"asset_type":"etf","symbol":"XLE","provider_symbol":"XLE","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国能源行业ETF代理","confidence":0.9},
+    "XLV": {"asset_type":"etf","symbol":"XLV","provider_symbol":"XLV","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国医疗保健行业ETF代理","confidence":0.9},
+    "XLI": {"asset_type":"etf","symbol":"XLI","provider_symbol":"XLI","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国工业行业ETF代理","confidence":0.9},
+    "XLY": {"asset_type":"etf","symbol":"XLY","provider_symbol":"XLY","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国可选消费行业ETF代理","confidence":0.89},
+    "XLP": {"asset_type":"etf","symbol":"XLP","provider_symbol":"XLP","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国必需消费行业ETF代理","confidence":0.89},
+    "XLU": {"asset_type":"etf","symbol":"XLU","provider_symbol":"XLU","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国公用事业行业ETF代理","confidence":0.89},
+    "XLB": {"asset_type":"etf","symbol":"XLB","provider_symbol":"XLB","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国材料行业ETF代理","confidence":0.89},
+    "XLRE": {"asset_type":"etf","symbol":"XLRE","provider_symbol":"XLRE","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国房地产行业ETF代理","confidence":0.89},
+    "XLC": {"asset_type":"etf","symbol":"XLC","provider_symbol":"XLC","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国通信服务行业ETF代理","confidence":0.89},
+    "SMH": {"asset_type":"etf","symbol":"SMH","provider_symbol":"SMH","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"半导体行业ETF代理","confidence":0.92},
+    "KRE": {"asset_type":"etf","symbol":"KRE","provider_symbol":"KRE","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国区域银行ETF代理","confidence":0.9},
+    "XBI": {"asset_type":"etf","symbol":"XBI","provider_symbol":"XBI","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"生物科技行业ETF代理","confidence":0.9},
+    "ITA": {"asset_type":"etf","symbol":"ITA","provider_symbol":"ITA","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"航空航天与国防ETF代理","confidence":0.89},
+    "CIBR": {"asset_type":"etf","symbol":"CIBR","provider_symbol":"CIBR","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"网络安全ETF代理","confidence":0.88},
+    "ICLN": {"asset_type":"etf","symbol":"ICLN","provider_symbol":"ICLN","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"清洁能源ETF代理","confidence":0.87},
+    "GDX": {"asset_type":"etf","symbol":"GDX","provider_symbol":"GDX","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"黄金矿业ETF代理","confidence":0.88},
+    "URA": {"asset_type":"etf","symbol":"URA","provider_symbol":"URA","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"铀与核能产业ETF代理","confidence":0.87},
+    "COPX": {"asset_type":"etf","symbol":"COPX","provider_symbol":"COPX","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"铜矿产业ETF代理","confidence":0.87},
+    "LIT": {"asset_type":"etf","symbol":"LIT","provider_symbol":"LIT","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"锂电产业ETF代理","confidence":0.87},
+    "SOXX": {"asset_type":"etf","symbol":"SOXX","provider_symbol":"SOXX","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"半导体行业ETF备选代理","confidence":0.9},
+    "IGV": {"asset_type":"etf","symbol":"IGV","provider_symbol":"IGV","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"软件行业ETF代理","confidence":0.88},
+    "SKYY": {"asset_type":"etf","symbol":"SKYY","provider_symbol":"SKYY","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"云计算行业ETF代理","confidence":0.87},
+    "BOTZ": {"asset_type":"etf","symbol":"BOTZ","provider_symbol":"BOTZ","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"机器人与人工智能ETF代理","confidence":0.86},
+    "PAVE": {"asset_type":"etf","symbol":"PAVE","provider_symbol":"PAVE","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国基础设施ETF代理","confidence":0.87},
+    "JETS": {"asset_type":"etf","symbol":"JETS","provider_symbol":"JETS","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"航空公司ETF代理","confidence":0.86},
+    "IYT": {"asset_type":"etf","symbol":"IYT","provider_symbol":"IYT","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国运输行业ETF代理","confidence":0.87},
+    "XRT": {"asset_type":"etf","symbol":"XRT","provider_symbol":"XRT","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国零售行业ETF代理","confidence":0.87},
+    "ITB": {"asset_type":"etf","symbol":"ITB","provider_symbol":"ITB","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国住宅建筑ETF代理","confidence":0.88},
+    "VNQ": {"asset_type":"etf","symbol":"VNQ","provider_symbol":"VNQ","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国房地产投资信托ETF代理","confidence":0.89},
+    "TAN": {"asset_type":"etf","symbol":"TAN","provider_symbol":"TAN","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"太阳能行业ETF代理","confidence":0.86},
+    "KWEB": {"asset_type":"etf","symbol":"KWEB","provider_symbol":"KWEB","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"中国互联网行业ETF代理","confidence":0.86},
+    "XME": {"asset_type":"etf","symbol":"XME","provider_symbol":"XME","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国金属与矿业ETF代理","confidence":0.87},
+    "SLX": {"asset_type":"etf","symbol":"SLX","provider_symbol":"SLX","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"钢铁行业ETF代理","confidence":0.85},
+    "SIL": {"asset_type":"etf","symbol":"SIL","provider_symbol":"SIL","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"白银矿业ETF代理","confidence":0.85},
+    "GDXJ": {"asset_type":"etf","symbol":"GDXJ","provider_symbol":"GDXJ","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"小型黄金矿业ETF代理","confidence":0.84},
+    "REMX": {"asset_type":"etf","symbol":"REMX","provider_symbol":"REMX","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"稀土与战略金属ETF代理","confidence":0.85},
+    "PHO": {"asset_type":"etf","symbol":"PHO","provider_symbol":"PHO","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"水资源产业ETF代理","confidence":0.84},
+    "MOO": {"asset_type":"etf","symbol":"MOO","provider_symbol":"MOO","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"全球农业企业ETF代理","confidence":0.85},
+    "XOP": {"asset_type":"etf","symbol":"XOP","provider_symbol":"XOP","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"油气勘探与生产ETF代理","confidence":0.88},
+    "OIH": {"asset_type":"etf","symbol":"OIH","provider_symbol":"OIH","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"油田服务ETF代理","confidence":0.87},
+    "KIE": {"asset_type":"etf","symbol":"KIE","provider_symbol":"KIE","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国保险行业ETF代理","confidence":0.85},
+    "IHI": {"asset_type":"etf","symbol":"IHI","provider_symbol":"IHI","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"美国医疗器械ETF代理","confidence":0.86},
+    "NLR": {"asset_type":"etf","symbol":"NLR","provider_symbol":"NLR","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"核能产业ETF代理","confidence":0.86},
+    "DRIV": {"asset_type":"etf","symbol":"DRIV","provider_symbol":"DRIV","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"自动驾驶与电动车ETF代理","confidence":0.84},
+    "FINX": {"asset_type":"etf","symbol":"FINX","provider_symbol":"FINX","venue":"TwelveData","currency":"USD","relation_type":"SECTOR","role":"SECTOR_PROXY","proxy_label":"金融科技ETF代理","confidence":0.84},
+    "GLD": {"asset_type":"etf","symbol":"GLD","provider_symbol":"GLD","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"黄金ETF代理","confidence":0.9},
+    "SLV": {"asset_type":"etf","symbol":"SLV","provider_symbol":"SLV","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"白银ETF代理","confidence":0.88},
+    "USO": {"asset_type":"etf","symbol":"USO","provider_symbol":"USO","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"WTI原油ETF代理","confidence":0.88},
+    "BNO": {"asset_type":"etf","symbol":"BNO","provider_symbol":"BNO","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"Brent原油ETF代理","confidence":0.88},
+    "UNG": {"asset_type":"etf","symbol":"UNG","provider_symbol":"UNG","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"天然气ETF代理","confidence":0.87},
+    "DBA": {"asset_type":"etf","symbol":"DBA","provider_symbol":"DBA","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"农业商品ETF代理","confidence":0.85},
+    "DBC": {"asset_type":"etf","symbol":"DBC","provider_symbol":"DBC","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"广泛商品ETF代理","confidence":0.87},
+    "CPER": {"asset_type":"etf","symbol":"CPER","provider_symbol":"CPER","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"铜期货ETF代理","confidence":0.86},
+    "PPLT": {"asset_type":"etf","symbol":"PPLT","provider_symbol":"PPLT","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"铂金ETF代理","confidence":0.85},
+    "PALL": {"asset_type":"etf","symbol":"PALL","provider_symbol":"PALL","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"钯金ETF代理","confidence":0.84},
+    "WEAT": {"asset_type":"etf","symbol":"WEAT","provider_symbol":"WEAT","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"小麦期货ETF代理","confidence":0.84},
+    "CORN": {"asset_type":"etf","symbol":"CORN","provider_symbol":"CORN","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"玉米期货ETF代理","confidence":0.84},
+    "SOYB": {"asset_type":"etf","symbol":"SOYB","provider_symbol":"SOYB","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"大豆期货ETF代理","confidence":0.84},
+    "SHY": {"asset_type":"etf","symbol":"SHY","provider_symbol":"SHY","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国短期国债ETF代理","confidence":0.9},
+    "IEF": {"asset_type":"etf","symbol":"IEF","provider_symbol":"IEF","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国中期国债ETF代理","confidence":0.9},
+    "TLT": {"asset_type":"etf","symbol":"TLT","provider_symbol":"TLT","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国长期国债ETF代理","confidence":0.9},
+    "TIP": {"asset_type":"etf","symbol":"TIP","provider_symbol":"TIP","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国通胀保值债券ETF代理","confidence":0.88},
+    "HYG": {"asset_type":"etf","symbol":"HYG","provider_symbol":"HYG","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国高收益债ETF代理","confidence":0.88},
+    "LQD": {"asset_type":"etf","symbol":"LQD","provider_symbol":"LQD","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国投资级公司债ETF代理","confidence":0.88},
+    "SGOV": {"asset_type":"etf","symbol":"SGOV","provider_symbol":"SGOV","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国0至3个月国债ETF代理","confidence":0.9},
+    "BIL": {"asset_type":"etf","symbol":"BIL","provider_symbol":"BIL","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国1至3个月国库券ETF代理","confidence":0.9},
+    "BND": {"asset_type":"etf","symbol":"BND","provider_symbol":"BND","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国综合债券ETF代理","confidence":0.89},
+    "GOVT": {"asset_type":"etf","symbol":"GOVT","provider_symbol":"GOVT","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国全期限国债ETF代理","confidence":0.89},
+    "MUB": {"asset_type":"etf","symbol":"MUB","provider_symbol":"MUB","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国市政债ETF代理","confidence":0.86},
+    "EMB": {"asset_type":"etf","symbol":"EMB","provider_symbol":"EMB","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"新兴市场美元债ETF代理","confidence":0.87},
+    "JNK": {"asset_type":"etf","symbol":"JNK","provider_symbol":"JNK","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国高收益债ETF备选代理","confidence":0.86},
+    "BKLN": {"asset_type":"etf","symbol":"BKLN","provider_symbol":"BKLN","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美国高级贷款ETF代理","confidence":0.85},
+    "UUP": {"asset_type":"etf","symbol":"UUP","provider_symbol":"UUP","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"美元指数ETF代理","confidence":0.88},
+    "FXY": {"asset_type":"etf","symbol":"FXY","provider_symbol":"FXY","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"日元ETF代理","confidence":0.86},
+    "FXE": {"asset_type":"etf","symbol":"FXE","provider_symbol":"FXE","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"欧元ETF代理","confidence":0.86},
+    "FXB": {"asset_type":"etf","symbol":"FXB","provider_symbol":"FXB","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"英镑ETF代理","confidence":0.86},
+    "FXA": {"asset_type":"etf","symbol":"FXA","provider_symbol":"FXA","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"澳元ETF代理","confidence":0.84},
+    "FXC": {"asset_type":"etf","symbol":"FXC","provider_symbol":"FXC","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"加元ETF代理","confidence":0.84},
+    "FXF": {"asset_type":"etf","symbol":"FXF","provider_symbol":"FXF","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"瑞士法郎ETF代理","confidence":0.84},
+    "CYB": {"asset_type":"etf","symbol":"CYB","provider_symbol":"CYB","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"人民币ETF代理","confidence":0.83},
+    "CEW": {"asset_type":"etf","symbol":"CEW","provider_symbol":"CEW","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"新兴市场货币ETF代理","confidence":0.82},
+    "VIXY": {"asset_type":"etf","symbol":"VIXY","provider_symbol":"VIXY","venue":"TwelveData","currency":"USD","relation_type":"MACRO_PROXY","role":"THEMATIC_PROXY","proxy_label":"短期期货波动率ETF代理","confidence":0.8}
   },
   "rules": [
-    {
-      "id": "bitcoin-direct-us-proxy-v1",
-      "priority": 1,
-      "match": {
-        "direct_asset_patterns": [
-          "^BTC$"
-        ],
-        "source_patterns": [
-          "^opennews_free$"
-        ]
-      },
-      "assets": ["BTC", "IBIT"]
-    },
-    {
-      "id": "resolved-public-company-v1",
-      "priority": 5,
-      "match": {
-        "company_ticker": true,
-        "company_name_required": true,
-        "issuer_resolution_required": true,
-        "source_patterns": [
-          "^(?:opennews_free|[a-z0-9_]+_official_news)$"
-        ]
-      },
-      "assets": ["$TICKER", "SPY"]
-    },
-    {
-      "id": "company-direct-market-v1",
-      "priority": 10,
-      "match": {
-        "company_ticker": true,
-        "company_name_required": true,
-        "source_patterns": [
-          "^(?:sec_current_filings|sharadar_active_research|fda_medwatch)$"
-        ]
-      },
-      "assets": ["$TICKER", "SPY"]
-    },
-    {
-      "id": "geopolitical-energy-transmission-v1",
-      "priority": 20,
-      "match": {
-        "event_family_patterns": [
-          "^(?:geopolitical|geopolitical maritime risk|macro policy|operational shock|operational disruption|external demand shock|policy revenue shock)$"
-        ],
-        "all_pattern_groups": [
-          [
-            "\\b(?:armed attack|blockade|geopolitical conflict|invasion|iran(?:ian)?|military|missile|sanction|war)\\b|(?:伊朗|武装|封锁|入侵|军事|导弹|制裁|战争)"
-          ],
-          [
-            "\\b(?:commercial shipping|crude|energy supply|hormuz|oil|oilfield|opec|pipeline|port blockade|shipping route|tanker)\\b|(?:商业航运|原油|石油|能源供应|霍尔木兹|油田|欧佩克|输油管道|港口封锁|航运路线|油轮)"
-          ]
-        ]
-      },
-      "assets": ["USO", "BNO", "GLD"]
-    },
-    {
-      "id": "armed-conflict-broad-market-v1",
-      "priority": 30,
-      "match": {
-        "event_family_patterns": [
-          "^(?:geopolitical|geopolitical maritime risk|macro policy)$"
-        ],
-        "any_patterns": [
-          "\\b(?:armed attack|armed conflict|blockade|invasion|military (?:action|attack|strikes?)|missile (?:attack|strikes?)|war)\\b|(?:武装袭击|武装冲突|封锁|入侵|军事行动|军事打击|导弹袭击|战争)"
-        ]
-      },
-      "assets": ["GLD", "SPY"]
-    },
-    {
-      "id": "monetary-policy-cross-asset-v1",
-      "priority": 40,
-      "match": {
-        "event_family_patterns": [
-          "^(?:macro policy|financial stability|bank supervision policy|regulatory policy)$"
-        ],
-        "any_patterns": [
-          "\\b(?:central bank rate|federal funds|fomc|interest rate decision|monetary policy|policy rate|rate cut|rate hike)\\b|(?:央行利率|联邦基金|美联储|利率决议|货币政策|政策利率|降息|加息)"
-        ]
-      },
-      "assets": ["TLT", "SPY", "GLD"]
-    },
-    {
-      "id": "inflation-release-cross-asset-v1",
-      "priority": 50,
-      "match": {
-        "event_family_patterns": [
-          "^macro data$"
-        ],
-        "any_patterns": [
-          "\\b(?:consumer price index|cpi|inflation|producer price index|ppi)\\b|(?:消费者价格指数|通胀|生产者价格指数)"
-        ]
-      },
-      "assets": ["TLT", "SPY", "GLD"]
-    }
+    {"id":"bitcoin-direct-us-proxy-v1","priority":1,"match":{"direct_asset_patterns":["^BTC$"],"source_patterns":["^opennews_free$"]},"assets":["BTC","IBIT"]},
+    {"id":"ethereum-direct-us-proxy-v1","priority":2,"match":{"direct_asset_patterns":["^ETH$"],"source_patterns":["^opennews_free$"]},"assets":["ETH","ETHA"]},
+    {"id":"solana-direct-v1","priority":3,"match":{"direct_asset_patterns":["^SOL$"],"source_patterns":["^opennews_free$"]},"assets":["SOL"]},
+    {"id":"xrp-direct-v1","priority":4,"match":{"direct_asset_patterns":["^XRP$"],"source_patterns":["^opennews_free$"]},"assets":["XRP"]},
+    {"id":"resolved-public-company-v1","priority":5,"match":{"company_ticker":true,"company_name_required":true,"issuer_resolution_required":true,"source_patterns":["^(?:opennews_free|[a-z0-9_]+_official_news)$"]},"assets":["$TICKER","SPY"]},
+    {"id":"company-direct-market-v1","priority":10,"match":{"company_ticker":true,"company_name_required":true,"source_patterns":["^(?:sec_current_filings|sharadar_active_research|fda_medwatch)$"]},"assets":["$TICKER","SPY"]},
+    {"id":"japan-country-market-v1","priority":20,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:bank of japan|boj|japan(?:ese)?|nikkei(?: 225)?|topix)\\b|(?:日本|日本银行|日本央行|日经|东证指数)"]},"assets":["EWJ","FXY"]},
+    {"id":"south-korea-country-market-v1","priority":21,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:bank of korea|bok|south korea(?:n)?|republic of korea|korea(?:n)?|kospi|kosdaq)\\b|(?:韩国|韩国央行|韩股|韩国综合股价指数)"],"none_patterns":["\\b(?:north korea(?:n)?|dprk)\\b|(?:朝鲜|北韩)"]},"assets":["EWY"]},
+    {"id":"hong-kong-country-market-v1","priority":22,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:hong kong|hang seng|hkma)\\b|(?:香港|恒生指数|香港金管局)"]},"assets":["EWH"]},
+    {"id":"china-country-market-v1","priority":23,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:china|chinese|people s bank of china|pboc|mainland china|csi 300|shanghai composite)\\b|(?:中国人民银行|中国央行|中国经济|沪深300|上证指数|中国内地)"]},"assets":["MCHI"]},
+    {"id":"taiwan-country-market-v1","priority":24,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:taiwan(?:ese)?|taiex)\\b|(?:台湾|台湾加权指数|台股)"]},"assets":["EWT"]},
+    {"id":"india-country-market-v1","priority":25,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:reserve bank of india|rbi|india(?:n)?|nifty|sensex)\\b|(?:印度|印度央行|印度储备银行)"]},"assets":["INDA"]},
+    {"id":"united-kingdom-country-market-v1","priority":26,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:bank of england|boe|united kingdom|britain|british|ftse)\\b|(?:英国|英格兰银行|英国央行)"]},"assets":["EWU","FXB"]},
+    {"id":"germany-country-market-v1","priority":27,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:germany|german|dax|bundesbank)\\b|(?:德国|德国央行|德国联邦银行)"]},"assets":["EWG"]},
+    {"id":"france-country-market-v1","priority":28,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:france|french|cac 40|bank of france)\\b|(?:法国|法国央行)"]},"assets":["EWQ"]},
+    {"id":"eurozone-country-market-v1","priority":29,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:european central bank|ecb|eurozone|euro area|stoxx|european union)\\b|(?:欧洲央行|欧元区|欧洲联盟)"]},"assets":["FEZ","FXE"]},
+    {"id":"australia-country-market-v1","priority":30,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:reserve bank of australia|rba|australia(?:n)?|asx 200)\\b|(?:澳大利亚|澳洲央行)"]},"assets":["EWA"]},
+    {"id":"canada-country-market-v1","priority":31,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:bank of canada|canada|canadian|tsx)\\b|(?:加拿大|加拿大央行)"]},"assets":["EWC"]},
+    {"id":"brazil-country-market-v1","priority":32,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:central bank of brazil|brazil(?:ian)?|bovespa|ibovespa)\\b|(?:巴西|巴西央行)"]},"assets":["EWZ"]},
+    {"id":"mexico-country-market-v1","priority":33,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:bank of mexico|banxico|mexico|mexican|mexbol)\\b|(?:墨西哥|墨西哥央行)"]},"assets":["EWW"]},
+    {"id":"south-africa-country-market-v1","priority":34,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:south africa(?:n)?|sarb|jse)\\b|(?:南非|南非储备银行)"]},"assets":["EZA"]},
+    {"id":"turkey-country-market-v1","priority":35,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:central bank of turkey|turkey|turkish|bist)\\b|(?:土耳其|土耳其央行)"],"none_patterns":["\\b(?:thanksgiving|poultry|avian influenza|bird flu)\\b"]},"assets":["TUR"]},
+    {"id":"israel-country-market-v1","priority":36,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:bank of israel|israel(?:i)?|tel aviv)\\b|(?:以色列|以色列央行|特拉维夫)"]},"assets":["EIS"]},
+    {"id":"saudi-arabia-country-market-v1","priority":37,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:saudi arabia(?:n)?|tadawul|sama)\\b|(?:沙特|沙特阿拉伯)"]},"assets":["KSA"]},
+    {"id":"uae-country-market-v1","priority":38,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:united arab emirates|uae|abu dhabi|dubai financial market)\\b|(?:阿联酋|阿布扎比|迪拜金融市场)"]},"assets":["UAE"]},
+    {"id":"qatar-country-market-v1","priority":39,"match":{"event_family_patterns":["^(?:macro data|macro policy|regional market|market move|economic policy|financial stability|country risk)$"],"any_patterns":["\\b(?:qatar|qatari|qatar central bank)\\b|(?:卡塔尔|卡塔尔央行)"]},"assets":["QAT"]},
+    {"id":"geopolitical-energy-transmission-v1","priority":50,"match":{"event_family_patterns":["^(?:geopolitical|geopolitical maritime risk|macro policy|operational shock|operational disruption|external demand shock|policy revenue shock)$"],"all_pattern_groups":[["\\b(?:armed attack|blockade|geopolitical conflict|invasion|iran(?:ian)?|military|missile|sanction|war)\\b|(?:伊朗|武装|封锁|入侵|军事|导弹|制裁|战争)"],["\\b(?:commercial shipping|crude|energy supply|hormuz|oil|oilfield|opec|pipeline|port blockade|shipping route|tanker)\\b|(?:商业航运|原油|石油|能源供应|霍尔木兹|油田|欧佩克|输油管道|港口封锁|航运路线|油轮)"]]},"assets":["USO","BNO","GLD"]},
+    {"id":"armed-conflict-broad-market-v1","priority":51,"match":{"event_family_patterns":["^(?:geopolitical|geopolitical maritime risk|macro policy)$"],"any_patterns":["\\b(?:armed attack|armed conflict|blockade|invasion|military (?:action|attack|strikes?)|missile (?:attack|strikes?)|war)\\b|(?:武装袭击|武装冲突|封锁|入侵|军事行动|军事打击|导弹袭击|战争)"]},"assets":["GLD","SPY"]},
+    {"id":"monetary-policy-cross-asset-v1","priority":60,"match":{"event_family_patterns":["^(?:macro policy|financial stability|bank supervision policy|regulatory policy)$"],"any_patterns":["\\b(?:central bank rate|federal funds|fomc|interest rate decision|monetary policy|policy rate|rate cut|rate hike)\\b|(?:央行利率|联邦基金|美联储|利率决议|货币政策|政策利率|降息|加息)"]},"assets":["TLT","SPY","GLD"]},
+    {"id":"inflation-release-cross-asset-v1","priority":70,"match":{"event_family_patterns":["^macro data$"],"any_patterns":["\\b(?:consumer price index|cpi|inflation|producer price index|ppi)\\b|(?:消费者价格指数|通胀|生产者价格指数)"]},"assets":["TLT","SPY","GLD"]},
+    {"id":"us-labor-growth-cross-asset-v1","priority":80,"match":{"event_family_patterns":["^macro data$"],"any_patterns":["\\b(?:employment situation|nonfarm payrolls|unemployment rate|job openings|jolts|gross domestic product|gdp)\\b|(?:非农就业|失业率|职位空缺|国内生产总值)"]},"assets":["SPY","TLT","UUP"]},
+    {"id":"semiconductor-sector-v1","priority":90,"match":{"event_family_patterns":["^(?:industry policy|sector shock|supply chain|operational shock|regulatory policy)$"],"any_patterns":["\\b(?:semiconductor|chip export|chipmaking|foundry)\\b|(?:半导体|芯片出口|晶圆代工)"]},"assets":["SMH","QQQ"]},
+    {"id":"banking-sector-v1","priority":91,"match":{"event_family_patterns":["^(?:financial stability|bank supervision policy|sector shock|regulatory policy)$"],"any_patterns":["\\b(?:banking sector|regional banks|deposit flight|bank capital|bank liquidity)\\b|(?:银行业|区域银行|存款外流|银行资本|银行流动性)"]},"assets":["XLF","KRE","SPY"]},
+    {"id":"biotechnology-sector-v1","priority":92,"match":{"event_family_patterns":["^(?:sector shock|industry policy|regulatory policy|product safety)$"],"any_patterns":["\\b(?:biotechnology|biotech sector|drug pricing|clinical trial sector)\\b|(?:生物科技|生物技术行业|药品定价)"]},"assets":["XBI","XLV"]},
+    {"id":"defense-sector-v1","priority":93,"match":{"event_family_patterns":["^(?:industry policy|sector shock|government procurement)$"],"any_patterns":["\\b(?:aerospace and defense|defense spending|military procurement)\\b|(?:航空航天与国防|国防开支|军事采购)"]},"assets":["ITA"]},
+    {"id":"cybersecurity-sector-v1","priority":94,"match":{"event_family_patterns":["^(?:security incident|industry policy|sector shock|regulatory policy)$"],"any_patterns":["\\b(?:cybersecurity sector|cyber security industry|ransomware industrywide)\\b|(?:网络安全行业|全行业勒索软件)"]},"assets":["CIBR"]},
+    {"id":"natural-gas-market-v1","priority":95,"match":{"event_family_patterns":["^(?:commodity market|energy market|operational shock|weather shock)$"],"any_patterns":["\\b(?:natural gas|lng supply|gas storage)\\b|(?:天然气|液化天然气供应|天然气库存)"]},"assets":["UNG"]},
+    {"id":"precious-metals-market-v1","priority":96,"match":{"event_family_patterns":["^(?:commodity market|metals market|inflation hedge)$"],"any_patterns":["\\b(?:gold|silver|precious metals)\\b|(?:黄金|白银|贵金属)"]},"assets":["GLD","SLV","GDX"]},
+    {"id":"uranium-market-v1","priority":97,"match":{"event_family_patterns":["^(?:commodity market|energy market|industry policy|sector shock)$"],"any_patterns":["\\b(?:uranium|nuclear fuel)\\b|(?:铀|核燃料)"]},"assets":["URA"]},
+    {"id":"copper-market-v1","priority":98,"match":{"event_family_patterns":["^(?:commodity market|metals market|industry policy|sector shock)$"],"any_patterns":["\\b(?:copper market|copper supply|copper mine)\\b|(?:铜市场|铜供应|铜矿)"]},"assets":["COPX"]},
+    {"id":"lithium-market-v1","priority":99,"match":{"event_family_patterns":["^(?:commodity market|metals market|industry policy|sector shock)$"],"any_patterns":["\\b(?:lithium market|lithium supply|battery metals)\\b|(?:锂市场|锂供应|电池金属)"]},"assets":["LIT"]}
   ]
 }
