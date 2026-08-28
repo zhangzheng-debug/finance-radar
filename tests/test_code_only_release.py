@@ -11,6 +11,11 @@ import sys
 
 import pytest
 
+from deployment.systemd.verify_code_only_release import (
+    MAX_BACKUP_FILE_COUNT,
+    MAX_BACKUP_MANIFEST_BYTES,
+)
+
 
 VALIDATOR = (
     Path(__file__).parents[1]
@@ -18,6 +23,11 @@ VALIDATOR = (
     / "systemd"
     / "verify_code_only_release.py"
 )
+
+
+def test_code_only_backup_bounds_cover_current_production_scale() -> None:
+    assert MAX_BACKUP_MANIFEST_BYTES == 64 * 1024 * 1024
+    assert MAX_BACKUP_FILE_COUNT == 250_000
 
 
 def _release(root: Path, marker: str) -> Path:

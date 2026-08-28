@@ -227,7 +227,10 @@ machinery itself must use `full` once so the new backup unit can create the
 first trusted attestation. Candidate validation and preparation leave the
 byte-identical collector and capture interpreter running; the worker stops only
 for the short atomic activation and overview publication window. The fast path
-also leaves existing shared-data ownership untouched.
+also leaves existing shared-data ownership untouched. Backup verification is
+bounded to a 64 MiB manifest and 250,000 payload files; every listed payload is
+still checked against the root-owned attestation, hash, byte count, inode,
+timestamp and exact bundle file set.
 
 The Evidence Agent also has an optional, independent loopback service on port
 18601. `install_local_evidence_model.sh` pins both llama.cpp and the GGUF model
