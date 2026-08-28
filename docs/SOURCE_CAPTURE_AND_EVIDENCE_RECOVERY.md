@@ -59,7 +59,7 @@ python scripts/build_source_observation_recovery.py `
 类似“地缘紧张推动避险、黄金上涨、市场等待 Fed 会议纪要”的记录应满足：
 
 1. 保留 provider 标题、摘要、链接、发布时间、接收时间和采集收据哈希；
-2. 在主事件流公开显示，`evidence_posture=SOURCE_CAPTURED`，并使用“仅捕获来源，不是正式事实”等明确措辞；
+2. 在主事件流公开显示；若有安全公共链接则使用 `source_provenance.access=PUBLIC_SOURCE`，若仅保留文本则使用 `CAPTURE_ONLY`。列表只显示“来源可查”或“来源已保存”，不重复铺陈内部证据缺口；
 3. `citable_evidence_count=0`，canonical rejected 状态不变；
 4. GOLD 只作为受影响资产，不作为宏观政策行为主体；
 5. 不把 provider 的 `long`、分数或等级送入事实判断、模型或页面。

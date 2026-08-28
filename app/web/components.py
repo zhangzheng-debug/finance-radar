@@ -67,6 +67,36 @@ PUBLIC_EVIDENCE_POSTURE_STATUS_CLASS = {
     "NO_SOURCE": "weak",
 }
 
+# The public feed is organized by source accessibility.  The stricter evidence
+# posture above remains available in details and API compatibility fields, but
+# it must not make an inspectable source look like a warning.
+PUBLIC_SOURCE_ACCESS_LABELS = {
+    "CLAIM_SOURCE_LINKED": "原文支持",
+    "PRIMARY_SOURCE": "一手来源",
+    "PUBLIC_SOURCE": "来源可查",
+    "CAPTURE_ONLY": "来源已保存",
+    "SOURCE_PROBLEM": "来源异常",
+    "NO_PUBLIC_SOURCE": "",
+}
+
+PUBLIC_SOURCE_ACCESS_COPY = {
+    "CLAIM_SOURCE_LINKED": "具体事实已绑定到可定位原文。",
+    "PRIMARY_SOURCE": "可打开监管、交易所、公司或政府等一手来源。",
+    "PUBLIC_SOURCE": "可打开该信息的公开发布来源。",
+    "CAPTURE_ONLY": "系统保留了来源文本，但当前没有可公开打开的链接。",
+    "SOURCE_PROBLEM": "来源已删除、撤回或出现其他可用性异常。",
+    "NO_PUBLIC_SOURCE": "当前事件没有可公开展示的来源。",
+}
+
+PUBLIC_SOURCE_ACCESS_STATUS_CLASS = {
+    "CLAIM_SOURCE_LINKED": "verified",
+    "PRIMARY_SOURCE": "source-primary",
+    "PUBLIC_SOURCE": "source-public",
+    "CAPTURE_ONLY": "source-capture",
+    "SOURCE_PROBLEM": "source-problem",
+    "NO_PUBLIC_SOURCE": "source-none",
+}
+
 PUBLIC_RISK_ROUTE_LABELS = {
     "RISK_REVIEW": "优先复核",
     "NON_TARGET": "非目标",
@@ -90,9 +120,15 @@ QWEN_POLARITY_LABELS = {
 }
 
 QWEN_STRENGTH_LABELS = {
-    "HIGH": "强度高",
-    "LOW": "强度低",
-    "NONE": "强度低",
+    "HIGH": "高",
+    "LOW": "低",
+    "NONE": "低",
+    "UNCLEAR": "",
+}
+
+QWEN_MATERIALITY_LABELS = {
+    "MATERIAL_ADVERSE": "重大",
+    "NOT_MATERIAL_ADVERSE": "一般",
     "UNCLEAR": "",
 }
 
@@ -115,6 +151,11 @@ STATUS_GLYPHS = {
     "candidate": "◇",
     "weak": "△",
     "rejected": "×",
+    "source-primary": "▣",
+    "source-public": "●",
+    "source-capture": "▪",
+    "source-problem": "!",
+    "source-none": "—",
 }
 
 EVENT_FAMILY_LABELS = {
@@ -873,6 +914,80 @@ def public_event_evidence_posture(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def public_event_source_provenance(item: dict[str, Any]) -> dict[str, Any]:
+    """Return the reader-facing source-access classification.
+
+    New API responses provide the nested ``source_provenance`` contract.  The
+    fallback keeps rolling deployments readable without treating a retained
+    capture as a failed evidence review.
+    """
+
+    declared = item.get("source_provenance")
+    declared = declared if isinstance(declared, dict) else {}
+    access = str(declared.get("access") or "").strip().upper()
+    if access not in PUBLIC_SOURCE_ACCESS_LABELS:
+        evidence = public_event_evidence_posture(item)
+        try:
+            primary_urls = max(0, int(item.get("primary_source_url_count") or 0))
+        except (TypeError, ValueError):
+            primary_urls = 0
+        try:
+            public_urls = max(0, int(item.get("public_source_url_count") or 0))
+        except (TypeError, ValueError):
+            public_urls = 0
+        try:
+            captured_text = max(0, int(item.get("captured_text_count") or 0))
+        except (TypeError, ValueError):
+            captured_text = 0
+        try:
+            capture_count = max(
+                0,
+                int(
+                    item.get("displayable_source_count")
+                    if "displayable_source_count" in item
+                    else item.get("captured_source_count")
+                    or 0
+                ),
+            )
+        except (TypeError, ValueError):
+            capture_count = 0
+        try:
+            problems = max(0, int(item.get("source_problem_count") or 0))
+        except (TypeError, ValueError):
+            problems = 0
+
+        if evidence["citation_ready"]:
+            access = "CLAIM_SOURCE_LINKED"
+        elif primary_urls or evidence["key"] == "PRIMARY_SOURCE_AVAILABLE":
+            access = "PRIMARY_SOURCE"
+        elif public_urls:
+            access = "PUBLIC_SOURCE"
+        elif (
+            captured_text
+            or capture_count
+            or (
+                "displayable_source_count" not in item
+                and evidence["key"] == "SOURCE_CAPTURED"
+            )
+        ):
+            access = "CAPTURE_ONLY"
+        elif problems:
+            access = "SOURCE_PROBLEM"
+        else:
+            access = "NO_PUBLIC_SOURCE"
+
+    return {
+        "key": access,
+        "label": PUBLIC_SOURCE_ACCESS_LABELS[access],
+        "explanation": PUBLIC_SOURCE_ACCESS_COPY[access],
+        "status_class": PUBLIC_SOURCE_ACCESS_STATUS_CLASS[access],
+        "classification_version": str(
+            declared.get("classification_version")
+            or "public-source-provenance-ui-fallback-v1"
+        ),
+    }
+
+
 def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
     """Render only an explicitly public-approved Qwen semantic assessment.
 
@@ -894,15 +1009,18 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
         and semantic.get("confirms_event_fact") is False
     ):
         polarity = str(semantic.get("polarity") or "").strip().upper()
+        materiality = str(semantic.get("materiality") or "").strip().upper()
         strength = str(semantic.get("adverse_strength") or "").strip().upper()
         priority = str(semantic.get("semantic_priority") or "").strip().upper()
         scope = str(semantic.get("assessment_scope") or "").strip().upper()
         if (
             polarity in QWEN_POLARITY_LABELS
+            and materiality in QWEN_MATERIALITY_LABELS
             and strength in QWEN_STRENGTH_LABELS
             and priority in {"PRIORITY_REVIEW", "ROUTINE"}
             and scope in {"EVIDENCE_SUPPORTED", "SOURCE_CONDITIONAL"}
             and polarity != "UNCLEAR"
+            and materiality != "UNCLEAR"
             and strength != "UNCLEAR"
         ):
             conditional = scope == "SOURCE_CONDITIONAL"
@@ -915,8 +1033,11 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
                 "label": (
                     QWEN_POLARITY_LABELS[polarity]
                     + " · "
-                    + QWEN_STRENGTH_LABELS[strength]
+                    + ("强度" + QWEN_STRENGTH_LABELS[strength])
                 ),
+                "polarity_label": QWEN_POLARITY_LABELS[polarity],
+                "materiality_label": QWEN_MATERIALITY_LABELS[materiality],
+                "strength_label": QWEN_STRENGTH_LABELS[strength],
                 "heading": "研究信号",
                 "explanation": (
                     "基于来源文本的风险语义判断。"
@@ -935,6 +1056,9 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "route": "",
         "label": "",
+        "polarity_label": "",
+        "materiality_label": "",
+        "strength_label": "",
         "heading": "研究信号",
         "explanation": "",
         "basis_label": "",
@@ -951,7 +1075,7 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
 def public_event_state(item: dict[str, Any]) -> str:
     """Return the legacy workflow projection for compatibility and disposition.
 
-    Public navigation and trust labels must use ``public_event_evidence_posture``
+    Public navigation and trust labels must use ``public_event_source_provenance``
     and ``public_event_risk_assessment`` instead.  The legacy state is retained
     so exceptional dispositions such as an excluded record remain auditable.
     """
@@ -1086,8 +1210,8 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, Any]:
     reused as the public summary because boilerplate and untranslated legal
     text are poor substitutes for a bounded statement of what is known.
     """
-    state = public_event_state(item)
     evidence = public_event_evidence_posture(item)
+    source_provenance = public_event_source_provenance(item)
     risk = public_event_risk_assessment(item)
     subject = public_event_subject(item)
     family_key = str(item.get("event_family") or "")
@@ -1150,8 +1274,15 @@ def public_event_copy(item: dict[str, Any]) -> dict[str, Any]:
         "evidence_explanation": str(evidence["explanation"]),
         "citation_ready": bool(evidence["citation_ready"]),
         "evidence_gaps": "、".join(evidence["gap_labels"]),
+        "source_access": str(source_provenance["key"]),
+        "source_label": str(source_provenance["label"]),
+        "source_explanation": str(source_provenance["explanation"]),
+        "source_status_class": str(source_provenance["status_class"]),
         "risk_route": str(risk["route"]),
         "risk_label": str(risk["label"]),
+        "risk_polarity_label": str(risk["polarity_label"]),
+        "risk_materiality_label": str(risk["materiality_label"]),
+        "risk_strength_label": str(risk["strength_label"]),
         "risk_heading": str(risk["heading"]),
         "risk_explanation": str(risk["explanation"]),
         "risk_basis_label": str(risk["basis_label"]),
@@ -1188,23 +1319,18 @@ def event_feed_row(
     canonical_status = str(item.get("status") or "candidate").lower()
     copy = public_event_copy(item) if public else None
     status_key = (
-        PUBLIC_EVIDENCE_POSTURE_STATUS_CLASS.get(
-            str(copy["evidence_posture"]), "candidate"
-        )
+        str(copy["source_status_class"])
         if copy
         else canonical_status
     )
     status = (
-        copy["evidence_label"]
+        copy["source_label"]
         if public
         else STATUS_LABELS.get(canonical_status, "EVENT")
     )
-    # A captured source is the common Public baseline and is already named in
-    # the context line. Repeating the same chip on nearly every row adds noise;
-    # retain chips only for evidence postures that materially differ from it.
     status_markup = (
         f'<span class="feed-chip status-{escape(status_key)}">{escape(status)}</span>'
-        if status and (not public or copy["evidence_posture"] != "SOURCE_CAPTURED")
+        if status
         else ""
     )
     subject = copy["subject"] if copy else (
@@ -1240,7 +1366,7 @@ def event_feed_row(
         for label, value in timing
         if label == "事件日"
     )
-    status_glyph = STATUS_GLYPHS.get(status_key, "◇" if status_key == "reviewed" else "○")
+    status_glyph = STATUS_GLYPHS.get(status_key, "○")
     authority_class = f"authority-{authority.lower()}" if authority.lower() in {"p0", "p1", "p2"} else ""
     authority_label = PUBLIC_AUTHORITY_LABELS.get(authority) if public else authority
     authority_chip = (

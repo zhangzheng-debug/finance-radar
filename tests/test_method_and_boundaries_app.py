@@ -26,7 +26,7 @@ def test_public_method_page_explains_evidence_without_internal_details() -> None
     assert "只读事件研究工具" in rendered
     assert "千问模型结合人工金标" not in rendered
     assert "风险信号仅在有效结果存在时显示" in rendered
-    for label in ("原文支持", "一手来源", "来源已收录", "事件记录"):
+    for label in ("原文支持", "一手来源", "来源可查", "来源已保存"):
         assert label in rendered
     assert "数据更新时间" in rendered
     assert "系统发现" not in rendered

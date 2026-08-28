@@ -705,7 +705,7 @@ event_reader_evidence AS (
     LEFT JOIN sec_current_supported_fact_slots sec_slot
       ON sec_slot.event_id=ce.event_id
      AND sec_slot.version=ce.current_version
-    WHERE TRIM(COALESCE(ev.evidence_url,''))!=''
+    WHERE public_source_url_ok(ev.evidence_url)=1
       AND LENGTH(TRIM(COALESCE(ev.evidence_passage,'')))>=40
       AND (
         (
@@ -943,11 +943,23 @@ current_source_content AS (
 ),
 page_event_sources AS MATERIALIZED (
     SELECT source_link.event_id,
-           raw.observation_id,raw.source_published_at,raw.local_received_at,
+           raw.observation_id,raw.source_id,
+           raw.source_published_at,raw.local_received_at,
            page.event_date,
            source_catalog.name AS source_name,
+           source_catalog.source_type,
+           source_catalog.authority_tier,
            {source_title_sql} AS title,
            {source_summary_sql} AS summary,
+           CASE
+             WHEN raw.source_id='opennews_free' AND json_valid(revision.raw_json)
+             THEN COALESCE(
+               NULLIF(TRIM(json_extract(revision.raw_json,'$.item.link')),''),
+               NULLIF(TRIM(json_extract(revision.raw_json,'$.item.url')),''),
+               raw.canonical_url
+             )
+             ELSE raw.canonical_url
+           END AS canonical_url,
            CASE WHEN revision.revision_kind='delete'
                 THEN 'deleted' ELSE raw.observation_status END AS observation_status,
            source_link.relation_type
@@ -968,7 +980,8 @@ page_event_sources AS MATERIALIZED (
 ranked_event_sources AS (
     SELECT source.event_id,
            source.observation_id,source.source_published_at,source.local_received_at,
-           source.source_name,source.title,source.summary,source.observation_status,
+           source.source_id,source.source_name,source.source_type,source.authority_tier,
+           source.title,source.summary,source.canonical_url,source.observation_status,
            ROW_NUMBER() OVER (
                PARTITION BY source.event_id
                ORDER BY CASE
@@ -985,7 +998,38 @@ ranked_event_sources AS (
 event_source_rollup AS (
     SELECT source.event_id,
            SUM(CASE WHEN source.observation_status!='deleted' THEN 1 ELSE 0 END)
-             AS captured_source_count
+             AS captured_source_count,
+           SUM(CASE WHEN source.relation_type!='filtered_aggregated_noise'
+                         AND source.observation_status!='deleted'
+                         AND (
+                           public_source_url_ok(source.canonical_url)=1
+                           OR TRIM(COALESCE(source.title,''))!=''
+                           OR TRIM(COALESCE(source.summary,''))!=''
+                         )
+                    THEN 1 ELSE 0 END) AS displayable_source_count,
+           SUM(CASE WHEN source.relation_type!='filtered_aggregated_noise'
+                         AND source.observation_status!='deleted'
+                         AND public_source_url_ok(source.canonical_url)=1
+                         AND (
+                           UPPER(source.authority_tier) IN ('P0','P1')
+                           OR UPPER(source.authority_tier) GLOB 'P0_*'
+                           OR UPPER(source.authority_tier) GLOB 'P1_*'
+                         )
+                    THEN 1 ELSE 0 END) AS primary_source_url_count,
+           SUM(CASE WHEN source.relation_type!='filtered_aggregated_noise'
+                         AND source.observation_status!='deleted'
+                         AND public_source_url_ok(source.canonical_url)=1
+                    THEN 1 ELSE 0 END) AS public_source_url_count,
+           SUM(CASE WHEN source.relation_type!='filtered_aggregated_noise'
+                         AND source.observation_status!='deleted'
+                         AND (
+                           TRIM(COALESCE(source.title,''))!=''
+                           OR TRIM(COALESCE(source.summary,''))!=''
+                         )
+                    THEN 1 ELSE 0 END) AS captured_text_count,
+           SUM(CASE WHEN source.relation_type!='filtered_aggregated_noise'
+                         AND source.observation_status='deleted'
+                    THEN 1 ELSE 0 END) AS source_problem_count
     FROM page_event_sources source
     GROUP BY source.event_id
 ),
@@ -1075,7 +1119,7 @@ event_reader_evidence AS (
     LEFT JOIN sec_current_supported_fact_slots sec_slot
       ON sec_slot.event_id=ce.event_id
      AND sec_slot.version=ce.current_version
-    WHERE TRIM(COALESCE(ev.evidence_url,''))!=''
+    WHERE public_source_url_ok(ev.evidence_url)=1
       AND LENGTH(TRIM(COALESCE(ev.evidence_passage,'')))>=40
       AND (
         (
@@ -1139,6 +1183,16 @@ event_public AS (
               rough.updated_at
            ) AS reviewed_at,
            COALESCE(reader_evidence.citable_evidence_count,0) AS citable_evidence_count,
+           COALESCE(source_rollup.primary_source_url_count,0)
+             AS primary_source_url_count,
+           COALESCE(source_rollup.displayable_source_count,0)
+             AS displayable_source_count,
+           COALESCE(source_rollup.public_source_url_count,0)
+             AS public_source_url_count,
+           COALESCE(source_rollup.captured_text_count,0)
+             AS captured_text_count,
+           COALESCE(source_rollup.source_problem_count,0)
+             AS source_problem_count,
            CASE WHEN json_valid(current_version.facts_json)
              THEN NULLIF(TRIM(json_extract(
                current_version.facts_json,'$.public_fact_summary'
@@ -1213,6 +1267,8 @@ event_public AS (
       ON light.event_id=canonical.event_id AND light.followup_rank=1
     LEFT JOIN event_reader_evidence reader_evidence
       ON reader_evidence.event_id=canonical.event_id
+    LEFT JOIN event_source_rollup source_rollup
+      ON source_rollup.event_id=canonical.event_id
     LEFT JOIN event_versions current_version
       ON current_version.event_id=canonical.event_id
      AND current_version.version=canonical.current_version
@@ -1975,7 +2031,7 @@ class LedgerRepository:
                        WHERE EXISTS (
                          SELECT 1 FROM event_evidence ev
                          WHERE ev.event_id=e.event_id
-                           AND ev.evidence_url IS NOT NULL AND TRIM(ev.evidence_url)!=''
+                           AND public_source_url_ok(ev.evidence_url)=1
                            AND ev.evidence_passage IS NOT NULL AND TRIM(ev.evidence_passage)!=''
                        )"""
                 ).fetchone()[0]
@@ -2581,7 +2637,50 @@ class LedgerRepository:
                    (SELECT COUNT(*) FROM event_observations xeo
                     JOIN latest_source_content xr ON xr.observation_id=xeo.observation_id
                     WHERE xeo.event_id=e.event_id AND xr.observation_status!='deleted')
-                     AS captured_source_count,
+                      AS captured_source_count,
+                   (SELECT COUNT(*) FROM event_observations xeo
+                    JOIN latest_source_content xr ON xr.observation_id=xeo.observation_id
+                    WHERE xeo.event_id=e.event_id
+                      AND xeo.relation_type!='filtered_aggregated_noise'
+                      AND xr.observation_status!='deleted'
+                      AND (
+                        public_source_url_ok(xr.canonical_url)=1
+                        OR TRIM(COALESCE(xr.title,''))!=''
+                        OR TRIM(COALESCE(xr.summary,''))!=''
+                      )) AS displayable_source_count,
+                   (SELECT COUNT(*) FROM event_observations xeo
+                    JOIN latest_source_content xr ON xr.observation_id=xeo.observation_id
+                    JOIN sources xs ON xs.source_id=xr.source_id
+                    WHERE xeo.event_id=e.event_id
+                      AND xeo.relation_type!='filtered_aggregated_noise'
+                      AND xr.observation_status!='deleted'
+                      AND public_source_url_ok(xr.canonical_url)=1
+                      AND (
+                        UPPER(xs.authority_tier) IN ('P0','P1')
+                        OR UPPER(xs.authority_tier) GLOB 'P0_*'
+                        OR UPPER(xs.authority_tier) GLOB 'P1_*'
+                      )) AS primary_source_url_count,
+                   (SELECT COUNT(*) FROM event_observations xeo
+                    JOIN latest_source_content xr ON xr.observation_id=xeo.observation_id
+                    WHERE xeo.event_id=e.event_id
+                      AND xeo.relation_type!='filtered_aggregated_noise'
+                      AND xr.observation_status!='deleted'
+                      AND public_source_url_ok(xr.canonical_url)=1)
+                     AS public_source_url_count,
+                   (SELECT COUNT(*) FROM event_observations xeo
+                    JOIN latest_source_content xr ON xr.observation_id=xeo.observation_id
+                    WHERE xeo.event_id=e.event_id
+                      AND xeo.relation_type!='filtered_aggregated_noise'
+                      AND xr.observation_status!='deleted'
+                      AND (
+                        TRIM(COALESCE(xr.title,''))!=''
+                        OR TRIM(COALESCE(xr.summary,''))!=''
+                      )) AS captured_text_count,
+                   (SELECT COUNT(*) FROM event_observations xeo
+                    JOIN latest_source_content xr ON xr.observation_id=xeo.observation_id
+                    WHERE xeo.event_id=e.event_id
+                      AND xeo.relation_type!='filtered_aggregated_noise'
+                      AND xr.observation_status='deleted') AS source_problem_count,
                    (SELECT severity_grade FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS severity_grade,
                    (SELECT credibility_tier FROM event_assessments a WHERE a.event_id=e.event_id ORDER BY a.created_at DESC LIMIT 1) AS credibility_tier,
                    (SELECT evidence_passage FROM event_evidence x WHERE x.event_id=e.event_id AND evidence_passage IS NOT NULL ORDER BY passage_score DESC, updated_at DESC LIMIT 1) AS evidence_excerpt,
@@ -2888,6 +2987,38 @@ class LedgerRepository:
                     (event_id,),
                 ).fetchone()
             )
+            source_link = _dict(
+                connection.execute(
+                    """SELECT r.title,r.summary,r.source_id,r.external_id,
+                              r.canonical_url,r.content_sha256,r.raw_json,
+                              r.source_published_at,r.local_received_at,
+                              r.latest_revision_no,r.latest_revision_kind,
+                              eo.observation_id,eo.relation_type,
+                              source.name AS source_name,
+                              source.source_type,source.authority_tier
+                       FROM event_observations eo
+                       JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                       JOIN sources source ON source.source_id=r.source_id
+                       JOIN canonical_events current_event
+                         ON current_event.event_id=eo.event_id
+                       WHERE eo.event_id=?
+                         AND eo.relation_type!='filtered_aggregated_noise'
+                         AND r.observation_status!='deleted'
+                         AND public_source_url_ok(r.canonical_url)=1
+                       ORDER BY CASE
+                                  WHEN UPPER(source.authority_tier) IN ('P0','P1')
+                                    OR UPPER(source.authority_tier) GLOB 'P0_*'
+                                    OR UPPER(source.authority_tier) GLOB 'P1_*'
+                                  THEN 0 ELSE 1
+                                END,
+                                CASE
+                                  WHEN DATE(r.source_published_at)=DATE(current_event.event_date)
+                                  THEN 0 ELSE 1
+                                END,
+                                r.local_received_at DESC,r.observation_id DESC LIMIT 1""",
+                    (event_id,),
+                ).fetchone()
+            )
         return {
             "event": event,
             "current_version": version,
@@ -2897,6 +3028,7 @@ class LedgerRepository:
             "market_snapshots": snapshots,
             "market_jobs": market_jobs,
             "preferred_source": preferred_source,
+            "source_link": source_link,
         }
 
     def captured_sources(self, event_id: str) -> list[dict[str, Any]]:
@@ -3167,7 +3299,7 @@ class LedgerRepository:
                     FROM event_evidence ev
                     JOIN raw_observations r ON r.observation_id=ev.observation_id
                     WHERE r.source_id IN ({placeholders})
-                      AND ev.evidence_url IS NOT NULL AND TRIM(ev.evidence_url)!=''""",
+                      AND public_source_url_ok(ev.evidence_url)=1""",
                 EVIDENCE_SNAPSHOT_SOURCE_IDS,
             ).fetchall()
         return {(str(row["event_id"]), str(row["evidence_id"])) for row in rows}
@@ -3221,7 +3353,7 @@ class LedgerRepository:
                              AND rel.date_coherent=1
                              AND rel.event_version=ce.current_version
                              AND {_CURRENT_EVIDENCE_PASSAGE_MATCH_SQL}
-                             AND TRIM(COALESCE(ev.evidence_url,''))!=''
+                             AND public_source_url_ok(ev.evidence_url)=1
                              AND LENGTH(TRIM(COALESCE(ev.evidence_passage,'')))>=40
                              AND (
                                UPPER(src.authority_tier) IN ('P0','P1')

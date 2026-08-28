@@ -252,9 +252,171 @@ def test_public_excerpt_bound_does_not_change_internal_source_semantics(tmp_path
     unbounded = repository.list_events(limit=1)["items"][0]
 
     assert bounded["captured_source_count"] == 2
+    assert bounded["displayable_source_count"] == 1
+    assert bounded["primary_source_url_count"] == 1
+    assert bounded["public_source_url_count"] == 1
+    assert bounded["captured_text_count"] == 1
+    assert bounded["source_problem_count"] == 1
     assert bounded["source_title"] == "Active"
     assert len(bounded["source_summary"]) == 512
     assert unbounded["source_summary"] == long_summary
+
+
+def test_public_source_counts_do_not_treat_private_url_as_reader_link(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "private-source-url.sqlite3"
+    _large_unreviewed_ledger(ledger_path, event_count=1)
+    timestamp = "2026-08-21T12:00:00+00:00"
+    with open_ledger(ledger_path) as connection:
+        connection.execute(
+            """INSERT INTO raw_observations VALUES (
+               'private','src','private',?,?,?,?,'http://127.0.0.1/source',?,'{}','captured'
+            )""",
+            (
+                timestamp,
+                timestamp,
+                "Retained private source",
+                "The captured text is retained for audit use.",
+                "a" * 64,
+            ),
+        )
+        connection.execute(
+            """INSERT INTO source_revisions VALUES (
+               'revision-private','private','src','private',1,'new',?,?,?,?,'{}'
+            )""",
+            (
+                timestamp,
+                "a" * 64,
+                "Retained private source",
+                "The captured text is retained for audit use.",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO event_observations VALUES ('browse-00000','private','primary',?)",
+            (timestamp,),
+        )
+        connection.commit()
+
+    item = LedgerRepository(ledger_path).list_events(limit=1)["items"][0]
+
+    assert item["captured_source_count"] == 1
+    assert item["displayable_source_count"] == 1
+    assert item["primary_source_url_count"] == 0
+    assert item["public_source_url_count"] == 0
+    assert item["captured_text_count"] == 1
+
+
+def test_empty_capture_is_not_described_as_saved_reader_text(tmp_path: Path) -> None:
+    ledger_path = tmp_path / "empty-capture.sqlite3"
+    _large_unreviewed_ledger(ledger_path, event_count=1)
+    timestamp = "2026-08-21T12:00:00+00:00"
+    with open_ledger(ledger_path) as connection:
+        connection.execute(
+            """INSERT INTO raw_observations VALUES (
+               'empty','src','empty',?,?,'','','http://127.0.0.1/source',?,'{}','captured'
+            )""",
+            (timestamp, timestamp, "b" * 64),
+        )
+        connection.execute(
+            """INSERT INTO source_revisions VALUES (
+               'revision-empty','empty','src','empty',1,'new',?,?,'','','{}'
+            )""",
+            (timestamp, "b" * 64),
+        )
+        connection.execute(
+            "INSERT INTO event_observations VALUES ('browse-00000','empty','primary',?)",
+            (timestamp,),
+        )
+        connection.commit()
+
+    item = LedgerRepository(ledger_path).list_events(limit=1)["items"][0]
+
+    assert item["captured_source_count"] == 1
+    assert item["displayable_source_count"] == 0
+    assert item["public_source_url_count"] == 0
+    assert item["captured_text_count"] == 0
+
+
+def test_event_detail_separates_text_preference_from_primary_source_link(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "separate-source-link.sqlite3"
+    _large_unreviewed_ledger(ledger_path, event_count=1)
+    received_at = "2026-08-21T12:00:00+00:00"
+    with open_ledger(ledger_path) as connection:
+        connection.execute(
+            "INSERT INTO sources VALUES ('src-p2','News','news_secondary','P2',1,1,?,?)",
+            (received_at, received_at),
+        )
+        connection.commit()
+    sources = (
+        (
+            "same-day-news",
+            "src-p2",
+            "2026-08-01T10:00:00+00:00",
+            "Same-day publisher text",
+            "The detailed same-day source excerpt is retained for reading.",
+            "https://news.example/story",
+        ),
+        (
+            "official-source",
+            "src",
+            "2026-07-31T10:00:00+00:00",
+            "Official public source",
+            "",
+            "https://regulator.example/notice",
+        ),
+    )
+    with open_ledger(ledger_path) as connection:
+        for observation_id, source_id, published_at, title, summary, source_url in sources:
+            connection.execute(
+                "INSERT INTO raw_observations VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    observation_id,
+                    source_id,
+                    observation_id,
+                    published_at,
+                    received_at,
+                    title,
+                    summary,
+                    source_url,
+                    observation_id[0] * 64,
+                    "{}",
+                    "captured",
+                ),
+            )
+            connection.execute(
+                "INSERT INTO source_revisions VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    f"revision-{observation_id}",
+                    observation_id,
+                    source_id,
+                    observation_id,
+                    1,
+                    "new",
+                    received_at,
+                    observation_id[0] * 64,
+                    title,
+                    summary,
+                    "{}",
+                ),
+            )
+            connection.execute(
+                "INSERT INTO event_observations VALUES ('browse-00000',?,'primary',?)",
+                (observation_id, received_at),
+            )
+        connection.commit()
+
+    detail = LedgerRepository(ledger_path).event_detail("browse-00000")
+
+    assert detail is not None
+    assert detail["preferred_source"]["title"] == "Same-day publisher text"
+    assert detail["preferred_source"]["canonical_url"] == "https://news.example/story"
+    assert detail["source_link"]["title"] == "Official public source"
+    assert detail["source_link"]["canonical_url"] == (
+        "https://regulator.example/notice"
+    )
 
 
 def test_public_browse_prefers_same_day_source_text_over_later_form_title(

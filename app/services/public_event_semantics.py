@@ -4,6 +4,8 @@ import math
 import re
 from typing import Any
 
+from app.source_url_policy import is_public_source_url
+
 
 EVIDENCE_POSTURES = frozenset(
     {
@@ -21,6 +23,17 @@ EVIDENCE_GAP_CODES = frozenset(
         "NO_CAPTURED_SOURCE",
     }
 )
+SOURCE_ACCESS_STATES = frozenset(
+    {
+        "CLAIM_SOURCE_LINKED",
+        "PRIMARY_SOURCE",
+        "PUBLIC_SOURCE",
+        "CAPTURE_ONLY",
+        "SOURCE_PROBLEM",
+        "NO_PUBLIC_SOURCE",
+    }
+)
+SOURCE_PROVENANCE_CLASSIFICATION_VERSION = "public-source-provenance-v1"
 RISK_ROUTES = frozenset({"RISK_REVIEW", "NON_TARGET", "ABSTAIN"})
 RISK_DECISION_SOURCES = frozenset(
     {
@@ -97,7 +110,115 @@ def _count(value: Any) -> int:
         return 0
 
 
-def derive_public_event_semantics(event: dict[str, Any]) -> dict[str, Any]:
+def _has_text(value: Any) -> bool:
+    return bool(" ".join(str(value or "").split()))
+
+
+def _has_http_url(value: Any) -> bool:
+    return is_public_source_url(value)
+
+
+def _is_primary_authority(value: Any) -> bool:
+    normalized = str(value or "").strip().upper()
+    return normalized in {"P0", "P1"} or normalized.startswith(("P0_", "P1_"))
+
+
+def derive_public_source_provenance(
+    event: dict[str, Any],
+    captured_source: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Describe what source material a reader can access.
+
+    This is deliberately separate from ``citation_ready``.  A source URL or
+    retained publisher text can be useful and directly inspectable even when
+    the current event version has not completed the stricter claim-to-passage
+    binding contract.
+    """
+
+    source = captured_source if isinstance(captured_source, dict) else event
+    citation_ready = _count(event.get("reader_ready")) == 1
+    citable_evidence_count = _count(event.get("citable_evidence_count"))
+    captured_source_count = _count(event.get("captured_source_count"))
+    displayable_source_count = (
+        _count(event.get("displayable_source_count"))
+        if "displayable_source_count" in event
+        else captured_source_count
+    )
+    primary_source_url_count = _count(event.get("primary_source_url_count"))
+    public_source_url_count = _count(event.get("public_source_url_count"))
+    captured_text_count = _count(event.get("captured_text_count"))
+    source_problem_count = _count(event.get("source_problem_count"))
+    if citable_evidence_count > 0:
+        primary_source_url_count = max(1, primary_source_url_count)
+        public_source_url_count = max(1, public_source_url_count)
+
+    source_url = (
+        source.get("source_url")
+        or source.get("canonical_url")
+        or event.get("source_url")
+        or event.get("canonical_url")
+    )
+    source_authority = (
+        source.get("authority_tier")
+        or event.get("source_authority_tier")
+    )
+    source_has_url = _has_http_url(source_url)
+    source_has_text = any(
+        _has_text(source.get(key))
+        for key in (
+            "source_excerpt",
+            "source_summary",
+            "summary",
+            "source_title",
+            "title",
+        )
+    )
+    if source_has_url:
+        public_source_url_count = max(1, public_source_url_count)
+        if _is_primary_authority(source_authority):
+            primary_source_url_count = max(1, primary_source_url_count)
+    if source_has_text:
+        captured_text_count = max(1, captured_text_count)
+    if source_has_url or source_has_text:
+        captured_source_count = max(1, captured_source_count)
+        displayable_source_count = max(1, displayable_source_count)
+
+    if citation_ready:
+        access = "CLAIM_SOURCE_LINKED"
+    elif primary_source_url_count > 0:
+        access = "PRIMARY_SOURCE"
+    elif public_source_url_count > 0:
+        access = "PUBLIC_SOURCE"
+    elif captured_text_count > 0:
+        access = "CAPTURE_ONLY"
+    elif source_problem_count > 0:
+        access = "SOURCE_PROBLEM"
+    else:
+        access = "NO_PUBLIC_SOURCE"
+
+    if primary_source_url_count > 0 or access == "CLAIM_SOURCE_LINKED":
+        origin_kind = "PRIMARY"
+    elif public_source_url_count > 0:
+        origin_kind = "PUBLISHER"
+    else:
+        origin_kind = "UNKNOWN"
+
+    return {
+        "classification_version": SOURCE_PROVENANCE_CLASSIFICATION_VERSION,
+        "access": access,
+        "origin_kind": origin_kind,
+        "displayable_source_count": displayable_source_count,
+        "primary_source_count": primary_source_url_count,
+        "public_source_url_count": public_source_url_count,
+        "captured_text_count": captured_text_count,
+        "problem_source_count": source_problem_count,
+    }
+
+
+def derive_public_event_semantics(
+    event: dict[str, Any],
+    captured_source: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Derive reader-facing evidence semantics from the strict ledger gate.
 
     These fields describe the evidence available for the current event version;
@@ -133,6 +254,14 @@ def derive_public_event_semantics(event: dict[str, Any]) -> dict[str, Any]:
         "citation_ready": citation_ready,
         "evidence_posture": evidence_posture,
         "evidence_gap_codes": gap_codes,
+        "source_provenance": derive_public_source_provenance(
+            event,
+            captured_source,
+        ),
+        "claim_citation": {
+            "ready": citation_ready,
+            "supporting_passage_count": citable_evidence_count,
+        },
     }
 
 

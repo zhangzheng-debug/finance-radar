@@ -3,10 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from html import escape
 from math import ceil
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlencode
 
 import streamlit as st
 
+from app.source_url_policy import (
+    preferred_public_source_url,
+    public_source_url as safe_public_source_url,
+)
 from app.web.common import (
     DEEP_LINK_STATE_KEY,
     UI_ROLE,
@@ -35,8 +39,8 @@ from app.web.components import (
     focus_public_event_feed,
     next_action_guidance,
     public_event_copy,
-    public_event_evidence_posture,
     public_event_risk_assessment,
+    public_event_source_provenance,
     public_event_state,
     render_evidence_route,
     render_event_feed,
@@ -100,27 +104,12 @@ def public_source_url(evidence: list[dict[str, object]]) -> str | None:
     value = str(evidence[0].get("evidence_url") or "").strip()
     if len(value) > 2048:
         return None
-    try:
-        parsed = urlsplit(value)
-    except ValueError:
-        return None
-    return value if parsed.scheme in {"http", "https"} and parsed.netloc else None
+    return safe_public_source_url(value)
 
 
 def public_capture_url(sources: list[dict[str, object]]) -> str | None:
     """Return a validated discovery-source link without treating it as evidence."""
-    if not sources:
-        return None
-    value = str(
-        sources[0].get("source_url") or sources[0].get("canonical_url") or ""
-    ).strip()
-    if len(value) > 2048:
-        return None
-    try:
-        parsed = urlsplit(value)
-    except ValueError:
-        return None
-    return value if parsed.scheme in {"http", "https"} and parsed.netloc else None
+    return preferred_public_source_url(sources)
 
 
 def render_capture_explanation_payload(payload: dict[str, object]) -> None:
@@ -155,7 +144,7 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
 def public_research_signal_markup(
     detail: dict[str, object], public_copy: dict[str, object]
 ) -> str:
-    """Render approved model semantics and available market observations compactly."""
+    """Render the stable Qwen slot and available market observations compactly."""
 
     role_order = {
         "DIRECT_ASSET": 1,
@@ -223,14 +212,31 @@ def public_research_signal_markup(
         }
 
     signal_rows: list[str] = []
-    if public_copy.get("risk_route") and public_copy.get("risk_label"):
-        basis = " ".join(str(public_copy.get("risk_basis_label") or "").split())
-        signal_rows.append(
-            '<div class="research-signal-row"'
-            + (f' title="{escape(basis)}"' if basis else "")
-            + '><span>千问</span>'
-            f'<strong>{escape(str(public_copy["risk_label"]))}</strong></div>'
+    qwen_ready = bool(public_copy.get("risk_route") and public_copy.get("risk_label"))
+    basis = " ".join(str(public_copy.get("risk_basis_label") or "").split())
+    qwen_values = (
+        (
+            str(public_copy.get("risk_polarity_label") or "—"),
+            str(public_copy.get("risk_materiality_label") or "—"),
+            str(public_copy.get("risk_strength_label") or "—"),
         )
+        if qwen_ready
+        else ("—", "—", "—")
+    )
+    qwen_metrics = "".join(
+        '<span class="qwen-signal-metric">'
+        f'<small>{escape(label)}</small><strong>{escape(value)}</strong></span>'
+        for label, value in zip(("方向", "做空重大性", "强度"), qwen_values, strict=True)
+    )
+    signal_rows.append(
+        '<div class="research-signal-row qwen-signal-row"'
+        + (f' title="{escape(basis)}"' if basis else "")
+        + '><span>千问风险研判</span><div class="qwen-signal-metrics">'
+        + qwen_metrics
+        + '</div><small class="qwen-slot-state">'
+        + ("自动研判" if qwen_ready else "模型接口已预留")
+        + "</small></div>"
+    )
 
     if normalized:
         # Select one shared window so values are comparable. Coverage wins;
@@ -418,13 +424,15 @@ def public_event_snapshot(
         semantic_input["risk_assessment"] = detail.get("risk_assessment")
     if not isinstance(semantic_input.get("semantic_assessment"), dict):
         semantic_input["semantic_assessment"] = detail.get("semantic_assessment")
-    posture = public_event_evidence_posture(semantic_input)
+    source = public_event_source_provenance(semantic_input)
+    citation_ready = source["key"] == "CLAIM_SOURCE_LINKED"
     risk = public_event_risk_assessment(semantic_input)
     legacy_state = public_event_state(event)
     return {
         "last_updated_at": str(event.get("last_updated_at") or ""),
-        "evidence_posture": posture["key"],
-        "citation_ready": posture["citation_ready"],
+        "source_access": source["key"],
+        "source_label": source["label"],
+        "citation_ready": citation_ready,
         "risk_route": risk["route"],
         "risk_model_version": risk["model_version"],
         "disposition": legacy_state if legacy_state == "excluded" else "",
@@ -444,11 +452,14 @@ def public_event_changes(
     if not previous:
         return []
     changes: list[str] = []
-    if previous.get("evidence_posture") != current.get("evidence_posture"):
+    if (
+        previous.get("source_access") is not None
+        and previous.get("source_access") != current.get("source_access")
+    ):
         changes.append(
-            "证据姿态："
-            f"{previous.get('evidence_posture') or '未记录'} → "
-            f"{current.get('evidence_posture') or '未记录'}"
+            "来源状态："
+            f"{previous.get('source_label') or '未标注'} → "
+            f"{current.get('source_label') or '未标注'}"
         )
     if previous.get("citation_ready") != current.get("citation_ready"):
         changes.append("正式引用条件发生变化。")
@@ -468,7 +479,7 @@ def public_event_changes(
     if added or removed:
         changes.append(f"关联证据：新增 {added} 条，移除 {removed} 条")
     if previous.get("last_updated_at") != current.get("last_updated_at") and not changes:
-        changes.append("事件记录的最后更新时间发生变化；证据姿态与关联材料未变。")
+        changes.append("事件记录的最后更新时间发生变化；来源状态与关联材料未变。")
     return changes
 
 
@@ -906,13 +917,14 @@ try:
             previous = seen_events.get(str(item.get("event_id") or ""))
             if not isinstance(previous, dict):
                 continue
-            feed_posture = public_event_evidence_posture(item)
+            feed_source = public_event_source_provenance(item)
             feed_risk = public_event_risk_assessment(item)
             legacy_state = public_event_state(item)
             current_feed_state = {
                 "last_updated_at": str(item.get("last_updated_at") or ""),
-                "evidence_posture": feed_posture["key"],
-                "citation_ready": feed_posture["citation_ready"],
+                "source_access": feed_source["key"],
+                "source_label": feed_source["label"],
+                "citation_ready": feed_source["key"] == "CLAIM_SOURCE_LINKED",
                 "risk_route": feed_risk["route"],
                 "risk_model_version": feed_risk["model_version"],
                 "disposition": legacy_state if legacy_state == "excluded" else "",
@@ -1027,15 +1039,18 @@ if preview_event_id:
                 explanation_state = dossier.get("capture_explanation") or {}
                 if isinstance(explanation_state, dict):
                     preview_capture_explanation = explanation_state
-                preferred_capture = preview_detail.get("preferred_source") or {}
-                if (
-                    isinstance(preferred_capture, dict)
-                    and (
-                        preferred_capture.get("source_title")
-                        or preferred_capture.get("source_excerpt")
-                    )
-                ):
-                    preview_sources = [preferred_capture]
+                for source_field in ("preferred_source", "source_link"):
+                    source_capture = preview_detail.get(source_field) or {}
+                    if (
+                        isinstance(source_capture, dict)
+                        and (
+                            source_capture.get("source_title")
+                            or source_capture.get("source_excerpt")
+                            or source_capture.get("source_url")
+                        )
+                        and source_capture not in preview_sources
+                    ):
+                        preview_sources.append(source_capture)
             preview_evidence = [
                 item
                 for item in preview_evidence
@@ -1156,7 +1171,8 @@ if preview_event_id:
                 if ticker and ticker != preview_company:
                     meta_values.append(ticker)
                 meta_values.append(str(public_copy["family"]))
-                meta_values.append(str(public_copy["evidence_label"]))
+                if public_copy["source_label"]:
+                    meta_values.append(str(public_copy["source_label"]))
                 if public_copy["headline_mode"] == "ATTRIBUTED_SOURCE":
                     headline_source = str(public_copy["headline_source"] or public_copy["source"])
                     if headline_source:
