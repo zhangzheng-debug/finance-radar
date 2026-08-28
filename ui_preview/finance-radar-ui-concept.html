@@ -1,0 +1,1087 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Finance Radar public reader UI preview</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f6f7f3;
+      --surface: #fcfcf8;
+      --surface-2: #f0f3ed;
+      --ink: #172029;
+      --muted: #64717b;
+      --faint: #8b969d;
+      --line: #d9ded6;
+      --line-soft: #e8ebe5;
+      --teal: #007f79;
+      --teal-soft: #dcefeb;
+      --green: #217a52;
+      --amber: #9a6200;
+      --red: #a5484c;
+      --blue: #286c9a;
+      --violet: #6a5d9a;
+      --shadow: 0 22px 55px rgb(37 45 50 / 0.10);
+      --radius: 8px;
+      font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--canvas);
+      color: var(--ink);
+    }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    .shell {
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      min-height: 100vh;
+      background: linear-gradient(90deg, var(--surface) 0 230px, transparent 230px);
+    }
+    .rail {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 24px 18px;
+      border-right: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .brand {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .mark {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      color: var(--teal);
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 14px;
+    }
+    .brand strong {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: .04em;
+    }
+    .brand span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .nav-label {
+      margin: 24px 7px 8px;
+      color: var(--faint);
+      font-size: 11px;
+    }
+    .nav {
+      display: grid;
+      gap: 4px;
+    }
+    .nav button {
+      display: grid;
+      grid-template-columns: 22px 1fr;
+      gap: 9px;
+      width: 100%;
+      padding: 10px 8px;
+      color: var(--muted);
+      text-align: left;
+      background: transparent;
+      border: 0;
+      border-radius: 7px;
+    }
+    .nav button:hover,
+    .nav button[aria-pressed="true"] {
+      color: var(--ink);
+      background: var(--teal-soft);
+    }
+    .nav button[aria-pressed="true"] {
+      box-shadow: inset 2px 0 0 var(--teal);
+    }
+    .nav b {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .nav small {
+      display: block;
+      margin-top: 3px;
+      color: var(--faint);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+    .boundary {
+      margin-top: 34px;
+      padding-top: 16px;
+      color: var(--muted);
+      border-top: 1px solid var(--line-soft);
+      font-size: 11px;
+      line-height: 1.7;
+    }
+    .boundary span {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin-right: 7px;
+      background: var(--green);
+      border-radius: 50%;
+    }
+    .main {
+      min-width: 0;
+      padding: 0 32px 44px;
+    }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      min-height: 68px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .live {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      white-space: nowrap;
+    }
+    .live::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      background: var(--green);
+      border-radius: 50%;
+    }
+    .page { display: none; }
+    .page.is-active { display: block; }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
+      gap: 32px;
+      padding: 32px 0 22px;
+      align-items: end;
+      border-bottom: 1px solid var(--line);
+    }
+    .kicker {
+      margin-bottom: 8px;
+      color: var(--teal);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 {
+      max-width: 780px;
+      font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+      font-size: clamp(34px, 4.8vw, 56px);
+      font-weight: 500;
+      line-height: 1.12;
+    }
+    .hero p {
+      max-width: 680px;
+      margin-top: 13px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.75;
+    }
+    .snapshot {
+      display: grid;
+      gap: 1px;
+      overflow: hidden;
+      background: var(--line);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    .snapshot div {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 11px 12px;
+      background: var(--surface);
+    }
+    .snapshot span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .snapshot strong {
+      font: 600 13px/1 ui-monospace, Consolas, monospace;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-bottom: 1px solid var(--line);
+    }
+    .metric {
+      padding: 17px 18px;
+      border-right: 1px solid var(--line-soft);
+    }
+    .metric:first-child { padding-left: 0; }
+    .metric:last-child { border-right: 0; }
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .metric strong {
+      display: block;
+      margin-top: 7px;
+      font: 600 20px/1 ui-monospace, Consolas, monospace;
+    }
+    .reader-grid {
+      display: grid;
+      grid-template-columns: minmax(320px, .98fr) minmax(0, 1.5fr);
+      gap: 26px;
+      align-items: start;
+      padding-top: 22px;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 150px;
+      gap: 10px;
+      margin-bottom: 13px;
+    }
+    .search {
+      width: 100%;
+      height: 42px;
+      padding: 0 13px;
+      color: var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+    }
+    .select {
+      height: 42px;
+      padding: 0 10px;
+      color: var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 7px;
+    }
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: baseline;
+      padding: 10px 0;
+    }
+    .section-head h2 {
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .section-head span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .feed {
+      border-top: 1px solid var(--line);
+    }
+    .event-row {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr) 18px;
+      gap: 14px;
+      width: 100%;
+      padding: 16px 9px 16px 0;
+      color: inherit;
+      text-align: left;
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .event-row:hover {
+      background: color-mix(in srgb, var(--teal-soft) 46%, transparent);
+    }
+    .event-row[aria-selected="true"] {
+      padding-left: 9px;
+      background: var(--surface);
+      box-shadow: inset 2px 0 0 var(--teal);
+    }
+    .event-time {
+      color: var(--muted);
+      font: 600 11px/1.45 ui-monospace, Consolas, monospace;
+    }
+    .event-chip {
+      display: inline-flex;
+      margin-bottom: 7px;
+      color: var(--teal);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .event-title {
+      display: block;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+    .event-summary {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .event-meta {
+      display: block;
+      margin-top: 8px;
+      color: var(--faint);
+      font-size: 11px;
+    }
+    .arrow {
+      color: var(--faint);
+      font-size: 20px;
+      line-height: 1;
+    }
+    .detail {
+      min-width: 0;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .detail-main {
+      padding: 23px 24px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+    .detail-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px 12px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .detail h2 {
+      margin-top: 14px;
+      font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+      font-size: clamp(24px, 3vw, 38px);
+      font-weight: 500;
+      line-height: 1.2;
+    }
+    .detail-summary {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .answer-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(230px, .72fr);
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .evidence-box,
+    .signal-box,
+    .source-box,
+    .timeline-box {
+      padding: 15px;
+      background: var(--surface-2);
+      border-radius: var(--radius);
+    }
+    .box-label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .04em;
+    }
+    .evidence-box p,
+    .source-box p {
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.75;
+    }
+    .signal-stack {
+      display: grid;
+      gap: 9px;
+    }
+    .signal-row {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr);
+      gap: 10px;
+      align-items: baseline;
+      font-size: 12px;
+    }
+    .signal-row span {
+      color: var(--muted);
+    }
+    .signal-row strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .negative { color: var(--red) !important; }
+    .positive { color: var(--green) !important; }
+    .neutral { color: var(--blue) !important; }
+    .detail-tabs {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-bottom: 1px solid var(--line);
+    }
+    .detail-tabs button {
+      min-height: 42px;
+      color: var(--muted);
+      background: transparent;
+      border: 0;
+      border-right: 1px solid var(--line-soft);
+      font-size: 12px;
+    }
+    .detail-tabs button:last-child { border-right: 0; }
+    .detail-tabs button[aria-pressed="true"] {
+      color: var(--ink);
+      background: var(--teal-soft);
+    }
+    .tab-panel {
+      display: none;
+      padding: 18px 24px 22px;
+    }
+    .tab-panel.is-active { display: block; }
+    .market-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .market-cell {
+      padding: 13px;
+      background: var(--surface-2);
+      border-radius: var(--radius);
+    }
+    .market-cell span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .market-cell strong {
+      display: block;
+      margin-top: 7px;
+      font: 600 18px/1 ui-monospace, Consolas, monospace;
+    }
+    .bars {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .bar-row {
+      display: grid;
+      grid-template-columns: 74px minmax(0, 1fr) 58px;
+      gap: 10px;
+      align-items: center;
+      font-size: 12px;
+    }
+    .bar-track {
+      height: 7px;
+      background: #dce2db;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      width: var(--value);
+      background: var(--teal);
+      border-radius: inherit;
+    }
+    .timeline {
+      position: relative;
+      display: grid;
+      gap: 14px;
+      margin-top: 2px;
+    }
+    .timeline::before {
+      content: "";
+      position: absolute;
+      left: 96px;
+      top: 8px;
+      bottom: 8px;
+      width: 1px;
+      background: var(--line);
+    }
+    .step {
+      position: relative;
+      display: grid;
+      grid-template-columns: 78px 18px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+    }
+    .step time {
+      color: var(--muted);
+      font: 600 11px/1.4 ui-monospace, Consolas, monospace;
+      text-align: right;
+    }
+    .dot {
+      z-index: 1;
+      width: 10px;
+      height: 10px;
+      margin-top: 3px;
+      background: var(--surface);
+      border: 2px solid var(--teal);
+      border-radius: 50%;
+    }
+    .step h3 {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .step p {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr);
+      gap: 20px;
+      align-items: center;
+      margin-top: 20px;
+      padding: 18px 0 2px;
+      border-top: 1px solid var(--line-soft);
+    }
+    .source-icons,
+    .result-icons {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .mini-card {
+      min-height: 54px;
+      padding: 9px;
+      background: var(--surface-2);
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    .mini-card b {
+      display: block;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .gate {
+      position: relative;
+      display: grid;
+      width: 86px;
+      height: 86px;
+      place-items: center;
+      justify-self: center;
+      color: var(--teal);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 50%;
+    }
+    .gate::before {
+      content: "";
+      position: absolute;
+      inset: 16px;
+      border: 1px solid color-mix(in srgb, var(--teal) 35%, transparent);
+      border-radius: 50%;
+    }
+    .sweep {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 35px;
+      height: 1px;
+      background: linear-gradient(90deg, var(--teal), transparent);
+      transform-origin: left center;
+      animation: scan 3.8s linear infinite;
+    }
+    .method-grid,
+    .case-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      padding-top: 24px;
+    }
+    .method-card,
+    .case-card {
+      padding: 18px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    .method-card h3,
+    .case-card h3 {
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .method-card p,
+    .case-card p {
+      margin-top: 9px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .footer-note {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    @keyframes scan {
+      from { transform: rotate(-90deg); opacity: .42; }
+      to { transform: rotate(270deg); opacity: .82; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .sweep { animation: none; }
+    }
+
+    @media (max-width: 980px) {
+      .shell { grid-template-columns: 1fr; background: var(--canvas); }
+      .rail {
+        position: static;
+        height: auto;
+        padding: 14px 18px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .brand { padding-bottom: 12px; }
+      .nav-label, .boundary { display: none; }
+      .nav {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-top: 12px;
+      }
+      .main { padding: 0 18px 34px; }
+      .hero,
+      .reader-grid,
+      .answer-grid,
+      .flow {
+        grid-template-columns: 1fr;
+      }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric:nth-child(2) { border-right: 0; }
+      .method-grid,
+      .case-grid,
+      .market-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .topbar { align-items: start; flex-direction: column; padding: 14px 0; }
+      .nav { grid-template-columns: 1fr; }
+      .hero { padding-top: 24px; }
+      .toolbar { grid-template-columns: 1fr; }
+      .event-row { grid-template-columns: 58px minmax(0, 1fr); }
+      .arrow { display: none; }
+      .detail-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .source-icons, .result-icons { grid-template-columns: 1fr; }
+      .timeline::before { left: 78px; }
+      .step { grid-template-columns: 60px 18px minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <div class="mark">◎</div>
+        <div>
+          <strong>Finance Radar</strong>
+          <span>Public reader preview</span>
+        </div>
+      </div>
+      <div class="nav-label">公开入口</div>
+      <nav class="nav" aria-label="页面">
+        <button type="button" data-page-target="radar" aria-pressed="true">
+          <span>⌁</span><span><b>事件雷达</b><small>事实、证据和研究信号</small></span>
+        </button>
+        <button type="button" data-page-target="cases" aria-pressed="false">
+          <span>◷</span><span><b>案例</b><small>冻结回放与样例阅读</small></span>
+        </button>
+        <button type="button" data-page-target="method" aria-pressed="false">
+          <span>◇</span><span><b>方法</b><small>边界、来源和模型职责</small></span>
+        </button>
+      </nav>
+      <p class="boundary"><span></span>Public 页面只解释公开事件和来源材料。内部队列、备份、Worker 和审稿身份不放在读者主界面。</p>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <span>基线：GitHub main 8ec7600 · PR #38 后公开读者方向</span>
+        <span class="live">静态 UI 预览 · 不调用写接口</span>
+      </div>
+
+      <section class="page is-active" data-page="radar">
+        <header class="hero">
+          <div>
+            <div class="kicker">先看来源，再看判断</div>
+            <h1>今天哪些金融事件值得核对</h1>
+            <p>公开读者第一屏只服务四件事：发现潜在下行事件、看懂来源说了什么、打开证据核对、在结果完整时查看 Qwen 风险语义和消息后的价格反应。</p>
+          </div>
+          <div class="snapshot" aria-label="数据快照">
+            <div><span>公开可浏览事件</span><strong>14,391</strong></div>
+            <div><span>正式可引用</span><strong>546</strong></div>
+            <div><span>带市场观察</span><strong>128</strong></div>
+            <div><span>快照生成</span><strong>3.1s</strong></div>
+          </div>
+        </header>
+
+        <div class="metrics" aria-label="关键指标">
+          <div class="metric"><span>今日新增</span><strong>38</strong></div>
+          <div class="metric"><span>Primary supported</span><strong>546</strong></div>
+          <div class="metric"><span>Source captured</span><strong>8,413</strong></div>
+          <div class="metric"><span>Risk review</span><strong>312</strong></div>
+        </div>
+
+        <div class="reader-grid">
+          <section>
+            <div class="toolbar">
+              <input class="search" data-search placeholder="搜索公司、Ticker、事件或来源" aria-label="搜索事件">
+              <select class="select" data-filter aria-label="证据姿态筛选">
+                <option value="all">全部证据姿态</option>
+                <option value="primary">Primary supported</option>
+                <option value="capture">Source captured</option>
+                <option value="risk">Risk review</option>
+              </select>
+            </div>
+            <div class="section-head">
+              <h2>事件流</h2>
+              <span data-count>4 条示例 · 最近发现优先</span>
+            </div>
+            <div class="feed" data-feed>
+              <button class="event-row" type="button" data-kind="primary risk market" aria-selected="true">
+                <span class="event-time">08-27<br>21:14 UTC</span>
+                <span>
+                  <span class="event-chip">Primary supported · Risk review</span>
+                  <span class="event-title">Oceanic Foods filed a going-concern warning in its latest 10-Q</span>
+                  <span class="event-summary">SEC 原文包含管理层对持续经营能力的重大疑虑，事件摘要可回到精确段落。</span>
+                  <span class="event-meta">SEC 10-Q · OFD · 消息后 T+30m -6.8%</span>
+                </span>
+                <span class="arrow">›</span>
+              </button>
+              <button class="event-row" type="button" data-kind="capture" aria-selected="false">
+                <span class="event-time">08-27<br>18:42 UTC</span>
+                <span>
+                  <span class="event-chip">Source captured · Source text interpreted</span>
+                  <span class="event-title">A regulator notice describes a delayed product approval pathway</span>
+                  <span class="event-summary">系统保留来源文本，但当前缺少可引用的一手证据关系，因此只展示来源归因摘要。</span>
+                  <span class="event-meta">Regulator feed · biotech · DeepSeek 仅解释来源文本</span>
+                </span>
+                <span class="arrow">›</span>
+              </button>
+              <button class="event-row" type="button" data-kind="primary market" aria-selected="false">
+                <span class="event-time">08-26<br>23:31 UTC</span>
+                <span>
+                  <span class="event-chip">Primary supported · Market context</span>
+                  <span class="event-title">North Valley Bank completed an asset sale after market close</span>
+                  <span class="event-summary">公司公告支持事实陈述，价格模块只显示完成窗口，不显示等待和供应商错误。</span>
+                  <span class="event-meta">Company release · NVB · 下个收盘 -2.1%</span>
+                </span>
+                <span class="arrow">›</span>
+              </button>
+              <button class="event-row" type="button" data-kind="capture" aria-selected="false">
+                <span class="event-time">08-26<br>16:08 UTC</span>
+                <span>
+                  <span class="event-chip">Source captured</span>
+                  <span class="event-title">A syndicated article mentions a possible restructuring plan</span>
+                  <span class="event-summary">聚合来源不能直接升级为正式事实；公共页保留线索，但不把它包装成已核验事件。</span>
+                  <span class="event-meta">Newswire mirror · restructuring · 无模型占位</span>
+                </span>
+                <span class="arrow">›</span>
+              </button>
+            </div>
+          </section>
+
+          <aside class="detail" data-detail aria-live="polite">
+            <div class="detail-main">
+              <div class="detail-meta" data-detail-meta>
+                <span>OFD · 2026-08-27</span><span>来源发布 21:02 UTC</span><span>数据更新 21:14 UTC</span>
+              </div>
+              <h2 data-detail-title>Oceanic Foods filed a going-concern warning in its latest 10-Q</h2>
+              <p class="detail-summary" data-detail-summary>SEC 原文包含管理层对持续经营能力的重大疑虑。当前事件为正式可引用事实，风险语义和价格反应独立展示，不改变证据状态。</p>
+              <div class="answer-grid">
+                <article class="evidence-box">
+                  <span class="box-label">关键原文</span>
+                  <p data-evidence>Management concluded that substantial doubt exists about the company's ability to continue as a going concern within one year after issuance of the financial statements.</p>
+                </article>
+                <article class="signal-box">
+                  <span class="box-label">研究信号</span>
+                  <div class="signal-stack">
+                    <div class="signal-row"><span>证据姿态</span><strong data-posture>Primary supported</strong></div>
+                    <div class="signal-row" data-qwen-row><span>Qwen</span><strong class="negative" data-qwen>Risk review · high materiality</strong></div>
+                    <div class="signal-row" data-price-row><span>价格</span><strong class="negative" data-price>OFD T+30m -6.8%</strong></div>
+                  </div>
+                </article>
+              </div>
+              <div class="flow" aria-label="来源分流动画">
+                <div class="source-icons">
+                  <div class="mini-card"><b>SEC</b>官方申报</div>
+                  <div class="mini-card"><b>News</b>公开线索</div>
+                  <div class="mini-card"><b>Reg</b>监管公告</div>
+                </div>
+                <div class="gate"><span class="sweep"></span><strong>Gate</strong></div>
+                <div class="result-icons">
+                  <div class="mini-card"><b>事实</b>可引用证据</div>
+                  <div class="mini-card"><b>信号</b>风险语义</div>
+                  <div class="mini-card"><b>行情</b>事后窗口</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="detail-tabs">
+              <button type="button" data-tab-target="source" aria-pressed="true">来源</button>
+              <button type="button" data-tab-target="market" data-optional-tab="market" aria-pressed="false">行情</button>
+              <button type="button" data-tab-target="model" data-optional-tab="model" aria-pressed="false">模型</button>
+              <button type="button" data-tab-target="trace" aria-pressed="false">回放</button>
+            </div>
+            <section class="tab-panel is-active" data-tab="source">
+              <article class="source-box">
+                <span class="box-label">来源阅读</span>
+                <p data-source-copy>标题、摘要和原文摘录去重展示。正式结论优先回到 P0/P1 原始材料；聚合页只作为发现入口。</p>
+              </article>
+            </section>
+            <section class="tab-panel" data-tab="market">
+              <div class="market-grid">
+                <div class="market-cell"><span>观察标的</span><strong data-market-asset>OFD</strong></div>
+                <div class="market-cell"><span>窗口</span><strong data-market-window>T+30m</strong></div>
+                <div class="market-cell"><span>收益</span><strong class="negative" data-market-return>-6.8%</strong></div>
+              </div>
+              <div class="bars" data-market-bars aria-label="市场反应窗口">
+                <div class="bar-row"><span>T+5m</span><div class="bar-track"><div class="bar-fill" style="--value:34%"></div></div><strong>-2.4%</strong></div>
+                <div class="bar-row"><span>T+30m</span><div class="bar-track"><div class="bar-fill" style="--value:72%"></div></div><strong>-6.8%</strong></div>
+                <div class="bar-row"><span>T+1d</span><div class="bar-track"><div class="bar-fill" style="--value:55%"></div></div><strong>-4.9%</strong></div>
+              </div>
+              <p class="footer-note">价格反应是事后审计窗口，不证明因果，也不用于交易触发。</p>
+            </section>
+            <section class="tab-panel" data-tab="model">
+              <article class="source-box">
+                <span class="box-label">模型职责</span>
+                <p data-model-copy>Qwen 只展示已批准、当前版本绑定的风险语义；DeepSeek 只在缺少可引用证据时解释捕获文本。两者都不改变证据状态。</p>
+              </article>
+            </section>
+            <section class="tab-panel" data-tab="trace">
+              <div class="timeline">
+                <article class="step"><time>21:02</time><span class="dot"></span><div><h3>来源发布</h3><p>系统记录来源时间和内容快照。</p></div></article>
+                <article class="step"><time>21:08</time><span class="dot"></span><div><h3>证据关系形成</h3><p>精确段落绑定事件主体、谓词和版本。</p></div></article>
+                <article class="step"><time>21:14</time><span class="dot"></span><div><h3>研究信号展示</h3><p>只在当前版本有效、结果完整时展示模型和价格窗口。</p></div></article>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <section class="page" data-page="cases">
+        <header class="hero">
+          <div>
+            <div class="kicker">Replay / cases</div>
+            <h1>把同一事件的判断路径纵向展开</h1>
+            <p>案例页不做新的判断，只让读者看到线索、来源、证据关系和最终展示之间的变化，适合给老师或队友解释系统为什么谨慎。</p>
+          </div>
+          <div class="snapshot">
+            <div><span>冻结案例</span><strong>04</strong></div>
+            <div><span>可回放步骤</span><strong>17</strong></div>
+            <div><span>写入行为</span><strong>0</strong></div>
+          </div>
+        </header>
+        <div class="case-grid">
+          <article class="case-card"><h3>从线索到证据</h3><p>聚合新闻先进入来源捕获，等 P0/P1 原始材料到位后才展示正式事实摘要。</p></article>
+          <article class="case-card"><h3>从证据到语义</h3><p>Qwen 风险语义是独立研究信号，不会把弱证据升级为真事实。</p></article>
+          <article class="case-card"><h3>从发布时间到价格窗口</h3><p>行情只显示已经完成的事件后固定窗口，错过窗口不会用当前报价补写。</p></article>
+        </div>
+      </section>
+
+      <section class="page" data-page="method">
+        <header class="hero">
+          <div>
+            <div class="kicker">Method and boundaries</div>
+            <h1>公开页面只回答读者真正需要的问题</h1>
+            <p>来源说了什么、证据有多强、风险模型是否给出当前有效语义。内部状态不替代事实，模型输出不替代证据。</p>
+          </div>
+          <div class="snapshot">
+            <div><span>公开入口</span><strong>3</strong></div>
+            <div><span>交易权限</span><strong>无</strong></div>
+            <div><span>账户数据</span><strong>无</strong></div>
+          </div>
+        </header>
+        <div class="method-grid">
+          <article class="method-card"><h3>01 · 证据姿态</h3><p>Primary supported、Primary source available、Source captured、No source 分开显示，不混用内部核验状态。</p></article>
+          <article class="method-card"><h3>02 · 模型语义</h3><p>Qwen 和 DeepSeek 各有边界，结果缺失或未批准时不生成占位卡片。</p></article>
+          <article class="method-card"><h3>03 · 市场上下文</h3><p>资产映射只选择观察标的。价格窗口是审计背景，不是交易建议。</p></article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const pages = [...document.querySelectorAll("[data-page]")];
+    const pageButtons = [...document.querySelectorAll("[data-page-target]")];
+    const tabButtons = [...document.querySelectorAll("[data-tab-target]")];
+    const tabPanels = [...document.querySelectorAll("[data-tab]")];
+    const rows = [...document.querySelectorAll(".event-row")];
+    const search = document.querySelector("[data-search]");
+    const filter = document.querySelector("[data-filter]");
+    const count = document.querySelector("[data-count]");
+    const detail = document.querySelector("[data-detail]");
+
+    const details = {
+      0: {
+        meta: "OFD · 2026-08-27 | 来源发布 21:02 UTC | 数据更新 21:14 UTC",
+        title: "Oceanic Foods filed a going-concern warning in its latest 10-Q",
+        summary: "SEC 原文包含管理层对持续经营能力的重大疑虑。当前事件为正式可引用事实，风险语义和价格反应独立展示，不改变证据状态。",
+        evidence: "Management concluded that substantial doubt exists about the company's ability to continue as a going concern within one year after issuance of the financial statements.",
+        posture: "Primary supported",
+        qwen: "Risk review · high materiality",
+        price: "OFD T+30m -6.8%",
+        market: {
+          asset: "OFD",
+          window: "T+30m",
+          returnValue: "-6.8%",
+          bars: [["T+5m", "34%", "-2.4%"], ["T+30m", "72%", "-6.8%"], ["T+1d", "55%", "-4.9%"]]
+        },
+        source: "标题、摘要和原文摘录去重展示。正式结论优先回到 P0/P1 原始材料；聚合页只作为发现入口。",
+        model: "Qwen 展示已批准、当前版本绑定的做空风险语义；DeepSeek 不参与这一条，因为证据已经闭合。"
+      },
+      1: {
+        meta: "Biotech · 2026-08-27 | 来源捕获 18:42 UTC | 证据关系未闭合",
+        title: "A regulator notice describes a delayed product approval pathway",
+        summary: "当前只有来源捕获文本，公共页保留不确定性，不把它写成正式事实。",
+        evidence: "A regulator notice describes additional review requirements. The captured text is readable, but no current P0/P1 relation binds the exact fact claim.",
+        posture: "Source captured",
+        qwen: null,
+        price: null,
+        market: null,
+        source: "DeepSeek 可以解释来源文本，让读者知道原文大意；它不确认事实、不改变证据姿态。",
+        model: null
+      },
+      2: {
+        meta: "NVB · 2026-08-26 | 下个收盘已完成 | 公司公告",
+        title: "North Valley Bank completed an asset sale after market close",
+        summary: "公司公告支持事实陈述，市场模块只显示完成窗口，不展示供应商错误、等待队列或后台任务状态。",
+        evidence: "The company announced that it completed the previously disclosed asset sale after the market close.",
+        posture: "Primary supported",
+        qwen: null,
+        price: "NVB next close -2.1%",
+        market: {
+          asset: "NVB",
+          window: "Next close",
+          returnValue: "-2.1%",
+          bars: [["Next close", "28%", "-2.1%"]]
+        },
+        source: "详情优先展示来源发布时间、数据更新时间和最相关的原文段落。",
+        model: null
+      },
+      3: {
+        meta: "Restructuring · 2026-08-26 | 聚合来源 | 非正式证据",
+        title: "A syndicated article mentions a possible restructuring plan",
+        summary: "聚合来源只能帮助发现线索，不能代替原始公告、监管文件或法院材料。",
+        evidence: "A syndicated article mentions a possible plan, but the current event version lacks a citable primary passage.",
+        posture: "Source captured",
+        qwen: null,
+        price: null,
+        market: null,
+        source: "公共页可以展示来源归因标题和有限摘录，但不能把它写成确认事实。",
+        model: null
+      }
+    };
+
+    function setText(selector, value) {
+      const node = document.querySelector(selector);
+      if (node) node.textContent = value;
+    }
+
+    function activatePage(name) {
+      pages.forEach(page => page.classList.toggle("is-active", page.dataset.page === name));
+      pageButtons.forEach(button => button.setAttribute("aria-pressed", String(button.dataset.pageTarget === name)));
+    }
+
+    function activateTab(name) {
+      const target = tabButtons.find(button => button.dataset.tabTarget === name);
+      if (!target || target.hidden) name = "source";
+      tabPanels.forEach(panel => panel.classList.toggle("is-active", panel.dataset.tab === name));
+      tabButtons.forEach(button => button.setAttribute("aria-pressed", String(button.dataset.tabTarget === name)));
+    }
+
+    function setOptionalState(data) {
+      const modelAvailable = Boolean(data.qwen && data.model);
+      const marketAvailable = Boolean(data.price && data.market);
+      document.querySelector("[data-qwen-row]").hidden = !modelAvailable;
+      document.querySelector("[data-price-row]").hidden = !marketAvailable;
+      document.querySelector('[data-optional-tab="model"]').hidden = !modelAvailable;
+      document.querySelector('[data-optional-tab="market"]').hidden = !marketAvailable;
+
+      if (marketAvailable) {
+        setText("[data-market-asset]", data.market.asset);
+        setText("[data-market-window]", data.market.window);
+        setText("[data-market-return]", data.market.returnValue);
+        const bars = document.querySelector("[data-market-bars]");
+        bars.replaceChildren(...data.market.bars.map(([label, width, value]) => {
+          const row = document.createElement("div");
+          row.className = "bar-row";
+          const name = document.createElement("span");
+          name.textContent = label;
+          const track = document.createElement("div");
+          track.className = "bar-track";
+          const fill = document.createElement("div");
+          fill.className = "bar-fill";
+          fill.style.setProperty("--value", width);
+          track.append(fill);
+          const result = document.createElement("strong");
+          result.textContent = value;
+          row.append(name, track, result);
+          return row;
+        }));
+      }
+
+      const activeTab = tabButtons.find(button => button.getAttribute("aria-pressed") === "true");
+      if (activeTab?.hidden) activateTab("source");
+    }
+
+    function selectRow(row) {
+      if (!row) return;
+      rows.forEach(item => item.setAttribute("aria-selected", String(item === row)));
+      const data = details[rows.indexOf(row)];
+      const meta = document.querySelector("[data-detail-meta]");
+      meta.replaceChildren(...data.meta.split(" | ").map(value => {
+        const item = document.createElement("span");
+        item.textContent = value;
+        return item;
+      }));
+      setText("[data-detail-title]", data.title);
+      setText("[data-detail-summary]", data.summary);
+      setText("[data-evidence]", data.evidence);
+      setText("[data-posture]", data.posture);
+      setText("[data-qwen]", data.qwen);
+      setText("[data-price]", data.price);
+      setText("[data-source-copy]", data.source);
+      setText("[data-model-copy]", data.model);
+      setOptionalState(data);
+    }
+
+    function filterRows() {
+      const term = search.value.trim().toLowerCase();
+      const kind = filter.value;
+      let visible = 0;
+      rows.forEach(row => {
+        const textMatch = !term || row.textContent.toLowerCase().includes(term);
+        const kindMatch = kind === "all" || row.dataset.kind.includes(kind);
+        const show = textMatch && kindMatch;
+        row.hidden = !show;
+        if (show) visible += 1;
+      });
+      count.textContent = `${visible} 条示例 · 最近发现优先`;
+      detail.hidden = visible === 0;
+      const selected = rows.find(row => row.getAttribute("aria-selected") === "true");
+      if (selected?.hidden) selectRow(rows.find(row => !row.hidden));
+    }
+
+    pageButtons.forEach(button => button.addEventListener("click", () => activatePage(button.dataset.pageTarget)));
+    tabButtons.forEach(button => button.addEventListener("click", () => activateTab(button.dataset.tabTarget)));
+    rows.forEach(row => row.addEventListener("click", () => selectRow(row)));
+    search.addEventListener("input", filterRows);
+    filter.addEventListener("change", filterRows);
+  </script>
+</body>
+</html>
