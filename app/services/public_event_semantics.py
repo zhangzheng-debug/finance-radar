@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 
@@ -50,6 +51,43 @@ QWEN_SEMANTIC_PRIORITIES = frozenset(
     {"PRIORITY_REVIEW", "ROUTINE", "UNDECIDABLE"}
 )
 QWEN_ASSESSMENT_SCOPES = frozenset({"EVIDENCE_SUPPORTED", "SOURCE_CONDITIONAL"})
+PUBLIC_HEADLINE_MODES = frozenset({"FACT", "ATTRIBUTED_SOURCE", "RECORD"})
+GENERIC_SOURCE_HEADLINE = re.compile(
+    r"^(?:sec\s+)?(?:8-k|6-k|10-k|10-q|20-f|40-f|25(?:-nse)?|15-12g)"
+    r"(?:\s+[a-z0-9.\-]+|\s*[-:]\s*[^:]{0,90})?$|"
+    r"^[a-z0-9.\-]+\s+[a-z0-9_\-]+\s+candidate$",
+    re.I,
+)
+GENERIC_SOURCE_SUMMARY_PREFIXES = (
+    "action in delisted/voluntarydelisting; value=delisted",
+    "certifies that it has reasonable grounds to believe that it meets all of the requirements for filing the form 25",
+)
+
+
+def _is_generic_recovery_title(value: str | None) -> bool:
+    """Return whether a historical repair title contains no event action."""
+    normalized = " ".join(str(value or "").lower().split())
+    return normalized.startswith(
+        (
+            "accepted official evidence for ",
+            "official evidence for ",
+            "accepted evidence for ",
+        )
+    )
+
+
+def _is_generic_source_headline(value: str | None) -> bool:
+    """Return whether a source title identifies a filing, not its event."""
+
+    normalized = " ".join(str(value or "").split())
+    return bool(normalized and GENERIC_SOURCE_HEADLINE.fullmatch(normalized))
+
+
+def _is_generic_source_summary(value: str | None) -> bool:
+    """Return whether an excerpt is provider/form boilerplate, not event text."""
+
+    normalized = " ".join(str(value or "").casefold().split())
+    return normalized.startswith(GENERIC_SOURCE_SUMMARY_PREFIXES)
 
 
 def _count(value: Any) -> int:
@@ -98,6 +136,68 @@ def derive_public_event_semantics(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def derive_public_display_headline(
+    event: dict[str, Any],
+    captured_source: dict[str, Any] | None = None,
+) -> dict[str, str | None]:
+    """Return a provenance-aware headline for the public browsing loop.
+
+    A source headline can make a discovery record scannable without promoting
+    it to a verified event fact.  The explicit mode is part of the display
+    contract so every reader can distinguish a supported fact, an attributed
+    source statement, and a minimal ledger record.
+    """
+
+    citation_ready = _count(event.get("reader_ready")) == 1
+    fact_summary = _bounded_text(event.get("public_fact_summary"), 180)
+    if citation_ready and fact_summary:
+        return {
+            "display_headline": fact_summary,
+            "headline_mode": "FACT",
+            "headline_source": None,
+        }
+
+    source = captured_source if isinstance(captured_source, dict) else event
+    source_title = _bounded_text(source.get("source_title") or source.get("title"), 180)
+    source_summary = _bounded_text(
+        source.get("source_summary")
+        or source.get("summary")
+        or event.get("unverified_capture_excerpt"),
+        180,
+    )
+    # Recovery titles such as "Accepted official evidence for XYZ" describe
+    # an import operation, not the event.  Prefer the attributed source excerpt
+    # so the browsing headline answers what the source actually says.
+    generic_title = _is_generic_recovery_title(source_title) or _is_generic_source_headline(
+        source_title
+    )
+    useful_summary = source_summary if not _is_generic_source_summary(source_summary) else None
+    source_headline = useful_summary if generic_title and useful_summary else source_title or useful_summary
+    if _is_generic_source_headline(source_headline):
+        source_headline = None
+    if source_headline:
+        return {
+            "display_headline": source_headline,
+            "headline_mode": "ATTRIBUTED_SOURCE",
+            "headline_source": _bounded_text(
+                source.get("source_name")
+                or source.get("name"),
+                80,
+            ),
+        }
+
+    subject = _bounded_text(
+        event.get("company_name") or event.get("ticker_at_event"), 100
+    )
+    event_date = _bounded_text(event.get("event_date"), 32)
+    record_parts = [part for part in (subject, event_date) if part]
+    return {
+        "display_headline": " · ".join(record_parts) or "事件记录",
+        "headline_mode": "RECORD",
+        "headline_source": None,
+    }
+
+
 def _bounded_enum(value: Any, allowed: frozenset[str]) -> str | None:
     normalized = str(value or "").strip().upper()
     return normalized if normalized in allowed else None
@@ -107,7 +207,12 @@ def _bounded_text(value: Any, limit: int) -> str | None:
     normalized = " ".join(str(value or "").split())
     if not normalized:
         return None
-    return normalized[:limit]
+    if len(normalized) <= limit:
+        return normalized
+    clipped = normalized[: max(1, limit - 1)].rstrip()
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0].rstrip()
+    return clipped + "…"
 
 
 def _applicable_confidence(output: dict[str, Any], run: dict[str, Any]) -> float | None:

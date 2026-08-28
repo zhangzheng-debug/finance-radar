@@ -5,6 +5,73 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.26.3
+
+- Add a compact Public research-signal projection that appears only when a
+  current, explicitly approved Qwen result satisfies the dual-human-gold,
+  automatic, non-shadow release contract. Empty and pending model states stay
+  out of the reader interface.
+- Add deterministic event-to-asset observation mappings for a bounded set of
+  ETF proxies including GLD, USO, BNO, SPY and TLT. Mappings remain
+  direction-neutral, carry zero impact and cannot enter ranking, model features
+  or any trading path.
+- Display only completed, reproducible post-publication reaction values, with
+  at most three assets and one comparable fixed window per event. Never replace
+  a missed historical window with a current quote.
+- Require exact one-minute market bars, bounded retries and cache reuse, and
+  migrate the ledger to Schema 15 with versioned policy and source-time
+  provenance for safe replay and restore.
+
+## 2026.08.26.2
+
+- Reserve a stable top safe area for the Public Reader beneath Streamlit's
+  fixed header. Keep the page title visible from 1920-pixel desktop layouts
+  through the 390-pixel mobile breakpoint, without the former 420/421-pixel
+  visibility cliff or inherited miniature heading style.
+- Reduce the Public evidence vocabulary to four reader-facing postures:
+  original-text support, primary source, captured source and event record.
+  Remove repeated source cards, duplicated titles, repeated source buttons and
+  the common captured-source chip from the feed while preserving the posture
+  once in event detail.
+- Render DeepSeek reading help only after a current cached result is ready for
+  a zero-evidence event. Keep absent, queued, failed and stale model states out
+  of the Public UI. Keep Qwen disabled until the human-gold release contract is
+  complete; a future approved risk signal must retain its short evidence-basis
+  label.
+- Extend the deterministic accessibility audit with 12 responsive Public
+  shell viewports and explicit header clearance, title size, following-content
+  gap and horizontal-overflow gates.
+
+## 2026.08.26.1
+
+- Rebuild the Public surface around one core path: discover downside events,
+  read the event claim, inspect the source material, view an approved Qwen risk
+  signal when one exists, and audit completed post-publication price reactions.
+  Remove reviewer workflow states, empty model placeholders, backend metrics,
+  repeated safety prose and duplicated navigation from the reader interface.
+- Replace company-name cards with provenance-aware event headlines. A current
+  citable fact is stated directly; a capture-only record is explicitly
+  attributed to its source; recovery boilerplate is never presented as the
+  event. Bound and deduplicate card excerpts and keep one compact update clock.
+- Keep all financial canonical events browsable regardless of review progress,
+  while retracting narrow, evidence-free central-bank cultural notices to the
+  immutable source archive. Future matching notices are rejected before
+  canonical admission, and historical retractions remain visible internally.
+- Add completed, audit-only reaction returns to the public dossier. Pending or
+  missed windows, raw snapshots, provider errors and job internals remain
+  private. Database isolation flags still prohibit every displayed return from
+  becoming a discovery rank or model feature.
+- Make zero-evidence DeepSeek assistance non-blocking. The source excerpt loads
+  with the event core; AI text appears only after a current persisted result is
+  ready. The browser stops network polling after a terminal result or a bounded
+  observation window and never exposes queue/failure placeholders to readers.
+- Simplify the Case and Method pages, keep public navigation to three entries,
+  preserve same-page event reading and pagination state, and tighten responsive
+  layout for 390-pixel screens without horizontal overflow.
+- Prevent obvious non-financial institutional releases from entering the
+  canonical event ledger while retaining their raw source observations for
+  audit.
+
 ## 2026.08.25.1
 
 - Replace the DeepSeek interpretation worker's generation-reset OFFSET sweep

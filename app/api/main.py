@@ -53,6 +53,7 @@ from app.services import (
 )
 from app.services.capture_interpretation import CAPTURE_INTERPRETATION_PROMPT_VERSION
 from app.services.public_event_semantics import (
+    derive_public_display_headline,
     derive_public_event_semantics,
     project_public_qwen_semantics,
     project_public_risk_assessment,
@@ -68,6 +69,14 @@ BACKUP_HEALTH_RECEIPT_FORMAT = "finance-radar-backup-health-receipt-v1"
 BACKUP_HEALTH_RECEIPT_MAX_BYTES = 64 * 1024
 OVERVIEW_SNAPSHOT_REFRESH_SECONDS = 30.0
 OVERVIEW_PUBLISHED_SNAPSHOT_REFRESH_SECONDS = 5 * 60.0
+PUBLIC_MARKET_REACTION_WINDOWS = (
+    ("t_plus_5m", "T+5m"),
+    ("t_plus_30m", "T+30m"),
+    ("t_plus_2h", "T+2h"),
+    ("next_close", "下个收盘"),
+    ("t_plus_1d", "T+1d"),
+    ("t_plus_5d", "T+5d"),
+)
 GENERIC_REVIEW_REASONS = frozenset(
     {
         "已逐条核对精确引文",
@@ -76,6 +85,287 @@ GENERIC_REVIEW_REASONS = frozenset(
         "n/a",
     }
 )
+
+
+def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
+    """Project completed, audit-only reaction returns for public reading.
+
+    Pending jobs, missed windows, raw snapshots and provider failures remain
+    operational data. The public surface receives only numeric metrics whose
+    database isolation flags prove they cannot feed discovery or model input.
+    """
+
+    rows = value.get("market_metrics")
+    if not isinstance(rows, list):
+        return None
+    raw_assets = value.get("assets")
+    raw_assets = raw_assets if isinstance(raw_assets, list) else []
+    asset_context: dict[str, dict[str, str]] = {}
+    role_labels = {
+        "DIRECT_SECURITY": "直接证券",
+        "MARKET_BENCHMARK": "市场基准",
+        "SECTOR_PROXY": "行业代理",
+        "THEMATIC_PROXY": "观察代理",
+    }
+    fallback_roles = {
+        "PRIMARY": "DIRECT_SECURITY",
+        "SECTOR": "SECTOR_PROXY",
+        "MACRO_PROXY": "THEMATIC_PROXY",
+        "ECOSYSTEM_PROXY": "THEMATIC_PROXY",
+    }
+    for asset in raw_assets:
+        if not isinstance(asset, dict):
+            continue
+        asset_id = str(asset.get("asset_id") or "").strip()
+        try:
+            active = int(asset.get("market_observation_allowed") or 0) == 1
+            no_trading = int(asset.get("no_trading") or 0) == 1
+        except (TypeError, ValueError):
+            continue
+        if not asset_id or not active or not no_trading:
+            continue
+        role = str(asset.get("display_role") or "").strip().upper()
+        if role not in role_labels:
+            role = fallback_roles.get(str(asset.get("relation_type") or "").upper(), "")
+        symbol = str(asset.get("symbol") or "").strip()
+        provider_symbol = str(asset.get("provider_symbol") or "").strip()
+        canonical_symbol = symbol or provider_symbol
+        if not canonical_symbol:
+            continue
+        asset_context[asset_id] = {
+            "role": role,
+            "role_label": role_labels.get(role, ""),
+            "proxy_label": str(asset.get("proxy_label") or "").strip()[:120],
+            "_symbol": canonical_symbol[:32],
+            "_provider_symbol": provider_symbol[:64],
+        }
+    window_order = {
+        window: index
+        for index, (window, _label) in enumerate(PUBLIC_MARKET_REACTION_WINDOWS)
+    }
+    labels = dict(PUBLIC_MARKET_REACTION_WINDOWS)
+    projected: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("metric_scope") or "") != "post_event_audit_only":
+            continue
+        if str(row.get("metric_value_type") or "") != "decimal_percent":
+            continue
+        context = asset_context.get(str(row.get("stable_id") or ""))
+        if context is None:
+            continue
+        try:
+            if int(row.get("allowed_for_discovery_rank") or 0) != 0:
+                continue
+            if int(row.get("allowed_as_model_feature") or 0) != 0:
+                continue
+            value_percent = float(str(row.get("metric_value") or ""))
+        except (TypeError, ValueError):
+            continue
+        if value_percent != value_percent or value_percent in {
+            float("inf"),
+            float("-inf"),
+        }:
+            continue
+        metric_name = str(row.get("metric_name") or "")
+        window = next(
+            (
+                candidate
+                for candidate, _label in PUBLIC_MARKET_REACTION_WINDOWS
+                if metric_name.startswith(f"reaction_return_{candidate}_pct__")
+            ),
+            "",
+        )
+        if not window:
+            continue
+        suffix = metric_name.split(
+            f"reaction_return_{window}_pct__",
+            1,
+        )[-1].strip()
+        metric_symbol = str(row.get("ticker_at_event") or "").strip()
+        accepted_symbols = {
+            candidate.upper()
+            for candidate in (
+                str(context.get("_symbol") or "").strip(),
+                str(context.get("_provider_symbol") or "").strip(),
+            )
+            if candidate
+        }
+        supplied_symbols = {
+            candidate.upper() for candidate in (metric_symbol, suffix) if candidate
+        }
+        if not accepted_symbols or not supplied_symbols.issubset(accepted_symbols):
+            continue
+        symbol = str(context["_symbol"])
+        timestamp_precision = str(row.get("timestamp_precision") or "")
+        label = labels[window]
+        if timestamp_precision == "DATE_ONLY":
+            label = {
+                "next_close": "首个完整交易日收盘",
+                "t_plus_1d": "下一交易日收盘",
+                "t_plus_5d": "5个交易日后",
+            }.get(window, label)
+        item = {
+            "window": window,
+            "label": label,
+            "symbol": symbol[:32],
+            "return_pct": round(value_percent, 6),
+            "provider": str(row.get("provider") or "")[:64],
+            "event_trade_date": row.get("event_trade_date"),
+            "benchmark_ticker": str(row.get("benchmark_ticker") or "")[:32] or None,
+            "scope": "post_event_audit_only",
+            "role": context["role"],
+            "role_label": context["role_label"],
+            "proxy_label": context["proxy_label"],
+            "_updated_at": row.get("updated_at"),
+        }
+        if timestamp_precision:
+            item["timestamp_precision"] = timestamp_precision
+        key = (str(row.get("stable_id") or ""), window)
+        previous = projected.get(key)
+        if previous is None or str(item.get("_updated_at") or "") >= str(
+            previous.get("_updated_at") or ""
+        ):
+            projected[key] = item
+    items = list(projected.values())
+    for item in items:
+        item.pop("_updated_at", None)
+    items.sort(
+        key=lambda item: (
+            str(item["symbol"]),
+            window_order[str(item["window"])],
+        )
+    )
+    if not items:
+        return None
+    return {
+        "items": items,
+        "scope": "post_event_audit_only",
+        "uses_event_truth": False,
+        "used_as_model_feature": False,
+        "used_for_discovery_rank": False,
+    }
+
+
+def _public_market_context(value: dict[str, Any]) -> dict[str, Any] | None:
+    """Project completed read-only price observations for public reading.
+
+    These are event-relative price snapshots, not live quotes. The projection
+    excludes pending jobs, provider errors, raw payloads and snapshots attached
+    to obsolete event versions.
+    """
+
+    raw_assets = value.get("assets")
+    raw_assets = raw_assets if isinstance(raw_assets, list) else []
+    role_labels = {
+        "DIRECT_SECURITY": "直接证券",
+        "MARKET_BENCHMARK": "市场基准",
+        "SECTOR_PROXY": "行业代理",
+        "THEMATIC_PROXY": "观察代理",
+    }
+    fallback_roles = {
+        "PRIMARY": "DIRECT_SECURITY",
+        "SECTOR": "SECTOR_PROXY",
+        "MACRO_PROXY": "THEMATIC_PROXY",
+        "ECOSYSTEM_PROXY": "THEMATIC_PROXY",
+    }
+    asset_context: dict[str, dict[str, str]] = {}
+    for asset in raw_assets:
+        if not isinstance(asset, dict):
+            continue
+        asset_id = str(asset.get("asset_id") or "").strip()
+        try:
+            allowed = int(asset.get("market_observation_allowed") or 0) == 1
+            no_trading = int(asset.get("no_trading") or 0) == 1
+        except (TypeError, ValueError):
+            continue
+        if not asset_id or not allowed or not no_trading:
+            continue
+        symbol = str(asset.get("symbol") or "").strip()
+        provider_symbol = str(asset.get("provider_symbol") or "").strip()
+        canonical_symbol = symbol or provider_symbol
+        if not canonical_symbol:
+            continue
+        role = str(asset.get("display_role") or "").strip().upper()
+        if role not in role_labels:
+            role = fallback_roles.get(str(asset.get("relation_type") or "").upper(), "")
+        asset_context[asset_id] = {
+            "symbol": canonical_symbol[:32],
+            "provider_symbol": provider_symbol[:64],
+            "role": role,
+            "role_label": role_labels.get(role, ""),
+            "proxy_label": str(asset.get("proxy_label") or "").strip()[:120],
+        }
+
+    rows = value.get("market_snapshots")
+    if not isinstance(rows, list):
+        return None
+    projected: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        context = asset_context.get(str(row.get("asset_id") or ""))
+        if context is None:
+            continue
+        try:
+            if int(row.get("read_only") or 0) != 1:
+                continue
+            if int(row.get("no_trading") or 0) != 1:
+                continue
+            price = float(str(row.get("price") or ""))
+        except (TypeError, ValueError):
+            continue
+        if price <= 0 or price != price or price in {float("inf"), float("-inf")}:
+            continue
+        if str(row.get("market_job_status") or "").upper() != "COMPLETED":
+            continue
+        provider = str(row.get("provider") or "").strip().lower()
+        if provider not in {"twelve_data", "binance_public"}:
+            continue
+        provider_symbol = str(row.get("provider_symbol") or "").strip()
+        accepted_symbols = {
+            candidate.upper()
+            for candidate in (context["symbol"], context["provider_symbol"])
+            if candidate
+        }
+        if not provider_symbol or provider_symbol.upper() not in accepted_symbols:
+            continue
+        observed_at = str(row.get("provider_as_of") or row.get("captured_at") or "").strip()
+        if not observed_at:
+            continue
+        currency = str(row.get("currency") or "").strip().upper()
+        if currency and (not currency.replace("_", "").isalnum() or len(currency) > 12):
+            continue
+        item = {
+            "symbol": context["symbol"],
+            "price": round(price, 8),
+            "currency": currency or None,
+            "observed_at": observed_at[:40],
+            "provider": provider,
+            "observation_window": str(row.get("observation_window") or "")[:32],
+            "role": context["role"],
+            "role_label": context["role_label"],
+            "proxy_label": context["proxy_label"],
+        }
+        timestamp_precision = str(row.get("timestamp_precision") or "")
+        if timestamp_precision:
+            item["timestamp_precision"] = timestamp_precision
+        asset_id = str(row.get("asset_id") or "")
+        previous = projected.get(asset_id)
+        if previous is None or str(item["observed_at"]) >= str(previous["observed_at"]):
+            projected[asset_id] = item
+    items = sorted(projected.values(), key=lambda item: str(item["symbol"]))
+    if not items:
+        return None
+    return {
+        "items": items,
+        "scope": "event_relative_price_observation",
+        "is_live_quote": False,
+        "uses_event_truth": False,
+        "used_as_model_feature": False,
+        "used_for_discovery_rank": False,
+    }
 
 
 def _rate_limit_client_key(request: Request, trusted_proxy_hosts: tuple[str, ...]) -> str:
@@ -950,6 +1240,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         result = {key: value.get(key) for key in public_event_fields}
         result.update(derive_public_event_semantics(value))
+        result.update(derive_public_display_headline(value, captured_source))
         result["risk_assessment"] = project_public_risk_assessment(
             risk_run,
             current_version=int(value.get("current_version") or 0),
@@ -1394,20 +1685,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if public_event.get("citation_ready") is True
             else {}
         )
+        preferred_source = (
+            value.get("preferred_source")
+            if isinstance(value.get("preferred_source"), dict)
+            else {}
+        )
         result: dict[str, Any] = {
             "event": public_event,
             "current_version": {
                 "version": version.get("version"),
                 "facts": public_facts,
             },
-            "preferred_source": {
-                "source_published_at": (
-                    value.get("preferred_source") or {}
-                ).get("source_published_at")
-            },
+            "preferred_source": (
+                public_captured_source(preferred_source)
+                if preferred_source
+                else {}
+            ),
             "evidence_count": len(evidence),
             "no_trading_banner": value.get("no_trading_banner"),
         }
+        market_reaction = _public_market_reaction(value)
+        if market_reaction is not None:
+            result["market_reaction"] = market_reaction
+        market_context = _public_market_context(value)
+        if market_context is not None:
+            result["market_context"] = market_context
         verification = value.get("verification_method")
         if isinstance(verification, dict):
             eligible_ids = {
@@ -1931,6 +2233,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 date_to=date_to.isoformat() if date_to else None,
                 reader_ready=effective_reader_ready,
                 captured_source_required=False,
+                exclude_nonfinancial_retractions=not internal_reader,
                 # The public card renders at most 360 characters.  Avoid
                 # pulling multi-megabyte provider summaries from historical
                 # observations only to discard them in ``public_event_item``.
@@ -1944,7 +2247,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if internal_reader:
             data = read_events()
         else:
-            cache_key = "public-event-feed-v3:" + repr(
+            cache_key = "public-event-feed-v4:" + repr(
                 (
                     status,
                     public_state,
@@ -1979,11 +2282,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         internal_reader: bool = Depends(internal_reader_access),
     ):
         effective_reader_ready = reader_ready if internal_reader else None
-        cache_key = f"event-facets-v2:{effective_reader_ready!r}"
+        cache_key = f"event-facets-v3:{effective_reader_ready!r}:{not internal_reader!r}"
         data = cached_read(
             cache_key,
             60.0,
-            lambda: ledger.event_facets(reader_ready=effective_reader_ready),
+            lambda: ledger.event_facets(
+                reader_ready=effective_reader_ready,
+                exclude_nonfinancial_retractions=not internal_reader,
+            ),
         )
         return envelope(request, data)
 
@@ -2026,10 +2332,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     qwen_run=qwen_runs.get(str(event.get("event_id") or "")),
                 ),
                 "evidence": {"items": evidence},
-                "knowledge": knowledge_context(
-                    str(event.get("event_family") or ""),
-                    str(event.get("event_type") or ""),
-                ),
                 "capture_explanation": {
                     "display": bool(explanation_eligibility.get("display")),
                     "reason_code": explanation_eligibility.get("reason_code"),

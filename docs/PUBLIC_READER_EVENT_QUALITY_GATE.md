@@ -97,17 +97,20 @@ Risk assessment is a separate optional object. When current, it may expose
 - `route` is limited to `RISK_REVIEW`, `NON_TARGET`, or `ABSTAIN`;
 - confidence is shown only when `confidence_applicable=true`; otherwise it is
   null/hidden;
-- absent or stale assessment means “等待研判”, never `NON_TARGET`;
+- absent, stale, unapproved or undecidable assessment creates no Public badge,
+  placeholder or explanation block; it is never projected as `NON_TARGET`;
 - risk routing never changes evidence posture, citation readiness, canonical
   facts, alerts, or trading permissions.
 
 ## Reader-facing behavior
 
 - All canonical records contribute to Public event and facet counts.
-- Every card exposes the evidence posture; the risk assessment is visually and
-  semantically separate.
-- An old direct link to a non-citation-ready record remains readable and lists
-  the missing subject, structured fact, source passage or capture.
+- Event detail exposes the evidence posture and keeps it semantically separate
+  from risk assessment. The feed omits the repetitive `SOURCE_CAPTURED` chip
+  while retaining distinct posture chips and concrete source attribution.
+- An old direct link to a non-citation-ready record remains readable using its
+  captured source text or neutral record title; internal gap inventories do not
+  become repetitive Public warning copy.
 - `PRIMARY_SUPPORTED` may render the concrete fact summary; all other postures
   render source-attributed, uncertainty-preserving copy rather than a confirmed
   fact.

@@ -21,6 +21,7 @@ from app.services import (
 )
 from app.services.capture_interpretation import CAPTURE_INTERPRETATION_PROMPT_VERSION
 from app.services.public_event_semantics import (
+    derive_public_display_headline,
     derive_public_event_semantics,
     project_public_qwen_semantics,
     project_public_risk_assessment,
@@ -111,6 +112,104 @@ def test_public_evidence_semantics_are_independent_of_workflow_state() -> None:
     no_source = derive_public_event_semantics({})
     assert no_source["evidence_posture"] == "NO_SOURCE"
     assert no_source["evidence_gap_codes"][-1] == "NO_CAPTURED_SOURCE"
+
+
+def test_public_display_headline_preserves_provenance_modes() -> None:
+    supported = derive_public_display_headline(
+        {
+            "reader_ready": 1,
+            "public_fact_summary": "Example Corp 任命 Jane Doe 为首席财务官",
+            "company_name": "Example Corp",
+            "event_date": "2026-08-26",
+        },
+        {"source_title": "A different source headline"},
+    )
+    assert supported == {
+        "display_headline": "Example Corp 任命 Jane Doe 为首席财务官",
+        "headline_mode": "FACT",
+        "headline_source": None,
+    }
+
+    attributed = derive_public_display_headline(
+        {
+            "reader_ready": 0,
+            "company_name": "Example Corp",
+            "event_date": "2026-08-26",
+        },
+        {
+            "source_title": "Example Corp announces a financing update",
+            "source_name": "SEC",
+        },
+    )
+    assert attributed == {
+        "display_headline": "Example Corp announces a financing update",
+        "headline_mode": "ATTRIBUTED_SOURCE",
+        "headline_source": "SEC",
+    }
+
+    record = derive_public_display_headline(
+        {
+            "reader_ready": 0,
+            "company_name": "Example Corp",
+            "event_date": "2026-08-26",
+        }
+    )
+    assert record == {
+        "display_headline": "Example Corp · 2026-08-26",
+        "headline_mode": "RECORD",
+        "headline_source": None,
+    }
+
+
+def test_public_display_headline_skips_generic_recovery_title() -> None:
+    result = derive_public_display_headline(
+        {"reader_ready": 0, "discovery_source": "historical_recovery"},
+        {
+            "source_title": "Accepted official evidence for ADTX",
+            "source_summary": "Nasdaq suspended trading in Aditxt shares on June 25.",
+            "source_name": "Nasdaq",
+        },
+    )
+
+    assert result["display_headline"] == "Nasdaq suspended trading in Aditxt shares on June 25."
+    assert result["headline_mode"] == "ATTRIBUTED_SOURCE"
+
+
+def test_public_display_headline_prefers_event_excerpt_over_generic_filing_title() -> None:
+    result = derive_public_display_headline(
+        {
+            "reader_ready": 0,
+            "company_name": "Flushing Financial Corp",
+            "event_date": "2026-08-26",
+            "discovery_source": "sharadar_active_research",
+        },
+        {
+            "source_title": "SEC 8-K FFIC",
+            "source_summary": "Each Flushing share was converted into 0.85 shares under the completed merger.",
+        },
+    )
+
+    assert result["display_headline"].startswith("Each Flushing share was converted")
+    assert result["headline_mode"] == "ATTRIBUTED_SOURCE"
+    assert result["headline_source"] is None
+
+
+def test_public_display_headline_rejects_form_25_and_discovery_boilerplate() -> None:
+    base_event = {
+        "reader_ready": 0,
+        "company_name": "Example Corp",
+        "event_date": "2026-08-26",
+    }
+    for summary in (
+        "certifies that it has reasonable grounds to believe that it meets all of the requirements for filing the Form 25",
+        "action in delisted/voluntarydelisting; value=delisted",
+    ):
+        result = derive_public_display_headline(
+            base_event,
+            {"source_title": "SEC 25-NSE EXM", "source_summary": summary},
+        )
+        assert result["headline_mode"] == "RECORD"
+        assert result["display_headline"] == "Example Corp · 2026-08-26"
 
 
 def test_public_risk_projection_requires_current_version_and_applicable_confidence() -> None:
@@ -414,6 +513,9 @@ def test_public_list_detail_and_dossier_share_current_semantics(tmp_path: Path) 
         assert event["risk_assessment"]["confidence"] is None
         assert event["risk_assessment"]["confidence_applicable"] is False
         assert event["risk_assessment"]["current"] is True
+        assert event["display_headline"] == "Semantic Corp filing report"
+        assert event["headline_mode"] == "ATTRIBUTED_SOURCE"
+        assert event["headline_source"] == "Source"
 
 
 def test_qwen_publication_is_closed_until_approved_and_current_input_matches(

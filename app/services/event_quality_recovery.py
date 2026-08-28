@@ -150,9 +150,9 @@ def _require_apply_schema(connection: sqlite3.Connection) -> None:
         for table in ("event_evidence_relations", "event_fact_workflow")
         if not _table_exists(connection, table)
     ]
-    if version < 14 or missing:
+    if version < 15 or missing:
         raise ValueError(
-            "target must be migrated to Schema 14 before apply"
+            "target must be migrated to Schema 15 before apply"
             + (f"; missing tables: {','.join(missing)}" if missing else "")
         )
 

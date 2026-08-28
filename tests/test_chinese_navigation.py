@@ -15,9 +15,9 @@ from app.web.common import (
 def test_public_navigation_is_small_chinese_and_route_stable() -> None:
     assert PRIMARY_NAVIGATION == PUBLIC_NAVIGATION
     assert [(item["key"], item["label"]) for item in PUBLIC_NAVIGATION] == [
-        ("home", "态势总览"),
-        ("replay", "证据演示"),
-        ("method", "方法与边界"),
+        ("home", "事件雷达"),
+        ("replay", "案例"),
+        ("method", "方法"),
     ]
     assert [item["path"] for item in PUBLIC_NAVIGATION] == [
         "Home.py",
@@ -71,5 +71,6 @@ def test_internal_html_navigation_explicitly_stays_in_current_tab() -> None:
     common_source = (web_root / "common.py").read_text(encoding="utf-8")
     home_source = (web_root / "Home.py").read_text(encoding="utf-8")
 
+    assert 'public-primary-link" href="{}" target="_self"' in common_source
     assert 'class="radar-primary-link{}" href="{}" target="_self"' in common_source
     assert 'href="./#live-events" target="_self"' in home_source

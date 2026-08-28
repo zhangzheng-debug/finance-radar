@@ -100,12 +100,13 @@ def test_shared_shell_has_one_primary_navigation_landmark_and_a_page_h1() -> Non
     assert "f'<h1 class=\"radar-page-context\">{escape(title)}</h1>'" in common_source
     assert "f'<h2 class=\"situation-title\"" in common_source
     assert 'role="navigation"' not in components_source
-    assert '<div class="fr-pagination" role="group"' in home_source
+    assert '<div class="fr-pagination {placement}" role="group"' in home_source
 
 
 def test_public_navigation_does_not_call_stale_data_realtime() -> None:
     home = next(item for item in web_common.PUBLIC_NAVIGATION if item["key"] == "home")
-    assert home["description"] == "浏览事件、证据摘要与更新状态"
+    assert home["label"] == "事件雷达"
+    assert home["description"] == "浏览事件与来源材料"
     assert "实时" not in home["description"]
 
 
@@ -304,16 +305,14 @@ def test_cached_api_get_uses_only_explicitly_aged_stale_snapshot_on_error(monkey
     assert metadata.age_seconds == 2.0
 
 
-def test_home_renders_shell_before_overview_and_loads_kpis_after_feed() -> None:
+def test_home_renders_public_shell_before_overview_without_internal_kpis() -> None:
     home_source = (Path(__file__).parents[1] / "app" / "web" / "Home.py").read_text(
         encoding="utf-8"
     )
-    assert home_source.index('header(\n    "态势总览"') < home_source.index(
+    assert home_source.index('class="public-reader-header"') < home_source.index(
         'cached_api_get(\n        "/api/v1/overview"'
     )
-    assert home_source.index("render_event_feed(", home_source.index("if live_feed:")) < home_source.index(
-        'cached_api_get(\n            "/api/v1/product/metrics"'
-    )
+    assert '"/api/v1/product/metrics"' not in home_source
 
 
 @pytest.mark.parametrize(

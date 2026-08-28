@@ -81,15 +81,16 @@ class PriceWindowAuditTests(unittest.TestCase):
         completed: datetime | None = None,
         provider: str | None = None,
         anchored: bool = True,
+        declared_anchor: str = "filing_effective",
     ) -> None:
         # market_jobs is unique on (event, asset, provider, window), which mirrors
         # reality: two providers may observe the same window for the same event.
         provider_name = provider or f"provider_{job_id.lower()}"
         self.connection.execute(
             """INSERT INTO market_jobs(
-                   market_job_id,event_id,asset_id,provider,observation_window,status,
+                   market_job_id,event_id,event_version,asset_id,provider,observation_window,status,
                    scheduled_at,completed_at,attempts,last_error,no_trading)
-               VALUES(?,'EVT1','AST1',?,?,?,?,?,0,NULL,1)""",
+               VALUES(?,'EVT1',1,'AST1',?,?,?,?,?,0,NULL,1)""",
             (
                 job_id,
                 provider_name,
@@ -110,11 +111,12 @@ class PriceWindowAuditTests(unittest.TestCase):
                        local_received_at,known_at,timestamp_precision,anchor_status,
                        anchor_lag_seconds,unsupported_windows_json,reason_code,
                        contract_version,created_at,updated_at,no_trading)
-                   VALUES(?,'EVT1',1,'AST1',?,'filing_effective',?,?,?,?,'EXACT_TIMESTAMP',
+                       VALUES(?,'EVT1',1,'AST1',?,?,?, ?,?,?,'EXACT_TIMESTAMP',
                           'EXACT',60,'[]',NULL,'market-anchor-v1',?,?,1)""",
                 (
                     anchor_id,
                     provider_name,
+                    declared_anchor,
                     _iso(anchor_at),
                     _iso(anchor_at),
                     _iso(anchor_at + timedelta(minutes=1)),
@@ -157,6 +159,40 @@ class PriceWindowAuditTests(unittest.TestCase):
         self.assertEqual(family["declared_anchor"], "filing_effective")
         self.assertTrue(family["anchor_matches_declaration"])
         self.assertEqual(report["status"], "PASS")
+
+    def test_automatic_mapping_uses_publication_anchor_in_audit(self) -> None:
+        policy_hash = "a" * 64
+        self.connection.execute(
+            """INSERT INTO event_asset_mapping_decisions(
+                   decision_id,event_id,event_version,policy_version,policy_sha256,
+                   observation_id,source_content_sha256,decision,rule_id,asset_count,
+                   created_at,no_trading)
+               VALUES('DEC1','EVT1',1,'v1',?,'obs',?,'MAPPED','macro',1,?,1)""",
+            (policy_hash, "b" * 64, utc_now()),
+        )
+        self.connection.execute(
+            """INSERT INTO event_asset_impacts(
+                   impact_id,event_id,asset_id,relation_type,direction,impact_score,
+                   confidence,reason_codes_json,assessment_source,mapping_decision_id,
+                   market_observation_allowed,no_trading,created_at,updated_at)
+               VALUES('IMP1','EVT1','AST1','MACRO_PROXY','ABSTAIN',0,1.0,'[]',
+                      'automatic_asset_mapping_v1:macro','DEC1',1,1,?,?)""",
+            (utc_now(), utc_now()),
+        )
+        self.connection.commit()
+        self._add_job(
+            "J-AUTO",
+            "t_plus_5m",
+            "COMPLETED",
+            scheduled=BASE,
+            completed=BASE,
+            declared_anchor="source_published",
+        )
+
+        report = audit.build_report(self.db_path)
+
+        self.assertEqual(report["anchor"]["jobs_with_declaration_mismatch"], 0)
+        self.assertEqual(report["anchor"]["families"][0]["declared_anchor"], "source_published")
 
     def test_legacy_job_without_anchor_is_reported_not_reinterpreted(self) -> None:
         self._add_job(

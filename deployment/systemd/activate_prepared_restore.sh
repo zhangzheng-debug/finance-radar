@@ -15,6 +15,8 @@ MANAGED_UNIT_PATHS=(
     /etc/systemd/system/finance-radar-api.service
     /etc/systemd/system/finance-radar-overview-snapshot.service
     /etc/systemd/system/finance-radar-overview-snapshot.timer
+    /etc/systemd/system/finance-radar-market.service
+    /etc/systemd/system/finance-radar-market.timer
     /etc/systemd/system/finance-radar-web.service
     /etc/systemd/system/finance-radar-admin.service
     /etc/systemd/system/finance-radar-reviewer.service
@@ -35,6 +37,8 @@ MANAGED_RUNTIME_UNITS=(
     finance-radar-backup.service
     finance-radar-overview-snapshot.timer
     finance-radar-overview-snapshot.service
+    finance-radar-market.timer
+    finance-radar-market.service
     finance-radar-evidence-llm.service
     finance-radar-worker.service
     finance-radar-admin.service
@@ -47,12 +51,14 @@ MANAGED_ENABLEMENT_UNITS=(
     finance-radar-api.service
     finance-radar-overview-snapshot.service
     finance-radar-overview-snapshot.timer
+    finance-radar-market.timer
     finance-radar-web.service
     finance-radar-worker.service
     finance-radar-backup.timer
     finance-radar-evidence-llm.service
 )
 BASE_MOVED=0
+MARKET_RUNTIME_AVAILABLE=0
 
 [ "$(id -u)" -eq 0 ] || { printf 'run as root\n' >&2; exit 2; }
 [[ "$EXPECTED_RELEASE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$ ]] || {
@@ -431,6 +437,16 @@ for unit in \
     finance-radar-backup.timer; do
     install_versioned_unit "$unit"
 done
+if { [ -f "$BASE/current/deployment/systemd/finance-radar-market.service" ] || \
+     [ -f "$BASE/config/etc/systemd/system/finance-radar-market.service" ]; } && \
+   { [ -f "$BASE/current/deployment/systemd/finance-radar-market.timer" ] || \
+     [ -f "$BASE/config/etc/systemd/system/finance-radar-market.timer" ]; }; then
+    install_versioned_unit finance-radar-market.service
+    install_versioned_unit finance-radar-market.timer
+    MARKET_RUNTIME_AVAILABLE=1
+else
+    printf 'optional market observation units are absent from this prepared archive\n' >&2
+fi
 if [ -f "$BASE/current/deployment/systemd/finance-radar-evidence-llm.service" ] || \
    [ -f "$BASE/config/etc/systemd/system/finance-radar-evidence-llm.service" ]; then
     install_versioned_unit finance-radar-evidence-llm.service
@@ -498,7 +514,11 @@ if systemctl is-active --quiet finance-radar-evidence-llm.service || \
 fi
 systemctl start finance-radar-overview-snapshot.service
 systemctl enable finance-radar-overview-snapshot.service
-systemctl enable --now finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer
+systemctl enable --now finance-radar-api finance-radar-web finance-radar-worker \
+    finance-radar-backup.timer
+if [ "$MARKET_RUNTIME_AVAILABLE" -eq 1 ]; then
+    systemctl enable --now finance-radar-market.timer
+fi
 systemctl enable --now finance-radar-overview-snapshot.timer
 
 # A restored production ledger performs the same synchronous overview
@@ -511,7 +531,11 @@ done
 curl -fsS http://127.0.0.1:18000/api/v1/health >/dev/null
 curl -fsS http://127.0.0.1:18000/api/v1/overview >/dev/null
 curl -fsS http://127.0.0.1:18501/radar/_stcore/health >/dev/null
-systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker finance-radar-backup.timer
+systemctl is-active --quiet finance-radar-api finance-radar-web finance-radar-worker \
+    finance-radar-backup.timer
+if [ "$MARKET_RUNTIME_AVAILABLE" -eq 1 ]; then
+    systemctl is-active --quiet finance-radar-market.timer
+fi
 systemctl is-active --quiet finance-radar-overview-snapshot.timer
 test "$(systemctl show finance-radar-overview-snapshot.service -p Result --value)" = success
 assert_public_web_identity_and_boundary || {

@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "policy_version": "event-asset-mapping-v1.2.0",
+  "max_assets_per_event": 3,
+  "direction": "ABSTAIN",
+  "impact_score": 0,
+  "no_trading": 1,
+  "asset_templates": {
+    "TICKER": {
+      "asset_type": "equity",
+      "currency": "USD",
+      "relation_type": "PRIMARY",
+      "role": "DIRECT_SECURITY",
+      "proxy_label": "公司直接证券",
+      "confidence": 0.98
+    }
+  },
+  "asset_registry": {
+    "SPY": {
+      "asset_type": "etf",
+      "symbol": "SPY",
+      "provider_symbol": "SPY",
+      "venue": "TwelveData",
+      "currency": "USD",
+      "relation_type": "MACRO_PROXY",
+      "role": "MARKET_BENCHMARK",
+      "proxy_label": "美国大盘ETF基准",
+      "confidence": 0.95
+    },
+    "GLD": {
+      "asset_type": "etf",
+      "symbol": "GLD",
+      "provider_symbol": "GLD",
+      "venue": "TwelveData",
+      "currency": "USD",
+      "relation_type": "MACRO_PROXY",
+      "role": "THEMATIC_PROXY",
+      "proxy_label": "黄金ETF代理",
+      "confidence": 0.9
+    },
+    "USO": {
+      "asset_type": "etf",
+      "symbol": "USO",
+      "provider_symbol": "USO",
+      "venue": "TwelveData",
+      "currency": "USD",
+      "relation_type": "MACRO_PROXY",
+      "role": "THEMATIC_PROXY",
+      "proxy_label": "WTI原油ETF代理",
+      "confidence": 0.88
+    },
+    "BNO": {
+      "asset_type": "etf",
+      "symbol": "BNO",
+      "provider_symbol": "BNO",
+      "venue": "TwelveData",
+      "currency": "USD",
+      "relation_type": "MACRO_PROXY",
+      "role": "THEMATIC_PROXY",
+      "proxy_label": "Brent原油ETF代理",
+      "confidence": 0.88
+    },
+    "TLT": {
+      "asset_type": "etf",
+      "symbol": "TLT",
+      "provider_symbol": "TLT",
+      "venue": "TwelveData",
+      "currency": "USD",
+      "relation_type": "MACRO_PROXY",
+      "role": "THEMATIC_PROXY",
+      "proxy_label": "美国长期国债ETF代理",
+      "confidence": 0.9
+    }
+  },
+  "rules": [
+    {
+      "id": "resolved-public-company-v1",
+      "priority": 5,
+      "match": {
+        "company_ticker": true,
+        "company_name_required": true,
+        "issuer_resolution_required": true,
+        "source_patterns": [
+          "^(?:opennews_free|[a-z0-9_]+_official_news)$"
+        ]
+      },
+      "assets": ["$TICKER", "SPY"]
+    },
+    {
+      "id": "company-direct-market-v1",
+      "priority": 10,
+      "match": {
+        "company_ticker": true,
+        "company_name_required": true,
+        "source_patterns": [
+          "^(?:sec_current_filings|sharadar_active_research|fda_medwatch)$"
+        ]
+      },
+      "assets": ["$TICKER", "SPY"]
+    },
+    {
+      "id": "geopolitical-energy-transmission-v1",
+      "priority": 20,
+      "match": {
+        "event_family_patterns": [
+          "^(?:geopolitical|geopolitical maritime risk|macro policy|operational shock|operational disruption|external demand shock|policy revenue shock)$"
+        ],
+        "all_pattern_groups": [
+          [
+            "\\b(?:armed attack|blockade|geopolitical conflict|invasion|iran(?:ian)?|military|missile|sanction|war)\\b|(?:伊朗|武装|封锁|入侵|军事|导弹|制裁|战争)"
+          ],
+          [
+            "\\b(?:commercial shipping|crude|energy supply|hormuz|oil|oilfield|opec|pipeline|port blockade|shipping route|tanker)\\b|(?:商业航运|原油|石油|能源供应|霍尔木兹|油田|欧佩克|输油管道|港口封锁|航运路线|油轮)"
+          ]
+        ]
+      },
+      "assets": ["USO", "BNO", "GLD"]
+    },
+    {
+      "id": "armed-conflict-broad-market-v1",
+      "priority": 30,
+      "match": {
+        "event_family_patterns": [
+          "^(?:geopolitical|geopolitical maritime risk|macro policy)$"
+        ],
+        "any_patterns": [
+          "\\b(?:armed attack|armed conflict|blockade|invasion|military (?:action|attack|strikes?)|missile (?:attack|strikes?)|war)\\b|(?:武装袭击|武装冲突|封锁|入侵|军事行动|军事打击|导弹袭击|战争)"
+        ]
+      },
+      "assets": ["GLD", "SPY"]
+    },
+    {
+      "id": "monetary-policy-cross-asset-v1",
+      "priority": 40,
+      "match": {
+        "event_family_patterns": [
+          "^(?:macro policy|financial stability|bank supervision policy|regulatory policy)$"
+        ],
+        "any_patterns": [
+          "\\b(?:central bank rate|federal funds|fomc|interest rate decision|monetary policy|policy rate|rate cut|rate hike)\\b|(?:央行利率|联邦基金|美联储|利率决议|货币政策|政策利率|降息|加息)"
+        ]
+      },
+      "assets": ["TLT", "SPY", "GLD"]
+    },
+    {
+      "id": "inflation-release-cross-asset-v1",
+      "priority": 50,
+      "match": {
+        "event_family_patterns": [
+          "^macro data$"
+        ],
+        "any_patterns": [
+          "\\b(?:consumer price index|cpi|inflation|producer price index|ppi)\\b|(?:消费者价格指数|通胀|生产者价格指数)"
+        ]
+      },
+      "assets": ["TLT", "SPY", "GLD"]
+    }
+  ]
+}

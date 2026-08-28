@@ -8,6 +8,8 @@ umask 077
 
 BASE="${FINANCE_RADAR_BASE:-/opt/finance-radar}"
 WORKER_UNIT="${FINANCE_RADAR_WORKER_UNIT:-finance-radar-worker.service}"
+MARKET_TIMER_UNIT="${FINANCE_RADAR_MARKET_TIMER_UNIT:-finance-radar-market.timer}"
+MARKET_SERVICE_UNIT="${FINANCE_RADAR_MARKET_SERVICE_UNIT:-finance-radar-market.service}"
 RESUME_INHIBIT="${FINANCE_RADAR_WORKER_RESUME_INHIBIT:-/run/finance-radar/worker-resume.inhibit}"
 BACKUP_SOURCE_ROOT="${FINANCE_RADAR_BACKUP_SOURCE_ROOT:-$BASE/current}"
 PREDEPLOY_BRIDGE="${FINANCE_RADAR_PREDEPLOY_BRIDGE:-0}"
@@ -109,6 +111,28 @@ else
 fi
 
 worker_was_active=0
+market_timer_was_active=0
+
+resume_owned_market_timer() {
+    local original_status="$1"
+    if [ "$market_timer_was_active" -ne 1 ]; then
+        return "$original_status"
+    fi
+    if [ -e "$RESUME_INHIBIT" ] || [ -L "$RESUME_INHIBIT" ]; then
+        printf 'backup_market_timer_resume=INHIBITED marker=%s\n' "$RESUME_INHIBIT" >&2
+        return "$original_status"
+    fi
+    if ! systemctl start "$MARKET_TIMER_UNIT" || \
+       ! systemctl is-active --quiet "$MARKET_TIMER_UNIT"; then
+        printf 'backup_market_timer_resume=FAILED unit=%s\n' "$MARKET_TIMER_UNIT" >&2
+        if [ "$original_status" -eq 0 ]; then
+            return 70
+        fi
+        return "$original_status"
+    fi
+    printf 'backup_market_timer_resume=PASS unit=%s\n' "$MARKET_TIMER_UNIT"
+    return "$original_status"
+}
 
 resume_owned_worker() {
     local original_status="$1"
@@ -137,14 +161,49 @@ resume_owned_worker() {
 }
 
 finish() {
-    local status=$? final_status
+    local status=$? market_status final_status
     trap - EXIT
     set +e
-    resume_owned_worker "$status"
+    resume_owned_market_timer "$status"
+    market_status=$?
+    resume_owned_worker "$market_status"
     final_status=$?
     exit "$final_status"
 }
 trap finish EXIT
+
+if systemctl cat "$MARKET_TIMER_UNIT" >/dev/null 2>&1; then
+    market_timer_state="$(systemctl show "$MARKET_TIMER_UNIT" --property=ActiveState --value)"
+    case "$market_timer_state" in
+        active)
+            systemctl stop "$MARKET_TIMER_UNIT"
+            market_timer_was_active=1
+            ;;
+        inactive|failed)
+            printf 'backup_market_timer_quiesce=NOT_OWNED state=%s unit=%s\n' \
+                "$market_timer_state" "$MARKET_TIMER_UNIT"
+            ;;
+        *)
+            printf 'refusing backup while market timer has transitional state: %s\n' \
+                "$market_timer_state" >&2
+            exit 3
+            ;;
+    esac
+    if systemctl is-active --quiet "$MARKET_SERVICE_UNIT"; then
+        for _ in $(seq 1 180); do
+            systemctl is-active --quiet "$MARKET_SERVICE_UNIT" || break
+            sleep 1
+        done
+    fi
+    if systemctl is-active --quiet "$MARKET_SERVICE_UNIT"; then
+        printf 'market observation cycle did not quiesce before backup\n' >&2
+        exit 3
+    fi
+    printf 'backup_market_quiesce=PASS timer=%s service=%s\n' \
+        "$MARKET_TIMER_UNIT" "$MARKET_SERVICE_UNIT"
+else
+    printf 'backup_market_quiesce=NOT_INSTALLED timer=%s\n' "$MARKET_TIMER_UNIT"
+fi
 
 worker_state="$(systemctl show "$WORKER_UNIT" --property=ActiveState --value)"
 case "$worker_state" in

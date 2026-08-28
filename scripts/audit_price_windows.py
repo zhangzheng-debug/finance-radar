@@ -93,6 +93,16 @@ def audit_anchor_declaration(connection: sqlite3.Connection) -> dict[str, Any]:
                   anchor.reaction_anchor_at,anchor.known_at,anchor.anchor_status,
                   anchor.timestamp_precision,anchor.reason_code,
                   anchor.contract_version,anchor.unsupported_windows_json,
+                  EXISTS(
+                    SELECT 1
+                      FROM event_asset_impacts impact
+                      JOIN event_asset_mapping_decisions decision
+                        ON decision.decision_id=impact.mapping_decision_id
+                     WHERE impact.event_id=j.event_id
+                       AND impact.asset_id=j.asset_id
+                       AND decision.event_version=j.event_version
+                       AND impact.assessment_source LIKE 'automatic_asset_mapping_v1:%'
+                  ) AS automatic_asset_mapping,
                   EXISTS(SELECT 1 FROM event_versions version
                          WHERE version.event_id=e.event_id
                            AND version.version=anchor.event_version) AS anchor_version_exists,
@@ -117,7 +127,11 @@ def audit_anchor_declaration(connection: sqlite3.Connection) -> dict[str, Any]:
     for row in rows:
         family = str(row["event_family"] or "")
         event_type = str(row["event_type"] or "")
-        expected = time_anchor_for_family(family, event_type)
+        expected = (
+            "source_published"
+            if int(row["automatic_asset_mapping"] or 0) == 1
+            else time_anchor_for_family(family, event_type)
+        )
         observed = str(row["declared_anchor_kind"] or "") or None
         family_counts[(family, expected, observed)] += 1
         problems: list[str] = []

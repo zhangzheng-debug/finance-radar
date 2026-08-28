@@ -4,6 +4,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 import app.web.common as web_common
@@ -93,7 +94,7 @@ def _overview() -> dict[str, Any]:
             },
         ],
         "audit": {"no_trading": 0, "no_auto_verify": 0, "no_leakage": 0},
-        "schema_version": 14,
+        "schema_version": 15,
         "quick_check": "ok",
     }
 
@@ -155,31 +156,37 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     page = AppTest.from_file(str(PAGE), default_timeout=10).run()
     rendered = "\n".join(str(item.value) for item in page.markdown)
     assert not page.exception
-    assert "事件浏览" in rendered
+    assert "风险雷达" in rendered
+    assert "事件" in rendered
     assert "Example Holdings" in rendered
-    assert "事件可见性与证据层级" in rendered
-    assert "账本中的 12 条事件现在全部可以浏览" in rendered
-    assert "其余 5 条按一手材料、来源捕获或尚无来源分级展示" in rendered
-    assert "全部事件，分级展示" in rendered
+    assert "12</strong><span>个事件" in rendered
+    assert "全部可浏览" not in rendered
+    assert "正式引用条件" not in rendered
     assert "证据路径" not in rendered
     assert "UTC" in rendered
     assert any(item.label == "搜索事件" for item in page.text_input)
-    assert any(item.label == "应用筛选" for item in page.button)
+    assert any(item.label == "搜索" for item in page.button)
     assert "系统与来源健康" not in rendered
     assert "Worker" not in rendered
-    assert "官方原文支持" in rendered
+    assert "原文支持" in rendered
     assert "自动研判 · 暂不判断" not in rendered
     assert "等待模型研判" not in rendered
     assert "待核验" not in rendered
     assert "已粗审" not in rendered
     assert "证据不足" not in rendered
     assert "已核验" not in rendered
-    assert "最近成功采集" in rendered
-    assert "最近发现新事件" in rendered
-    assert "事件总量" in rendered
-    assert "正式可引用 / 其他证据姿态" in rendered
-    assert "7 / 5" in rendered
-    assert "全部规范事件均可浏览" in rendered
+    for discouraged_copy in (
+        "不确定",
+        "还没有",
+        "尚未",
+        "暂无",
+        "等待研判",
+        "未达到",
+    ):
+        assert discouraged_copy not in rendered
+    assert "最近更新" in rendered
+    assert rendered.count('aria-label="事件分页"') == 2
+    assert "只读事件研究工具" in "\n".join(str(item.value) for item in page.caption)
     assert "实时事件、原始证据与核验进度" not in rendered
     assert "正式处置状态" not in rendered
     assert "Schema" not in rendered
@@ -210,7 +217,7 @@ def test_public_legacy_state_url_cannot_hide_the_event_inventory(monkeypatch) ->
     ]
     assert event_requests
     assert all("public_state" not in urllib.parse.parse_qs(urllib.parse.urlsplit(value).query) for value in event_requests)
-    assert "官方原文支持" in rendered
+    assert "原文支持" in rendered
     assert "preview_state=" not in rendered
 
 
@@ -223,22 +230,20 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     page.run()
     rendered = "\n".join(str(item.value) for item in page.markdown)
     assert not page.exception
-    assert "当前页事件预览" in rendered
+    assert "事件详情" in rendered
     assert "Exact primary-source passage naming the issuer, action, and event stage." in rendered
-    assert "阅读提示" in rendered
-    assert "先读支持当前事实的官方原文" in rendered
     assert "监管执法" in rendered
     assert "SEC 官方文件" in rendered
-    assert "原始证据 · 请结合完整文件阅读" in rendered
-    assert "发生了什么" in rendered
-    assert "为什么关注" in rendered
-    assert "证据与引用" in rendered
-    assert "官方原文支持" in rendered
+    assert "关键原文" in rendered
+    assert "信息依据" not in rendered
+    assert "影响路径" not in rendered
+    assert "原文支持" in rendered
     assert "<article><span>模型研判</span>" not in rendered
     assert "自动研判 · 暂不判断" not in rendered
-    assert "时间口径" in rendered
+    assert "时间口径" not in rendered
     assert "来源发布" in rendered
-    assert "系统发现" in rendered
+    assert "数据更新" in rendered
+    assert "系统发现" not in rendered
     assert "人工复核记录" not in rendered
     assert "本轮引用证据 ID" not in rendered
     assert "ev-primary-1" not in rendered
@@ -247,12 +252,202 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "sec_current_filings" not in rendered
     assert ">P0<" not in rendered
     assert any(
-        link.label == "直达本条原始来源（外部网站）" for link in page.get("link_button")
+        link.label == "查看原始来源" for link in page.get("link_button")
     )
     assert not any("工作台" in button.label or "人工复核" in button.label for button in page.button)
     assert not any(button.label == "收起当前页预览" for button in page.button)
     assert "返回原筛选位置" in rendered
-    assert "本次浏览会话首次查看" in "\n".join(str(item.value) for item in page.caption)
+    assert "本次浏览会话首次查看" not in "\n".join(str(item.value) for item in page.caption)
+    assert "核对清单" not in rendered
+    assert "改变判断的情形" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("assessment_scope", "basis_label"),
+    [
+        ("EVIDENCE_SUPPORTED", "基于关键原文"),
+        ("SOURCE_CONDITIONAL", "基于来源文本"),
+    ],
+)
+def test_public_valid_qwen_signal_keeps_its_evidence_basis(
+    monkeypatch,
+    assessment_scope: str,
+    basis_label: str,
+) -> None:
+    def qwen_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        payload = _fake_api(path, **kwargs)
+        semantic = {
+            "polarity": "ADVERSE",
+            "adverse_strength": "HIGH",
+            "semantic_priority": "PRIORITY_REVIEW",
+            "assessment_scope": assessment_scope,
+            "publication_state": "PUBLIC_APPROVED",
+            "training_basis": "INDEPENDENT_DUAL_HUMAN_GOLD",
+            "automatic": True,
+            "shadow": False,
+            "no_trading": True,
+            "confirms_event_fact": False,
+            "current": True,
+        }
+        parsed = urllib.parse.urlsplit(path)
+        if parsed.path == "/api/v1/events":
+            payload["items"][0] = {**payload["items"][0], "semantic_assessment": semantic}
+        elif parsed.path == "/api/v1/events/event-a":
+            payload["event"] = {**payload["event"], "semantic_assessment": semantic}
+        return payload
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", qwen_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "研究信号" in rendered
+    assert "千问" in rendered
+    assert "负面 · 强度高" in rendered
+    assert basis_label in rendered
+    assert "HUMAN_GOLD_TRAINED_QWEN" not in rendered
+    assert "PUBLIC_APPROVED" not in rendered
+    assert "等待模型研判" not in rendered
+
+
+def test_public_detail_shows_only_available_market_reaction(monkeypatch) -> None:
+    def market_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        data = _fake_api(path, **kwargs)
+        if urllib.parse.urlsplit(path).path == "/api/v1/events/event-a":
+            data["market_reaction"] = {
+                "scope": "post_event_audit_only",
+                "items": [
+                    {
+                        "window": "t_plus_5m",
+                        "label": "T+5m",
+                        "symbol": "ACME",
+                        "return_pct": -3.125,
+                        "provider": "twelve_data",
+                    },
+                    {
+                        "window": "t_plus_30m",
+                        "label": "T+30m",
+                        "symbol": "GLD",
+                        "return_pct": 1.25,
+                        "provider": "twelve_data",
+                        "role_label": "观察代理",
+                        "proxy_label": "黄金ETF代理",
+                    },
+                    {
+                        "window": "t_plus_30m",
+                        "label": "T+30m",
+                        "symbol": "USO",
+                        "return_pct": -0.75,
+                        "provider": "twelve_data",
+                        "role_label": "观察代理",
+                        "proxy_label": "WTI原油ETF代理",
+                    },
+                    {
+                        "window": "t_plus_30m",
+                        "label": "T+30m",
+                        "symbol": "ZZZ",
+                        "return_pct": 9.99,
+                        "provider": "twelve_data",
+                        "role_label": "观察代理",
+                        "proxy_label": "测试代理",
+                    },
+                    {
+                        "window": "t_plus_30m",
+                        "label": "T+30m",
+                        "symbol": "SPY",
+                        "return_pct": 0.25,
+                        "provider": "twelve_data",
+                        "role_label": "市场基准",
+                        "proxy_label": "美国大盘ETF基准",
+                    },
+                ],
+            }
+        return data
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", market_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "消息发布后（T+30m）" in rendered
+    assert "GLD" in rendered
+    assert "+1.25%" in rendered
+    assert "USO" in rendered
+    assert "-0.75%" in rendered
+    assert "美国大盘ETF基准" in rendered
+    assert "黄金ETF代理" in rendered
+    assert "WTI原油ETF代理" in rendered
+    assert "ZZZ" not in rendered
+    assert "T+30m" in rendered
+    assert "-3.12%" not in rendered
+
+
+def test_public_detail_hides_empty_market_reaction(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", _fake_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "消息发布后的市场变化" not in rendered
+    assert 'class="market-reaction research-signals"' not in rendered
+    assert "PENDING" not in rendered
+    assert "MISSED" not in rendered
+
+
+def test_public_detail_shows_price_context_before_return_exists(monkeypatch) -> None:
+    def market_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        data = _fake_api(path, **kwargs)
+        if urllib.parse.urlsplit(path).path == "/api/v1/events/event-a":
+            data["market_context"] = {
+                "scope": "event_relative_price_observation",
+                "is_live_quote": False,
+                "items": [
+                    {
+                        "symbol": "ACME",
+                        "price": 23.4567,
+                        "currency": "USD",
+                        "observed_at": "2026-08-03T14:35:00+00:00",
+                        "role_label": "直接证券",
+                    }
+                ],
+            }
+            data["market_reaction"] = {
+                "scope": "post_event_audit_only",
+                "items": [
+                    {
+                        "window": "t_plus_30m",
+                        "label": "T+30m",
+                        "symbol": "ACME",
+                        "return_pct": -1.25,
+                        "provider": "twelve_data",
+                    }
+                ],
+            }
+        return data
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", market_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "价格截面" in rendered
+    assert "ACME" in rendered
+    assert "23.46 USD" in rendered
+    assert "-1.25%" in rendered
+    assert "PENDING" not in rendered
+    assert "UNAVAILABLE" not in rendered
 
 
 def test_public_preview_timeout_keeps_feed_summary_without_legacy_retry(monkeypatch) -> None:
@@ -426,7 +621,7 @@ def test_public_workflow_verified_without_receipt_does_not_become_public_trust_l
     rendered = "\n".join(str(item.value) for item in page.markdown)
 
     assert not page.exception
-    assert "官方原文支持" in rendered
+    assert "原文支持" in rendered
     assert "人工复核记录" not in rendered
     assert "历史已核验记录" not in rendered
     assert "核验留痕" not in rendered
@@ -463,7 +658,7 @@ def test_public_workflow_receipt_stays_out_of_reader_surface(monkeypatch) -> Non
     rendered = "\n".join(str(item.value) for item in page.markdown)
 
     assert not page.exception
-    assert "官方原文支持" in rendered
+    assert "原文支持" in rendered
     assert "治理留痕 · 限定检查" not in rendered
     assert "评分 74" not in rendered
     assert "ev-primary-1" not in rendered
@@ -615,23 +810,21 @@ def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatc
     rendered = "\n".join(str(item.value) for item in page.markdown)
 
     assert not page.exception
-    assert "仅捕获来源" in rendered
-    assert "0 条可读证据" in rendered
-    assert "1 条采集来源记录" in rendered
-    assert "AI 自动解释（仅在无证据时启用）" in rendered
-    assert "AI 阅读辅助 · 非证据" in rendered
-    assert "因为该事件目前完全没有关联证据" in rendered
+    assert "来源文本" in rendered
+    assert "来源摘录" not in rendered
+    assert "0 条可读证据" not in rendered
+    assert "A provider discovery summary, not a verified policy action." in rendered
+    assert "1 条来源记录" not in rendered
+    assert "AI 解读" in rendered
+    assert "当前事件无关联证据，因此启用 AI 解读来源文本；结果不参与风险评级。" in rendered
     assert "Markets await central-bank minutes while gold rises" in rendered
-    assert "系统捕获文本 · 不是 P0/P1 原始证据" in rendered
+    assert rendered.count("Markets await central-bank minutes while gold rises") == 1
     assert "这是一条市场评论，不是一项已经发生的政策行动" in rendered
     assert "来源称市场正在等待央行会议纪要" in rendered
     assert "确定性预览 · 外部模型待接入" not in rendered
-    assert "这是一条异常处置记录" in rendered
-    assert "异常处置：已排除" in rendered
-    assert any(
-        link.label == "查看这条发现来源（非核验证据）"
-        for link in page.get("link_button")
-    )
+    assert "已排除" not in rendered
+    assert rendered.count("A provider discovery summary, not a verified policy action.") == 1
+    assert any(link.label == "查看原始来源" for link in page.get("link_button"))
 
 
 def test_public_event_feed_failure_never_substitutes_overview_events(monkeypatch) -> None:
@@ -646,15 +839,14 @@ def test_public_event_feed_failure_never_substitutes_overview_events(monkeypatch
     rendered = "\n".join(str(item.value) for item in [*page.markdown, *page.caption])
 
     assert not page.exception
-    assert "当前筛选的数据暂时不可用" in rendered
-    assert "未显示任何替代事件" in rendered
+    assert "读取失败" in rendered
     assert "数据服务暂时不可用" in rendered
     assert "Example Holdings" not in rendered
-    assert "当前筛选没有匹配事件" not in rendered
+    assert "当前筛选无结果" not in rendered
     assert "事件分页" not in rendered
 
 
-def test_public_collector_marks_missing_success_timestamp_unknown(monkeypatch) -> None:
+def test_public_collector_does_not_turn_missing_health_metadata_into_reader_copy(monkeypatch) -> None:
     def missing_worker_time_api(path: str, **kwargs: Any) -> dict[str, Any]:
         if urllib.parse.urlsplit(path).path == "/api/v1/overview":
             overview = _overview()
@@ -671,10 +863,8 @@ def test_public_collector_marks_missing_success_timestamp_unknown(monkeypatch) -
     )
 
     assert not page.exception
-    assert "采集状态" in rendered
-    assert "更新状态未知" in rendered
-    assert "数据更新状态无法确认" in rendered
-    assert "不能视为实时信息" in rendered
+    assert "数据更新时间不可用" not in rendered
+    assert "更新状态未知" not in rendered
 
 
 def test_public_collector_marks_overdue_worker_as_stale_not_realtime(monkeypatch) -> None:
@@ -697,7 +887,5 @@ def test_public_collector_marks_overdue_worker_as_stale_not_realtime(monkeypatch
     )
 
     assert not page.exception
-    assert "完整数据处理周期已中断" in rendered
-    assert "部分来源可能仍已采集" in rendered
-    assert "不是实时信息" in rendered
-    assert "更新已中断" in rendered
+    assert "数据更新中断" in rendered
+    assert "最近一次完整处理" in rendered

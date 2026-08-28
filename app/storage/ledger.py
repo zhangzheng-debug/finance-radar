@@ -943,7 +943,9 @@ current_source_content AS (
 ),
 page_event_sources AS MATERIALIZED (
     SELECT source_link.event_id,
-           raw.observation_id,raw.local_received_at,
+           raw.observation_id,raw.source_published_at,raw.local_received_at,
+           page.event_date,
+           source_catalog.name AS source_name,
            {source_title_sql} AS title,
            {source_summary_sql} AS summary,
            CASE WHEN revision.revision_kind='delete'
@@ -952,6 +954,7 @@ page_event_sources AS MATERIALIZED (
     FROM paged_canonical page
     CROSS JOIN event_observations source_link
     CROSS JOIN raw_observations raw
+    JOIN sources source_catalog ON source_catalog.source_id=raw.source_id
     LEFT JOIN source_revisions revision
       ON revision.observation_id=raw.observation_id
      AND revision.revision_no=(
@@ -964,14 +967,20 @@ page_event_sources AS MATERIALIZED (
 ),
 ranked_event_sources AS (
     SELECT source.event_id,
-           source.observation_id,source.local_received_at,
-           source.title,source.summary,source.observation_status,
+           source.observation_id,source.source_published_at,source.local_received_at,
+           source.source_name,source.title,source.summary,source.observation_status,
            ROW_NUMBER() OVER (
                PARTITION BY source.event_id
-               ORDER BY source.local_received_at DESC,source.observation_id DESC
+               ORDER BY CASE
+                          WHEN DATE(source.source_published_at)=DATE(source.event_date)
+                           AND LENGTH(TRIM(COALESCE(source.summary,'')))>=40
+                          THEN 0 ELSE 1
+                        END,
+                        source.local_received_at DESC,source.observation_id DESC
            ) AS source_rank
     FROM page_event_sources source
     WHERE source.relation_type!='filtered_aggregated_noise'
+      AND source.observation_status!='deleted'
 ),
 event_source_rollup AS (
     SELECT source.event_id,
@@ -1272,6 +1281,18 @@ class LedgerRepository:
                     "alert_outbox",
                 )
             }
+            counts["public_visible_events"] = int(
+                connection.execute(
+                    """SELECT COUNT(*)
+                       FROM canonical_events e
+                       WHERE NOT EXISTS (
+                           SELECT 1 FROM event_versions vnoise
+                           WHERE vnoise.event_id=e.event_id
+                             AND vnoise.version=e.current_version
+                             AND vnoise.change_reason='official_nonfinancial_notice'
+                       )"""
+                ).fetchone()[0]
+            )
             event_status = {
                 row["status"]: row["n"]
                 for row in connection.execute(
@@ -2392,6 +2413,7 @@ class LedgerRepository:
         date_to: str | None = None,
         reader_ready: bool | None = None,
         captured_source_required: bool = False,
+        exclude_nonfinancial_retractions: bool = False,
         source_excerpt_chars: int | None = None,
         sort: str = "event_date",
         limit: int = 50,
@@ -2432,6 +2454,13 @@ class LedgerRepository:
 
         where: list[str] = []
         params: list[Any] = []
+        if exclude_nonfinancial_retractions:
+            where.append(
+                "NOT EXISTS (SELECT 1 FROM event_versions vnoise "
+                "WHERE vnoise.event_id=e.event_id "
+                "AND vnoise.version=e.current_version "
+                "AND vnoise.change_reason='official_nonfinancial_notice')"
+            )
         if status:
             where.append("e.status=?")
             params.append(status)
@@ -2498,6 +2527,8 @@ class LedgerRepository:
                         WHERE r.event_id=e.event_id AND r.source_rank=1) AS source_title,
                        (SELECT r.summary FROM ranked_event_sources r
                         WHERE r.event_id=e.event_id AND r.source_rank=1) AS source_summary
+                       ,(SELECT r.source_name FROM ranked_event_sources r
+                         WHERE r.event_id=e.event_id AND r.source_rank=1) AS source_name
                 FROM event_public e
                 ORDER BY {sort_orders[sort]}
                 """
@@ -2531,6 +2562,7 @@ class LedgerRepository:
                 "date_to": date_to,
                 "reader_ready": reader_ready,
                 "captured_source_required": captured_source_required,
+                "exclude_nonfinancial_retractions": exclude_nonfinancial_retractions,
                 "sort": sort,
             }
 
@@ -2557,12 +2589,21 @@ class LedgerRepository:
                     JOIN latest_source_content r ON r.observation_id=eo.observation_id
                     WHERE eo.event_id=e.event_id
                       AND eo.relation_type!='filtered_aggregated_noise'
+                      AND r.observation_status!='deleted'
                     ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_title,
                    (SELECT r.summary FROM event_observations eo
                     JOIN latest_source_content r ON r.observation_id=eo.observation_id
                     WHERE eo.event_id=e.event_id
                       AND eo.relation_type!='filtered_aggregated_noise'
-                    ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_summary
+                      AND r.observation_status!='deleted'
+                    ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_summary,
+                   (SELECT source.name FROM event_observations eo
+                    JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                    JOIN sources source ON source.source_id=r.source_id
+                    WHERE eo.event_id=e.event_id
+                      AND eo.relation_type!='filtered_aggregated_noise'
+                      AND r.observation_status!='deleted'
+                    ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1) AS source_name
             FROM paged_events e
             ORDER BY {sort_orders[sort]}
             """
@@ -2593,13 +2634,27 @@ class LedgerRepository:
             "date_to": date_to,
             "reader_ready": reader_ready,
             "captured_source_required": captured_source_required,
+            "exclude_nonfinancial_retractions": exclude_nonfinancial_retractions,
             "sort": sort,
         }
 
-    def event_facets(self, *, reader_ready: bool | None = None) -> dict[str, Any]:
+    def event_facets(
+        self,
+        *,
+        reader_ready: bool | None = None,
+        exclude_nonfinancial_retractions: bool = False,
+    ) -> dict[str, Any]:
         """Return bounded, live filter suggestions without exposing event content."""
         source_table = "canonical_events" if reader_ready is None else "event_public"
-        where = "" if reader_ready is None else " AND reader_ready=?"
+        conditions = [] if reader_ready is None else ["e.reader_ready=?"]
+        if exclude_nonfinancial_retractions:
+            conditions.append(
+                "NOT EXISTS (SELECT 1 FROM event_versions vnoise "
+                "WHERE vnoise.event_id=e.event_id "
+                "AND vnoise.version=e.current_version "
+                "AND vnoise.change_reason='official_nonfinancial_notice')"
+            )
+        where = " AND " + " AND ".join(conditions) if conditions else ""
         params: tuple[Any, ...] = () if reader_ready is None else (int(reader_ready),)
         with closing(self.connect()) as connection:
             families = [
@@ -2607,10 +2662,10 @@ class LedgerRepository:
                 for row in connection.execute(
                     ((PUBLIC_EVENT_STATE_CTE + " ") if reader_ready is not None else "")
                     + f"""SELECT event_family AS value, COUNT(*) AS n
-                       FROM {source_table}
-                       WHERE event_family IS NOT NULL AND TRIM(event_family) != ''
+                       FROM {source_table} e
+                       WHERE e.event_family IS NOT NULL AND TRIM(e.event_family) != ''
                        {where}
-                       GROUP BY event_family
+                       GROUP BY e.event_family
                        ORDER BY n DESC, value ASC
                        LIMIT 100""",
                     params,
@@ -2621,10 +2676,10 @@ class LedgerRepository:
                 for row in connection.execute(
                     ((PUBLIC_EVENT_STATE_CTE + " ") if reader_ready is not None else "")
                     + f"""SELECT discovery_source AS value, COUNT(*) AS n
-                       FROM {source_table}
-                       WHERE discovery_source IS NOT NULL AND TRIM(discovery_source) != ''
+                       FROM {source_table} e
+                       WHERE e.discovery_source IS NOT NULL AND TRIM(e.discovery_source) != ''
                        {where}
-                       GROUP BY discovery_source
+                       GROUP BY e.discovery_source
                        ORDER BY n DESC, value ASC
                        LIMIT 100""",
                     params,
@@ -2634,6 +2689,7 @@ class LedgerRepository:
             "families": families,
             "sources": sources,
             "reader_ready": reader_ready,
+            "exclude_nonfinancial_retractions": exclude_nonfinancial_retractions,
             "read_only": True,
             "no_trading": True,
         }
@@ -2730,8 +2786,16 @@ class LedgerRepository:
                 dict(row)
                 for row in connection.execute(
                     """SELECT i.*, a.asset_type, a.symbol, a.provider_symbol, a.currency,
-                              a.venue, a.metadata_json
-                       FROM event_asset_impacts i JOIN assets a ON a.asset_id=i.asset_id
+                              a.venue, a.metadata_json,
+                              receipt.display_role,receipt.proxy_label
+                       FROM event_asset_impacts i
+                       JOIN assets a ON a.asset_id=i.asset_id
+                       LEFT JOIN event_asset_mapping_receipts receipt
+                         ON receipt.mapping_decision_id=i.mapping_decision_id
+                        AND receipt.event_id=i.event_id
+                        AND receipt.asset_id=i.asset_id
+                        AND receipt.relation_type=i.relation_type
+                        AND receipt.decision='SELECTED'
                        WHERE i.event_id=? ORDER BY i.impact_score DESC""",
                     (event_id,),
                 )
@@ -2742,21 +2806,38 @@ class LedgerRepository:
             metrics = [
                 dict(row)
                 for row in connection.execute(
-                    "SELECT * FROM event_market_metrics WHERE event_id=? ORDER BY metric_name",
-                    (event_id,),
+                    """SELECT metric.*,anchor.timestamp_precision
+                         FROM event_market_metrics metric
+                         LEFT JOIN market_event_anchors anchor
+                           ON anchor.event_id=metric.event_id
+                          AND anchor.event_version=metric.event_version
+                          AND anchor.asset_id=metric.stable_id
+                          AND anchor.provider=metric.provider
+                        WHERE metric.event_id=? AND metric.event_version=?
+                        ORDER BY metric.metric_name""",
+                    (event_id, event["current_version"]),
                 )
             ]
             snapshots = [
                 dict(row)
                 for row in connection.execute(
-                    "SELECT * FROM market_snapshots WHERE event_id=? ORDER BY captured_at DESC",
-                    (event_id,),
+                    """SELECT s.*,j.event_version,j.observation_window,
+                              j.status AS market_job_status,anchor.timestamp_precision
+                       FROM market_snapshots s
+                       JOIN market_jobs j ON j.market_job_id=s.market_job_id
+                       LEFT JOIN market_job_anchor_links link
+                         ON link.market_job_id=j.market_job_id
+                       LEFT JOIN market_event_anchors anchor
+                         ON anchor.anchor_id=link.anchor_id
+                       WHERE s.event_id=? AND j.event_version=?
+                       ORDER BY s.captured_at DESC""",
+                    (event_id, event["current_version"]),
                 )
             ]
             market_jobs = [
                 dict(row)
                 for row in connection.execute(
-                    """SELECT j.market_job_id,j.event_id,j.asset_id,j.provider,
+                    """SELECT j.market_job_id,j.event_id,j.event_version,j.asset_id,j.provider,
                               j.observation_window,j.status,j.scheduled_at,j.completed_at,
                               j.attempts,j.last_error,j.no_trading,
                               anchor.event_version AS anchor_event_version,
@@ -2781,13 +2862,27 @@ class LedgerRepository:
                 )
             preferred_source = _dict(
                 connection.execute(
-                    """SELECT r.title,r.summary,r.source_id,r.source_published_at,
-                              r.local_received_at,eo.observation_id,eo.relation_type
+                    """SELECT r.title,r.summary,r.source_id,r.external_id,
+                              r.canonical_url,r.content_sha256,r.raw_json,
+                              r.source_published_at,r.local_received_at,
+                              r.latest_revision_no,r.latest_revision_kind,
+                              eo.observation_id,eo.relation_type,
+                              source.name AS source_name,
+                              source.source_type,source.authority_tier
                        FROM event_observations eo
                        JOIN latest_source_content r ON r.observation_id=eo.observation_id
+                       JOIN sources source ON source.source_id=r.source_id
+                       JOIN canonical_events current_event
+                         ON current_event.event_id=eo.event_id
                        WHERE eo.event_id=?
                          AND eo.relation_type!='filtered_aggregated_noise'
-                       ORDER BY r.local_received_at DESC,r.observation_id DESC LIMIT 1""",
+                         AND r.observation_status!='deleted'
+                       ORDER BY CASE
+                                  WHEN DATE(r.source_published_at)=DATE(current_event.event_date)
+                                   AND LENGTH(TRIM(COALESCE(r.summary,'')))>=40
+                                  THEN 0 ELSE 1
+                                END,
+                                r.local_received_at DESC,r.observation_id DESC LIMIT 1""",
                     (event_id,),
                 ).fetchone()
             )

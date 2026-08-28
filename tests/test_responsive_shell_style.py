@@ -40,6 +40,7 @@ def test_runtime_typography_uses_comfortable_body_and_touch_tokens() -> None:
 
 
 def test_shell_has_explicit_layout_contracts_for_all_target_widths() -> None:
+    tokens = TOKENS.read_text(encoding="utf-8")
     style = STYLE.read_text(encoding="utf-8")
 
     for width in (1100, 900, 620, 420):
@@ -53,6 +54,21 @@ def test_shell_has_explicit_layout_contracts_for_all_target_widths() -> None:
     assert "width: min(20rem, 86vw) !important;" in style
     assert "overflow-wrap: anywhere;" in style
     assert "word-break: break-word;" in style
+    assert "--fr-streamlit-header-height: 3.75rem;" in tokens
+    assert "--fr-public-shell-gap: .75rem;" in tokens
+    assert (
+        "padding-top: calc(var(--fr-streamlit-header-height) + "
+        "var(--fr-public-shell-gap));"
+    ) in style
+    assert ".public-reader-header span {" not in style
+    assert ".public-reader-header > div > span {" in style
+    assert '.public-reader-header [data-testid="stHeaderActionElements"]' in style
+    assert ":has(> .public-reader-header)" in style
+    assert "margin-bottom: 0 !important;" in style
+    assert ".public-reader-header { display: none; }" not in style
+    assert "scroll-margin-top: calc(var(--fr-streamlit-header-height) + 1rem);" in style
+    assert re.search(r"\.research-signal-row\s*\{[^}]*flex-wrap:\s*wrap", style, re.S)
+    assert re.search(r"\.market-reaction-inline\s*\{[^}]*flex-wrap:\s*wrap", style, re.S)
 
 
 def test_accessibility_contract_covers_focus_contrast_and_reduced_motion() -> None:
