@@ -24,6 +24,8 @@ from typing import Any
 
 
 MAX_BACKUP_AGE_SECONDS = 93_600
+MAX_BACKUP_MANIFEST_BYTES = 64 * 1024 * 1024
+MAX_BACKUP_FILE_COUNT = 250_000
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
 GENERATED_RUNTIME_ROOTS = {"data", "reports", "release-records"}
 GENERATED_RUNTIME_FILES = {".env"}
@@ -323,7 +325,7 @@ def check_backup(
         fail(f"verified backup path cannot be resolved: {exc}")
 
     manifest_bytes = manifest_path.read_bytes()
-    if len(manifest_bytes) > 8 * 1024 * 1024:
+    if len(manifest_bytes) > MAX_BACKUP_MANIFEST_BYTES:
         fail("verified backup manifest is unexpectedly large")
     try:
         manifest = json.loads(manifest_bytes)
@@ -362,6 +364,8 @@ def check_backup(
     recorded_stats = attestation.get("payload_stats")
     if not isinstance(files, list) or not files or not isinstance(recorded_stats, list):
         fail("verified backup file inventory is incomplete")
+    if len(files) > MAX_BACKUP_FILE_COUNT or len(recorded_stats) > MAX_BACKUP_FILE_COUNT:
+        fail("verified backup file inventory exceeds the bounded code-only policy")
     stats_by_path = {
         item.get("path"): item
         for item in recorded_stats
