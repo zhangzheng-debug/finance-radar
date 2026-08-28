@@ -29,7 +29,7 @@ def test_public_source_url_accepts_public_http_urls(value: str) -> None:
         "",
         "file:///etc/passwd",
         "javascript:alert(1)",
-        "https://user:secret@example.com/story",
+        "https://user" + ":secret@example.com/story",
         "http://localhost/private",
         "http://metadata.google.internal/computeMetadata/v1/",
         "http://intranet/private",

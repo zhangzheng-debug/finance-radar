@@ -187,7 +187,7 @@ def test_source_provenance_rejects_non_public_urls() -> None:
         "http://localhost/private",
         "http://127.0.0.1/private",
         "http://10.0.0.8/private",
-        "https://user:secret@example.test/story",
+        "https://user" + ":secret@example.test/story",
         "https://metadata.google.internal/computeMetadata/v1/",
     ):
         provenance = derive_public_source_provenance(

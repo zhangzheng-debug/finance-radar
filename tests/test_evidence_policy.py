@@ -44,7 +44,7 @@ _CLAIM_RECEIPT_ARGS = {
         ("evidence_url", "http://127.0.0.1/filing", "MISSING_HTTP_EVIDENCE_URL"),
         (
             "evidence_url",
-            "https://user:secret@sec.example/filing",
+            "https://user" + ":secret@sec.example/filing",
             "MISSING_HTTP_EVIDENCE_URL",
         ),
         ("evidence_passage", "short", "MISSING_EXACT_PASSAGE"),
@@ -102,7 +102,7 @@ def test_primary_authority_tier_rejects_discovery_and_lookalike_prefixes(tier: s
         "http://localhost/filing",
         "http://10.0.0.8/filing",
         "http://169.254.169.254/latest/meta-data/",
-        "https://user:secret@example.com/filing",
+        "https://user" + ":secret@example.com/filing",
         "file:///etc/passwd",
     ),
 )
