@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from scripts.audit_asset_provider_coverage import assess_coverage, render_markdown, run
+from scripts.audit_asset_provider_coverage import (
+    BINANCE_EXCHANGE_INFO_URL,
+    assess_coverage,
+    render_markdown,
+    run,
+)
 
 
 def config_fixture() -> dict:
@@ -64,8 +69,29 @@ def test_run_uses_injected_catalog_fetchers(tmp_path) -> None:
         path,
         api_key="not-a-real-key",
         timeout=3.0,
-        binance_fetcher=lambda timeout: {"BTCUSDT"},
-        twelve_data_fetcher=lambda key, timeout: {"IBIT", "EWJ"},
+        binance_fetcher=lambda timeout, symbols: {"BTCUSDT"},
+        twelve_data_fetcher=lambda key, timeout, symbols: {"IBIT", "EWJ"},
     )
     assert report["passed"] is True
     assert report["registry_assets"] == 3
+
+
+def test_symbol_scoped_provider_error_does_not_hide_supported_assets() -> None:
+    report = assess_coverage(
+        config_fixture(),
+        binance_symbols={"BTCUSDT"},
+        twelve_data_symbols={"IBIT"},
+        provider_errors={"twelve_data": "one filtered lookup failed"},
+        provider_symbol_errors={"twelve_data": {"EWJ": "timeout"}},
+    )
+    assert report["passed"] is True
+    assert [row["status"] for row in report["assets"] if row["symbol"] == "IBIT"] == [
+        "SUPPORTED"
+    ]
+    assert [row["status"] for row in report["assets"] if row["symbol"] == "EWJ"] == [
+        "UNKNOWN_PROVIDER_ERROR"
+    ]
+
+
+def test_binance_audit_uses_public_market_data_only_host() -> None:
+    assert BINANCE_EXCHANGE_INFO_URL.startswith("https://data-api.binance.vision/")

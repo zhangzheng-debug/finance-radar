@@ -26,7 +26,7 @@ sudo /opt/finance-radar/venv/bin/python \
   --markdown-output /opt/finance-radar/shared/reports/asset-provider-coverage.md
 ```
 
-该命令只读取 Binance 交易对目录和 Twelve Data ETF 目录，不创建行情任务、不修改事件或映射，也不接触账户、订单和交易接口。
+该命令只读取 Binance 交易对目录和 Twelve Data ETF 参考数据，不创建行情任务、不修改事件或映射，也不接触账户、订单和交易接口。Binance 使用与生产行情 Worker 相同的公开 market-data-only 主机；Twelve Data 使用官方支持的 `symbol` 过滤逐项核对，避免下载巨大整表时一次分块传输中断把全部资产误报为失败。临时网络、限流和服务端错误会自动重试，仍失败时按具体符号保留为“供应商状态未知”，不会伪装成资产不存在。
 
 ## 已主动启用的映射
 
