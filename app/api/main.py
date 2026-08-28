@@ -51,7 +51,11 @@ from app.services import (
     normalized_capture_input,
     validate_interpretation_result,
 )
-from app.services.capture_interpretation import CAPTURE_INTERPRETATION_PROMPT_VERSION
+from app.services.capture_interpretation import (
+    CAPTURE_INTERPRETATION_PROMPT_VERSION,
+    LEGACY_CAPTURE_INTERPRETATION_PROMPT_SHA256,
+    LEGACY_CAPTURE_INTERPRETATION_PROMPT_VERSION,
+)
 from app.services.public_event_semantics import (
     derive_public_display_headline,
     derive_public_event_semantics,
@@ -77,6 +81,18 @@ PUBLIC_MARKET_REACTION_WINDOWS = (
     ("t_plus_1d", "T+1d"),
     ("t_plus_5d", "T+5d"),
 )
+
+
+def _public_mapping_rank(value: Any) -> int:
+    """Return a bounded display rank without trusting persisted legacy values."""
+
+    try:
+        rank = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 99
+    return rank if 1 <= rank <= 3 else 99
+
+
 GENERIC_REVIEW_REASONS = frozenset(
     {
         "已逐条核对精确引文",
@@ -100,9 +116,11 @@ def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
         return None
     raw_assets = value.get("assets")
     raw_assets = raw_assets if isinstance(raw_assets, list) else []
-    asset_context: dict[str, dict[str, str]] = {}
+    asset_context: dict[str, dict[str, Any]] = {}
     role_labels = {
         "DIRECT_SECURITY": "直接证券",
+        "DIRECT_ASSET": "直接资产",
+        "US_LISTED_PROXY": "美股代理",
         "MARKET_BENCHMARK": "市场基准",
         "SECTOR_PROXY": "行业代理",
         "THEMATIC_PROXY": "观察代理",
@@ -136,6 +154,7 @@ def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
             "role": role,
             "role_label": role_labels.get(role, ""),
             "proxy_label": str(asset.get("proxy_label") or "").strip()[:120],
+            "_mapping_rank": _public_mapping_rank(asset.get("mapping_rank")),
             "_symbol": canonical_symbol[:32],
             "_provider_symbol": provider_symbol[:64],
         }
@@ -218,6 +237,7 @@ def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
             "role": context["role"],
             "role_label": context["role_label"],
             "proxy_label": context["proxy_label"],
+            "_mapping_rank": context["_mapping_rank"],
             "_updated_at": row.get("updated_at"),
         }
         if timestamp_precision:
@@ -229,14 +249,16 @@ def _public_market_reaction(value: dict[str, Any]) -> dict[str, Any] | None:
         ):
             projected[key] = item
     items = list(projected.values())
-    for item in items:
-        item.pop("_updated_at", None)
     items.sort(
         key=lambda item: (
-            str(item["symbol"]),
+            int(item.get("_mapping_rank") or 99),
             window_order[str(item["window"])],
+            str(item["symbol"]),
         )
     )
+    for item in items:
+        item.pop("_updated_at", None)
+        item.pop("_mapping_rank", None)
     if not items:
         return None
     return {
@@ -260,6 +282,8 @@ def _public_market_context(value: dict[str, Any]) -> dict[str, Any] | None:
     raw_assets = raw_assets if isinstance(raw_assets, list) else []
     role_labels = {
         "DIRECT_SECURITY": "直接证券",
+        "DIRECT_ASSET": "直接资产",
+        "US_LISTED_PROXY": "美股代理",
         "MARKET_BENCHMARK": "市场基准",
         "SECTOR_PROXY": "行业代理",
         "THEMATIC_PROXY": "观察代理",
@@ -270,7 +294,7 @@ def _public_market_context(value: dict[str, Any]) -> dict[str, Any] | None:
         "MACRO_PROXY": "THEMATIC_PROXY",
         "ECOSYSTEM_PROXY": "THEMATIC_PROXY",
     }
-    asset_context: dict[str, dict[str, str]] = {}
+    asset_context: dict[str, dict[str, Any]] = {}
     for asset in raw_assets:
         if not isinstance(asset, dict):
             continue
@@ -296,6 +320,7 @@ def _public_market_context(value: dict[str, Any]) -> dict[str, Any] | None:
             "role": role,
             "role_label": role_labels.get(role, ""),
             "proxy_label": str(asset.get("proxy_label") or "").strip()[:120],
+            "_mapping_rank": _public_mapping_rank(asset.get("mapping_rank")),
         }
 
     rows = value.get("market_snapshots")
@@ -347,6 +372,7 @@ def _public_market_context(value: dict[str, Any]) -> dict[str, Any] | None:
             "role": context["role"],
             "role_label": context["role_label"],
             "proxy_label": context["proxy_label"],
+            "_mapping_rank": context["_mapping_rank"],
         }
         timestamp_precision = str(row.get("timestamp_precision") or "")
         if timestamp_precision:
@@ -355,7 +381,15 @@ def _public_market_context(value: dict[str, Any]) -> dict[str, Any] | None:
         previous = projected.get(asset_id)
         if previous is None or str(item["observed_at"]) >= str(previous["observed_at"]):
             projected[asset_id] = item
-    items = sorted(projected.values(), key=lambda item: str(item["symbol"]))
+    items = sorted(
+        projected.values(),
+        key=lambda item: (
+            int(item.get("_mapping_rank") or 99),
+            str(item["symbol"]),
+        ),
+    )
+    for item in items:
+        item.pop("_mapping_rank", None)
     if not items:
         return None
     return {
@@ -1462,6 +1496,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "generated_at",
         "source_language",
         "coverage",
+        "source_shape",
         "one_line_zh",
         "what_source_says",
         "what_source_does_not_prove_zh",
@@ -1470,6 +1505,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "modality",
         "why_current_state_zh",
         "missing_to_change_state_zh",
+        "boundary_zh",
         "prompt_injection_suspected",
         "persisted",
         "external_generation_state",
@@ -1477,7 +1513,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     def public_capture_interpretation(value: dict[str, Any]) -> dict[str, Any]:
-        return {key: value.get(key) for key in public_capture_interpretation_fields}
+        projected = {
+            key: value.get(key) for key in public_capture_interpretation_fields
+        }
+        claims = value.get("what_source_says")
+        claims = claims if isinstance(claims, list) else []
+        projected["what_source_says"] = [
+            claim
+            for claim in claims
+            if isinstance(claim, dict)
+            and str(claim.get("text_zh") or "").strip()
+            not in {"来源表达了所引用的内容。", "来源标题表达了这一主张；尚未完成中文语义复核。"}
+        ][:2]
+        projected["boundary_zh"] = (
+            str(value.get("boundary_zh") or "").strip()
+            or "AI仅解释来源文本，不参与事件评级或价格判断。"
+        )
+        return projected
 
     def public_worker_cycle(value: dict[str, Any] | None) -> dict[str, Any] | None:
         """Expose only the user-facing state and timing of one worker cycle."""
@@ -1775,6 +1827,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         persisted_runs = operations.latest_capture_interpretations(
             str(event.get("event_id") or ""),
             receipts,
+            generation_priority=(
+                (
+                    CAPTURE_INTERPRETATION_CONTRACT,
+                    CAPTURE_INTERPRETATION_PROMPT_VERSION,
+                    CAPTURE_INTERPRETATION_PROMPT_SHA256,
+                    DEEPSEEK_CHEAP_TEXT_MODEL,
+                ),
+                (
+                    CAPTURE_INTERPRETATION_CONTRACT,
+                    LEGACY_CAPTURE_INTERPRETATION_PROMPT_VERSION,
+                    LEGACY_CAPTURE_INTERPRETATION_PROMPT_SHA256,
+                    DEEPSEEK_CHEAP_TEXT_MODEL,
+                ),
+            ),
         )
         items: list[dict[str, Any]] = []
         for capture in visible_captures:
@@ -1784,7 +1850,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 if not output:
                     continue
-                validate_interpretation_result(output, capture_source_text(capture))
+                validate_interpretation_result(
+                    output,
+                    capture_source_text(capture),
+                    allow_legacy_prompt=True,
+                )
                 if str((run or {}).get("status") or "") != "COMPLETED":
                     continue
                 if int((run or {}).get("external_call") or 0) != 1:
@@ -1795,13 +1865,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     CAPTURE_INTERPRETATION_CONTRACT
                 ):
                     continue
-                if str((run or {}).get("prompt_version") or "") != (
-                    CAPTURE_INTERPRETATION_PROMPT_VERSION
-                ):
-                    continue
-                if str((run or {}).get("prompt_sha256") or "") != (
-                    CAPTURE_INTERPRETATION_PROMPT_SHA256
-                ):
+                run_prompt_identity = (
+                    str((run or {}).get("prompt_version") or ""),
+                    str((run or {}).get("prompt_sha256") or ""),
+                )
+                if run_prompt_identity not in {
+                    (
+                        CAPTURE_INTERPRETATION_PROMPT_VERSION,
+                        CAPTURE_INTERPRETATION_PROMPT_SHA256,
+                    ),
+                    (
+                        LEGACY_CAPTURE_INTERPRETATION_PROMPT_VERSION,
+                        LEGACY_CAPTURE_INTERPRETATION_PROMPT_SHA256,
+                    ),
+                }:
                     continue
                 if str((run or {}).get("model_snapshot") or "") != (
                     DEEPSEEK_CHEAP_TEXT_MODEL
@@ -1833,7 +1910,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     (run or {}).get("input_sha256") or ""
                 ):
                     continue
-                if output.get("prompt_version") != CAPTURE_INTERPRETATION_PROMPT_VERSION:
+                if (
+                    str(output.get("prompt_version") or ""),
+                    str(output.get("prompt_sha256") or ""),
+                ) != run_prompt_identity:
                     continue
             except Exception:
                 continue

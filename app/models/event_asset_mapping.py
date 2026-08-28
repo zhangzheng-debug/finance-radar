@@ -28,7 +28,14 @@ ALLOWED_RELATION_TYPES = frozenset(
     {"PRIMARY", "SECTOR", "SUPPLIER", "CUSTOMER", "MACRO_PROXY", "ECOSYSTEM_PROXY"}
 )
 ALLOWED_ROLES = frozenset(
-    {"DIRECT_SECURITY", "MARKET_BENCHMARK", "SECTOR_PROXY", "THEMATIC_PROXY"}
+    {
+        "DIRECT_SECURITY",
+        "DIRECT_ASSET",
+        "US_LISTED_PROXY",
+        "MARKET_BENCHMARK",
+        "SECTOR_PROXY",
+        "THEMATIC_PROXY",
+    }
 )
 TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,14}$")
 EXCHANGE_TICKER_PATTERN = re.compile(
@@ -40,6 +47,9 @@ EXCHANGE_TICKER_PATTERN = re.compile(
 GENERIC_COMPANY_TOKENS = frozenset(
     {"company", "corporation", "corp", "inc", "incorporated", "limited", "ltd", "holdings"}
 )
+DIRECT_ASSET_ALIASES: Mapping[str, tuple[str, ...]] = {
+    "BTC": ("bitcoin", "btc"),
+}
 
 TOP_LEVEL_FIELDS = frozenset(
     {
@@ -83,6 +93,7 @@ MATCH_FIELDS = frozenset(
         "company_ticker",
         "company_name_required",
         "issuer_resolution_required",
+        "direct_asset_patterns",
         "source_patterns",
         "event_family_patterns",
         "event_type_patterns",
@@ -105,6 +116,7 @@ TEXT_FIELDS = (
     "claim_subject",
     "claim_action",
     "claim_stage",
+    "event_claim_text",
 )
 
 
@@ -138,6 +150,7 @@ class MappingRule:
     company_ticker: bool
     company_name_required: bool
     issuer_resolution_required: bool
+    direct_asset_patterns: tuple[Pattern[str], ...]
     source_patterns: tuple[Pattern[str], ...]
     event_family_patterns: tuple[Pattern[str], ...]
     event_type_patterns: tuple[Pattern[str], ...]
@@ -291,6 +304,11 @@ def _parse_rule(
     if issuer_resolution_required and not company_ticker:
         raise ValueError(f"mapping rule {rule_id} requires a ticker before issuer resolution")
 
+    direct_asset_patterns = _compile_patterns(
+        match.get("direct_asset_patterns"),
+        label=f"mapping rule {rule_id}.direct_asset_patterns",
+    )
+
     source_patterns = _compile_patterns(
         match.get("source_patterns"), label=f"mapping rule {rule_id}.source_patterns"
     )
@@ -315,6 +333,7 @@ def _parse_rule(
         )
     if (
         not company_ticker
+        and not direct_asset_patterns
         and not source_patterns
         and not event_family_patterns
         and not event_type_patterns
@@ -345,6 +364,7 @@ def _parse_rule(
         company_ticker=company_ticker,
         company_name_required=company_name_required,
         issuer_resolution_required=issuer_resolution_required,
+        direct_asset_patterns=direct_asset_patterns,
         source_patterns=source_patterns,
         event_family_patterns=event_family_patterns,
         event_type_patterns=event_type_patterns,
@@ -443,6 +463,17 @@ def _facts(event: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def _event_text(event: Mapping[str, Any]) -> str:
     facts = _facts(event)
+    event_claim_text = str(
+        event.get("event_claim_text") or facts.get("event_claim_text") or ""
+    ).strip()
+    if event_claim_text:
+        values = [
+            str(event.get("event_family") or ""),
+            str(event.get("event_type") or ""),
+            event_claim_text,
+        ]
+        combined = " ".join(value for value in values if value).casefold()
+        return re.sub(r"[^\w]+", " ", combined, flags=re.UNICODE).strip()
     values: list[str] = []
     for field in TEXT_FIELDS:
         for source in (event, facts):
@@ -451,6 +482,52 @@ def _event_text(event: Mapping[str, Any]) -> str:
                 values.append(value.strip())
     combined = " ".join(values).casefold()
     return re.sub(r"[^\w]+", " ", combined, flags=re.UNICODE).strip()
+
+
+def _bounded_source_texts(event: Mapping[str, Any]) -> tuple[str, ...]:
+    facts = _facts(event)
+    claim = str(
+        event.get("event_claim_text") or facts.get("event_claim_text") or ""
+    ).strip()
+    if claim:
+        return (claim,)
+    values: list[str] = []
+    for field in ("source_title", "source_summary"):
+        for source in (event, facts):
+            text = str(source.get(field) or "").strip()
+            if text and text not in values:
+                values.append(text)
+    return tuple(values)
+
+
+def _direct_asset_symbol(event: Mapping[str, Any]) -> str | None:
+    """Return a non-security asset only when the atomic claim binds it."""
+
+    facts = _facts(event)
+    source_shape = str(facts.get("source_shape") or "").strip().upper()
+    if source_shape and source_shape != "SINGLE_EVENT":
+        return None
+    declared = str(
+        event.get("ticker_at_event")
+        or facts.get("ticker_at_event")
+        or facts.get("ticker")
+        or ""
+    ).strip().upper()
+    if not declared or not TICKER_PATTERN.fullmatch(declared):
+        return None
+    affected_raw = facts.get("affected_assets")
+    affected = {
+        str(value or "").strip().upper()
+        for value in affected_raw
+        if str(value or "").strip()
+    } if isinstance(affected_raw, list) else set()
+    if declared not in affected:
+        return None
+    claim = " ".join(_bounded_source_texts(event)).casefold()
+    aliases = DIRECT_ASSET_ALIASES.get(declared, (declared.casefold(),))
+    if not any(re.search(rf"\b{re.escape(alias.casefold())}\b", claim) for alias in aliases):
+        return None
+    return declared
 
 
 def _ticker(event: Mapping[str, Any]) -> str | None:
@@ -493,8 +570,7 @@ def _source_mentions_company(event: Mapping[str, Any], *, ticker: str = "") -> b
         if len(token) >= 4 and token not in GENERIC_COMPANY_TOKENS
     }
     ticker_is_company_name = bool(ticker) and normalized_company.upper() == ticker.upper()
-    for field in ("source_title", "source_summary"):
-        text = str(event.get(field) or "").strip()
+    for text in _bounded_source_texts(event):
         if not text:
             continue
         normalized_text = re.sub(r"[^a-z0-9]+", " ", text.casefold()).strip()
@@ -514,8 +590,7 @@ def _explicit_exchange_ticker(event: Mapping[str, Any]) -> tuple[str, str] | Non
     company-name token (or the company name itself is the ticker).
     """
 
-    for field in ("source_title", "source_summary"):
-        text = str(event.get(field) or "").strip()
+    for text in _bounded_source_texts(event):
         if not text:
             continue
         for match in EXCHANGE_TICKER_PATTERN.finditer(text):
@@ -546,6 +621,14 @@ def _rule_matches(rule: MappingRule, event: Mapping[str, Any], *, text: str) -> 
             return False
     if rule.issuer_resolution_required and not event.get("_issuer_resolution_reason"):
         return False
+    if rule.direct_asset_patterns:
+        direct_asset = str(
+            event.get("_claim_direct_asset") or _direct_asset_symbol(event) or ""
+        )
+        if not direct_asset or not any(
+            pattern.fullmatch(direct_asset) for pattern in rule.direct_asset_patterns
+        ):
+            return False
     source_id = str(event.get("source_id") or event.get("discovery_source") or "").strip()
     if rule.source_patterns and not any(
         pattern.fullmatch(source_id) for pattern in rule.source_patterns
@@ -614,9 +697,23 @@ def resolve_event_assets(
         raise ValueError("provide either policy or config_path, not both")
     selected_policy = policy or load_asset_mapping_policy(config_path)
     resolved_event = dict(event)
+    facts = _facts(event)
+    source_shape = str(facts.get("source_shape") or "").strip().upper()
+    if source_shape and source_shape != "SINGLE_EVENT":
+        return []
+    claim_direct_asset = _direct_asset_symbol(event)
+    if claim_direct_asset:
+        resolved_event["_claim_direct_asset"] = claim_direct_asset
     if issuer_directory is not None:
-        resolution = issuer_directory.resolve(event)
+        issuer_event = dict(event)
+        event_claim_text = str(facts.get("event_claim_text") or "").strip()
+        if event_claim_text:
+            issuer_event["source_title"] = event_claim_text
+            issuer_event["source_summary"] = ""
+        resolution = issuer_directory.resolve(issuer_event)
         if resolution is not None:
+            if claim_direct_asset and claim_direct_asset != resolution.ticker:
+                return []
             resolved_event["company_name"] = resolution.company_name
             resolved_event["ticker_at_event"] = resolution.ticker
             resolved_event["exchange"] = resolution.exchange
@@ -680,6 +777,11 @@ def resolve_event_assets(
                     *(
                         ["SOURCE_SUBJECT_COHERENT"]
                         if asset.role == "DIRECT_SECURITY"
+                        else []
+                    ),
+                    *(
+                        ["CLAIM_BOUND_DIRECT_ASSET"]
+                        if asset.role == "DIRECT_ASSET"
                         else []
                     ),
                     *(

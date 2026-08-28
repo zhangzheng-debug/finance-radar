@@ -94,7 +94,7 @@ def _overview() -> dict[str, Any]:
             },
         ],
         "audit": {"no_trading": 0, "no_auto_verify": 0, "no_leakage": 0},
-        "schema_version": 15,
+        "schema_version": 16,
         "quick_check": "ok",
     }
 
@@ -816,7 +816,8 @@ def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatc
     assert "A provider discovery summary, not a verified policy action." in rendered
     assert "1 条来源记录" not in rendered
     assert "AI 解读" in rendered
-    assert "当前事件无关联证据，因此启用 AI 解读来源文本；结果不参与风险评级。" in rendered
+    assert "AI仅解释来源文本，不参与事件评级或价格判断。" in rendered
+    assert "原文：Markets await central-bank minutes" not in rendered
     assert "Markets await central-bank minutes while gold rises" in rendered
     assert rendered.count("Markets await central-bank minutes while gold rises") == 1
     assert "这是一条市场评论，不是一项已经发生的政策行动" in rendered

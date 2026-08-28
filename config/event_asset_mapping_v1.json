@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_version": "event-asset-mapping-v1.2.0",
+  "policy_version": "event-asset-mapping-v1.3.0",
   "max_assets_per_event": 3,
   "direction": "ABSTAIN",
   "impact_score": 0,
@@ -16,6 +16,28 @@
     }
   },
   "asset_registry": {
+    "BTC": {
+      "asset_type": "crypto",
+      "symbol": "BTC",
+      "provider_symbol": "BTCUSDT",
+      "venue": "Binance",
+      "currency": "USDT",
+      "relation_type": "PRIMARY",
+      "role": "DIRECT_ASSET",
+      "proxy_label": "BTC现货参考（BTC/USDT，24×7）",
+      "confidence": 0.99
+    },
+    "IBIT": {
+      "asset_type": "etf",
+      "symbol": "IBIT",
+      "provider_symbol": "IBIT",
+      "venue": "NASDAQ",
+      "currency": "USD",
+      "relation_type": "ECOSYSTEM_PROXY",
+      "role": "US_LISTED_PROXY",
+      "proxy_label": "美国现货比特币ETP代理（NASDAQ时段）",
+      "confidence": 0.92
+    },
     "SPY": {
       "asset_type": "etf",
       "symbol": "SPY",
@@ -73,6 +95,19 @@
     }
   },
   "rules": [
+    {
+      "id": "bitcoin-direct-us-proxy-v1",
+      "priority": 1,
+      "match": {
+        "direct_asset_patterns": [
+          "^BTC$"
+        ],
+        "source_patterns": [
+          "^opennews_free$"
+        ]
+      },
+      "assets": ["BTC", "IBIT"]
+    },
     {
       "id": "resolved-public-company-v1",
       "priority": 5,

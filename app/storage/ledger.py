@@ -2787,7 +2787,8 @@ class LedgerRepository:
                 for row in connection.execute(
                     """SELECT i.*, a.asset_type, a.symbol, a.provider_symbol, a.currency,
                               a.venue, a.metadata_json,
-                              receipt.display_role,receipt.proxy_label
+                              receipt.display_role,receipt.proxy_label,
+                              receipt.mapping_rank
                        FROM event_asset_impacts i
                        JOIN assets a ON a.asset_id=i.asset_id
                        LEFT JOIN event_asset_mapping_receipts receipt
@@ -2796,7 +2797,8 @@ class LedgerRepository:
                         AND receipt.asset_id=i.asset_id
                         AND receipt.relation_type=i.relation_type
                         AND receipt.decision='SELECTED'
-                       WHERE i.event_id=? ORDER BY i.impact_score DESC""",
+                       WHERE i.event_id=?
+                       ORDER BY COALESCE(receipt.mapping_rank,99),i.impact_score DESC""",
                     (event_id,),
                 )
             ]

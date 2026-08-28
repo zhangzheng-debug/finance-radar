@@ -140,15 +140,15 @@ def estimate_flash_peak_cny(usage: dict[str, Any]) -> dict[str, Any]:
 
 def _model_json_example() -> dict[str, Any]:
     return {
-        "one_line_zh": "来源称某事项可能发生，但尚未证明已经完成。",
+        "one_line_zh": "来源称某公司计划出售一项业务。",
         "what_source_says": [
-            {"text_zh": "来源使用可能性表述。", "quote": "may occur"}
+            {"text_zh": "公司计划出售该业务。", "quote": "plans to sell the business"}
         ],
-        "what_source_does_not_prove_zh": ["没有证明事项已经发生。"],
+        "what_source_does_not_prove_zh": [],
         "actors": [{"text": "Example Corp", "role": "ACTOR", "quote": "Example Corp"}],
         "affected_assets": [],
-        "modality": "CONDITIONAL",
-        "missing_to_change_state_zh": ["需要权威原始文件。"],
+        "modality": "PROPOSED",
+        "missing_to_change_state_zh": [],
         "prompt_injection_suspected": False,
     }
 
@@ -200,11 +200,10 @@ def _narrow_model_output(output: Any, source_text: str) -> Any:
     """Apply deterministic, information-reducing repairs before validation.
 
     DeepSeek occasionally adds wrapper/extra keys, returns asset objects, or
-    repeats a number that is absent from the retained capture.  Those are
-    formatting failures rather than useful claims.  This helper may only drop
-    model-controlled material or replace ungrounded prose with a number-free
-    boundary statement; the strict contract validator still makes the final
-    decision.
+    repeats a number that is absent from the retained capture. Those are
+    formatting failures rather than useful claims. This helper may only drop
+    model-controlled material; it never replaces a failed claim with generic
+    filler. The strict contract validator still makes the final decision.
     """
 
     if not isinstance(output, dict):
@@ -252,27 +251,46 @@ def _narrow_model_output(output: Any, source_text: str) -> Any:
         repaired["modality"] = "UNCLEAR"
 
     source_numbers = _numeric_tokens(source_text)
-    if not _has_only_grounded_numbers(repaired.get("one_line_zh"), source_numbers):
-        repaired["one_line_zh"] = (
-            "来源描述了一项相关事项；具体表述以系统保留的原始文本为准。"
-        )
-
     claims = repaired.get("what_source_says")
     if isinstance(claims, list):
+        useful_claims: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
         for claim in claims:
-            if isinstance(claim, dict) and not _has_only_grounded_numbers(
-                claim.get("text_zh"), source_numbers
+            if (
+                not isinstance(claim, dict)
+                or set(claim) != {"text_zh", "quote"}
+                or not isinstance(claim.get("text_zh"), str)
+                or not isinstance(claim.get("quote"), str)
+                or not claim["text_zh"].strip()
+                or not claim["quote"].strip()
+                or claim["quote"] not in source_text
+                or not _has_only_grounded_numbers(claim["text_zh"], source_numbers)
             ):
-                claim["text_zh"] = "来源表达了所引用的内容。"
+                continue
+            key = (claim["text_zh"].strip(), claim["quote"].strip())
+            if key in seen:
+                continue
+            seen.add(key)
+            useful_claims.append(
+                {"text_zh": key[0][:240], "quote": key[1][:500]}
+            )
+            if len(useful_claims) == 2:
+                break
+        repaired["what_source_says"] = useful_claims
 
-    for key in ("what_source_does_not_prove_zh", "missing_to_change_state_zh"):
-        values = repaired.get(key)
-        if isinstance(values, list):
-            repaired[key] = [
-                value
-                for value in values
-                if _has_only_grounded_numbers(value, source_numbers)
-            ]
+    if not _has_only_grounded_numbers(repaired.get("one_line_zh"), source_numbers):
+        useful_claims = repaired.get("what_source_says")
+        replacement = (
+            useful_claims[0]["text_zh"]
+            if isinstance(useful_claims, list) and useful_claims
+            else repaired.get("one_line_zh")
+        )
+        repaired["one_line_zh"] = replacement
+
+    # The public boundary is server-owned and rendered once. Provider-written
+    # disclaimer/checklist arrays only create repetitive UI and are discarded.
+    repaired["what_source_does_not_prove_zh"] = []
+    repaired["missing_to_change_state_zh"] = []
     return repaired
 
 
@@ -282,7 +300,7 @@ class DeepSeekCaptureInterpretationProvider:
     model: str = DEEPSEEK_CHEAP_TEXT_MODEL
     base_url: str = DEEPSEEK_BASE_URL
     timeout_seconds: float = 45.0
-    max_tokens: int = 700
+    max_tokens: int = 520
     requester: JsonRequester = _default_json_requester
 
     def __post_init__(self) -> None:

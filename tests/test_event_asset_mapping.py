@@ -47,13 +47,62 @@ def test_default_policy_is_strict_versioned_and_content_addressed() -> None:
     load_asset_mapping_policy.cache_clear()
     policy = load_asset_mapping_policy()
 
-    assert policy.policy_version == "event-asset-mapping-v1.2.0"
+    assert policy.policy_version == "event-asset-mapping-v1.3.0"
     assert policy.policy_sha256 == hashlib.sha256(MAPPING_PATH.read_bytes()).hexdigest()
     assert policy.max_assets_per_event == 3
     assert policy.direction == "ABSTAIN"
     assert policy.impact_score == 0
     assert policy.no_trading == 1
-    assert [rule.priority for rule in policy.rules] == [5, 10, 20, 30, 40, 50]
+    assert [rule.priority for rule in policy.rules] == [1, 5, 10, 20, 30, 40, 50]
+
+
+def test_claim_bound_bitcoin_event_maps_spot_then_us_listed_proxy() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "security_incident",
+            "event_type": "bitcoin_network_security_alert",
+            "ticker_at_event": "BTC",
+            "discovery_source": "opennews_free",
+            "facts": {
+                "source_shape": "SINGLE_EVENT",
+                "event_claim_text": "Bitcoin Lightning Network security alert affects BTC",
+                "affected_assets": ["BTC"],
+            },
+        },
+        issuer_directory=_issuer_directory(),
+    )
+
+    assert _symbols(items) == ["BTC", "IBIT"]
+    assert items[0]["asset_type"] == "crypto"
+    assert items[0]["provider_symbol"] == "BTCUSDT"
+    assert items[0]["currency"] == "USDT"
+    assert items[0]["role"] == "DIRECT_ASSET"
+    assert items[0]["proxy_label"] == "BTC现货参考（BTC/USDT，24×7）"
+    assert items[1]["asset_type"] == "etf"
+    assert items[1]["role"] == "US_LISTED_PROXY"
+    assert items[1]["proxy_label"] == "美国现货比特币ETP代理（NASDAQ时段）"
+    assert {item["rule_id"] for item in items} == {"bitcoin-direct-us-proxy-v1"}
+
+
+def test_multi_topic_capture_cannot_reach_asset_mapping() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "earnings",
+            "event_type": "earnings_or_guidance",
+            "ticker_at_event": "BTC",
+            "discovery_source": "opennews_free",
+            "source_title": (
+                "Nvidia shares jump after earnings, while Bitcoin tests $80,000"
+            ),
+            "facts": {
+                "source_shape": "MULTI_TOPIC_DIGEST",
+                "affected_assets": ["BTC"],
+            },
+        },
+        issuer_directory=_issuer_directory(),
+    )
+
+    assert items == []
 
 
 def test_public_earnings_leading_issuer_resolves_to_direct_security() -> None:
@@ -409,7 +458,7 @@ def test_all_mappings_obey_read_only_directionless_contract(event: dict[str, str
         assert item["direction"] == "ABSTAIN"
         assert item["impact_score"] == 0
         assert item["no_trading"] == 1
-        assert item["policy_version"] == "event-asset-mapping-v1.2.0"
+        assert item["policy_version"] == "event-asset-mapping-v1.3.0"
         assert len(str(item["policy_sha256"])) == 64
         assert item["rule_id"]
         assert item["role"]

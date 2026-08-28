@@ -91,9 +91,12 @@ def test_deepseek_flash_request_is_official_json_nonthinking_and_bounded() -> No
     assert captured["payload"]["response_format"] == {"type": "json_object"}
     assert captured["payload"]["thinking"] == {"type": "disabled"}
     assert captured["payload"]["stream"] is False
-    assert captured["payload"]["max_tokens"] == 700
+    assert captured["payload"]["max_tokens"] == 520
     assert "raw_json" not in json.dumps(captured["payload"], ensure_ascii=False)
-    assert output == _model_output()
+    expected = _model_output()
+    expected["what_source_does_not_prove_zh"] = []
+    expected["missing_to_change_state_zh"] = []
+    assert output == expected
     assert usage["thinking_disabled"] is True
     assert usage["estimated_cny"] == 0.004075
 
@@ -111,7 +114,7 @@ def test_deepseek_cost_uses_peak_price_and_charges_unclassified_input_as_miss() 
     assert usage["billing_currency"] == "CNY"
 
 
-def test_deepseek_provider_rejects_unapproved_model_and_hallucinated_quote() -> None:
+def test_deepseek_provider_rejects_unapproved_model_and_drops_hallucinated_quote() -> None:
     with pytest.raises(ValueError, match="approved cheapest model"):
         DeepSeekCaptureInterpretationProvider(
             api_key="unit-test-secret",
@@ -135,17 +138,14 @@ def test_deepseek_provider_rejects_unapproved_model_and_hallucinated_quote() -> 
         api_key="unit-test-secret",
         requester=requester,
     )
-    with pytest.raises(DeepSeekCaptureInterpretationError, match="UNSUPPORTED_SOURCE_QUOTE") as error:
-        provider.interpret(_normalized())
-    assert error.value.error_class == "CONTRACT_REJECTED"
-    assert error.value.retryable is True
+    validated, _ = provider.interpret(_normalized())
+    assert validated["what_source_says"] == []
+    assert "来源表达了所引用的内容" not in json.dumps(validated, ensure_ascii=False)
 
 
 def test_deepseek_contract_failure_carries_billable_usage() -> None:
     invalid = _model_output()
-    invalid["what_source_says"] = [
-        {"text_zh": "虚构事实。", "quote": "The Fed released the minutes"}
-    ]
+    invalid["prompt_injection_suspected"] = "false"
 
     def requester(url, headers, payload, timeout):
         return {
@@ -198,7 +198,16 @@ def test_deepseek_provider_narrows_extra_fields_asset_objects_and_ungrounded_num
     output = _model_output()
     output["affected_assets"] = [{"symbol": "BTC"}]
     output["one_line_zh"] = "来源称价格上涨了 20%，涉及 BTC。"
-    output["what_source_says"][0]["text_zh"] = "市场已经等待了 20 天。"
+    output["what_source_says"] = [
+        {
+            "text_zh": "市场已经等待了 20 天。",
+            "quote": "Markets awaited the Fed meeting minutes",
+        },
+        {
+            "text_zh": "市场正在等待美联储会议纪要。",
+            "quote": "Markets awaited the Fed meeting minutes",
+        },
+    ]
     output["unexpected"] = "must be removed"
 
     def requester(url, headers, payload, timeout):
@@ -218,7 +227,16 @@ def test_deepseek_provider_narrows_extra_fields_asset_objects_and_ungrounded_num
     assert set(validated) == set(_model_output())
     assert validated["affected_assets"] == ["GOLD"]
     assert "20" not in validated["one_line_zh"]
-    assert validated["what_source_says"][0]["text_zh"] == "来源表达了所引用的内容。"
+    assert validated["one_line_zh"] == "市场正在等待美联储会议纪要。"
+    assert validated["what_source_says"] == [
+        {
+            "text_zh": "市场正在等待美联储会议纪要。",
+            "quote": "Markets awaited the Fed meeting minutes",
+        }
+    ]
+    assert validated["what_source_does_not_prove_zh"] == []
+    assert validated["missing_to_change_state_zh"] == []
+    assert "来源表达了所引用的内容" not in json.dumps(validated, ensure_ascii=False)
 
 
 def test_deepseek_provider_safely_downgrades_unknown_modality() -> None:
