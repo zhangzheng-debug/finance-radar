@@ -1372,6 +1372,8 @@ class OperationsRepository:
         self,
         event_id: str,
         capture_receipt_sha256s: list[str],
+        *,
+        generation_priority: tuple[tuple[str, str, str, str], ...] = (),
     ) -> dict[str, dict[str, Any]]:
         """Return the preferred completed run for each requested capture.
 
@@ -1392,6 +1394,10 @@ class OperationsRepository:
         )
         if not receipts:
             return {}
+        generation_rank = {
+            tuple(str(part) for part in generation): rank
+            for rank, generation in enumerate(generation_priority)
+        }
         with closing(self.connect()) as connection:
             rows = [
                 dict(row)
@@ -1401,11 +1407,36 @@ class OperationsRepository:
                          AND capture_receipt_sha256 IN (
                            SELECT value FROM json_each(?)
                          )
-                       ORDER BY capture_receipt_sha256,
-                                external_call DESC,updated_at DESC""",
+                       ORDER BY capture_receipt_sha256,updated_at DESC""",
                     (event_id, json.dumps(receipts, ensure_ascii=False)),
                 )
             ]
+        if generation_rank:
+            rows = [
+                row
+                for row in rows
+                if (
+                    str(row.get("contract_version") or ""),
+                    str(row.get("prompt_version") or ""),
+                    str(row.get("prompt_sha256") or ""),
+                    str(row.get("model_snapshot") or ""),
+                )
+                in generation_rank
+            ]
+            rows.sort(
+                key=lambda row: (
+                    str(row.get("capture_receipt_sha256") or ""),
+                    generation_rank[
+                        (
+                            str(row.get("contract_version") or ""),
+                            str(row.get("prompt_version") or ""),
+                            str(row.get("prompt_sha256") or ""),
+                            str(row.get("model_snapshot") or ""),
+                        )
+                    ],
+                    -int(row.get("external_call") or 0),
+                )
+            )
         selected: dict[str, dict[str, Any]] = {}
         for row in rows:
             receipt = str(row.get("capture_receipt_sha256") or "")

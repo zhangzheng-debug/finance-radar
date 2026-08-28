@@ -47,13 +47,228 @@ def test_default_policy_is_strict_versioned_and_content_addressed() -> None:
     load_asset_mapping_policy.cache_clear()
     policy = load_asset_mapping_policy()
 
-    assert policy.policy_version == "event-asset-mapping-v1.2.0"
+    assert policy.policy_version == "event-asset-mapping-v1.5.0"
     assert policy.policy_sha256 == hashlib.sha256(MAPPING_PATH.read_bytes()).hexdigest()
     assert policy.max_assets_per_event == 3
     assert policy.direction == "ABSTAIN"
     assert policy.impact_score == 0
     assert policy.no_trading == 1
-    assert [rule.priority for rule in policy.rules] == [5, 10, 20, 30, 40, 50]
+    assert len(policy.asset_registry) == 160
+    priorities = [rule.priority for rule in policy.rules]
+    assert priorities == sorted(priorities)
+    assert len(priorities) == len(set(priorities)) == 41
+
+
+def test_claim_bound_bitcoin_event_maps_spot_then_us_listed_proxy() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "security_incident",
+            "event_type": "bitcoin_network_security_alert",
+            "ticker_at_event": "BTC",
+            "discovery_source": "opennews_free",
+            "facts": {
+                "source_shape": "SINGLE_EVENT",
+                "event_claim_text": "Bitcoin Lightning Network security alert affects BTC",
+                "affected_assets": ["BTC"],
+            },
+        },
+        issuer_directory=_issuer_directory(),
+    )
+
+    assert _symbols(items) == ["BTC", "IBIT"]
+    assert items[0]["asset_type"] == "crypto"
+    assert items[0]["provider_symbol"] == "BTCUSDT"
+    assert items[0]["currency"] == "USDT"
+    assert items[0]["role"] == "DIRECT_ASSET"
+    assert items[0]["proxy_label"] == "BTC现货参考（BTC/USDT，24×7）"
+    assert items[1]["asset_type"] == "etf"
+    assert items[1]["role"] == "US_LISTED_PROXY"
+    assert items[1]["proxy_label"] == "美国现货比特币ETP代理（NASDAQ时段）"
+    assert {item["rule_id"] for item in items} == {"bitcoin-direct-us-proxy-v1"}
+
+
+@pytest.mark.parametrize(
+    ("ticker", "claim", "expected"),
+    [
+        ("ETH", "Ethereum network upgrade affects ETH", ["ETH", "ETHA"]),
+        ("SOL", "Solana validator incident affects SOL", ["SOL"]),
+        ("XRP", "XRP ledger disruption affects XRP", ["XRP"]),
+    ],
+)
+def test_claim_bound_crypto_assets_use_direct_market_before_any_listed_proxy(
+    ticker: str, claim: str, expected: list[str]
+) -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "security_incident",
+            "event_type": "crypto_network_incident",
+            "ticker_at_event": ticker,
+            "discovery_source": "opennews_free",
+            "facts": {
+                "source_shape": "SINGLE_EVENT",
+                "event_claim_text": claim,
+                "affected_assets": [ticker],
+            },
+        }
+    )
+
+    assert _symbols(items) == expected
+    assert items[0]["role"] == "DIRECT_ASSET"
+    assert items[0]["provider_symbol"] == f"{ticker}USDT"
+    assert all(item["no_trading"] == 1 for item in items)
+
+
+def test_asset_universe_covers_major_regions_sectors_rates_fx_commodities_and_crypto() -> None:
+    registry = load_asset_mapping_policy().asset_registry
+
+    expected = {
+        # Direct crypto and listed proxies.
+        "BTC", "IBIT", "ETH", "ETHA", "SOL", "XRP", "BNB", "ADA",
+        "DOGE", "AVAX", "LINK", "DOT", "LTC", "BCH",
+        # Broad markets and countries.
+        "SPY", "QQQ", "IWM", "DIA", "EFA", "EEM", "VTI", "VT", "ACWI",
+        "RSP", "MDY", "EWJ", "EWY",
+        "MCHI", "EWH", "EWT", "INDA", "EWA", "EWC", "EWZ", "EWW",
+        "EWU", "FEZ", "EWG", "EWQ", "EZA", "EIS", "TUR", "KSA", "UAE", "QAT",
+        "EWS", "EIDO", "EWM", "THD", "VNM", "EPHE", "ENZL", "EWN",
+        "EWO", "EWK", "EWD", "ENOR", "EDEN", "EFNL", "EPOL", "GREK",
+        "EIRL", "PGAL", "ECH", "EPU", "ARGT", "GXG", "EGPT", "PAK", "KWT", "NGE",
+        # Sectors and themes.
+        "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB",
+        "XLRE", "XLC", "SMH", "KRE", "XBI", "ITA", "CIBR", "ICLN",
+        "SOXX", "IGV", "SKYY", "BOTZ", "PAVE", "JETS", "IYT", "XRT",
+        "ITB", "VNQ", "TAN", "KWEB", "XME", "SLX", "SIL", "GDXJ",
+        "REMX", "PHO", "MOO", "XOP", "OIH", "KIE", "IHI", "NLR", "DRIV", "FINX",
+        # Commodities, rates, credit and FX.
+        "GLD", "SLV", "USO", "BNO", "UNG", "DBA", "GDX", "URA", "COPX", "LIT",
+        "DBC", "CPER", "PPLT", "PALL", "WEAT", "CORN", "SOYB",
+        "SHY", "IEF", "TLT", "TIP", "HYG", "LQD", "UUP", "FXY", "FXE", "FXB",
+        "SGOV", "BIL", "BND", "GOVT", "MUB", "EMB", "JNK", "BKLN",
+        "FXA", "FXC", "FXF", "CYB", "CEW", "VIXY",
+    }
+
+    assert expected <= set(registry)
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Bank of Japan raises its policy rate", ["EWJ", "FXY"]),
+        ("South Korea raises interest rates after an inflation surprise", ["EWY"]),
+        ("Hong Kong Monetary Authority tightens policy", ["EWH"]),
+        ("China's central bank announces a new reserve policy", ["MCHI"]),
+        ("Taiwan growth forecast is revised lower", ["EWT"]),
+        ("Reserve Bank of India changes its policy stance", ["INDA"]),
+        ("Bank of England cuts rates", ["EWU", "FXB"]),
+        ("Germany reports a sharp drop in industrial output", ["EWG"]),
+        ("France revises its economic growth forecast", ["EWQ"]),
+        ("European Central Bank changes its policy rate", ["FEZ", "FXE"]),
+        ("Reserve Bank of Australia changes its policy rate", ["EWA"]),
+        ("Bank of Canada cuts its policy rate", ["EWC"]),
+        ("Central Bank of Brazil raises its policy rate", ["EWZ"]),
+        ("Bank of Mexico cuts its policy rate", ["EWW"]),
+        ("South African Reserve Bank changes its policy rate", ["EZA"]),
+        ("Central Bank of Turkey raises its policy rate", ["TUR"]),
+        ("Bank of Israel changes its policy rate", ["EIS"]),
+        ("Saudi Arabia revises its economic growth forecast", ["KSA"]),
+        ("UAE revises its economic growth forecast", ["UAE"]),
+        ("Qatar central bank changes its policy stance", ["QAT"]),
+    ],
+)
+def test_atomic_country_market_events_map_to_country_proxies(
+    title: str, expected: list[str]
+) -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "macro_policy",
+            "event_type": "country_policy_action",
+            "discovery_source": "opennews_free",
+            "facts": {
+                "source_shape": "SINGLE_EVENT",
+                "event_claim_text": title,
+            },
+        }
+    )
+
+    assert _symbols(items) == expected
+    assert all(item["role"] == "THEMATIC_PROXY" for item in items)
+
+
+def test_country_name_in_company_earnings_does_not_create_a_country_proxy() -> None:
+    assert resolve_event_assets(
+        {
+            "event_family": "earnings",
+            "event_type": "quarterly_results",
+            "discovery_source": "opennews_free",
+            "facts": {
+                "source_shape": "SINGLE_EVENT",
+                "event_claim_text": "A U.S. retailer said sales in Japan improved this quarter",
+            },
+        }
+    ) == []
+
+
+def test_multi_country_market_digest_cannot_reach_country_mapping() -> None:
+    assert resolve_event_assets(
+        {
+            "event_family": "regional_market",
+            "event_type": "market_roundup",
+            "discovery_source": "opennews_free",
+            "facts": {
+                "source_shape": "MULTI_TOPIC_DIGEST",
+                "event_claim_text": "Japan rises while Korea falls and China awaits policy news",
+            },
+        }
+    ) == []
+
+
+def test_north_korea_reference_cannot_be_misclassified_as_south_korea_market() -> None:
+    assert resolve_event_assets(
+        {
+            "event_family": "country_risk",
+            "event_type": "sovereign_risk",
+            "discovery_source": "opennews_free",
+            "facts": {
+                "source_shape": "SINGLE_EVENT",
+                "event_claim_text": "North Korea reports a new missile test",
+            },
+        }
+    ) == []
+
+
+def test_turkey_animal_reference_cannot_reach_country_market_mapping() -> None:
+    assert resolve_event_assets(
+        {
+            "event_family": "market_move",
+            "event_type": "food_price_move",
+            "discovery_source": "opennews_free",
+            "facts": {
+                "source_shape": "SINGLE_EVENT",
+                "event_claim_text": "Thanksgiving turkey prices fall as poultry supply recovers",
+            },
+        }
+    ) == []
+
+
+def test_multi_topic_capture_cannot_reach_asset_mapping() -> None:
+    items = resolve_event_assets(
+        {
+            "event_family": "earnings",
+            "event_type": "earnings_or_guidance",
+            "ticker_at_event": "BTC",
+            "discovery_source": "opennews_free",
+            "source_title": (
+                "Nvidia shares jump after earnings, while Bitcoin tests $80,000"
+            ),
+            "facts": {
+                "source_shape": "MULTI_TOPIC_DIGEST",
+                "affected_assets": ["BTC"],
+            },
+        },
+        issuer_directory=_issuer_directory(),
+    )
+
+    assert items == []
 
 
 def test_public_earnings_leading_issuer_resolves_to_direct_security() -> None:
@@ -409,7 +624,7 @@ def test_all_mappings_obey_read_only_directionless_contract(event: dict[str, str
         assert item["direction"] == "ABSTAIN"
         assert item["impact_score"] == 0
         assert item["no_trading"] == 1
-        assert item["policy_version"] == "event-asset-mapping-v1.2.0"
+        assert item["policy_version"] == "event-asset-mapping-v1.5.0"
         assert len(str(item["policy_sha256"])) == 64
         assert item["rule_id"]
         assert item["role"]

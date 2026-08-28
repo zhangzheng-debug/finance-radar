@@ -290,6 +290,12 @@ class LiveCandidateExtractorTests(unittest.TestCase):
             (now, now),
         )
         self.connection.execute(
+            """INSERT INTO event_versions VALUES (
+               'legacy-event',1,?,'candidate','candidate','earnings','earnings_or_guidance',
+               NULL,'{}','legacy_import')""",
+            (now,),
+        )
+        self.connection.execute(
             "INSERT INTO event_observations VALUES (?,?,?,?)",
             ("legacy-event", observation_id, "aggregated_discovery_candidate", now),
         )
@@ -298,6 +304,30 @@ class LiveCandidateExtractorTests(unittest.TestCase):
                'legacy-job','legacy-event','live_primary_evidence_review',
                'COMPLETED_DISCOVERY_FILTERED',50,0,?,NULL,'{}',?,?)""",
             (now, now, now),
+        )
+        self.connection.execute(
+            """INSERT INTO assets(
+               asset_id,asset_type,symbol,provider_symbol,venue,currency,
+               metadata_json,created_at,updated_at)
+               VALUES('legacy-asset','equity','NVDA','NVDA','NASDAQ','USD','{}',?,?)""",
+            (now, now),
+        )
+        self.connection.execute(
+            """INSERT INTO event_asset_impacts(
+               impact_id,event_id,asset_id,relation_type,direction,impact_score,
+               confidence,reason_codes_json,assessment_source,mapping_decision_id,
+               market_observation_allowed,no_trading,created_at,updated_at)
+               VALUES('legacy-impact','legacy-event','legacy-asset','PRIMARY','ABSTAIN',0,
+                      1.0,'[]','automatic_asset_mapping_v1:legacy-rule',NULL,1,1,?,?)""",
+            (now, now),
+        )
+        self.connection.execute(
+            """INSERT INTO market_jobs(
+               market_job_id,event_id,event_version,asset_id,provider,
+               observation_window,status,scheduled_at,completed_at,attempts,last_error,no_trading)
+               VALUES('legacy-market-job','legacy-event',1,'legacy-asset','twelve_data',
+                      'T+30m','PENDING',?,NULL,0,NULL,1)""",
+            (now,),
         )
         self.connection.commit()
 
@@ -324,6 +354,20 @@ class LiveCandidateExtractorTests(unittest.TestCase):
             "SELECT relation_type FROM event_observations WHERE event_id='legacy-event'"
         ).fetchone()
         self.assertEqual(relation["relation_type"], "filtered_aggregated_noise")
+        impact = self.connection.execute(
+            """SELECT market_observation_allowed FROM event_asset_impacts
+               WHERE event_id='legacy-event'"""
+        ).fetchone()
+        market_job = self.connection.execute(
+            """SELECT status,last_error FROM market_jobs
+               WHERE event_id='legacy-event'"""
+        ).fetchone()
+        self.assertEqual(impact["market_observation_allowed"], 0)
+        self.assertEqual(market_job["status"], "CANCELLED_EVENT_REJECTED")
+        self.assertIn("semantic_gate", market_job["last_error"])
+        facts = json.loads(version["facts_json"])
+        self.assertEqual(facts["discovery_filter"]["automatic_impacts_deactivated"], 1)
+        self.assertEqual(facts["discovery_filter"]["unfinished_market_jobs_cancelled"], 1)
 
     def test_mixed_cluster_filters_noise_observation_but_keeps_valid_event(self) -> None:
         now = utc_now()
@@ -478,7 +522,94 @@ class LiveCandidateExtractorTests(unittest.TestCase):
             )
         result = extractor.process_pending(self.connection, limit=10)
         self.assertEqual(result["candidates"], 0)
-        self.assertEqual(result["no_candidate"], 4)
+        self.assertEqual(result["no_candidate"], 3)
+        self.assertEqual(result["source_shape_filtered"], 1)
+
+    def test_multi_topic_nvidia_bitcoin_digest_stays_out_of_event_ledger(self) -> None:
+        title = (
+            "Nvidia shares jump after another earnings beat, bitcoin runs into a "
+            "major wall of supply around $80,000, and AI-generated security reports "
+            "put Bitcoin's Lightning Network on alert"
+        )
+        self.add_observation(
+            "nvidia-bitcoin-digest",
+            title,
+            "https://example.test/nvidia-bitcoin-digest",
+            raw_json=json.dumps(
+                {"item": {"title": title, "coins": ["BTC"]}}
+            ),
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["candidates"], 0)
+        self.assertEqual(result["source_shape_filtered"], 1)
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM canonical_events").fetchone()[0],
+            0,
+        )
+        job = self.connection.execute(
+            "SELECT status,last_error FROM observation_jobs"
+        ).fetchone()
+        self.assertEqual(job["status"], "COMPLETED_SCOPE_FILTERED")
+        self.assertIn("multi_topic_digest", job["last_error"])
+        self.assertEqual(
+            self.connection.execute("SELECT COUNT(*) FROM raw_observations").fetchone()[0],
+            1,
+        )
+
+    def test_multi_topic_asian_market_digest_stays_out_of_event_ledger(self) -> None:
+        title = (
+            "Asian stocks edge lower at the start of a key week. MSCI Asia falls "
+            "0.1% and South Korea's KOSPI drops 1.2%. Alibaba announces an HK$80 "
+            "billion share issue, while investors await Nvidia earnings and a "
+            "Federal Reserve speech."
+        )
+        self.add_observation(
+            "asian-market-digest",
+            title,
+            "https://example.test/asian-market-digest",
+            raw_json=json.dumps(
+                {"item": {"title": title, "coins": ["NVDA"]}}
+            ),
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["candidates"], 0)
+        self.assertEqual(result["source_shape_filtered"], 1)
+        job = self.connection.execute(
+            "SELECT status,last_error FROM observation_jobs"
+        ).fetchone()
+        self.assertEqual(job["status"], "COMPLETED_SCOPE_FILTERED")
+        self.assertIn("multi_topic_digest", job["last_error"])
+
+    def test_causal_cross_clause_macro_story_remains_one_atomic_event(self) -> None:
+        title = "Federal Reserve raises interest rates, sending Bitcoin lower"
+        self.add_observation(
+            "fed-rates-bitcoin",
+            title,
+            "https://example.test/fed-rates-bitcoin",
+            raw_json=json.dumps(
+                {"item": {"title": title, "coins": ["BTC"]}}
+            ),
+        )
+
+        result = extractor.process_pending(self.connection, limit=10)
+
+        self.assertEqual(result["candidates"], 1)
+        event = self.connection.execute(
+            "SELECT event_type,company_name,ticker_at_event FROM canonical_events"
+        ).fetchone()
+        self.assertEqual(event["event_type"], "monetary_policy")
+        self.assertEqual(event["company_name"], "Federal Reserve")
+        self.assertIsNone(event["ticker_at_event"])
+        facts = json.loads(
+            self.connection.execute("SELECT facts_json FROM event_versions").fetchone()[0]
+        )
+        self.assertEqual(facts["source_shape"], "SINGLE_EVENT")
+        self.assertEqual(facts["affected_assets"], ["BTC"])
+        self.assertEqual(facts["event_claim_text"], title)
 
     def test_live_roundup_ai_benchmark_hack_and_fed_name_collision_are_scope_filtered(self) -> None:
         fixtures = (
@@ -578,7 +709,7 @@ class LiveCandidateExtractorTests(unittest.TestCase):
             ("Federal Reserve", None),
         )
 
-    def test_macro_actor_is_subject_and_provider_coin_is_only_affected_asset(self) -> None:
+    def test_macro_actor_is_subject_and_unmentioned_provider_coin_is_not_an_asset(self) -> None:
         title = "Federal Reserve released meeting minutes and kept policy rates unchanged"
         self.add_observation(
             "fed-released-minutes",
@@ -600,7 +731,7 @@ class LiveCandidateExtractorTests(unittest.TestCase):
         facts = json.loads(
             self.connection.execute("SELECT facts_json FROM event_versions").fetchone()[0]
         )
-        self.assertEqual(facts["affected_assets"], ["GOLD"])
+        self.assertNotIn("affected_assets", facts)
         self.assertNotIn("signal", facts)
         self.assertNotIn("grade", facts)
 

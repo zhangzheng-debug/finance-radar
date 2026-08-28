@@ -14,7 +14,7 @@ from typing import Any, Iterable
 from app.evidence_policy import register_sqlite_integrity_functions
 
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -307,7 +307,8 @@ CREATE TABLE IF NOT EXISTS event_asset_mapping_receipts (
     asset_id TEXT NOT NULL,
     relation_type TEXT NOT NULL,
     display_role TEXT NOT NULL CHECK (display_role IN (
-        'DIRECT_SECURITY','MARKET_BENCHMARK','SECTOR_PROXY','THEMATIC_PROXY'
+        'DIRECT_SECURITY','DIRECT_ASSET','US_LISTED_PROXY',
+        'MARKET_BENCHMARK','SECTOR_PROXY','THEMATIC_PROXY'
     )),
     proxy_label TEXT NOT NULL,
     rule_id TEXT NOT NULL,
@@ -871,7 +872,8 @@ def _create_event_asset_mapping_tables(connection: sqlite3.Connection) -> None:
             asset_id TEXT NOT NULL,
             relation_type TEXT NOT NULL,
             display_role TEXT NOT NULL CHECK (display_role IN (
-                'DIRECT_SECURITY','MARKET_BENCHMARK','SECTOR_PROXY','THEMATIC_PROXY'
+                'DIRECT_SECURITY','DIRECT_ASSET','US_LISTED_PROXY',
+                'MARKET_BENCHMARK','SECTOR_PROXY','THEMATIC_PROXY'
             )),
             proxy_label TEXT NOT NULL,
             rule_id TEXT NOT NULL,
@@ -967,6 +969,15 @@ def _mapping_tables_are_current(connection: sqlite3.Connection) -> bool:
         in receipt_fks
         and ("assets", ("asset_id",), ("asset_id",)) in receipt_fks
     )
+
+
+def _mapping_roles_are_current(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' "
+        "AND name='event_asset_mapping_receipts'"
+    ).fetchone()
+    sql = str(row["sql"] or "").upper() if row is not None else ""
+    return "'DIRECT_ASSET'" in sql and "'US_LISTED_PROXY'" in sql
 
 
 def _is_lower_sha256(value: Any) -> bool:
@@ -1170,6 +1181,8 @@ def _legacy_mapping_bundles(
                 or str(receipt.get("display_role") or "")
                 not in {
                     "DIRECT_SECURITY",
+                    "DIRECT_ASSET",
+                    "US_LISTED_PROXY",
                     "MARKET_BENCHMARK",
                     "SECTOR_PROXY",
                     "THEMATIC_PROXY",
@@ -1323,6 +1336,50 @@ def _upgrade_event_asset_mapping_tables(connection: sqlite3.Connection) -> None:
         raise
     finally:
         connection.execute("PRAGMA foreign_keys=ON")
+
+
+def _upgrade_event_asset_mapping_roles_v16(connection: sqlite3.Connection) -> None:
+    """Expand display roles without discarding proven Schema 15 mappings."""
+
+    if _mapping_roles_are_current(connection):
+        return
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys=OFF")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        if _mapping_roles_are_current(connection):
+            connection.commit()
+            return
+        _archive_table(
+            connection,
+            "event_asset_mapping_receipts",
+            "event_asset_mapping_receipts_legacy_schema16_roles",
+        )
+        _archive_table(
+            connection,
+            "event_asset_mapping_decisions",
+            "event_asset_mapping_decisions_legacy_schema16_roles",
+        )
+        _create_event_asset_mapping_tables(connection)
+        connection.execute(
+            """INSERT INTO event_asset_mapping_decisions
+               SELECT * FROM event_asset_mapping_decisions_legacy_schema16_roles"""
+        )
+        connection.execute(
+            """INSERT INTO event_asset_mapping_receipts
+               SELECT * FROM event_asset_mapping_receipts_legacy_schema16_roles"""
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        raise RuntimeError(
+            f"Schema 16 mapping-role migration foreign-key violations: {violations[:3]}"
+        )
 
 
 def _create_market_bars_table(connection: sqlite3.Connection) -> None:
@@ -2079,6 +2136,7 @@ def open_ledger(path: Path) -> sqlite3.Connection:
     connection.executescript(SCHEMA)
     _upgrade_v15_projection_columns(connection)
     _upgrade_event_asset_mapping_tables(connection)
+    _upgrade_event_asset_mapping_roles_v16(connection)
     _upgrade_market_bars(connection)
     _upgrade_market_jobs_versioning(connection)
     _disable_unbound_automatic_asset_impacts(connection)

@@ -328,6 +328,7 @@ def map_event_assets(
     config_path: str | None = None,
     issuer_directory: IssuerDirectory | None = None,
     apply: bool = True,
+    force: bool = False,
 ) -> dict[str, Any]:
     today = today or dt.datetime.now(dt.timezone.utc).date()
     selected_policy = policy or load_asset_mapping_policy(config_path)
@@ -337,11 +338,12 @@ def map_event_assets(
         today=today,
         event_ids=event_ids,
         policy_sha256=selected_policy.policy_sha256,
-        only_unmapped=apply,
+        only_unmapped=apply and not force,
     )
     now = utc_now()
     result: dict[str, Any] = {
         "mode": "APPLY" if apply else "SHADOW",
+        "forced_reconciliation": bool(force),
         "policy_version": selected_policy.policy_version,
         "policy_sha256": selected_policy.policy_sha256,
         "selected_events": len(events),

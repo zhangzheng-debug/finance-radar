@@ -2,7 +2,7 @@
 
 > 面向个人研究者的只读金融事件证据雷达：持续发现多源事件，压缩重复报道，把人快速带回原始证据、修订时间线与事后行情；证据不足时明确保留不确定性。
 
-[所有者意图与系统细则](docs/OWNER_INTENT_AND_SYSTEM_DOCTRINE.md) · [当前状态](CURRENT_STATE.md) · [产品章程](docs/PRODUCT_CHARTER.md) · [采集来源与证据恢复](docs/SOURCE_CAPTURE_AND_EVIDENCE_RECOVERY.md) · [事件资产与价格反应 V1](docs/EVENT_ASSET_MARKET_REACTION_V1.md) · [下一阶段计划](docs/NEXT_PHASE_PLAN_2026-08-15.md) · [2026-08-13 目标一致性审计](reports/PROJECT_ALIGNMENT_AUDIT_2026-08-13.md) · [部署说明](deployment/README.md)
+[所有者意图与系统细则](docs/OWNER_INTENT_AND_SYSTEM_DOCTRINE.md) · [当前状态](CURRENT_STATE.md) · [产品章程](docs/PRODUCT_CHARTER.md) · [采集来源与证据恢复](docs/SOURCE_CAPTURE_AND_EVIDENCE_RECOVERY.md) · [事件资产与价格反应 V1](docs/EVENT_ASSET_MARKET_REACTION_V1.md) · [事件原子化与市场映射修复](docs/EVENT_ATOMICITY_MARKET_REPAIR.md) · [下一阶段计划](docs/NEXT_PHASE_PLAN_2026-08-15.md) · [2026-08-13 目标一致性审计](reports/PROJECT_ALIGNMENT_AUDIT_2026-08-13.md) · [部署说明](deployment/README.md)
 
 Finance Radar 不是交易终端，也不是自动事实裁判。系统收集并核验全极性金融事件；面向做空研究的特化只存在于“重大下行风险人工复核路由”层。模型只回答是否值得优先交给人核验，禁止输出 LONG/SHORT、价格方向、收益、仓位或交易许可。正式结论必须受确定性证据门和人工判断约束；代码中没有订单、持仓、余额或交易执行接口。
 

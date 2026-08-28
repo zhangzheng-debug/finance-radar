@@ -136,8 +136,8 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
         st.markdown(
             '<section class="capture-ai-result" aria-label="AI 解读">'
             '<div class="capture-ai-boundary-head">'
-            '<span>AI 解读</span>'
-            '<strong>当前事件无关联证据，因此启用 AI 解读来源文本；结果不参与风险评级。</strong>'
+            '<span>AI 阅读辅助</span>'
+            f'<strong>{escape(str(interpretation.get("boundary_zh") or "AI仅解释来源文本，不参与事件评级或价格判断。"))}</strong>'
             '</div>'
             f'<p>{escape(str(interpretation.get("one_line_zh") or ""))}</p>'
             '</section>',
@@ -145,20 +145,26 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
         )
         claims = interpretation.get("what_source_says") or []
         if claims:
-            st.markdown("**来源要点**")
-            for claim in claims[:4]:
+            st.markdown("**要点**")
+            for claim in claims[:2]:
                 if not isinstance(claim, dict):
                     continue
-                st.markdown(
-                    f"- {escape(str(claim.get('text_zh') or ''))}  "
-                    f"\n  原文：{escape(str(claim.get('quote') or ''))}"
-                )
+                st.markdown(f"- {escape(str(claim.get('text_zh') or ''))}")
 
 
 def public_research_signal_markup(
     detail: dict[str, object], public_copy: dict[str, object]
 ) -> str:
     """Render approved model semantics and available market observations compactly."""
+
+    role_order = {
+        "DIRECT_ASSET": 1,
+        "DIRECT_SECURITY": 1,
+        "US_LISTED_PROXY": 2,
+        "MARKET_BENCHMARK": 3,
+        "SECTOR_PROXY": 4,
+        "THEMATIC_PROXY": 5,
+    }
 
     reaction = detail.get("market_reaction")
     reaction = reaction if isinstance(reaction, dict) else {}
@@ -189,6 +195,7 @@ def public_research_signal_markup(
                 "return_pct": value,
                 "role_label": " ".join(str(item.get("role_label") or "").split()),
                 "proxy_label": " ".join(str(item.get("proxy_label") or "").split()),
+                "role": " ".join(str(item.get("role") or "").split()),
             }
         )
     context = detail.get("market_context")
@@ -212,6 +219,7 @@ def public_research_signal_markup(
             "observed_at": " ".join(str(item.get("observed_at") or "").split()),
             "role_label": " ".join(str(item.get("role_label") or "").split()),
             "proxy_label": " ".join(str(item.get("proxy_label") or "").split()),
+            "role": " ".join(str(item.get("role") or "").split()),
         }
 
     signal_rows: list[str] = []
@@ -247,7 +255,11 @@ def public_research_signal_markup(
             ),
         )
         selected = sorted(
-            by_window[selected_window], key=lambda item: str(item["symbol"])
+            by_window[selected_window],
+            key=lambda item: (
+                role_order.get(str(item.get("role") or ""), 99),
+                str(item["symbol"]),
+            ),
         )[:3]
         window_label = str(selected[0]["label"])
         values: list[str] = []
@@ -272,7 +284,13 @@ def public_research_signal_markup(
         )
     if prices:
         values: list[str] = []
-        for symbol, item in sorted(prices.items())[:3]:
+        for symbol, item in sorted(
+            prices.items(),
+            key=lambda pair: (
+                role_order.get(str(pair[1].get("role") or ""), 99),
+                pair[0],
+            ),
+        )[:3]:
             role = str(item.get("proxy_label") or item.get("role_label") or "")
             role_markup = f'<small>{escape(role)}</small>' if role else ""
             currency = str(item.get("currency") or "")

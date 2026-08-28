@@ -89,7 +89,7 @@ LEDGER_V15_TABLES = (
     "market_jobs",
     "market_bars",
 )
-EXPECTED_LEDGER_SCHEMA_VERSION = 15
+EXPECTED_LEDGER_SCHEMA_VERSION = 16
 LEDGER_V15_REQUIRED_COLUMNS = {
     "assets": ("asset_id", "asset_type", "symbol", "provider_symbol"),
     "event_asset_impacts": (
@@ -620,27 +620,27 @@ def _validate_ledger_v15_contract(connection: sqlite3.Connection) -> None:
         missing = sorted(set(required_columns) - columns)
         if missing:
             raise ValueError(
-                f"ledger schema 15 table {table} is missing required columns: "
+                f"ledger schema {EXPECTED_LEDGER_SCHEMA_VERSION} table {table} is missing required columns: "
                 + ", ".join(missing)
             )
     for table, expected in LEDGER_V15_REQUIRED_PRIMARY_KEYS.items():
         actual = _sqlite_primary_key(connection, table)
         if actual != expected:
             raise ValueError(
-                f"ledger schema 15 table {table} has invalid primary key: "
+                f"ledger schema {EXPECTED_LEDGER_SCHEMA_VERSION} table {table} has invalid primary key: "
                 f"expected={expected} actual={actual}"
             )
     for table, expected in LEDGER_V15_REQUIRED_UNIQUE_KEYS.items():
         if expected not in _sqlite_unique_keys(connection, table):
             raise ValueError(
-                f"ledger schema 15 table {table} is missing required unique key: {expected}"
+                f"ledger schema {EXPECTED_LEDGER_SCHEMA_VERSION} table {table} is missing required unique key: {expected}"
             )
     for table, expected_keys in LEDGER_V15_REQUIRED_FOREIGN_KEYS.items():
         actual = _sqlite_foreign_keys(connection, table)
         for expected in expected_keys:
             if expected not in actual:
                 raise ValueError(
-                    f"ledger schema 15 table {table} is missing required foreign key: {expected}"
+                    f"ledger schema {EXPECTED_LEDGER_SCHEMA_VERSION} table {table} is missing required foreign key: {expected}"
                 )
 
 
