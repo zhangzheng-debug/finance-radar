@@ -16,6 +16,18 @@
 
 完整符号、数据商符号、资产角色和中文展示名以 `config/event_asset_mapping_v1.json` 为准。没有高置信规则的候选资产保持休眠；启用前还要验证 Twelve Data/Binance 覆盖、交易时段和历史分钟数据完整性。
 
+可使用只读供应商目录审计验证“已启用规则”涉及的资产。启用资产缺失会使审计失败；尚未被规则引用的休眠资产只形成容量告警，不阻断现有生产功能：
+
+```bash
+sudo /opt/finance-radar/venv/bin/python \
+  /opt/finance-radar/current/scripts/audit_asset_provider_coverage.py \
+  --env-file /etc/finance-radar.env \
+  --json-output /opt/finance-radar/shared/reports/asset-provider-coverage.json \
+  --markdown-output /opt/finance-radar/shared/reports/asset-provider-coverage.md
+```
+
+该命令只读取 Binance 交易对目录和 Twelve Data ETF 目录，不创建行情任务、不修改事件或映射，也不接触账户、订单和交易接口。
+
 ## 已主动启用的映射
 
 - 单主题 BTC 事件：BTC 直接市场在前，IBIT 美国上市代理在后。
