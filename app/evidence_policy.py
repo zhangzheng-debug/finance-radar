@@ -12,7 +12,8 @@ import json
 import re
 import sqlite3
 from typing import Any, Mapping
-from urllib.parse import urlsplit
+
+from app.source_url_policy import is_public_source_url
 
 
 CONFLICTING_EVIDENCE_STATUSES = frozenset(
@@ -450,6 +451,12 @@ def register_sqlite_integrity_functions(connection: sqlite3.Connection) -> None:
         _sqlite_fact_quote_context_valid,
         deterministic=True,
     )
+    connection.create_function(
+        "public_source_url_ok",
+        1,
+        lambda value: int(is_public_source_url(value)),
+        deterministic=True,
+    )
 
 
 def _exact_contiguous_quote(value: Any, passage: str, *, field: str) -> str:
@@ -703,13 +710,7 @@ def is_conflicting_evidence_status(value: Any) -> bool:
 
 def is_http_evidence_url(value: Any) -> bool:
     text = _text(value)
-    if not text or len(text) > 2048:
-        return False
-    try:
-        parsed = urlsplit(text)
-    except ValueError:
-        return False
-    return parsed.scheme.casefold() in {"http", "https"} and bool(parsed.netloc)
+    return bool(text and len(text) <= 2048 and is_public_source_url(text))
 
 
 def is_primary_authority_tier(value: Any) -> bool:

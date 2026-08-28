@@ -142,7 +142,7 @@ Web Situation Room 取代 Telegram 成为主界面；系统明确为“全极性
 - `FR-EVD-007 · P`：Sharadar 等供应商表和启发式探测只能创建 `candidate`；只有独立证据流程可产生 `verified / weak / rejected`。
 - `FR-EVD-008 · P`：canonical event status、人工裁决的 `evidence_state` 轴、Evidence Agent status 和 risk-router evidence gate 是四个独立命名空间。risk-router 的 gate 不是 `PRIMARY_SUPPORTED_*` 时必须直接 `ABSTAIN`，且不得调用语义模型或显示置信度；任何命名空间都不能自动写另一个命名空间。
 - `FR-EVD-009 · P`：`citation_ready` 必须由当前事件版本、具体事实槽、主体绑定和可定位 P0/P1 支持关系自动派生；它不是人工审批、canonical status 或 Public 可见性门。未满足时事件仍公开，但只能显示与 `evidence_posture` 一致的来源归因和缺口，不得写成正式事实。
-- `FR-EVD-010 · P`：Public 的证据姿态固定为独立轴：`PRIMARY_SUPPORTED`、`PRIMARY_SOURCE_AVAILABLE`、`SOURCE_CAPTURED`、`NO_SOURCE`。缺口以 `evidence_gap_codes` 单独说明；证据姿态不得由风险路由、严重度、行情结果或人工流程进度推断。
+- `FR-EVD-010 · P`：Public 保留严格证据姿态轴：`PRIMARY_SUPPORTED`、`PRIMARY_SOURCE_AVAILABLE`、`SOURCE_CAPTURED`、`NO_SOURCE`，但列表主徽标使用独立的来源可访问轴：`CLAIM_SOURCE_LINKED`、`PRIMARY_SOURCE`、`PUBLIC_SOURCE`、`CAPTURE_ONLY`、`SOURCE_PROBLEM`、`NO_PUBLIC_SOURCE`。`citation_ready=false` 不得被展示成黄色“无原文”；只有真实来源异常使用警示色。两轴均不得由风险路由、严重度、行情结果或人工流程进度推断。
 
 首版 `evidence_gap_codes` 为 `MISSING_SUBJECT`、`MISSING_FACT_SUMMARY`、`MISSING_CITABLE_EVIDENCE`、`NO_CAPTURED_SOURCE`。Public 风险研判可以暴露 `route`、`confidence_applicable`、适用时的 `confidence`、`model_version`、`decision_source`、`evidence_state`、`evaluated_at`、`shadow` 和 `current`；缺失或非 current 不能伪装成 `NON_TARGET`。
 

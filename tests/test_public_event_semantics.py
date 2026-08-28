@@ -23,6 +23,7 @@ from app.services.capture_interpretation import CAPTURE_INTERPRETATION_PROMPT_VE
 from app.services.public_event_semantics import (
     derive_public_display_headline,
     derive_public_event_semantics,
+    derive_public_source_provenance,
     project_public_qwen_semantics,
     project_public_risk_assessment,
 )
@@ -75,6 +76,20 @@ def test_public_evidence_semantics_are_independent_of_workflow_state() -> None:
         "citation_ready": True,
         "evidence_posture": "PRIMARY_SUPPORTED",
         "evidence_gap_codes": [],
+        "source_provenance": {
+            "classification_version": "public-source-provenance-v1",
+            "access": "CLAIM_SOURCE_LINKED",
+            "origin_kind": "PRIMARY",
+            "displayable_source_count": 1,
+            "primary_source_count": 1,
+            "public_source_url_count": 1,
+            "captured_text_count": 0,
+            "problem_source_count": 0,
+        },
+        "claim_citation": {
+            "ready": True,
+            "supporting_passage_count": 1,
+        },
     }
 
     primary_available = derive_public_event_semantics(
@@ -91,6 +106,20 @@ def test_public_evidence_semantics_are_independent_of_workflow_state() -> None:
         "citation_ready": False,
         "evidence_posture": "PRIMARY_SOURCE_AVAILABLE",
         "evidence_gap_codes": ["MISSING_SUBJECT"],
+        "source_provenance": {
+            "classification_version": "public-source-provenance-v1",
+            "access": "PRIMARY_SOURCE",
+            "origin_kind": "PRIMARY",
+            "displayable_source_count": 2,
+            "primary_source_count": 1,
+            "public_source_url_count": 1,
+            "captured_text_count": 0,
+            "problem_source_count": 0,
+        },
+        "claim_citation": {
+            "ready": False,
+            "supporting_passage_count": 2,
+        },
     }
 
     captured = derive_public_event_semantics(
@@ -100,9 +129,11 @@ def test_public_evidence_semantics_are_independent_of_workflow_state() -> None:
             "reader_has_fact_summary": 0,
             "citable_evidence_count": 0,
             "captured_source_count": 1,
+            "captured_text_count": 1,
         }
     )
     assert captured["evidence_posture"] == "SOURCE_CAPTURED"
+    assert captured["source_provenance"]["access"] == "CAPTURE_ONLY"
     assert captured["evidence_gap_codes"] == [
         "MISSING_SUBJECT",
         "MISSING_FACT_SUMMARY",
@@ -111,7 +142,70 @@ def test_public_evidence_semantics_are_independent_of_workflow_state() -> None:
 
     no_source = derive_public_event_semantics({})
     assert no_source["evidence_posture"] == "NO_SOURCE"
+    assert no_source["source_provenance"]["access"] == "NO_PUBLIC_SOURCE"
     assert no_source["evidence_gap_codes"][-1] == "NO_CAPTURED_SOURCE"
+
+
+def test_source_provenance_uses_accessible_material_not_review_progress() -> None:
+    primary = derive_public_source_provenance(
+        {"reader_ready": 0, "captured_source_count": 1},
+        {
+            "authority_tier": "P0_official",
+            "canonical_url": "https://www.sec.gov/Archives/example.htm",
+            "title": "Issuer filing",
+        },
+    )
+    assert primary["access"] == "PRIMARY_SOURCE"
+    assert primary["origin_kind"] == "PRIMARY"
+
+    publisher = derive_public_source_provenance(
+        {"reader_ready": 0, "captured_source_count": 1},
+        {
+            "authority_tier": "P2",
+            "canonical_url": "https://publisher.example/story",
+            "summary": "A publisher-supplied summary.",
+        },
+    )
+    assert publisher["access"] == "PUBLIC_SOURCE"
+    assert publisher["origin_kind"] == "PUBLISHER"
+
+    saved = derive_public_source_provenance(
+        {"reader_ready": 0, "captured_source_count": 1},
+        {"summary": "A retained source receipt without a public URL."},
+    )
+    assert saved["access"] == "CAPTURE_ONLY"
+
+    problem = derive_public_source_provenance(
+        {"reader_ready": 0, "source_problem_count": 1}
+    )
+    assert problem["access"] == "SOURCE_PROBLEM"
+
+
+def test_source_provenance_rejects_non_public_urls() -> None:
+    for source_url in (
+        "file:///etc/passwd",
+        "http://localhost/private",
+        "http://127.0.0.1/private",
+        "http://10.0.0.8/private",
+        "https://user:secret@example.test/story",
+        "https://metadata.google.internal/computeMetadata/v1/",
+    ):
+        provenance = derive_public_source_provenance(
+            {"reader_ready": 0, "captured_source_count": 1},
+            {"authority_tier": "P0", "canonical_url": source_url},
+        )
+        assert provenance["access"] == "NO_PUBLIC_SOURCE"
+        assert provenance["public_source_url_count"] == 0
+        assert provenance["primary_source_count"] == 0
+
+    retained = derive_public_source_provenance(
+        {"reader_ready": 0, "captured_source_count": 1},
+        {
+            "canonical_url": "http://127.0.0.1/private",
+            "summary": "Retained source text remains available for inspection.",
+        },
+    )
+    assert retained["access"] == "CAPTURE_ONLY"
 
 
 def test_public_display_headline_preserves_provenance_modes() -> None:

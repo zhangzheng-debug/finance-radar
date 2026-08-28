@@ -88,6 +88,30 @@ ledger proves. The initial codes are `MISSING_SUBJECT`,
 `NO_CAPTURED_SOURCE`. A later vocabulary extension requires a versioned
 contract and tests.
 
+This strict posture remains an API and audit axis. It is not the primary badge
+or color in the Public feed because it answers whether the system may cite a
+specific claim, not whether a reader can open and inspect the source.
+
+## Public source provenance
+
+Every Public event also exposes a machine-derived `source_provenance` object.
+Its `access` value is the feed's primary source badge:
+
+| Value | Public meaning |
+|---|---|
+| `CLAIM_SOURCE_LINKED` | The current claim is bound to a locatable source passage. |
+| `PRIMARY_SOURCE` | A regulator, exchange, issuer, government, or other P0/P1 source URL is available. |
+| `PUBLIC_SOURCE` | A public publisher or news-source URL is available. |
+| `CAPTURE_ONLY` | Source text was retained, but no public URL is currently available. |
+| `SOURCE_PROBLEM` | A retained source is deleted or otherwise has a recorded availability problem. |
+| `NO_PUBLIC_SOURCE` | No displayable URL or retained source text is available. |
+
+`PRIMARY_SOURCE`, `PUBLIC_SOURCE`, and `CAPTURE_ONLY` are normal material
+states, not warnings. Only a recorded source problem uses warning styling.
+`citation_ready` and `claim_citation.ready` remain strict and independent; a
+record may therefore expose `source_provenance.access=PRIMARY_SOURCE` while
+`claim_citation.ready=false`.
+
 ## Public risk assessment
 
 Risk assessment is a separate optional object. When current, it may expose
@@ -105,9 +129,10 @@ Risk assessment is a separate optional object. When current, it may expose
 ## Reader-facing behavior
 
 - All canonical records contribute to Public event and facet counts.
-- Event detail exposes the evidence posture and keeps it semantically separate
-  from risk assessment. The feed omits the repetitive `SOURCE_CAPTURED` chip
-  while retaining distinct posture chips and concrete source attribution.
+- Event detail exposes source provenance, strict claim-citation status, and risk
+  assessment as separate axes. The feed uses source provenance for its concise
+  badge and color; it never converts `citation_ready=false` into a yellow source
+  warning.
 - An old direct link to a non-citation-ready record remains readable using its
   captured source text or neutral record title; internal gap inventories do not
   become repetitive Public warning copy.

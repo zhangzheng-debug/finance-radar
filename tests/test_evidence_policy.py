@@ -7,6 +7,7 @@ import pytest
 from app.evidence_policy import (
     build_dual_human_selected_evidence_receipt,
     dual_human_selected_evidence_receipt_matches,
+    is_http_evidence_url,
     is_primary_authority_tier,
 )
 
@@ -40,6 +41,12 @@ _CLAIM_RECEIPT_ARGS = {
     ("field", "value", "reason"),
     (
         ("evidence_url", "ftp://sec.example/filing", "MISSING_HTTP_EVIDENCE_URL"),
+        ("evidence_url", "http://127.0.0.1/filing", "MISSING_HTTP_EVIDENCE_URL"),
+        (
+            "evidence_url",
+            "https://user:secret@sec.example/filing",
+            "MISSING_HTTP_EVIDENCE_URL",
+        ),
         ("evidence_passage", "short", "MISSING_EXACT_PASSAGE"),
         ("authority_tier", "P2", "SOURCE_NOT_EXACT_P0_P1"),
         ("authority_tier", "P00", "SOURCE_NOT_EXACT_P0_P1"),
@@ -87,6 +94,20 @@ def test_primary_authority_tier_accepts_canonical_qualified_values(tier: str) ->
 @pytest.mark.parametrize("tier", ("", "P2", "P00", "P01", "P10", "P0OFFICIAL"))
 def test_primary_authority_tier_rejects_discovery_and_lookalike_prefixes(tier: str) -> None:
     assert not is_primary_authority_tier(tier)
+
+
+@pytest.mark.parametrize(
+    "url",
+    (
+        "http://localhost/filing",
+        "http://10.0.0.8/filing",
+        "http://169.254.169.254/latest/meta-data/",
+        "https://user:secret@example.com/filing",
+        "file:///etc/passwd",
+    ),
+)
+def test_evidence_url_must_be_safe_for_public_readers(url: str) -> None:
+    assert is_http_evidence_url(url) is False
 
 
 def test_dual_receipt_binds_current_source_revision_and_checksum() -> None:

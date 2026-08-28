@@ -26,6 +26,7 @@ from app.web.components import (
     public_event_evidence_posture,
     public_event_quality,
     public_event_risk_assessment,
+    public_event_source_provenance,
     public_event_state,
     score_dimensions,
     source_health_state,
@@ -323,6 +324,56 @@ def test_public_evidence_posture_prefers_contract_and_uses_conservative_fallback
     assert captured["key"] == "SOURCE_CAPTURED"
 
 
+def test_public_source_provenance_separates_access_from_claim_citation() -> None:
+    linked = public_event_source_provenance(
+        {
+            "citation_ready": True,
+            "source_provenance": {"access": "CLAIM_SOURCE_LINKED"},
+        }
+    )
+    assert linked["label"] == "原文支持"
+    assert linked["status_class"] == "verified"
+
+    primary = public_event_source_provenance(
+        {
+            "citation_ready": False,
+            "evidence_posture": "SOURCE_CAPTURED",
+            "source_provenance": {
+                "classification_version": "public-source-provenance-v1",
+                "access": "PRIMARY_SOURCE",
+            },
+        }
+    )
+    assert primary["label"] == "一手来源"
+    assert primary["status_class"] == "source-primary"
+
+    publisher = public_event_source_provenance(
+        {
+            "citation_ready": False,
+            "public_source_url_count": 1,
+            "captured_source_count": 1,
+        }
+    )
+    assert publisher["label"] == "来源可查"
+    assert publisher["status_class"] == "source-public"
+
+    capture = public_event_source_provenance(
+        {"citation_ready": False, "captured_text_count": 1}
+    )
+    assert capture["label"] == "来源已保存"
+    assert capture["status_class"] == "source-capture"
+
+    filtered_only = public_event_source_provenance(
+        {
+            "citation_ready": False,
+            "evidence_posture": "SOURCE_CAPTURED",
+            "captured_source_count": 1,
+            "displayable_source_count": 0,
+        }
+    )
+    assert filtered_only["key"] == "NO_PUBLIC_SOURCE"
+
+
 def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() -> None:
     waiting = public_event_risk_assessment({"risk_assessment": None})
     assert waiting["label"] == ""
@@ -351,6 +402,7 @@ def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() ->
         {
             "semantic_assessment": {
                 "polarity": "ADVERSE",
+                "materiality": "MATERIAL_ADVERSE",
                 "adverse_strength": "HIGH",
                 "semantic_priority": "PRIORITY_REVIEW",
                 "assessment_scope": "SOURCE_CONDITIONAL",
@@ -365,6 +417,7 @@ def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() ->
         {
             "semantic_assessment": {
                 "polarity": "ADVERSE",
+                "materiality": "MATERIAL_ADVERSE",
                 "adverse_strength": "HIGH",
                 "semantic_priority": "PRIORITY_REVIEW",
                 "assessment_scope": "SOURCE_CONDITIONAL",
@@ -379,6 +432,9 @@ def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() ->
         }
     )
     assert qwen["label"] == "负面 · 强度高"
+    assert qwen["polarity_label"] == "负面"
+    assert qwen["materiality_label"] == "重大"
+    assert qwen["strength_label"] == "高"
     assert qwen["explanation"] == "基于来源文本的风险语义判断。"
     assert qwen["basis_label"] == "基于来源文本"
     assert qwen["confidence"] == ""
@@ -497,6 +553,7 @@ def test_public_card_never_exposes_legacy_workflow_disposition() -> None:
     )
     assert "来源已收录" not in ordinary
     assert "来源摘录" not in ordinary
+    assert "来源已保存" in ordinary
     assert ">已核验<" not in ordinary
 
     excluded = event_feed_row(
@@ -508,7 +565,8 @@ def test_public_card_never_exposes_legacy_workflow_disposition() -> None:
         },
         public=True,
     )
-    assert "事件记录" in excluded
+    assert "来源异常" not in excluded
+    assert "status-source-none" in excluded
     assert ">已排除<" not in excluded
 
 

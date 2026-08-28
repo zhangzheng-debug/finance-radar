@@ -18,7 +18,6 @@ from itertools import islice
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable, Literal
-from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -35,6 +34,7 @@ from app.models.qwen_risk_contract import (
     QWEN_RISK_CONTRACT_VERSION,
     QWEN_RISK_PROMPT_VERSION,
 )
+from app.source_url_policy import public_source_url
 from app.services import (
     CAPTURE_INTERPRETATION_CONTRACT,
     CAPTURE_INTERPRETATION_PROMPT_SHA256,
@@ -1191,7 +1191,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "discovery_source",
         "reviewed_at",
         "captured_source_count",
+        "displayable_source_count",
         "citable_evidence_count",
+        "primary_source_url_count",
+        "public_source_url_count",
+        "captured_text_count",
+        "source_problem_count",
         "public_fact_summary",
         "claim_subject",
         "claim_action",
@@ -1239,7 +1244,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
 
         result = {key: value.get(key) for key in public_event_fields}
-        result.update(derive_public_event_semantics(value))
+        result.update(derive_public_event_semantics(value, captured_source))
         result.update(derive_public_display_headline(value, captured_source))
         result["risk_assessment"] = project_public_risk_assessment(
             risk_run,
@@ -1384,7 +1389,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return {}
 
     def public_evidence_item(value: dict[str, Any]) -> dict[str, Any]:
-        return {key: value.get(key) for key in public_evidence_fields}
+        result = {key: value.get(key) for key in public_evidence_fields}
+        result["evidence_url"] = public_source_url(value.get("evidence_url"))
+        return result
 
     def public_captured_source(value: dict[str, Any]) -> dict[str, Any]:
         """Expose a bounded discovery receipt without calling it evidence."""
@@ -1403,28 +1410,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else normalized[: limit - 1].rstrip() + "…"
             )
 
-        source_url = str(value.get("canonical_url") or "").strip()
-        try:
-            parsed_url = urlsplit(source_url)
-        except ValueError:
-            parsed_url = None
-        if (
-            parsed_url is None
-            or parsed_url.scheme.lower() not in {"http", "https"}
-            or not parsed_url.hostname
-            or parsed_url.username
-            or parsed_url.password
-        ):
-            source_url = ""
-        elif parsed_url.hostname.casefold() in {"localhost", "metadata.google.internal"}:
-            source_url = ""
-        else:
-            try:
-                source_address = ipaddress.ip_address(parsed_url.hostname)
-            except ValueError:
-                source_address = None
-            if source_address is not None and not source_address.is_global:
-                source_url = ""
+        source_url = public_source_url(value.get("canonical_url"))
         excerpt_raw = normalized_text(value.get("summary"))
         return {
             "source_name": value.get("source_name"),
@@ -1434,7 +1420,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "source_excerpt": bounded_text(value.get("summary"), 1200),
             "source_excerpt_original_length": len(excerpt_raw),
             "source_excerpt_truncated": len(excerpt_raw) > 1200,
-            "source_url": source_url or None,
+            "source_url": source_url,
             "source_published_at": value.get("source_published_at"),
             "local_received_at": value.get("local_received_at"),
             "latest_revision_no": value.get("latest_revision_no"),
@@ -1690,6 +1676,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if isinstance(value.get("preferred_source"), dict)
             else {}
         )
+        source_link = (
+            value.get("source_link")
+            if isinstance(value.get("source_link"), dict)
+            else {}
+        )
         result: dict[str, Any] = {
             "event": public_event,
             "current_version": {
@@ -1699,6 +1690,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "preferred_source": (
                 public_captured_source(preferred_source)
                 if preferred_source
+                else {}
+            ),
+            "source_link": (
+                public_captured_source(source_link)
+                if source_link
                 else {}
             ),
             "evidence_count": len(evidence),
@@ -2351,7 +2347,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         return envelope(
             request,
-            cached_read(f"public-event-dossier-v3:{event_id}", 20.0, read_dossier),
+            cached_read(f"public-event-dossier-v4:{event_id}", 20.0, read_dossier),
         )
 
     @application.get("/api/v1/events/{event_id}")

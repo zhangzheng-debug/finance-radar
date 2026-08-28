@@ -238,6 +238,9 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "信息依据" not in rendered
     assert "影响路径" not in rendered
     assert "原文支持" in rendered
+    assert "千问风险研判" in rendered
+    assert "模型接口已预留" in rendered
+    assert "做空重大性" in rendered
     assert "<article><span>模型研判</span>" not in rendered
     assert "自动研判 · 暂不判断" not in rendered
     assert "时间口径" not in rendered
@@ -278,6 +281,7 @@ def test_public_valid_qwen_signal_keeps_its_evidence_basis(
         payload = _fake_api(path, **kwargs)
         semantic = {
             "polarity": "ADVERSE",
+            "materiality": "MATERIAL_ADVERSE",
             "adverse_strength": "HIGH",
             "semantic_priority": "PRIORITY_REVIEW",
             "assessment_scope": assessment_scope,
@@ -305,8 +309,12 @@ def test_public_valid_qwen_signal_keeps_its_evidence_basis(
 
     assert not page.exception
     assert "研究信号" in rendered
-    assert "千问" in rendered
-    assert "负面 · 强度高" in rendered
+    assert "千问风险研判" in rendered
+    assert "方向</small><strong>负面" in rendered
+    assert "做空重大性</small><strong>重大" in rendered
+    assert "强度</small><strong>高" in rendered
+    assert "自动研判" in rendered
+    assert "模型接口已预留" not in rendered
     assert basis_label in rendered
     assert "HUMAN_GOLD_TRAINED_QWEN" not in rendered
     assert "PUBLIC_APPROVED" not in rendered
@@ -388,7 +396,7 @@ def test_public_detail_shows_only_available_market_reaction(monkeypatch) -> None
     assert "-3.12%" not in rendered
 
 
-def test_public_detail_hides_empty_market_reaction(monkeypatch) -> None:
+def test_public_detail_hides_empty_market_reaction_but_keeps_qwen_slot(monkeypatch) -> None:
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(web_common, "api_request", _fake_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10)
@@ -398,7 +406,9 @@ def test_public_detail_hides_empty_market_reaction(monkeypatch) -> None:
 
     assert not page.exception
     assert "消息发布后的市场变化" not in rendered
-    assert 'class="market-reaction research-signals"' not in rendered
+    assert 'class="market-reaction research-signals"' in rendered
+    assert "千问风险研判" in rendered
+    assert "模型接口已预留" in rendered
     assert "PENDING" not in rendered
     assert "MISSED" not in rendered
 
@@ -561,6 +571,14 @@ def test_public_preview_reports_changes_since_last_view(monkeypatch) -> None:
                 **data["event"],
                 "current_version": revision["version"],
                 "last_updated_at": f"2026-07-1{7 + revision['version']}T12:34:00+00:00",
+                "source_provenance": {
+                    "classification_version": "public-source-provenance-v1",
+                    "access": (
+                        "PUBLIC_SOURCE"
+                        if revision["version"] == 1
+                        else "PRIMARY_SOURCE"
+                    ),
+                },
             }
             data["current_version"] = {
                 **data["current_version"],
@@ -596,6 +614,9 @@ def test_public_preview_reports_changes_since_last_view(monkeypatch) -> None:
 
     assert not page.exception
     assert "自上次查看后的变化" in rendered
+    assert "来源状态：来源可查 → 一手来源" in rendered
+    assert "PUBLIC_SOURCE" not in rendered
+    assert "PRIMARY_SOURCE" not in rendered
     assert "事件版本：1 → 2" in rendered
     assert "关联证据：新增 1 条，移除 0 条" in rendered
 

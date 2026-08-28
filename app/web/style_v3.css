@@ -643,6 +643,11 @@ html, body, [class*="css"] {
 .feed-signal.status-candidate,
 .feed-signal.status-weak { color: var(--fr-amber); }
 .feed-signal.status-rejected { color: var(--fr-red); }
+.feed-signal.status-source-primary { color: var(--fr-cyan); }
+.feed-signal.status-source-public { color: #66a8ff; }
+.feed-signal.status-source-capture,
+.feed-signal.status-source-none { color: var(--fr-muted); }
+.feed-signal.status-source-problem { color: var(--fr-amber); }
 
 .feed-meta {
     gap: 5px;
@@ -667,6 +672,11 @@ html, body, [class*="css"] {
 .feed-chip.status-candidate,
 .feed-chip.status-weak { color: var(--fr-amber); border-color: rgba(245, 180, 83, .32); }
 .feed-chip.status-rejected { color: var(--fr-red); border-color: rgba(255, 107, 122, .30); }
+.feed-chip.status-source-primary { color: var(--fr-cyan); border-color: rgba(56, 199, 236, .32); }
+.feed-chip.status-source-public { color: #66a8ff; border-color: rgba(102, 168, 255, .32); }
+.feed-chip.status-source-capture,
+.feed-chip.status-source-none { color: var(--fr-muted); border-color: rgba(121, 145, 166, .24); }
+.feed-chip.status-source-problem { color: var(--fr-amber); border-color: rgba(245, 180, 83, .32); }
 .feed-chip.authority-p0 { color: var(--fr-p0); border-color: rgba(233, 196, 106, .42); }
 .feed-chip.authority-p1 { color: var(--fr-p1); border-color: rgba(142, 202, 230, .34); }
 .feed-chip.authority-p2 { color: var(--fr-p2); }
@@ -1433,6 +1443,39 @@ code,
 .research-signal-row > strong {
   color: var(--fr-amber);
   font-size: .9rem;
+}
+
+.qwen-signal-row {
+  align-items: center;
+}
+
+.qwen-signal-metrics {
+  display: flex;
+  flex: 1 1 24rem;
+  flex-wrap: wrap;
+  gap: .55rem 1.25rem;
+}
+
+.qwen-signal-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .38rem;
+}
+
+.qwen-signal-metric small,
+.qwen-slot-state {
+  color: var(--fr-text-dim);
+  font-size: .7rem;
+}
+
+.qwen-signal-metric strong {
+  color: var(--fr-text-1);
+  font-size: .86rem;
+}
+
+.qwen-slot-state {
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .market-signal-row {
