@@ -267,6 +267,49 @@ def test_all_exposure_axes_and_legacy_issuer_alias_are_excluded(tmp_path: Path) 
     }
 
 
+def test_provisional_legacy_issuer_is_conservative_exposure_not_candidate_eligibility(
+    tmp_path: Path,
+) -> None:
+    old = _provider("old")
+    old_alias = _provider("old-alias")
+    clean = _provider("clean")
+    providers = [old, old_alias, clean]
+    owners = [
+        _owner(
+            row,
+            event=f"event-{row['sample_id']}",
+            entity=f"entity-{row['sample_id']}",
+            chain=f"chain-{row['sample_id']}",
+        )
+        for row in providers
+    ]
+    maps = [
+        _map_row("old", "event-old", "issuer:legacy", quality="PROVISIONAL_RAW_TICKER"),
+        _map_row("old-alias", "event-old-alias", "issuer:legacy"),
+        _map_row("clean", "event-clean", "issuer:clean"),
+        _map_row("train", "event-train", "issuer:train"),
+    ]
+    paths = _fixture_files(
+        tmp_path,
+        providers,
+        owners,
+        maps,
+        [_exposure("train", "event-train", "issuer:train", "chain-train", "d" * 64)],
+        ["old"],
+    )
+
+    manifest = _run(paths, tmp_path / "out", general=1, high=0, legacy=1)
+
+    selected = (tmp_path / "out" / PROVIDER_OUTPUT).read_text(encoding="utf-8")
+    assert '"sample_id":"clean"' in selected
+    assert '"sample_id":"old-alias"' not in selected
+    assert manifest["exposure_isolation"]["legacy_strict60_resolved_for_exposure_only"] is True
+    assert manifest["exposure_isolation"]["legacy_strict60_resolution_quality_counts"] == {
+        "PROVISIONAL_RAW_TICKER": 1,
+    }
+    assert manifest["selection"]["allowed_candidate_resolution_qualities"] == ["PREFIX:STRONG"]
+
+
 def test_rejects_answer_bearing_input_before_writing_output(tmp_path: Path) -> None:
     bad = _provider("bad")
     bad["content"]["materiality"] = "MATERIAL_ADVERSE"

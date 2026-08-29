@@ -780,17 +780,18 @@ def select_issuer_isolated_benchmark_v2(
     training_axis_counts = {axis: len(values) for axis, values in exposures.items()}
 
     # The consumed strict60 contributes every isolation axis, not just its IDs.
+    # It is a superseded diagnostic set, so a resolved provisional issuer may be
+    # used here for conservative exposure blocking.  This does not make that
+    # row benchmark-eligible: newly selected candidates still must resolve with
+    # an explicit STRONG quality in _strong_parse_reasons().
+    legacy_resolution_quality_counts: Counter[str] = Counter()
     for sample_id in legacy_ids:
         owner = owner_by_id[sample_id]
         event_id = _identifier(owner.get("source_event_id") or owner.get("event_id"))
         canonical_key, legacy_quality = canonical.resolve(
             sample_id, event_id, context=f"legacy strict60 {sample_id}",
         )
-        if not _is_strong_resolution_quality(legacy_quality):
-            raise ValueError(
-                f"legacy strict60 {sample_id}: canonical issuer is not strong-resolved: "
-                f"{legacy_quality}"
-            )
+        legacy_resolution_quality_counts[legacy_quality] += 1
         declared = _identifier(owner.get("canonical_issuer_key") or owner.get("canonical_issuer_group"))
         if declared and _normalized_identifier(declared) != _normalized_identifier(canonical_key):
             raise ValueError(f"legacy strict60 {sample_id}: owner/map canonical issuer conflict")
@@ -1030,6 +1031,10 @@ def select_issuer_isolated_benchmark_v2(
                 },
                 "training_exposure_split_counts": exposure_summary["exposure_split_counts"],
                 "legacy_strict60_all_axes_added_to_exposure_union": True,
+                "legacy_strict60_resolved_for_exposure_only": True,
+                "legacy_strict60_resolution_quality_counts": dict(
+                    sorted(legacy_resolution_quality_counts.items())
+                ),
                 "selected_overlap_counts": selected_overlap_counts,
                 "all_selected_overlap_counts_zero": not any(selected_overlap_counts.values()),
             },
@@ -1085,6 +1090,9 @@ def select_issuer_isolated_benchmark_v2(
                 "prices_used": False,
                 "human_gold_claimed": False,
                 "legacy_v1_classification": "AI_NOT_HUMAN_GOLD",
+                "legacy_strict60_resolution_quality_counts": dict(
+                    sorted(legacy_resolution_quality_counts.items())
+                ),
             },
             "production_model_changed": False,
         }
