@@ -24,13 +24,25 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.models.qwen_risk_contract import validate_semantic_payload  # noqa: E402
+from app.models.qwen_risk_contract import (  # noqa: E402
+    expected_semantic_payload,
+    validate_semantic_payload,
+)
+from app.models.risk_label_contract import MATERIALITY, POLARITIES  # noqa: E402
 
 
 DATASET_ROLES = frozenset(
     {"DEV_SELECTION_ONLY", "SEALED_BENCHMARK_ONLY", "DIAGNOSTIC_ONLY"}
 )
 TARGET_CONTRACT = "core-v1"
+LEGACY_MODEL_OUTPUT_CONTRACT = "core-payload-v1"
+AXES_MODEL_OUTPUT_CONTRACT = "core-axes-v1"
+MODEL_OUTPUT_CONTRACTS = frozenset(
+    {LEGACY_MODEL_OUTPUT_CONTRACT, AXES_MODEL_OUTPUT_CONTRACT}
+)
+AXES_FIELDS = frozenset({"materiality", "polarity"})
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+GENERATION_CONFIG_VERSION = "qwen-semantic-greedy-v1"
 BASE_MODEL_FULL_HASH_MAX_BYTES = 8 * 1024 * 1024
 BASE_MODEL_SAMPLE_BYTES = 1024 * 1024
 ADAPTER_CONFIG_NAME = "adapter_config.json"
@@ -145,11 +157,299 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
+def extract_model_output(
+    text: str, *, model_output_contract: str
+) -> dict[str, Any] | None:
+    """Parse model output according to the declared raw-output contract."""
+
+    if model_output_contract == LEGACY_MODEL_OUTPUT_CONTRACT:
+        return extract_json_object(text)
+    if model_output_contract != AXES_MODEL_OUTPUT_CONTRACT:
+        raise ValueError(f"unsupported model_output_contract: {model_output_contract}")
+    try:
+        value = json.loads(str(text or "").strip())
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def normalize_payload(value: dict[str, Any] | None) -> dict[str, str] | None:
     if not isinstance(value, dict):
         return None
     fields = ("materiality", "polarity", "adverse_strength", "semantic_priority")
     return {field: str(value.get(field) or "").strip().upper() for field in fields}
+
+
+def normalize_model_output(
+    value: Any,
+    *,
+    model_output_contract: str,
+    allow_negative_polarity_alias: bool = False,
+) -> dict[str, Any]:
+    """Normalize one raw model object and derive the four-field semantic payload."""
+
+    if model_output_contract not in MODEL_OUTPUT_CONTRACTS:
+        raise ValueError(f"unsupported model_output_contract: {model_output_contract}")
+    if not isinstance(allow_negative_polarity_alias, bool):
+        raise ValueError("allow_negative_polarity_alias must be boolean")
+    if not isinstance(value, dict):
+        return {
+            "normalized_model_output": None,
+            "full_payload": None,
+            "issues": ["payload_not_object"],
+            "polarity_alias_applied": False,
+        }
+
+    alias_applied = False
+    if model_output_contract == LEGACY_MODEL_OUTPUT_CONTRACT:
+        normalized = normalize_payload(value)
+        if normalized is not None and normalized["polarity"] == "NEGATIVE":
+            if allow_negative_polarity_alias:
+                normalized["polarity"] = "ADVERSE"
+                alias_applied = True
+        issues = validate_semantic_payload(normalized)
+        if (
+            normalized is not None
+            and normalized["polarity"] == "NEGATIVE"
+            and not allow_negative_polarity_alias
+        ):
+            issues = ["negative_polarity_alias_disabled", *issues]
+        return {
+            "normalized_model_output": normalized,
+            "full_payload": normalized,
+            "issues": issues,
+            "polarity_alias_applied": alias_applied,
+        }
+
+    extra = sorted(set(value) - AXES_FIELDS)
+    missing = sorted(AXES_FIELDS - set(value))
+    issues: list[str] = []
+    if extra:
+        issues.append("model_output_unsupported_fields:" + ",".join(extra))
+    if missing:
+        issues.append("model_output_missing_fields:" + ",".join(missing))
+    normalized_axes = {
+        field: str(value.get(field) or "").strip().upper()
+        for field in sorted(AXES_FIELDS)
+    }
+    if normalized_axes["polarity"] == "NEGATIVE":
+        if allow_negative_polarity_alias:
+            normalized_axes["polarity"] = "ADVERSE"
+            alias_applied = True
+        else:
+            issues.append("negative_polarity_alias_disabled")
+    if normalized_axes["materiality"] not in MATERIALITY:
+        issues.append("invalid_materiality")
+    if normalized_axes["polarity"] not in POLARITIES:
+        issues.append("invalid_polarity")
+    if issues:
+        return {
+            "normalized_model_output": normalized_axes,
+            "full_payload": None,
+            "issues": issues,
+            "polarity_alias_applied": alias_applied,
+        }
+    full_payload = expected_semantic_payload(
+        normalized_axes["materiality"], normalized_axes["polarity"]
+    )
+    full_issues = validate_semantic_payload(full_payload)
+    if full_issues:
+        raise ValueError(f"derived semantic payload is invalid: {full_issues}")
+    return {
+        "normalized_model_output": normalized_axes,
+        "full_payload": full_payload,
+        "issues": [],
+        "polarity_alias_applied": alias_applied,
+    }
+
+
+def normalize_expected_payload(
+    model_target: Any,
+    *,
+    model_output_contract: str,
+    semantic_target: Any = None,
+) -> tuple[dict[str, str] | None, list[str]]:
+    """Validate model target and return the full four-field semantic truth."""
+
+    if model_output_contract == AXES_MODEL_OUTPUT_CONTRACT:
+        normalized_model_target = normalize_model_output(
+            model_target,
+            model_output_contract=model_output_contract,
+            allow_negative_polarity_alias=False,
+        )
+        issues = [
+            f"model_target:{issue}"
+            for issue in normalized_model_target["issues"]
+        ]
+        if semantic_target is None:
+            issues.append("semantic_target:missing")
+            return None, issues
+        semantic_issues = validate_semantic_payload(semantic_target)
+        issues.extend(f"semantic_target:{issue}" for issue in semantic_issues)
+        normalized_semantic_target = normalize_payload(semantic_target)
+        if issues or normalized_semantic_target is None:
+            return None, issues
+        if normalized_semantic_target != normalized_model_target["full_payload"]:
+            return None, ["semantic_target:inconsistent_with_model_target"]
+        return normalized_semantic_target, []
+    if model_output_contract != LEGACY_MODEL_OUTPUT_CONTRACT:
+        raise ValueError(f"unsupported model_output_contract: {model_output_contract}")
+    issues = validate_semantic_payload(model_target)
+    return normalize_payload(model_target), issues
+
+
+def _row_contract_binding(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
+    metadata = row.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError(f"dataset line {line_number} metadata missing")
+    target_contract = str(metadata.get("target_contract") or "").strip()
+    if target_contract != TARGET_CONTRACT:
+        raise ValueError(
+            f"dataset line {line_number} target_contract must be {TARGET_CONTRACT}"
+        )
+    raw_model_output_contract = metadata.get("model_output_contract")
+    model_output_contract_explicit = raw_model_output_contract is not None
+    if model_output_contract_explicit and not isinstance(
+        raw_model_output_contract, str
+    ):
+        raise ValueError(
+            f"dataset line {line_number} model_output_contract must be text"
+        )
+    model_output_contract = (
+        LEGACY_MODEL_OUTPUT_CONTRACT
+        if not model_output_contract_explicit
+        else str(raw_model_output_contract).strip()
+    )
+    if model_output_contract not in MODEL_OUTPUT_CONTRACTS:
+        raise ValueError(
+            f"dataset line {line_number} unsupported model_output_contract: "
+            f"{model_output_contract!r}"
+        )
+
+    raw_prompt_version = metadata.get("prompt_version")
+    raw_prompt_sha256 = metadata.get("prompt_sha256")
+    if raw_prompt_version is not None and not isinstance(raw_prompt_version, str):
+        raise ValueError(f"dataset line {line_number} prompt_version must be text")
+    if raw_prompt_sha256 is not None and not isinstance(raw_prompt_sha256, str):
+        raise ValueError(f"dataset line {line_number} prompt_sha256 must be text")
+    prompt_version = (
+        str(raw_prompt_version).strip() if raw_prompt_version is not None else None
+    )
+    prompt_sha256 = (
+        str(raw_prompt_sha256).strip().lower()
+        if raw_prompt_sha256 is not None
+        else None
+    )
+    if (prompt_version is None) != (prompt_sha256 is None):
+        raise ValueError(
+            f"dataset line {line_number} prompt_version/prompt_sha256 must appear together"
+        )
+    if model_output_contract_explicit and (not prompt_version or not prompt_sha256):
+        raise ValueError(
+            f"dataset line {line_number} explicit model_output_contract requires prompt identity"
+        )
+    if prompt_version is not None:
+        if not prompt_version:
+            raise ValueError(f"dataset line {line_number} prompt_version is empty")
+        if not prompt_sha256 or not SHA256_RE.fullmatch(prompt_sha256):
+            raise ValueError(f"dataset line {line_number} prompt_sha256 is invalid")
+        messages = row.get("messages")
+        system_messages = [
+            message
+            for message in messages or []
+            if isinstance(message, dict)
+            and str(message.get("role") or "").strip().lower() == "system"
+        ]
+        if (
+            len(system_messages) != 1
+            or not messages
+            or system_messages[0] is not messages[0]
+            or not isinstance(system_messages[0].get("content"), str)
+        ):
+            raise ValueError(
+                f"dataset line {line_number} prompt binding requires one leading system message"
+            )
+        actual_prompt_sha256 = hashlib.sha256(
+            system_messages[0]["content"].encode("utf-8")
+        ).hexdigest()
+        if actual_prompt_sha256 != prompt_sha256:
+            raise ValueError(f"dataset line {line_number} system prompt SHA256 mismatch")
+    return {
+        "target_contract": target_contract,
+        "model_output_contract": model_output_contract,
+        "model_output_contract_explicit": model_output_contract_explicit,
+        "legacy_compatibility_mode": not model_output_contract_explicit,
+        "prompt_version": prompt_version,
+        "prompt_sha256": prompt_sha256,
+        "prompt_binding_verified": prompt_version is not None,
+    }
+
+
+def dataset_contract_binding(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        raise ValueError("evaluation dataset is empty")
+    bindings = [
+        _row_contract_binding(row, line_number=index)
+        for index, row in enumerate(rows, start=1)
+    ]
+    first = bindings[0]
+    for index, binding in enumerate(bindings[1:], start=2):
+        if binding != first:
+            raise ValueError(f"dataset line {index} model/prompt contract mismatch")
+    return first
+
+
+def explicit_generation_config(tokenizer: Any, *, max_new_tokens: int) -> dict[str, Any]:
+    """Resolve every generation setting whose inheritance could change decoding."""
+
+    if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int):
+        raise ValueError("max_new_tokens must be an integer")
+    if max_new_tokens < 1:
+        raise ValueError("max_new_tokens must be positive")
+    eos_token_id = getattr(tokenizer, "eos_token_id", None)
+    if (
+        isinstance(eos_token_id, bool)
+        or not isinstance(eos_token_id, int)
+        or eos_token_id < 0
+    ):
+        raise ValueError("tokenizer eos_token_id must be a nonnegative integer")
+    pad_token_id = getattr(tokenizer, "pad_token_id", None)
+    if pad_token_id is None:
+        pad_token_id = eos_token_id
+    if (
+        isinstance(pad_token_id, bool)
+        or not isinstance(pad_token_id, int)
+        or pad_token_id < 0
+    ):
+        raise ValueError("tokenizer pad_token_id must be a nonnegative integer or None")
+    return {
+        "max_new_tokens": max_new_tokens,
+        "min_new_tokens": 0,
+        "do_sample": False,
+        "repetition_penalty": 1.0,
+        "encoder_repetition_penalty": 1.0,
+        "no_repeat_ngram_size": 0,
+        "num_beams": 1,
+        "num_beam_groups": 1,
+        "num_return_sequences": 1,
+        "use_cache": True,
+        "eos_token_id": eos_token_id,
+        "pad_token_id": pad_token_id,
+    }
+
+
+def polarity_alias_report(*, enabled: bool, applied_rows: int) -> dict[str, Any]:
+    if not isinstance(enabled, bool):
+        raise ValueError("polarity alias enabled flag must be boolean")
+    if isinstance(applied_rows, bool) or not isinstance(applied_rows, int) or applied_rows < 0:
+        raise ValueError("polarity alias applied_rows must be a nonnegative integer")
+    if applied_rows and not enabled:
+        raise ValueError("disabled polarity alias cannot have applied rows")
+    return {
+        "enabled": enabled,
+        "mapping": {"NEGATIVE": "ADVERSE"},
+        "applied_rows": applied_rows,
+    }
 
 
 def confusion_rows(truth: Iterable[str], predicted: Iterable[str]) -> dict[str, dict[str, int]]:
@@ -268,6 +568,7 @@ def load_evaluation_dataset(
         raise FileNotFoundError(path)
     rows: list[dict[str, Any]] = []
     seen_sample_ids: set[str] = set()
+    common_binding: dict[str, Any] | None = None
     for line_number, line in enumerate(
         path.read_text(encoding="utf-8").splitlines(), start=1
     ):
@@ -300,18 +601,6 @@ def load_evaluation_dataset(
         if str(messages[-1].get("role") or "").strip().lower() != "assistant":
             raise ValueError(f"dataset line {line_number} final message is not assistant")
 
-        try:
-            target = json.loads(messages[-1]["content"])
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"dataset line {line_number} assistant target is not valid JSON"
-            ) from exc
-        target_issues = validate_semantic_payload(target)
-        if target_issues:
-            raise ValueError(
-                f"dataset line {line_number} target contract invalid: {target_issues}"
-            )
-
         metadata = row.get("metadata")
         if not isinstance(metadata, dict):
             raise ValueError(f"dataset line {line_number} metadata missing")
@@ -332,6 +621,27 @@ def load_evaluation_dataset(
             raise ValueError(
                 f"dataset line {line_number} DEV_SELECTION_ONLY requires metadata.split=DEV"
             )
+        binding = _row_contract_binding(row, line_number=line_number)
+        if common_binding is None:
+            common_binding = binding
+        elif binding != common_binding:
+            raise ValueError(f"dataset line {line_number} model/prompt contract mismatch")
+
+        try:
+            model_target = json.loads(messages[-1]["content"])
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"dataset line {line_number} assistant target is not valid JSON"
+            ) from exc
+        expected, target_issues = normalize_expected_payload(
+            model_target,
+            model_output_contract=binding["model_output_contract"],
+            semantic_target=metadata.get("semantic_target"),
+        )
+        if target_issues or expected is None:
+            raise ValueError(
+                f"dataset line {line_number} target contract invalid: {target_issues}"
+            )
         rows.append(row)
     if not rows:
         raise ValueError("evaluation dataset is empty")
@@ -346,22 +656,36 @@ def run_inference(
     dataset_role: str,
     output_dir: Path,
     max_new_tokens: int,
+    allow_negative_polarity_alias: bool = False,
 ) -> dict[str, Any]:
+    if output_dir.exists():
+        raise FileExistsError(f"output directory already exists: {output_dir}")
+    if not isinstance(allow_negative_polarity_alias, bool):
+        raise ValueError("allow_negative_polarity_alias must be boolean")
+    if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int):
+        raise ValueError("max_new_tokens must be an integer")
     if max_new_tokens < 1:
         raise ValueError("max_new_tokens must be positive")
     dataset_rows = load_evaluation_dataset(dataset, dataset_role=dataset_role)
+    contract_binding = dataset_contract_binding(dataset_rows)
     model_fingerprint = base_model_fingerprint(base_model)
     peft_fingerprint = adapter_fingerprint(adapter)
-    generation_config = {
-        "max_new_tokens": max_new_tokens,
-        "do_sample": False,
-    }
 
     import torch
     from peft import PeftModel
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        BitsAndBytesConfig,
+        GenerationConfig,
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, local_files_only=True)
+    generation_overrides = explicit_generation_config(
+        tokenizer, max_new_tokens=max_new_tokens
+    )
+    safe_generation_config = GenerationConfig(**generation_overrides)
+    resolved_generation_config = safe_generation_config.to_dict()
     quantization = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
@@ -379,24 +703,53 @@ def run_inference(
     model.eval()
 
     predictions: list[dict[str, Any]] = []
+    alias_applied_rows = 0
     for index, row in enumerate(dataset_rows, start=1):
         messages = row["messages"][:-1]
-        expected = normalize_payload(json.loads(row["messages"][-1]["content"]))
+        model_target = json.loads(row["messages"][-1]["content"])
+        expected, expected_issues = normalize_expected_payload(
+            model_target,
+            model_output_contract=contract_binding["model_output_contract"],
+            semantic_target=row["metadata"].get("semantic_target"),
+        )
+        if expected_issues or expected is None:
+            raise ValueError(
+                f"dataset row changed after preflight: {row['metadata']['sample_id']}"
+            )
+        normalized_expected_model_output = normalize_model_output(
+            model_target,
+            model_output_contract=contract_binding["model_output_contract"],
+            allow_negative_polarity_alias=False,
+        )
+        if normalized_expected_model_output["issues"]:
+            raise ValueError(
+                f"dataset model target changed after preflight: "
+                f"{row['metadata']['sample_id']}"
+            )
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         encoded = tokenizer(prompt, return_tensors="pt").to(model.device)
         with torch.inference_mode():
             generated = model.generate(
                 **encoded,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                pad_token_id=tokenizer.eos_token_id,
+                generation_config=safe_generation_config,
             )
         continuation = generated[0, encoded["input_ids"].shape[1] :]
         raw_output = tokenizer.decode(continuation, skip_special_tokens=True).strip()
-        predicted = normalize_payload(extract_json_object(raw_output))
-        issues = validate_semantic_payload(predicted)
+        parsed_model_output = extract_model_output(
+            raw_output,
+            model_output_contract=contract_binding["model_output_contract"],
+        )
+        normalized_output = normalize_model_output(
+            parsed_model_output,
+            model_output_contract=contract_binding["model_output_contract"],
+            allow_negative_polarity_alias=allow_negative_polarity_alias,
+        )
+        predicted = normalized_output["full_payload"]
+        issues = normalized_output["issues"]
         contract_valid = not issues
         exact_match = bool(contract_valid and predicted == expected)
+        alias_applied = bool(normalized_output["polarity_alias_applied"])
+        alias_applied_rows += int(alias_applied)
         predictions.append(
             {
                 "index": index,
@@ -404,8 +757,17 @@ def run_inference(
                 "event_id": row["metadata"].get("event_id"),
                 "benchmark_stratum": row["metadata"].get("benchmark_stratum"),
                 "expected": expected,
+                "expected_model_output": normalized_expected_model_output[
+                    "normalized_model_output"
+                ],
+                "model_output_contract": contract_binding["model_output_contract"],
+                "parsed_model_output": parsed_model_output,
+                "normalized_model_output": normalized_output[
+                    "normalized_model_output"
+                ],
                 "predicted": predicted,
                 "raw_output": raw_output,
+                "polarity_alias_applied": alias_applied,
                 "contract_issues": issues,
                 "contract_valid": contract_valid,
                 "exact_match": exact_match,
@@ -413,7 +775,7 @@ def run_inference(
         )
         print(f"{index}/{len(predictions) if False else '?'} {row['metadata']['sample_id']} valid={contract_valid} exact={exact_match}", flush=True)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True)
     prediction_path = output_dir / "predictions.jsonl"
     prediction_path.write_text(
         "".join(stable_json(row) + "\n" for row in predictions), encoding="utf-8"
@@ -427,7 +789,17 @@ def run_inference(
         "human_gold_claimed": False,
         "dataset_role": dataset_role,
         "reserved_test_only": dataset_role == "SEALED_BENCHMARK_ONLY",
-        "target_contract": TARGET_CONTRACT,
+        "target_contract": contract_binding["target_contract"],
+        "model_output_contract": contract_binding["model_output_contract"],
+        "model_output_contract_explicit": contract_binding[
+            "model_output_contract_explicit"
+        ],
+        "legacy_compatibility_mode": contract_binding[
+            "legacy_compatibility_mode"
+        ],
+        "prompt_version": contract_binding["prompt_version"],
+        "prompt_sha256": contract_binding["prompt_sha256"],
+        "prompt_binding_verified": contract_binding["prompt_binding_verified"],
         "dataset_path": str(dataset),
         "dataset_sha256": sha256_file(dataset),
         "base_model": str(base_model),
@@ -435,7 +807,13 @@ def run_inference(
         "adapter": str(adapter),
         "adapter_fingerprint": peft_fingerprint,
         "max_new_tokens": max_new_tokens,
-        "generation_config": generation_config,
+        "generation_config_version": GENERATION_CONFIG_VERSION,
+        "generation_config_inherits_base_model": False,
+        "generation_config": resolved_generation_config,
+        "polarity_alias": polarity_alias_report(
+            enabled=allow_negative_polarity_alias,
+            applied_rows=alias_applied_rows,
+        ),
         "metrics": metrics,
         "metrics_by_benchmark_stratum": metrics_by_benchmark_stratum,
         "gate": gate_decision(metrics),
@@ -461,6 +839,11 @@ def main() -> int:
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--max-new-tokens", type=int, default=96)
+    parser.add_argument(
+        "--allow-negative-polarity-alias",
+        action="store_true",
+        help="map model polarity NEGATIVE to ADVERSE and record every use",
+    )
     args = parser.parse_args()
     report = run_inference(
         base_model=args.base_model.resolve(),
@@ -469,6 +852,7 @@ def main() -> int:
         dataset_role=args.dataset_role,
         output_dir=args.output_dir.resolve(),
         max_new_tokens=args.max_new_tokens,
+        allow_negative_polarity_alias=args.allow_negative_polarity_alias,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["gate"]["passed"] else 2

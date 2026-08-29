@@ -26,8 +26,14 @@ if str(ROOT) not in sys.path:
 
 from app.models.qwen_risk_contract import validate_semantic_payload  # noqa: E402
 from scripts.evaluate_qwen_semantic_adapter import (  # noqa: E402
-    extract_json_object,
+    AXES_MODEL_OUTPUT_CONTRACT,
+    GENERATION_CONFIG_VERSION,
+    LEGACY_MODEL_OUTPUT_CONTRACT,
+    dataset_contract_binding,
+    extract_model_output,
     load_evaluation_dataset,
+    normalize_expected_payload,
+    normalize_model_output,
     normalize_payload,
     summarize_predictions,
 )
@@ -38,6 +44,7 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DEV_SELECTION_ROLE = "DEV_SELECTION_ONLY"
 REPORT_SCHEMA_VERSION = 2
 TARGET_CONTRACT = "core-v1"
+POLARITY_ALIAS_MAPPING = {"NEGATIVE": "ADVERSE"}
 GATE_THRESHOLDS = {
     "rows_min": 120,
     "priority_support_min": 20,
@@ -98,7 +105,9 @@ def _fingerprint(value: Any, *, field: str, path: Path) -> dict[str, Any]:
     return value
 
 
-def _generation_config(value: Any, *, path: Path) -> dict[str, Any]:
+def _generation_config(
+    value: Any, *, path: Path, explicit_model_output_contract: bool = False
+) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"generation_config missing in {path}")
     required = {"max_new_tokens", "do_sample"}
@@ -110,29 +119,193 @@ def _generation_config(value: Any, *, path: Path) -> dict[str, Any]:
         raise ValueError(f"invalid max_new_tokens in {path}")
     if value.get("do_sample") is not False:
         raise ValueError(f"selection requires deterministic generation in {path}")
+    if explicit_model_output_contract:
+        explicit_required = {
+            "repetition_penalty",
+            "num_beams",
+            "use_cache",
+            "eos_token_id",
+            "pad_token_id",
+        }
+        explicit_missing = sorted(explicit_required - set(value))
+        if explicit_missing:
+            raise ValueError(
+                f"generation_config missing explicit fields in {path}: {explicit_missing}"
+            )
+        repetition_penalty = value.get("repetition_penalty")
+        if (
+            isinstance(repetition_penalty, bool)
+            or not isinstance(repetition_penalty, (int, float))
+            or not math.isfinite(float(repetition_penalty))
+            or float(repetition_penalty) != 1.0
+        ):
+            raise ValueError(f"invalid repetition_penalty in {path}")
+        if value.get("num_beams") != 1 or isinstance(value.get("num_beams"), bool):
+            raise ValueError(f"selection requires num_beams=1 in {path}")
+        if value.get("use_cache") is not True:
+            raise ValueError(f"selection requires use_cache=true in {path}")
+        for field in ("eos_token_id", "pad_token_id"):
+            token_id = value.get(field)
+            if isinstance(token_id, bool) or not isinstance(token_id, int) or token_id < 0:
+                raise ValueError(f"invalid {field} in {path}")
     return value
 
 
-def _load_expected_dataset(path: Path) -> dict[str, dict[str, Any]]:
+def _load_expected_dataset(
+    path: Path,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     rows = load_evaluation_dataset(path, dataset_role=DEV_SELECTION_ROLE)
+    contract_binding = dataset_contract_binding(rows)
     expected_by_sample: dict[str, dict[str, Any]] = {}
     for index, row in enumerate(rows, start=1):
         sample_id = str(row["metadata"].get("sample_id") or "").strip()
-        expected = normalize_payload(json.loads(row["messages"][-1]["content"]))
-        if expected is None:
-            raise ValueError(f"DEV dataset sample has invalid expected payload: {sample_id}")
+        model_target = json.loads(row["messages"][-1]["content"])
+        expected, expected_issues = normalize_expected_payload(
+            model_target,
+            model_output_contract=contract_binding["model_output_contract"],
+            semantic_target=row["metadata"].get("semantic_target"),
+        )
+        expected_model_output = normalize_model_output(
+            model_target,
+            model_output_contract=contract_binding["model_output_contract"],
+            allow_negative_polarity_alias=False,
+        )
+        if (
+            expected is None
+            or expected_issues
+            or expected_model_output["issues"]
+        ):
+            raise ValueError(
+                f"DEV dataset sample has invalid expected payload: {sample_id}"
+            )
         expected_by_sample[sample_id] = {
             "index": index,
             "event_id": row["metadata"].get("event_id"),
             "benchmark_stratum": row["metadata"].get("benchmark_stratum"),
             "expected": expected,
+            "expected_model_output": expected_model_output[
+                "normalized_model_output"
+            ],
         }
-    return expected_by_sample
+    return expected_by_sample, contract_binding
+
+
+def _report_contract_binding(
+    report: dict[str, Any],
+    *,
+    dataset_binding: dict[str, Any],
+    path: Path,
+) -> dict[str, Any]:
+    raw_contract = report.get("model_output_contract")
+    explicit = raw_contract is not None
+    model_output_contract = (
+        str(raw_contract).strip() if explicit else LEGACY_MODEL_OUTPUT_CONTRACT
+    )
+    if model_output_contract not in {
+        LEGACY_MODEL_OUTPUT_CONTRACT,
+        AXES_MODEL_OUTPUT_CONTRACT,
+    }:
+        raise ValueError(f"unsupported model_output_contract in {path}")
+    if model_output_contract != dataset_binding["model_output_contract"]:
+        raise ValueError(f"model_output_contract does not match DEV dataset in {path}")
+
+    if explicit:
+        if report.get("model_output_contract_explicit") is not True:
+            raise ValueError(f"explicit model_output_contract flag missing in {path}")
+        if report.get("legacy_compatibility_mode") is not False:
+            raise ValueError(f"invalid legacy_compatibility_mode in {path}")
+    elif report.get("model_output_contract_explicit") not in (None, False):
+        raise ValueError(f"legacy model_output_contract flag mismatch in {path}")
+    elif report.get("legacy_compatibility_mode") not in (None, True):
+        raise ValueError(f"legacy compatibility flag mismatch in {path}")
+
+    prompt_version = report.get("prompt_version")
+    prompt_sha256 = report.get("prompt_sha256")
+    prompt_binding_verified = report.get("prompt_binding_verified")
+    if explicit:
+        prompt_version = str(prompt_version or "").strip()
+        prompt_sha256 = str(prompt_sha256 or "").strip().lower()
+        if not prompt_version or not SHA256_RE.fullmatch(prompt_sha256):
+            raise ValueError(f"invalid prompt identity in {path}")
+        if prompt_binding_verified is not True:
+            raise ValueError(f"prompt binding not verified in {path}")
+    else:
+        if prompt_version is not None or prompt_sha256 is not None:
+            raise ValueError(f"implicit legacy report has prompt identity in {path}")
+        if prompt_binding_verified not in (None, False):
+            raise ValueError(f"implicit legacy prompt binding mismatch in {path}")
+
+    if prompt_version != dataset_binding["prompt_version"]:
+        raise ValueError(f"prompt_version does not match DEV dataset in {path}")
+    if prompt_sha256 != dataset_binding["prompt_sha256"]:
+        raise ValueError(f"prompt_sha256 does not match DEV dataset in {path}")
+    if bool(prompt_binding_verified) != bool(
+        dataset_binding["prompt_binding_verified"]
+    ):
+        raise ValueError(f"prompt binding flag does not match DEV dataset in {path}")
+
+    generation_config_version = report.get("generation_config_version")
+    generation_config_inherits_base_model = report.get(
+        "generation_config_inherits_base_model"
+    )
+    if explicit:
+        if generation_config_version != GENERATION_CONFIG_VERSION:
+            raise ValueError(f"unsupported generation_config_version in {path}")
+        if generation_config_inherits_base_model is not False:
+            raise ValueError(f"generation config inheritance is not disabled in {path}")
+    elif generation_config_version is not None:
+        raise ValueError(f"implicit legacy report has generation_config_version in {path}")
+    elif generation_config_inherits_base_model is not None:
+        raise ValueError(f"implicit legacy report has generation inheritance flag in {path}")
+
+    return {
+        "model_output_contract": model_output_contract,
+        "model_output_contract_explicit": explicit,
+        "legacy_compatibility_mode": not explicit,
+        "prompt_version": prompt_version,
+        "prompt_sha256": prompt_sha256,
+        "prompt_binding_verified": bool(prompt_binding_verified),
+        "generation_config_version": generation_config_version,
+        "generation_config_inherits_base_model": generation_config_inherits_base_model,
+    }
+
+
+def _polarity_alias(value: Any, *, explicit: bool, path: Path) -> dict[str, Any]:
+    if value is None and not explicit:
+        return {"enabled": False, "mapping": POLARITY_ALIAS_MAPPING, "applied_rows": 0}
+    if not isinstance(value, dict):
+        raise ValueError(f"polarity_alias missing in {path}")
+    if set(value) != {"enabled", "mapping", "applied_rows"}:
+        raise ValueError(f"invalid polarity_alias fields in {path}")
+    enabled = value.get("enabled")
+    applied_rows = value.get("applied_rows")
+    if not isinstance(enabled, bool):
+        raise ValueError(f"polarity_alias enabled is not boolean in {path}")
+    if value.get("mapping") != POLARITY_ALIAS_MAPPING:
+        raise ValueError(f"unsupported polarity_alias mapping in {path}")
+    if (
+        isinstance(applied_rows, bool)
+        or not isinstance(applied_rows, int)
+        or applied_rows < 0
+    ):
+        raise ValueError(f"invalid polarity_alias applied_rows in {path}")
+    if applied_rows and not enabled:
+        raise ValueError(f"disabled polarity_alias has applied rows in {path}")
+    return {
+        "enabled": enabled,
+        "mapping": POLARITY_ALIAS_MAPPING,
+        "applied_rows": applied_rows,
+    }
 
 
 def _load_bound_predictions(
-    path: Path, *, expected_by_sample: dict[str, dict[str, Any]]
-) -> list[dict[str, Any]]:
+    path: Path,
+    *,
+    expected_by_sample: dict[str, dict[str, Any]],
+    model_output_contract: str,
+    explicit_model_output_contract: bool,
+    allow_negative_polarity_alias: bool,
+) -> tuple[list[dict[str, Any]], int]:
     raw_rows: list[tuple[int, Any]] = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
@@ -151,6 +324,7 @@ def _load_bound_predictions(
 
     seen_sample_ids: set[str] = set()
     scored_rows: list[dict[str, Any]] = []
+    alias_applied_rows = 0
     for line_number, row in raw_rows:
         if not isinstance(row, dict):
             raise ValueError(f"predictions.jsonl line {line_number} is not an object: {path}")
@@ -190,15 +364,68 @@ def _load_bound_predictions(
         if expected != dataset_row["expected"]:
             raise ValueError(f"prediction expected payload does not match DEV dataset for {sample_id!r}")
 
+        reported_model_output_contract = row.get("model_output_contract")
+        if explicit_model_output_contract:
+            if reported_model_output_contract != model_output_contract:
+                raise ValueError(
+                    f"prediction model_output_contract mismatch for {sample_id!r}"
+                )
+            if row.get("expected_model_output") != dataset_row["expected_model_output"]:
+                raise ValueError(
+                    f"prediction expected_model_output does not match DEV dataset for {sample_id!r}"
+                )
+        elif reported_model_output_contract not in (
+            None,
+            LEGACY_MODEL_OUTPUT_CONTRACT,
+        ):
+            raise ValueError(
+                f"legacy prediction model_output_contract mismatch for {sample_id!r}"
+            )
+
         raw_output = row.get("raw_output")
         if not isinstance(raw_output, str):
             raise ValueError(f"prediction raw_output is not text for {sample_id!r}")
-        predicted = normalize_payload(extract_json_object(raw_output))
+        parsed_model_output = extract_model_output(
+            raw_output, model_output_contract=model_output_contract
+        )
+        normalized_output = normalize_model_output(
+            parsed_model_output,
+            model_output_contract=model_output_contract,
+            allow_negative_polarity_alias=allow_negative_polarity_alias,
+        )
+        if explicit_model_output_contract:
+            if row.get("parsed_model_output") != parsed_model_output:
+                raise ValueError(
+                    f"prediction parsed_model_output does not match raw_output for {sample_id!r}"
+                )
+            if (
+                row.get("normalized_model_output")
+                != normalized_output["normalized_model_output"]
+            ):
+                raise ValueError(
+                    f"prediction normalized_model_output mismatch for {sample_id!r}"
+                )
+            reported_alias_applied = row.get("polarity_alias_applied")
+            if not isinstance(reported_alias_applied, bool):
+                raise ValueError(
+                    f"prediction polarity_alias_applied is not boolean for {sample_id!r}"
+                )
+            if reported_alias_applied != normalized_output["polarity_alias_applied"]:
+                raise ValueError(
+                    f"prediction polarity_alias_applied mismatch for {sample_id!r}"
+                )
+        elif row.get("polarity_alias_applied") not in (None, False):
+            raise ValueError(
+                f"legacy prediction unexpectedly applied polarity alias for {sample_id!r}"
+            )
+
+        predicted = normalized_output["full_payload"]
         reported_predicted = row.get("predicted")
         if reported_predicted != predicted:
             raise ValueError(f"prediction payload does not match raw_output for {sample_id!r}")
-        predicted_issues = validate_semantic_payload(predicted)
+        predicted_issues = normalized_output["issues"]
         contract_valid = not predicted_issues
+        alias_applied_rows += int(normalized_output["polarity_alias_applied"])
         reported_contract_valid = row.get("contract_valid")
         if not isinstance(reported_contract_valid, bool):
             raise ValueError(f"prediction contract_valid is not boolean for {sample_id!r}")
@@ -228,7 +455,7 @@ def _load_bound_predictions(
     missing = sorted(set(expected_by_sample) - seen_sample_ids)
     if missing:
         raise ValueError(f"predictions.jsonl is missing DEV sample_ids: {missing[:3]}")
-    return scored_rows
+    return scored_rows, alias_applied_rows
 
 
 def _core_metric_values(metrics: Any, *, path: Path) -> dict[str, Any]:
@@ -324,6 +551,7 @@ def _load_report(
     path: Path,
     expected_dataset_sha256: str,
     expected_by_sample: dict[str, dict[str, Any]],
+    dataset_binding: dict[str, Any],
 ) -> dict[str, Any]:
     report = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(report, dict):
@@ -340,6 +568,14 @@ def _load_report(
         raise ValueError(f"reserved TEST report cannot select a checkpoint: {path}")
     if report.get("target_contract") != TARGET_CONTRACT:
         raise ValueError(f"selector requires target_contract={TARGET_CONTRACT}: {path}")
+    contract_binding = _report_contract_binding(
+        report, dataset_binding=dataset_binding, path=path
+    )
+    polarity_alias = _polarity_alias(
+        report.get("polarity_alias"),
+        explicit=contract_binding["model_output_contract_explicit"],
+        path=path,
+    )
     if report.get("evaluator_gate_advisory_only") is not True:
         raise ValueError(f"evaluator gate authority missing: {path}")
     if str(report.get("dataset_sha256") or "").lower() != expected_dataset_sha256:
@@ -359,14 +595,28 @@ def _load_report(
     adapter_fingerprint = _fingerprint(
         report.get("adapter_fingerprint"), field="adapter_fingerprint", path=path
     )
-    generation_config = _generation_config(report.get("generation_config"), path=path)
+    generation_config = _generation_config(
+        report.get("generation_config"),
+        path=path,
+        explicit_model_output_contract=contract_binding[
+            "model_output_contract_explicit"
+        ],
+    )
     if report.get("max_new_tokens") != generation_config["max_new_tokens"]:
         raise ValueError(f"max_new_tokens binding mismatch: {path}")
     adapter = str(report.get("adapter") or "")
     step = _checkpoint_step(adapter)
-    scored_rows = _load_bound_predictions(
-        predictions, expected_by_sample=expected_by_sample
+    scored_rows, alias_applied_rows = _load_bound_predictions(
+        predictions,
+        expected_by_sample=expected_by_sample,
+        model_output_contract=contract_binding["model_output_contract"],
+        explicit_model_output_contract=contract_binding[
+            "model_output_contract_explicit"
+        ],
+        allow_negative_polarity_alias=polarity_alias["enabled"],
     )
+    if alias_applied_rows != polarity_alias["applied_rows"]:
+        raise ValueError(f"polarity_alias applied_rows mismatch in {path}")
     recomputed_metrics = summarize_predictions(scored_rows)
     recomputed_values = _core_metric_values(recomputed_metrics, path=predictions)
     if recomputed_values["rows"] != len(expected_by_sample):
@@ -417,6 +667,8 @@ def _load_report(
         "adapter_fingerprint": adapter_fingerprint,
         "base_model_fingerprint": base_model_fingerprint,
         "generation_config": generation_config,
+        **contract_binding,
+        "polarity_alias": polarity_alias,
         "dataset_role": DEV_SELECTION_ROLE,
         "target_contract": TARGET_CONTRACT,
         "checkpoint_step": step,
@@ -453,9 +705,11 @@ def summarize(
         raise FileExistsError(output)
 
     dataset_sha256 = _sha256(expected_dataset)
-    expected_by_sample = _load_expected_dataset(expected_dataset)
+    expected_by_sample, dataset_binding = _load_expected_dataset(expected_dataset)
     rows = [
-        _load_report(path.resolve(), dataset_sha256, expected_by_sample)
+        _load_report(
+            path.resolve(), dataset_sha256, expected_by_sample, dataset_binding
+        )
         for path in report_paths
     ]
     steps = [row["checkpoint_step"] for row in rows]
@@ -463,6 +717,23 @@ def summarize(
         raise ValueError("duplicate checkpoint step")
     base_model_fingerprint = rows[0]["base_model_fingerprint"]
     generation_config = rows[0]["generation_config"]
+    selection_contract = {
+        key: rows[0][key]
+        for key in (
+            "model_output_contract",
+            "model_output_contract_explicit",
+            "legacy_compatibility_mode",
+            "prompt_version",
+            "prompt_sha256",
+            "prompt_binding_verified",
+            "generation_config_version",
+            "generation_config_inherits_base_model",
+        )
+    }
+    alias_policy = {
+        "enabled": rows[0]["polarity_alias"]["enabled"],
+        "mapping": rows[0]["polarity_alias"]["mapping"],
+    }
     for row in rows[1:]:
         if _stable_json(row["base_model_fingerprint"]) != _stable_json(
             base_model_fingerprint
@@ -470,6 +741,15 @@ def summarize(
             raise ValueError("base model fingerprint mismatch across reports")
         if row["generation_config"] != generation_config:
             raise ValueError("generation configuration mismatch across reports")
+        row_contract = {key: row[key] for key in selection_contract}
+        if row_contract != selection_contract:
+            raise ValueError("model/prompt contract mismatch across reports")
+        row_alias_policy = {
+            "enabled": row["polarity_alias"]["enabled"],
+            "mapping": row["polarity_alias"]["mapping"],
+        }
+        if row_alias_policy != alias_policy:
+            raise ValueError("polarity alias policy mismatch across reports")
     passing = sorted((row for row in rows if row["passed"]), key=_rank_key)
     summary = {
         "schema_version": 2,
@@ -485,6 +765,8 @@ def summarize(
         "dataset_sha256": dataset_sha256,
         "dataset_rows_verified": len(expected_by_sample),
         "prediction_metrics_recomputed": True,
+        **selection_contract,
+        "polarity_alias_policy": alias_policy,
         "base_model_fingerprint": base_model_fingerprint,
         "generation_config": generation_config,
         "gate_thresholds": GATE_THRESHOLDS,

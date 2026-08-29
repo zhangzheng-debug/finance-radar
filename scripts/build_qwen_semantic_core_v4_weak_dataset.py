@@ -17,7 +17,7 @@ import os
 import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import sys
 
@@ -31,29 +31,30 @@ from app.models.qwen_risk_contract import (  # noqa: E402
     normalize_qwen_risk_content,
     validate_semantic_payload,
 )
+from app.models.qwen_weak_supervision_contract import (  # noqa: E402
+    QWEN_WEAK_DEFAULT_PAIR_MULTIPLIERS,
+    QWEN_WEAK_MODEL_OUTPUT_CONTRACT,
+    QWEN_WEAK_PAIR_MULTIPLIER_CONTRACT,
+    QWEN_WEAK_PROMPT_SHA256,
+    QWEN_WEAK_PROMPT_VERSION,
+    QWEN_WEAK_SUPERVISION_VERSION,
+    QWEN_WEAK_SYSTEM_PROMPT,
+)
 from scripts.train_risk_router_ai_adjudicated import _risk_first_policy  # noqa: E402
 
 
-DATASET_CONTRACT = "qwen-core-v1-weak-supervision-v4"
+DATASET_CONTRACT = QWEN_WEAK_SUPERVISION_VERSION
 TARGET_CONTRACT = "core-v1"
 SPLIT_SALT = "finance-radar-qwen-core-v4-component-split-20260830"
-SYSTEM_PROMPT = (
-    "你是金融雷达的语义风险分类器。只根据所给文本判断对焦点资产的极性与做空风险重大性；"
-    "不判断证据真假，不补充外部事实，不使用事后价格，不给投资建议。"
-    "区分已发生事实、正式决定、提议、风险因素、合同定义与历史重述。"
-    "破产重组、确定退市、已发生违约、重大监管处罚、关键临床失败可构成重大负面；"
-    "普通风险披露、假设性条款、已解决事项、常规治理和有偿并购退出不得仅凭关键词判为重大负面。"
-    "融资同时考虑获得资金与稀释，明确改善或成功结果可判正面。仅输出指定 JSON。"
-)
+SYSTEM_PROMPT = QWEN_WEAK_SYSTEM_PROMPT
 SOURCE_PRIORITY = {
     "DUAL_REVIEW_CONSENSUS": 3,
     "AI_ASSISTED_REFERENCE": 2,
     "DETERMINISTIC_WEAK_RULE": 1,
 }
 PAIR_MULTIPLIERS = {
-    ("NOT_MATERIAL_ADVERSE", "ADVERSE"): 2,
-    ("NOT_MATERIAL_ADVERSE", "MIXED"): 4,
-    ("UNCLEAR", "UNCLEAR"): 4,
+    (materiality, polarity): multiplier
+    for materiality, polarity, multiplier in QWEN_WEAK_DEFAULT_PAIR_MULTIPLIERS
 }
 
 
@@ -366,12 +367,118 @@ def _split_component(component: list[dict[str, Any]]) -> str:
     return "DEV" if rank % 100 < 15 else "TRAIN"
 
 
+def _exposure_identity(row: Mapping[str, Any]) -> tuple[str, str, str]:
+    return (
+        _clean_identifier(row.get("sample_id")),
+        _clean_identifier(row.get("event_id") or row.get("source_event_id")),
+        _clean_identifier(row.get("content_sha256")),
+    )
+
+
+def _load_frozen_splits(path: Path | None) -> tuple[dict[tuple[str, str, str], str], Counter[str]]:
+    if path is None:
+        return {}, Counter()
+    frozen: dict[tuple[str, str, str], str] = {}
+    counts: Counter[str] = Counter()
+    for number, row in enumerate(read_jsonl(path), 1):
+        if any(key in row for key in ("messages", "target", "expected", "label")):
+            raise ValueError(f"{path}:{number}: frozen split registry must not contain labels or messages")
+        identity = _exposure_identity(row)
+        if not all(identity):
+            raise ValueError(f"{path}:{number}: incomplete frozen exposure identity")
+        split = str(row.get("exposure_split") or "").strip().upper()
+        if split not in {"TRAIN", "DEV"}:
+            raise ValueError(f"{path}:{number}: invalid frozen exposure split {split!r}")
+        previous = frozen.get(identity)
+        if previous is not None and previous != split:
+            raise ValueError(f"{path}:{number}: frozen exposure identity has conflicting splits")
+        if previous is None:
+            counts[split] += 1
+        frozen[identity] = split
+    if not frozen:
+        raise ValueError(f"{path}: frozen split registry is empty")
+    return frozen, counts
+
+
+def _component_split(
+    component: list[dict[str, Any]],
+    frozen_splits: Mapping[tuple[str, str, str], str],
+) -> str:
+    matched = {
+        frozen_splits[identity]
+        for row in component
+        for identity in [_exposure_identity(row)]
+        if identity in frozen_splits
+    }
+    if len(matched) > 1:
+        raise RuntimeError("one connected component spans frozen TRAIN and DEV rows")
+    # DEV is a sealed membership set, not a ratio target.  A component that did
+    # not exist in the frozen registry is new training material regardless of
+    # its legacy hash rank.
+    return next(iter(matched)) if matched else "TRAIN"
+
+
+def _resolved_pair_multipliers(
+    configured: Mapping[tuple[str, str], int] | None,
+) -> dict[tuple[str, str], int]:
+    source = PAIR_MULTIPLIERS if configured is None else configured
+    resolved: dict[tuple[str, str], int] = {}
+    for raw_pair, raw_multiplier in source.items():
+        if not isinstance(raw_pair, tuple) or len(raw_pair) != 2:
+            raise ValueError("pair multiplier keys must be (materiality, polarity) tuples")
+        materiality = str(raw_pair[0]).strip().upper()
+        polarity = str(raw_pair[1]).strip().upper()
+        if isinstance(raw_multiplier, bool) or not isinstance(raw_multiplier, int) or not 1 <= raw_multiplier <= 16:
+            raise ValueError("pair multipliers must be integers in [1, 16]")
+        semantic = expected_semantic_payload(materiality, polarity)
+        issues = validate_semantic_payload(semantic)
+        if issues:
+            raise ValueError(f"invalid pair multiplier {materiality}|{polarity}: {issues}")
+        if (materiality, polarity) == ("UNCLEAR", "UNCLEAR") and raw_multiplier != 1:
+            raise ValueError("UNCLEAR|UNCLEAR must not be oversampled")
+        pair = (materiality, polarity)
+        if pair in resolved:
+            raise ValueError(f"duplicate pair multiplier {materiality}|{polarity}")
+        resolved[pair] = raw_multiplier
+    return dict(sorted(resolved.items()))
+
+
+def _pair_multiplier_payload(multipliers: Mapping[tuple[str, str], int]) -> dict[str, int]:
+    return {"|".join(pair): multiplier for pair, multiplier in sorted(multipliers.items())}
+
+
+def _parse_pair_multiplier_args(values: list[str]) -> dict[tuple[str, str], int] | None:
+    if not values:
+        return None
+    parsed: dict[tuple[str, str], int] = {}
+    for raw in values:
+        pair_text, separator, multiplier_text = raw.rpartition("=")
+        parts = pair_text.split("|")
+        if not separator or len(parts) != 2:
+            raise ValueError(
+                "--pair-multiplier must be MATERIALITY|POLARITY=INTEGER"
+            )
+        pair = (parts[0].strip().upper(), parts[1].strip().upper())
+        if pair in parsed:
+            raise ValueError(f"duplicate --pair-multiplier {'|'.join(pair)}")
+        parsed[pair] = int(multiplier_text)
+    return parsed
+
+
 def _prepared(row: dict[str, Any], split: str) -> dict[str, Any]:
+    actual_prompt_sha256 = sha256_bytes(SYSTEM_PROMPT.encode("utf-8"))
+    if actual_prompt_sha256 != QWEN_WEAK_PROMPT_SHA256:
+        raise RuntimeError("weak-supervision prompt bytes do not match the versioned prompt SHA")
+    semantic_target = row["target"]
+    model_target = {
+        "materiality": semantic_target["materiality"],
+        "polarity": semantic_target["polarity"],
+    }
     return {
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": stable_json(row["content"])},
-            {"role": "assistant", "content": stable_json(row["target"])},
+            {"role": "assistant", "content": stable_json(model_target)},
         ],
         "metadata": {
             "sample_id": row["sample_id"],
@@ -383,6 +490,11 @@ def _prepared(row: dict[str, Any], split: str) -> dict[str, Any]:
             "content_sha256": row["content_sha256"],
             "split": split,
             "target_contract": TARGET_CONTRACT,
+            "model_output_contract": QWEN_WEAK_MODEL_OUTPUT_CONTRACT,
+            "semantic_target": semantic_target,
+            "prompt_version": QWEN_WEAK_PROMPT_VERSION,
+            "prompt_sha256": actual_prompt_sha256,
+            "weak_supervision_version": QWEN_WEAK_SUPERVISION_VERSION,
             "label_provenance": row["source"],
             "label_classification": "WEAK_SUPERVISION_NOT_HUMAN_GOLD",
             "weak_rule": row["weak_rule"],
@@ -406,9 +518,15 @@ def build_dataset(
     canonical_source_map: Path | None = None,
     canonical_pool: Path | None = None,
     canonical_issuer_map: Path | None = None,
+    frozen_split_registry: Path | None = None,
+    pair_multipliers: Mapping[tuple[str, str], int] | None = None,
 ) -> dict[str, Any]:
     explicit_exclusions = explicit_exclusions or []
     quality_exclusions = quality_exclusions or []
+    resolved_pair_multipliers = _resolved_pair_multipliers(pair_multipliers)
+    pair_multiplier_payload = _pair_multiplier_payload(resolved_pair_multipliers)
+    pair_multiplier_sha256 = sha256_bytes(stable_json(pair_multiplier_payload).encode("utf-8"))
+    frozen_splits, frozen_split_counts = _load_frozen_splits(frozen_split_registry)
     inputs = [
         *( (path, "DUAL_REVIEW_CONSENSUS") for path in dual_consensus ),
         *( (path, "AI_ASSISTED_REFERENCE") for path in ai_assisted ),
@@ -551,11 +669,10 @@ def build_dataset(
         else:
             quality_free.append(row)
 
-    policy_removed: list[dict[str, Any]] = []
-    policy_free: list[dict[str, Any]] = []
+    policy_disagreements: list[dict[str, Any]] = []
+    policy_free: list[dict[str, Any]] = list(quality_free)
     for row in quality_free:
         if row["source"] != "AI_ASSISTED_REFERENCE":
-            policy_free.append(row)
             continue
         text = "\n".join([
             str(row["content"].get("headline") or ""),
@@ -566,13 +683,13 @@ def build_dataset(
         policy_priority = {"RISK_REVIEW": "PRIORITY_REVIEW", "NON_TARGET": "ROUTINE"}.get(str(policy_label or ""))
         target_priority = row["target"]["semantic_priority"]
         if policy_priority and target_priority in {"PRIORITY_REVIEW", "ROUTINE"} and policy_priority != target_priority:
-            policy_removed.append({
+            policy_disagreements.append({
                 "sample_id": row["sample_id"], "event_id": row["event_id"],
                 "source": row["source"], "target": row["target"],
                 "policy_label": policy_label, "policy_reason": policy_reason,
+                "action": "RETAINED_DIAGNOSTIC_ONLY",
+                "retained_in_dataset": True,
             })
-        else:
-            policy_free.append(row)
 
     # Contradictions are unsafe only when they refer to the same sample, event,
     # or normalized content.  Different events for one issuer may legitimately
@@ -612,9 +729,47 @@ def build_dataset(
     unique = list(chosen.values())
 
     prepared = {"TRAIN": [], "DEV": []}
+    frozen_dev_boundary_exclusions: list[dict[str, Any]] = []
+    admitted_unique: list[dict[str, Any]] = []
     for component in _components(unique):
-        split = _split_component(component)
-        prepared[split].extend(_prepared(row, split) for row in component)
+        split = _component_split(component, frozen_splits)
+        admitted_component = component
+        if split == "DEV":
+            admitted_component = [
+                row
+                for row in component
+                if frozen_splits.get(_exposure_identity(row)) == "DEV"
+            ]
+            boundary_rows = [
+                row
+                for row in component
+                if frozen_splits.get(_exposure_identity(row)) != "DEV"
+            ]
+            frozen_dev_identities = sorted(
+                "|".join(identity)
+                for row in admitted_component
+                for identity in [_exposure_identity(row)]
+            )
+            frozen_dev_identity_sha256 = sha256_bytes(
+                stable_json(frozen_dev_identities).encode("utf-8")
+            )
+            for row in boundary_rows:
+                frozen_dev_boundary_exclusions.append({
+                    "sample_id": row["sample_id"],
+                    "event_id": row["event_id"],
+                    "entity_group": row.get("entity_group"),
+                    "canonical_issuer_key": row.get("canonical_issuer_key"),
+                    "event_chain_group": row.get("event_chain_group"),
+                    "content_sha256": row["content_sha256"],
+                    "source": row["source"],
+                    "reason": "NEW_ROW_CONNECTED_TO_FROZEN_DEV_COMPONENT",
+                    "connected_frozen_dev_identity_count": len(frozen_dev_identities),
+                    "connected_frozen_dev_identity_sha256": frozen_dev_identity_sha256,
+                    "connected_frozen_dev_identity_examples": frozen_dev_identities[:10],
+                    "action": "EXCLUDED_FAIL_CLOSED",
+                })
+        admitted_unique.extend(admitted_component)
+        prepared[split].extend(_prepared(row, split) for row in admitted_component)
     for rows in prepared.values():
         rows.sort(key=lambda row: (str(row["metadata"].get("sample_id") or ""), row["metadata"]["content_sha256"]))
 
@@ -641,6 +796,39 @@ def build_dataset(
             f"train/dev contains unresolved canonical issuers: {train_dev_unresolved_canonical_rows}"
         )
 
+    prepared_by_exposure_identity = {
+        _exposure_identity(row["metadata"]): row["metadata"]["split"]
+        for split in ("TRAIN", "DEV")
+        for row in prepared[split]
+    }
+    missing_frozen_identities = set(frozen_splits) - set(prepared_by_exposure_identity)
+    moved_frozen_identities = {
+        identity: (frozen_splits[identity], prepared_by_exposure_identity[identity])
+        for identity in frozen_splits.keys() & prepared_by_exposure_identity.keys()
+        if frozen_splits[identity] != prepared_by_exposure_identity[identity]
+    }
+    if missing_frozen_identities:
+        raise RuntimeError(
+            f"frozen split registry rows disappeared from v11 dataset: {len(missing_frozen_identities)}"
+        )
+    if moved_frozen_identities:
+        raise RuntimeError(
+            f"frozen split registry rows changed split: {len(moved_frozen_identities)}"
+        )
+    expected_dev_identities = {
+        identity for identity, split in frozen_splits.items() if split == "DEV"
+    }
+    actual_dev_identities = {
+        _exposure_identity(row["metadata"]) for row in prepared["DEV"]
+    }
+    missing_dev_identities = expected_dev_identities - actual_dev_identities
+    extra_dev_identities = actual_dev_identities - expected_dev_identities
+    if missing_dev_identities or extra_dev_identities:
+        raise RuntimeError(
+            "DEV membership differs from frozen registry: "
+            f"missing={len(missing_dev_identities)},extra={len(extra_dev_identities)}"
+        )
+
     exposure_rows: list[dict[str, Any]] = []
     for split in ("TRAIN", "DEV"):
         for row in prepared[split]:
@@ -660,7 +848,7 @@ def build_dataset(
     balanced: list[dict[str, Any]] = []
     for row in prepared["TRAIN"]:
         target = json.loads(row["messages"][-1]["content"])
-        repeats = PAIR_MULTIPLIERS.get((target["materiality"], target["polarity"]), 1)
+        repeats = resolved_pair_multipliers.get((target["materiality"], target["polarity"]), 1)
         for repeat in range(repeats):
             copy = json.loads(json.dumps(row))
             if repeat:
@@ -678,6 +866,8 @@ def build_dataset(
         "duplicate_exclusions": output_dir / "duplicate_exclusions.jsonl",
         "quality_exclusions": output_dir / "quality_exclusions.jsonl",
         "policy_exclusions": output_dir / "policy_exclusions.jsonl",
+        "policy_disagreements": output_dir / "policy_disagreements.jsonl",
+        "frozen_dev_boundary_exclusions": output_dir / "frozen_dev_boundary_exclusions.jsonl",
         "training_exposure_registry": output_dir / "training_exposure_registry.jsonl",
     }
     hashes = {
@@ -688,7 +878,11 @@ def build_dataset(
         "conflict_exclusions": write_jsonl(files["conflict_exclusions"], conflicts),
         "duplicate_exclusions": write_jsonl(files["duplicate_exclusions"], duplicates),
         "quality_exclusions": write_jsonl(files["quality_exclusions"], quality_removed),
-        "policy_exclusions": write_jsonl(files["policy_exclusions"], policy_removed),
+        "policy_exclusions": write_jsonl(files["policy_exclusions"], []),
+        "policy_disagreements": write_jsonl(files["policy_disagreements"], policy_disagreements),
+        "frozen_dev_boundary_exclusions": write_jsonl(
+            files["frozen_dev_boundary_exclusions"], frozen_dev_boundary_exclusions
+        ),
         "training_exposure_registry": write_jsonl(files["training_exposure_registry"], exposure_rows),
     }
     atomic_write(
@@ -703,10 +897,14 @@ def build_dataset(
         ).items()))
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "dataset_contract": DATASET_CONTRACT,
         "semantic_contract": QWEN_RISK_CONTRACT_VERSION,
         "target_contract": TARGET_CONTRACT,
+        "model_output_contract": QWEN_WEAK_MODEL_OUTPUT_CONTRACT,
+        "weak_supervision_version": QWEN_WEAK_SUPERVISION_VERSION,
+        "prompt_version": QWEN_WEAK_PROMPT_VERSION,
+        "prompt_sha256": QWEN_WEAK_PROMPT_SHA256,
         "label_classification": "WEAK_SUPERVISION_NOT_HUMAN_GOLD",
         "split_salt": SPLIT_SALT,
         "input_counts": dict(sorted(input_counts.items())),
@@ -739,17 +937,37 @@ def build_dataset(
             "canonical_issuer_not_strong" in row.get("reasons", []) for row in leakage
         ),
         "quality_excluded_rows": len(quality_removed),
-        "policy_excluded_rows": len(policy_removed),
+        "policy_excluded_rows": 0,
+        "policy_disagreement_rows": len(policy_disagreements),
+        "policy_disagreement_action": "RETAINED_DIAGNOSTIC_ONLY",
+        "frozen_dev_boundary_excluded_rows": len(frozen_dev_boundary_exclusions),
         "conflict_excluded_rows": len(conflicts),
         "duplicate_excluded_rows": len(duplicates),
-        "unique_rows": len(unique),
+        "deduplicated_unique_rows_before_dev_boundary": len(unique),
+        "dataset_unique_rows": len(admitted_unique),
+        "unique_rows": len(admitted_unique),
         "train_unique_rows": len(prepared["TRAIN"]),
+        "train_effective_rows": len(balanced),
         "train_balanced_rows": len(balanced),
+        "train_repeat_rows": len(balanced) - len(prepared["TRAIN"]),
         "dev_rows": len(prepared["DEV"]),
-        "component_count": len(_components(unique)),
+        "component_count": len(_components(admitted_unique)),
         "train_dev_canonical_issuer_overlap": len(train_dev_canonical_overlap),
         "train_dev_unresolved_canonical_issuer_rows": train_dev_unresolved_canonical_rows,
         "training_exposure_registry_rows": len(exposure_rows),
+        "frozen_split_registry": ({
+            "path": str(frozen_split_registry),
+            "sha256": sha256_file(frozen_split_registry),
+            "rows": len(frozen_splits),
+            "split_counts": dict(sorted(frozen_split_counts.items())),
+            "matched_rows": len(frozen_splits),
+            "missing_rows": 0,
+            "moved_rows": 0,
+            "expected_dev_identity_rows": len(expected_dev_identities),
+            "actual_dev_identity_rows": len(actual_dev_identities),
+            "extra_dev_identity_rows": 0,
+            "dev_membership_exact_match": True,
+        } if frozen_split_registry else None),
         "training_exposure_registry_contract": {
             "audience": "OWNER_ONLY_BENCHMARK_ISOLATION",
             "labels_included": False,
@@ -760,7 +978,15 @@ def build_dataset(
         "train_pair_counts_unique": pair_counts(prepared["TRAIN"]),
         "train_pair_counts_effective": pair_counts(balanced),
         "dev_pair_counts": pair_counts(prepared["DEV"]),
-        "pair_multipliers": {"|".join(key): value for key, value in PAIR_MULTIPLIERS.items()},
+        "pair_multiplier_contract": QWEN_WEAK_PAIR_MULTIPLIER_CONTRACT,
+        "pair_multiplier_default": 1,
+        "pair_multiplier_sha256": pair_multiplier_sha256,
+        "pair_multipliers": pair_multiplier_payload,
+        "training_file_roles": {
+            "train_unique": "UNIQUE_TRAIN_EXAMPLES_NO_REPEATS",
+            "train_balanced": "EFFECTIVE_TRAIN_INSTANCES_WITH_REPEATS",
+            "dev": "UNIQUE_FROZEN_DEV_EXAMPLES_NO_REPEATS",
+        },
         "output_sha256": hashes,
         "leakage_policy": [
             "sample_id", "event_id", "entity_group", "canonical_issuer_key",
@@ -788,8 +1014,22 @@ def main() -> int:
     parser.add_argument("--canonical-source-map", type=Path)
     parser.add_argument("--canonical-pool", type=Path)
     parser.add_argument("--canonical-issuer-map", type=Path)
+    parser.add_argument(
+        "--frozen-split-registry",
+        type=Path,
+        required=True,
+        help="owner-only exposure registry whose existing TRAIN/DEV assignments must remain unchanged",
+    )
+    parser.add_argument(
+        "--pair-multiplier",
+        action="append",
+        default=[],
+        metavar="MATERIALITY|POLARITY=INTEGER",
+        help="override the complete frozen v11 multiplier map; repeat once per non-default pair",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
+    configured_pair_multipliers = _parse_pair_multiplier_args(args.pair_multiplier)
     manifest = build_dataset(
         dual_consensus=[path.resolve() for path in args.dual_consensus],
         ai_assisted=[path.resolve() for path in args.ai_assisted],
@@ -801,6 +1041,10 @@ def main() -> int:
         canonical_source_map=args.canonical_source_map.resolve() if args.canonical_source_map else None,
         canonical_pool=args.canonical_pool.resolve() if args.canonical_pool else None,
         canonical_issuer_map=args.canonical_issuer_map.resolve() if args.canonical_issuer_map else None,
+        frozen_split_registry=(
+            args.frozen_split_registry.resolve() if args.frozen_split_registry else None
+        ),
+        pair_multipliers=configured_pair_multipliers,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0

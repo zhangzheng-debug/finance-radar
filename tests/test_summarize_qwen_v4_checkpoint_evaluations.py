@@ -8,7 +8,18 @@ from typing import Any, Callable
 
 import pytest
 
-from scripts.evaluate_qwen_semantic_adapter import stable_json, summarize_predictions
+from app.models.qwen_weak_supervision_contract import (
+    QWEN_WEAK_PROMPT_SHA256,
+    QWEN_WEAK_PROMPT_VERSION,
+    QWEN_WEAK_SYSTEM_PROMPT,
+)
+from scripts.evaluate_qwen_semantic_adapter import (
+    AXES_MODEL_OUTPUT_CONTRACT,
+    GENERATION_CONFIG_VERSION,
+    normalize_model_output,
+    stable_json,
+    summarize_predictions,
+)
 from scripts.summarize_qwen_v4_checkpoint_evaluations import summarize
 
 
@@ -24,6 +35,9 @@ ROUTINE_PAYLOAD = {
     "adverse_strength": "NONE",
     "semantic_priority": "ROUTINE",
 }
+AXES_PROMPT = QWEN_WEAK_SYSTEM_PROMPT
+AXES_PROMPT_VERSION = QWEN_WEAK_PROMPT_VERSION
+AXES_PROMPT_SHA256 = QWEN_WEAK_PROMPT_SHA256
 
 
 def _sha256(path: Path) -> str:
@@ -195,6 +209,170 @@ def _report(
         "metrics": metrics,
     }
     report_path.write_text(json.dumps(value), encoding="utf-8")
+    return report_path
+
+
+def _axes_dataset(
+    path: Path, *, priority_rows: int = 40, routine_rows: int = 100
+) -> Path:
+    rows: list[dict[str, Any]] = []
+    for index in range(priority_rows + routine_rows):
+        semantic_target = (
+            deepcopy(PRIORITY_PAYLOAD)
+            if index < priority_rows
+            else deepcopy(ROUTINE_PAYLOAD)
+        )
+        model_target = {
+            "materiality": semantic_target["materiality"],
+            "polarity": semantic_target["polarity"],
+        }
+        rows.append(
+            {
+                "messages": [
+                    {"role": "system", "content": AXES_PROMPT},
+                    {"role": "user", "content": "{}"},
+                    {"role": "assistant", "content": stable_json(model_target)},
+                ],
+                "metadata": {
+                    "sample_id": f"axes-{index:03d}",
+                    "event_id": f"axes-event-{index:03d}",
+                    "split": "DEV",
+                    "target_contract": "core-v1",
+                    "model_output_contract": AXES_MODEL_OUTPUT_CONTRACT,
+                    "prompt_version": AXES_PROMPT_VERSION,
+                    "prompt_sha256": AXES_PROMPT_SHA256,
+                    "semantic_target": semantic_target,
+                },
+            }
+        )
+    path.write_text(
+        "".join(stable_json(row) + "\n" for row in rows), encoding="utf-8"
+    )
+    return path
+
+
+def _axes_report(
+    path: Path,
+    dataset: Path,
+    step: int,
+    *,
+    false_negatives: int = 4,
+    false_positives: int = 5,
+    alias_enabled: bool = False,
+    alias_row: int | None = None,
+) -> Path:
+    dataset_rows = _dataset_rows(dataset)
+    priority_indices = list(range(40))
+    routine_indices = list(range(40, 140))
+    fn_indices = set(priority_indices[:false_negatives])
+    fp_indices = set(routine_indices[:false_positives])
+    predictions: list[dict[str, Any]] = []
+    alias_applied_rows = 0
+    for index, dataset_row in enumerate(dataset_rows, start=1):
+        metadata = dataset_row["metadata"]
+        expected = deepcopy(metadata["semantic_target"])
+        expected_model_output = json.loads(dataset_row["messages"][-1]["content"])
+        if index - 1 in fn_indices:
+            parsed = {
+                "materiality": ROUTINE_PAYLOAD["materiality"],
+                "polarity": ROUTINE_PAYLOAD["polarity"],
+            }
+        elif index - 1 in fp_indices:
+            parsed = {
+                "materiality": PRIORITY_PAYLOAD["materiality"],
+                "polarity": PRIORITY_PAYLOAD["polarity"],
+            }
+        else:
+            parsed = deepcopy(expected_model_output)
+        if alias_row == index - 1:
+            parsed["polarity"] = "NEGATIVE"
+        normalized = normalize_model_output(
+            parsed,
+            model_output_contract=AXES_MODEL_OUTPUT_CONTRACT,
+            allow_negative_polarity_alias=alias_enabled,
+        )
+        alias_applied = bool(normalized["polarity_alias_applied"])
+        alias_applied_rows += int(alias_applied)
+        predicted = normalized["full_payload"]
+        valid = not normalized["issues"]
+        predictions.append(
+            {
+                "index": index,
+                "sample_id": metadata["sample_id"],
+                "event_id": metadata["event_id"],
+                "benchmark_stratum": metadata.get("benchmark_stratum"),
+                "expected": expected,
+                "expected_model_output": expected_model_output,
+                "model_output_contract": AXES_MODEL_OUTPUT_CONTRACT,
+                "parsed_model_output": parsed,
+                "normalized_model_output": normalized["normalized_model_output"],
+                "predicted": predicted,
+                "raw_output": stable_json(parsed),
+                "polarity_alias_applied": alias_applied,
+                "contract_issues": normalized["issues"],
+                "contract_valid": valid,
+                "exact_match": bool(valid and predicted == expected),
+            }
+        )
+
+    report_dir = path.with_suffix("")
+    report_dir.mkdir(parents=True)
+    report_path = report_dir / "report.json"
+    predictions_path = report_dir / "predictions.jsonl"
+    _write_predictions(predictions_path, predictions)
+    generation_config = {
+        "max_new_tokens": 96,
+        "do_sample": False,
+        "repetition_penalty": 1.0,
+        "num_beams": 1,
+        "use_cache": True,
+        "eos_token_id": 151645,
+        "pad_token_id": 151643,
+    }
+    report = {
+        "schema_version": 2,
+        "evaluation_only": True,
+        "production_model_changed": False,
+        "human_gold_claimed": False,
+        "dataset_role": "DEV_SELECTION_ONLY",
+        "reserved_test_only": False,
+        "target_contract": "core-v1",
+        "model_output_contract": AXES_MODEL_OUTPUT_CONTRACT,
+        "model_output_contract_explicit": True,
+        "legacy_compatibility_mode": False,
+        "prompt_version": AXES_PROMPT_VERSION,
+        "prompt_sha256": AXES_PROMPT_SHA256,
+        "prompt_binding_verified": True,
+        "dataset_path": str(dataset),
+        "dataset_sha256": _sha256(dataset),
+        "adapter": f"D:/run/checkpoint-{step}",
+        "adapter_fingerprint": {
+            "scheme": "sha256-peft-adapter-files-v1",
+            "sha256": f"{step:064x}",
+            "files": [{"path": "adapter_model.safetensors"}],
+        },
+        "base_model_fingerprint": {
+            "scheme": "sha256-directory-manifest-full-small-head-tail-large-v1",
+            "sha256": "a" * 64,
+            "files": [{"path": "config.json"}],
+        },
+        "max_new_tokens": 96,
+        "generation_config_version": GENERATION_CONFIG_VERSION,
+        "generation_config_inherits_base_model": False,
+        "generation_config": generation_config,
+        "polarity_alias": {
+            "enabled": alias_enabled,
+            "mapping": {"NEGATIVE": "ADVERSE"},
+            "applied_rows": alias_applied_rows,
+        },
+        "evaluator_gate_advisory_only": True,
+        "checkpoint_selection_authority": (
+            "summarize_qwen_v4_checkpoint_evaluations.py strict selector gate"
+        ),
+        "predictions_sha256": _sha256(predictions_path),
+        "metrics": summarize_predictions(predictions),
+    }
+    report_path.write_text(json.dumps(report), encoding="utf-8")
     return report_path
 
 
@@ -626,4 +804,207 @@ def test_zero_denominator_routing_rate_remains_none_and_cannot_pass(
     )
     checkpoint = result["evaluated_checkpoints"][0]
     assert checkpoint["metrics"][field] is None
+    assert checkpoint["passed"] is False
+
+
+def test_selector_recomputes_core_metrics_from_axes_raw_output(tmp_path: Path) -> None:
+    dataset = _axes_dataset(tmp_path / "axes-dev.jsonl")
+    report = _axes_report(tmp_path / "axes-step.json", dataset, 28)
+
+    result = summarize(
+        report_paths=[report],
+        expected_dataset=dataset,
+        output=tmp_path / "selection.json",
+    )
+
+    selected = result["selected_checkpoint"]
+    assert selected["checkpoint_step"] == 28
+    assert selected["model_output_contract"] == AXES_MODEL_OUTPUT_CONTRACT
+    assert selected["prompt_version"] == AXES_PROMPT_VERSION
+    assert selected["prompt_sha256"] == AXES_PROMPT_SHA256
+    assert selected["prompt_binding_verified"] is True
+    assert selected["generation_config_version"] == GENERATION_CONFIG_VERSION
+    assert selected["generation_config_inherits_base_model"] is False
+    assert result["model_output_contract"] == AXES_MODEL_OUTPUT_CONTRACT
+    assert result["polarity_alias_policy"]["enabled"] is False
+
+
+def test_selector_recomputes_and_binds_negative_alias_from_axes_raw_output(
+    tmp_path: Path,
+) -> None:
+    dataset = _axes_dataset(tmp_path / "axes-dev.jsonl")
+    report = _axes_report(
+        tmp_path / "axes-step.json",
+        dataset,
+        28,
+        alias_enabled=True,
+        alias_row=40,
+    )
+
+    result = summarize(
+        report_paths=[report],
+        expected_dataset=dataset,
+        output=tmp_path / "selection.json",
+    )
+
+    checkpoint = result["evaluated_checkpoints"][0]
+    assert checkpoint["polarity_alias"] == {
+        "enabled": True,
+        "mapping": {"NEGATIVE": "ADVERSE"},
+        "applied_rows": 1,
+    }
+    assert result["polarity_alias_policy"]["enabled"] is True
+
+
+@pytest.mark.parametrize(
+    ("mutate_prediction", "message"),
+    [
+        (
+            lambda row: row.update({"parsed_model_output": {"materiality": "UNCLEAR"}}),
+            "parsed_model_output does not match raw_output",
+        ),
+        (
+            lambda row: row.update({"normalized_model_output": {"polarity": "NEUTRAL"}}),
+            "normalized_model_output mismatch",
+        ),
+        (
+            lambda row: row.update({"predicted": deepcopy(PRIORITY_PAYLOAD)}),
+            "payload does not match raw_output",
+        ),
+        (
+            lambda row: row.update({"contract_issues": ["invented"]}),
+            "contract_issues mismatch",
+        ),
+        (
+            lambda row: row.update({"contract_valid": False}),
+            "contract_valid mismatch",
+        ),
+        (
+            lambda row: row.update({"exact_match": True}),
+            "exact_match mismatch",
+        ),
+        (
+            lambda row: row.update({"polarity_alias_applied": True}),
+            "polarity_alias_applied mismatch",
+        ),
+    ],
+)
+def test_axes_selector_rejects_prediction_derivation_tampering(
+    tmp_path: Path,
+    mutate_prediction: Callable[[dict[str, Any]], None],
+    message: str,
+) -> None:
+    dataset = _axes_dataset(tmp_path / "axes-dev.jsonl")
+    report = _axes_report(tmp_path / "axes-step.json", dataset, 28)
+    rows = _read_predictions(report)
+    mutate_prediction(rows[0])
+    _rewrite_bound_predictions(report, rows)
+
+    with pytest.raises(ValueError, match=message):
+        summarize(
+            report_paths=[report],
+            expected_dataset=dataset,
+            output=tmp_path / "selection.json",
+        )
+
+
+@pytest.mark.parametrize(
+    ("report_field", "value", "message"),
+    [
+        ("model_output_contract", "wrong-contract", "unsupported model_output_contract"),
+        ("prompt_version", "wrong-version", "prompt_version does not match DEV dataset"),
+        ("prompt_sha256", "0" * 64, "prompt_sha256 does not match DEV dataset"),
+        ("prompt_binding_verified", False, "prompt binding not verified"),
+        ("generation_config_version", "wrong-version", "unsupported generation_config_version"),
+        ("generation_config_inherits_base_model", True, "inheritance is not disabled"),
+    ],
+)
+def test_axes_selector_rejects_report_contract_tampering(
+    tmp_path: Path, report_field: str, value: Any, message: str
+) -> None:
+    dataset = _axes_dataset(tmp_path / "axes-dev.jsonl")
+    report = _axes_report(tmp_path / "axes-step.json", dataset, 28)
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    payload[report_field] = value
+    report.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        summarize(
+            report_paths=[report],
+            expected_dataset=dataset,
+            output=tmp_path / "selection.json",
+        )
+
+
+def test_axes_selector_rejects_alias_count_and_cross_checkpoint_policy_mismatch(
+    tmp_path: Path,
+) -> None:
+    dataset = _axes_dataset(tmp_path / "axes-dev.jsonl")
+    bad_count = _axes_report(
+        tmp_path / "bad-count.json", dataset, 28, alias_enabled=True
+    )
+    payload = json.loads(bad_count.read_text(encoding="utf-8"))
+    payload["polarity_alias"]["applied_rows"] = 1
+    bad_count.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="polarity_alias applied_rows mismatch"):
+        summarize(
+            report_paths=[bad_count],
+            expected_dataset=dataset,
+            output=tmp_path / "selection-a.json",
+        )
+
+    disabled = _axes_report(tmp_path / "disabled.json", dataset, 56)
+    enabled = _axes_report(tmp_path / "enabled.json", dataset, 84, alias_enabled=True)
+    with pytest.raises(ValueError, match="polarity alias policy mismatch across reports"):
+        summarize(
+            report_paths=[disabled, enabled],
+            expected_dataset=dataset,
+            output=tmp_path / "selection-b.json",
+        )
+
+
+def test_axes_selector_rejects_non_explicit_generation_configuration(
+    tmp_path: Path,
+) -> None:
+    dataset = _axes_dataset(tmp_path / "axes-dev.jsonl")
+    report = _axes_report(tmp_path / "axes-step.json", dataset, 28)
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    del payload["generation_config"]["num_beams"]
+    report.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="missing explicit fields"):
+        summarize(
+            report_paths=[report],
+            expected_dataset=dataset,
+            output=tmp_path / "selection.json",
+        )
+
+
+def test_axes_invalid_raw_output_is_scored_as_parse_failure(tmp_path: Path) -> None:
+    dataset = _axes_dataset(tmp_path / "axes-dev.jsonl")
+    report = _axes_report(tmp_path / "axes-step.json", dataset, 28)
+    rows = _read_predictions(report)
+    rows[0].update(
+        {
+            "raw_output": "```json\n{}\n```",
+            "parsed_model_output": None,
+            "normalized_model_output": None,
+            "predicted": None,
+            "polarity_alias_applied": False,
+            "contract_issues": ["payload_not_object"],
+            "contract_valid": False,
+            "exact_match": False,
+        }
+    )
+    _rewrite_bound_predictions(report, rows, recompute_report_metrics=True)
+
+    result = summarize(
+        report_paths=[report],
+        expected_dataset=dataset,
+        output=tmp_path / "selection.json",
+    )
+
+    checkpoint = result["evaluated_checkpoints"][0]
+    assert checkpoint["metrics"]["contract_valid_rows"] == 139
+    assert checkpoint["checks"]["parse_success_rate_eq_1_00"] is False
     assert checkpoint["passed"] is False

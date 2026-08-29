@@ -1,15 +1,27 @@
+import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from app.models.qwen_risk_contract import expected_semantic_payload
 from scripts.evaluate_qwen_semantic_adapter import (
+    AXES_MODEL_OUTPUT_CONTRACT,
+    LEGACY_MODEL_OUTPUT_CONTRACT,
     adapter_fingerprint,
     base_model_fingerprint,
+    dataset_contract_binding,
+    explicit_generation_config,
+    extract_model_output,
     extract_json_object,
     gate_decision,
     load_evaluation_dataset,
+    normalize_expected_payload,
+    normalize_model_output,
     normalize_payload,
+    polarity_alias_report,
+    run_inference,
     summarize_prediction_strata,
     summarize_predictions,
 )
@@ -55,6 +67,30 @@ def _dataset_row(
     }
 
 
+def _axes_dataset_row(
+    sample_id: str = "axes-1",
+    *,
+    prompt: str = "two-axis system prompt",
+    prompt_version: str = "qwen-core-axes-prompt-v11",
+    materiality: str = "MATERIAL_ADVERSE",
+    polarity: str = "ADVERSE",
+) -> dict:
+    row = _dataset_row(sample_id)
+    row["messages"][0]["content"] = prompt
+    row["messages"][-1]["content"] = json.dumps(
+        {"materiality": materiality, "polarity": polarity}
+    )
+    row["metadata"].update(
+        {
+            "model_output_contract": AXES_MODEL_OUTPUT_CONTRACT,
+            "semantic_target": expected_semantic_payload(materiality, polarity),
+            "prompt_version": prompt_version,
+            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        }
+    )
+    return row
+
+
 def _write_dataset(path: Path, rows: list[dict]) -> Path:
     path.write_text(
         "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
@@ -65,9 +101,71 @@ def _write_dataset(path: Path, rows: list[dict]) -> Path:
 def test_dataset_preflight_accepts_core_v1_dev_before_inference(tmp_path: Path):
     dataset = _write_dataset(tmp_path / "dev.jsonl", [_dataset_row()])
 
-    assert load_evaluation_dataset(dataset, dataset_role="DEV_SELECTION_ONLY") == [
-        _dataset_row()
-    ]
+    rows = load_evaluation_dataset(dataset, dataset_role="DEV_SELECTION_ONLY")
+
+    assert rows == [_dataset_row()]
+    assert dataset_contract_binding(rows) == {
+        "target_contract": "core-v1",
+        "model_output_contract": LEGACY_MODEL_OUTPUT_CONTRACT,
+        "model_output_contract_explicit": False,
+        "legacy_compatibility_mode": True,
+        "prompt_version": None,
+        "prompt_sha256": None,
+        "prompt_binding_verified": False,
+    }
+
+
+def test_axes_dataset_keeps_full_core_truth_separate_from_two_axis_target(
+    tmp_path: Path,
+):
+    row = _axes_dataset_row()
+    dataset = _write_dataset(tmp_path / "axes-dev.jsonl", [row])
+
+    rows = load_evaluation_dataset(dataset, dataset_role="DEV_SELECTION_ONLY")
+    binding = dataset_contract_binding(rows)
+    model_target = json.loads(rows[0]["messages"][-1]["content"])
+    expected, issues = normalize_expected_payload(
+        model_target,
+        model_output_contract=binding["model_output_contract"],
+        semantic_target=rows[0]["metadata"]["semantic_target"],
+    )
+
+    assert set(model_target) == {"materiality", "polarity"}
+    assert expected == expected_semantic_payload("MATERIAL_ADVERSE", "ADVERSE")
+    assert issues == []
+    assert binding == {
+        "target_contract": "core-v1",
+        "model_output_contract": AXES_MODEL_OUTPUT_CONTRACT,
+        "model_output_contract_explicit": True,
+        "legacy_compatibility_mode": False,
+        "prompt_version": "qwen-core-axes-prompt-v11",
+        "prompt_sha256": hashlib.sha256(
+            b"two-axis system prompt"
+        ).hexdigest(),
+        "prompt_binding_verified": True,
+    }
+
+
+def test_axes_dataset_rejects_missing_or_inconsistent_full_semantic_truth(
+    tmp_path: Path,
+):
+    missing = _axes_dataset_row("missing")
+    missing["metadata"].pop("semantic_target")
+    with pytest.raises(ValueError, match="semantic_target:missing"):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "missing-truth.jsonl", [missing]),
+            dataset_role="DEV_SELECTION_ONLY",
+        )
+
+    inconsistent = _axes_dataset_row("inconsistent")
+    inconsistent["metadata"]["semantic_target"] = expected_semantic_payload(
+        "NOT_MATERIAL_ADVERSE", "ADVERSE"
+    )
+    with pytest.raises(ValueError, match="inconsistent_with_model_target"):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "inconsistent-truth.jsonl", [inconsistent]),
+            dataset_role="DEV_SELECTION_ONLY",
+        )
 
 
 def test_dataset_preflight_rejects_wrong_final_role_and_target_contract(tmp_path: Path):
@@ -84,6 +182,70 @@ def test_dataset_preflight_rejects_wrong_final_role_and_target_contract(tmp_path
         load_evaluation_dataset(
             _write_dataset(tmp_path / "wrong-contract.jsonl", [wrong_contract]),
             dataset_role="DIAGNOSTIC_ONLY",
+        )
+
+
+def test_new_contract_requires_exact_prompt_identity_while_legacy_does_not(
+    tmp_path: Path,
+):
+    missing_identity = _axes_dataset_row("missing-identity")
+    missing_identity["metadata"].pop("prompt_version")
+    missing_identity["metadata"].pop("prompt_sha256")
+    with pytest.raises(
+        ValueError, match="explicit model_output_contract requires prompt identity"
+    ):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "missing-prompt.jsonl", [missing_identity]),
+            dataset_role="DEV_SELECTION_ONLY",
+        )
+
+    stale_hash = _axes_dataset_row("stale-hash")
+    stale_hash["messages"][0]["content"] += " changed"
+    with pytest.raises(ValueError, match="system prompt SHA256 mismatch"):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "stale-prompt.jsonl", [stale_hash]),
+            dataset_role="DEV_SELECTION_ONLY",
+        )
+
+    non_text_version = _axes_dataset_row("non-text-version")
+    non_text_version["metadata"]["prompt_version"] = 11
+    with pytest.raises(ValueError, match="prompt_version must be text"):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "non-text-prompt.jsonl", [non_text_version]),
+            dataset_role="DEV_SELECTION_ONLY",
+        )
+
+    explicit_legacy = _dataset_row("explicit-legacy")
+    explicit_legacy["metadata"][
+        "model_output_contract"
+    ] = LEGACY_MODEL_OUTPUT_CONTRACT
+    with pytest.raises(
+        ValueError, match="explicit model_output_contract requires prompt identity"
+    ):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "explicit-legacy.jsonl", [explicit_legacy]),
+            dataset_role="DEV_SELECTION_ONLY",
+        )
+
+    legacy = _write_dataset(tmp_path / "legacy.jsonl", [_dataset_row("legacy")])
+    assert load_evaluation_dataset(legacy, dataset_role="DEV_SELECTION_ONLY")
+
+
+def test_dataset_rejects_mixed_model_output_or_prompt_bindings(tmp_path: Path):
+    axes = _axes_dataset_row("axes")
+    legacy = _dataset_row("legacy")
+    with pytest.raises(ValueError, match="model/prompt contract mismatch"):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "mixed-contract.jsonl", [axes, legacy]),
+            dataset_role="DEV_SELECTION_ONLY",
+        )
+
+    first = _axes_dataset_row("first")
+    second = _axes_dataset_row("second", prompt_version="different-version")
+    with pytest.raises(ValueError, match="model/prompt contract mismatch"):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "mixed-prompt.jsonl", [first, second]),
+            dataset_role="DEV_SELECTION_ONLY",
         )
 
 
@@ -138,6 +300,173 @@ def test_model_and_adapter_fingerprints_are_reproducible_and_content_bound(
 def test_extract_json_object_accepts_fence_and_surrounding_text():
     assert extract_json_object('```json\n{"polarity":"ADVERSE"}\n```') == {"polarity": "ADVERSE"}
     assert extract_json_object('answer: {"polarity":"NEUTRAL"} done') == {"polarity": "NEUTRAL"}
+
+
+def test_axes_parser_requires_a_plain_json_object_but_legacy_remains_compatible():
+    raw = '{"materiality":"MATERIAL_ADVERSE","polarity":"ADVERSE"}'
+    assert extract_model_output(
+        raw, model_output_contract=AXES_MODEL_OUTPUT_CONTRACT
+    ) == {"materiality": "MATERIAL_ADVERSE", "polarity": "ADVERSE"}
+    assert (
+        extract_model_output(
+            f"```json\n{raw}\n```",
+            model_output_contract=AXES_MODEL_OUTPUT_CONTRACT,
+        )
+        is None
+    )
+    assert extract_model_output(
+        f"answer: {raw}", model_output_contract=AXES_MODEL_OUTPUT_CONTRACT
+    ) is None
+    assert extract_model_output(
+        f"```json\n{raw}\n```",
+        model_output_contract=LEGACY_MODEL_OUTPUT_CONTRACT,
+    ) == {"materiality": "MATERIAL_ADVERSE", "polarity": "ADVERSE"}
+
+
+def test_axes_model_output_derives_full_payload_and_rejects_wrong_shape():
+    valid = normalize_model_output(
+        {"materiality": " material_adverse ", "polarity": "adverse"},
+        model_output_contract=AXES_MODEL_OUTPUT_CONTRACT,
+    )
+    assert valid == {
+        "normalized_model_output": {
+            "materiality": "MATERIAL_ADVERSE",
+            "polarity": "ADVERSE",
+        },
+        "full_payload": expected_semantic_payload(
+            "MATERIAL_ADVERSE", "ADVERSE"
+        ),
+        "issues": [],
+        "polarity_alias_applied": False,
+    }
+
+    missing = normalize_model_output(
+        {"materiality": "MATERIAL_ADVERSE"},
+        model_output_contract=AXES_MODEL_OUTPUT_CONTRACT,
+    )
+    assert "model_output_missing_fields:polarity" in missing["issues"]
+    assert missing["full_payload"] is None
+
+    extra = normalize_model_output(
+        {
+            "materiality": "MATERIAL_ADVERSE",
+            "polarity": "ADVERSE",
+            "adverse_strength": "HIGH",
+        },
+        model_output_contract=AXES_MODEL_OUTPUT_CONTRACT,
+    )
+    assert "model_output_unsupported_fields:adverse_strength" in extra["issues"]
+    assert extra["full_payload"] is None
+
+
+def test_negative_polarity_alias_is_opt_in_exact_and_audited():
+    raw = {"materiality": "MATERIAL_ADVERSE", "polarity": " negative "}
+    rejected = normalize_model_output(
+        raw,
+        model_output_contract=AXES_MODEL_OUTPUT_CONTRACT,
+        allow_negative_polarity_alias=False,
+    )
+    assert "negative_polarity_alias_disabled" in rejected["issues"]
+    assert "invalid_polarity" in rejected["issues"]
+    assert rejected["full_payload"] is None
+    assert rejected["polarity_alias_applied"] is False
+
+    accepted = normalize_model_output(
+        raw,
+        model_output_contract=AXES_MODEL_OUTPUT_CONTRACT,
+        allow_negative_polarity_alias=True,
+    )
+    assert accepted["normalized_model_output"]["polarity"] == "ADVERSE"
+    assert accepted["full_payload"] == expected_semantic_payload(
+        "MATERIAL_ADVERSE", "ADVERSE"
+    )
+    assert accepted["issues"] == []
+    assert accepted["polarity_alias_applied"] is True
+
+    expected, expected_issues = normalize_expected_payload(
+        raw,
+        model_output_contract=AXES_MODEL_OUTPUT_CONTRACT,
+        semantic_target=expected_semantic_payload(
+            "MATERIAL_ADVERSE", "ADVERSE"
+        ),
+    )
+    assert expected is None
+    assert "model_target:negative_polarity_alias_disabled" in expected_issues
+
+    fuzzy = normalize_model_output(
+        {"materiality": "MATERIAL_ADVERSE", "polarity": "VERY_NEGATIVE"},
+        model_output_contract=AXES_MODEL_OUTPUT_CONTRACT,
+        allow_negative_polarity_alias=True,
+    )
+    assert fuzzy["full_payload"] is None
+    assert fuzzy["polarity_alias_applied"] is False
+    assert polarity_alias_report(enabled=True, applied_rows=1) == {
+        "enabled": True,
+        "mapping": {"NEGATIVE": "ADVERSE"},
+        "applied_rows": 1,
+    }
+    with pytest.raises(ValueError, match="disabled polarity alias"):
+        polarity_alias_report(enabled=False, applied_rows=1)
+
+
+def test_explicit_generation_config_uses_fresh_safe_greedy_values():
+    fallback_pad = explicit_generation_config(
+        SimpleNamespace(eos_token_id=151645, pad_token_id=None),
+        max_new_tokens=96,
+    )
+    assert fallback_pad == {
+        "max_new_tokens": 96,
+        "min_new_tokens": 0,
+        "do_sample": False,
+        "repetition_penalty": 1.0,
+        "encoder_repetition_penalty": 1.0,
+        "no_repeat_ngram_size": 0,
+        "num_beams": 1,
+        "num_beam_groups": 1,
+        "num_return_sequences": 1,
+        "use_cache": True,
+        "eos_token_id": 151645,
+        "pad_token_id": 151645,
+    }
+    explicit_pad = explicit_generation_config(
+        SimpleNamespace(eos_token_id=151645, pad_token_id=151643),
+        max_new_tokens=32,
+    )
+    assert explicit_pad["pad_token_id"] == 151643
+
+    with pytest.raises(ValueError, match="max_new_tokens must be positive"):
+        explicit_generation_config(
+            SimpleNamespace(eos_token_id=1, pad_token_id=1), max_new_tokens=0
+        )
+    with pytest.raises(ValueError, match="max_new_tokens must be an integer"):
+        explicit_generation_config(
+            SimpleNamespace(eos_token_id=1, pad_token_id=1),
+            max_new_tokens=True,
+        )
+    with pytest.raises(ValueError, match="eos_token_id"):
+        explicit_generation_config(
+            SimpleNamespace(eos_token_id=[1, 2], pad_token_id=1),
+            max_new_tokens=1,
+        )
+    with pytest.raises(ValueError, match="pad_token_id"):
+        explicit_generation_config(
+            SimpleNamespace(eos_token_id=1, pad_token_id=-1),
+            max_new_tokens=1,
+        )
+
+
+def test_run_inference_refuses_existing_output_before_any_model_work(tmp_path: Path):
+    output_dir = tmp_path / "existing"
+    output_dir.mkdir()
+    with pytest.raises(FileExistsError, match="output directory already exists"):
+        run_inference(
+            base_model=tmp_path / "missing-model",
+            adapter=tmp_path / "missing-adapter",
+            dataset=tmp_path / "missing-dataset.jsonl",
+            dataset_role="DEV_SELECTION_ONLY",
+            output_dir=output_dir,
+            max_new_tokens=96,
+        )
 
 
 def test_summarize_and_gate_perfect_payloads():

@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from app.models.qwen_risk_contract import expected_semantic_payload
+from app.models.qwen_weak_supervision_contract import (
+    QWEN_WEAK_MODEL_OUTPUT_CONTRACT,
+    QWEN_WEAK_PROMPT_SHA256,
+    QWEN_WEAK_PROMPT_VERSION,
+    QWEN_WEAK_SYSTEM_PROMPT,
+)
+from scripts import build_qwen_semantic_core_v4_weak_dataset as builder
 from scripts.build_qwen_semantic_core_v4_weak_dataset import build_dataset, stable_json
 
 
@@ -31,6 +41,21 @@ def _row(sample: str, event: str, entity: str, chain: str, materiality: str, pol
 
 def _write(path: Path, rows: list[dict]) -> None:
     path.write_text("".join(stable_json(row) + "\n" for row in rows), encoding="utf-8")
+
+
+def _frozen_registry_row(row: dict, split: str) -> dict:
+    content = json.loads(row["messages"][1]["content"])
+    content_sha256 = hashlib.sha256(stable_json(content).encode("utf-8")).hexdigest()
+    metadata = row["metadata"]
+    return {
+        "schema_version": 1,
+        "sample_id": metadata["sample_id"],
+        "event_id": metadata["event_id"],
+        "entity_group": metadata["entity_group"],
+        "event_chain_group": metadata["event_chain_group"],
+        "content_sha256": content_sha256,
+        "exposure_split": split,
+    }
 
 
 def test_builder_excludes_strict_entities_and_conflicting_duplicates(tmp_path: Path) -> None:
@@ -192,3 +217,220 @@ def test_provisional_canonical_issuer_is_excluded_from_training(tmp_path: Path) 
     )
     assert '"sample_id":"provisional"' not in outputs
     assert '"sample_id":"strong"' in outputs
+
+
+def test_policy_disagreement_is_diagnostic_and_row_is_retained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ai = tmp_path / "ai.jsonl"
+    strict = tmp_path / "strict.jsonl"
+    row = _row(
+        "ai-routine", "event-ai", "issuer:ai", "chain:ai",
+        "NOT_MATERIAL_ADVERSE", "NEUTRAL",
+    )
+    _write(ai, [row])
+    _write(strict, [])
+    monkeypatch.setattr(builder, "_risk_first_policy", lambda _text: ("RISK_REVIEW", "legacy"))
+
+    output = tmp_path / "output"
+    manifest = build_dataset(
+        dual_consensus=[], ai_assisted=[ai], deterministic_weak=[],
+        strict_indices=[strict], output_dir=output,
+    )
+
+    assert manifest["policy_excluded_rows"] == 0
+    assert manifest["policy_disagreement_rows"] == 1
+    assert (output / "policy_exclusions.jsonl").read_text(encoding="utf-8") == ""
+    diagnostic = json.loads(
+        (output / "policy_disagreements.jsonl").read_text(encoding="utf-8").strip()
+    )
+    assert diagnostic["action"] == "RETAINED_DIAGNOSTIC_ONLY"
+    assert diagnostic["retained_in_dataset"] is True
+    all_rows = (
+        (output / "qwen_core_v4_train_unique.jsonl").read_text(encoding="utf-8")
+        + (output / "qwen_core_v4_dev.jsonl").read_text(encoding="utf-8")
+    )
+    assert '"sample_id":"ai-routine"' in all_rows
+
+
+def test_v11_axes_prompt_provenance_and_effective_counts_are_explicit(tmp_path: Path) -> None:
+    dual = tmp_path / "dual.jsonl"
+    strict = tmp_path / "strict.jsonl"
+    frozen = tmp_path / "frozen.jsonl"
+    rows = [
+        _row("ma", "e-ma", "issuer:ma", "chain:ma", "MATERIAL_ADVERSE", "ADVERSE"),
+        _row("nma-a", "e-a", "issuer:a", "chain:a", "NOT_MATERIAL_ADVERSE", "ADVERSE"),
+        _row("nma-m", "e-m", "issuer:m", "chain:m", "NOT_MATERIAL_ADVERSE", "MIXED"),
+        _row("nma-p", "e-p", "issuer:p", "chain:p", "NOT_MATERIAL_ADVERSE", "POSITIVE"),
+        _row("unclear", "e-u", "issuer:u", "chain:u", "UNCLEAR", "UNCLEAR"),
+    ]
+    _write(dual, rows)
+    _write(strict, [])
+    _write(frozen, [_frozen_registry_row(row, "TRAIN") for row in rows])
+
+    output = tmp_path / "output"
+    manifest = build_dataset(
+        dual_consensus=[dual], ai_assisted=[], deterministic_weak=[],
+        strict_indices=[strict], output_dir=output, frozen_split_registry=frozen,
+    )
+
+    train_unique = [
+        json.loads(line)
+        for line in (output / "qwen_core_v4_train_unique.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(train_unique) == 5
+    assert manifest["model_output_contract"] == QWEN_WEAK_MODEL_OUTPUT_CONTRACT
+    assert manifest["prompt_version"] == QWEN_WEAK_PROMPT_VERSION
+    assert manifest["prompt_sha256"] == QWEN_WEAK_PROMPT_SHA256
+    assert hashlib.sha256(QWEN_WEAK_SYSTEM_PROMPT.encode("utf-8")).hexdigest() == QWEN_WEAK_PROMPT_SHA256
+    for prepared in train_unique:
+        assistant = json.loads(prepared["messages"][-1]["content"])
+        assert set(assistant) == {"materiality", "polarity"}
+        metadata = prepared["metadata"]
+        assert metadata["target_contract"] == "core-v1"
+        assert metadata["model_output_contract"] == "core-axes-v1"
+        assert set(metadata["semantic_target"]) == {
+            "materiality", "polarity", "adverse_strength", "semantic_priority",
+        }
+        assert metadata["prompt_version"] == QWEN_WEAK_PROMPT_VERSION
+        assert metadata["prompt_sha256"] == QWEN_WEAK_PROMPT_SHA256
+
+    assert manifest["train_unique_rows"] == 5
+    assert manifest["train_effective_rows"] == 12
+    assert manifest["train_repeat_rows"] == 7
+    assert manifest["train_pair_counts_unique"]["UNCLEAR|UNCLEAR"] == 1
+    assert manifest["train_pair_counts_effective"]["UNCLEAR|UNCLEAR"] == 1
+    assert manifest["training_file_roles"]["train_unique"].startswith("UNIQUE_")
+    assert manifest["training_file_roles"]["train_balanced"].startswith("EFFECTIVE_")
+    assert manifest["frozen_split_registry"]["moved_rows"] == 0
+
+
+def test_pair_multiplier_override_is_frozen_and_unclear_cannot_repeat(tmp_path: Path) -> None:
+    dual = tmp_path / "dual.jsonl"
+    strict = tmp_path / "strict.jsonl"
+    frozen = tmp_path / "frozen.jsonl"
+    row = _row("ma", "event-ma", "issuer:ma", "chain:ma", "MATERIAL_ADVERSE", "ADVERSE")
+    _write(dual, [row])
+    _write(strict, [])
+    _write(frozen, [_frozen_registry_row(row, "TRAIN")])
+
+    manifest = build_dataset(
+        dual_consensus=[dual], ai_assisted=[], deterministic_weak=[],
+        strict_indices=[strict], output_dir=tmp_path / "output",
+        frozen_split_registry=frozen,
+        pair_multipliers={("MATERIAL_ADVERSE", "ADVERSE"): 3},
+    )
+    assert manifest["pair_multipliers"] == {"MATERIAL_ADVERSE|ADVERSE": 3}
+    assert manifest["train_unique_rows"] == 1
+    assert manifest["train_effective_rows"] == 3
+    assert len(manifest["pair_multiplier_sha256"]) == 64
+
+    with pytest.raises(ValueError, match=r"UNCLEAR\|UNCLEAR must not be oversampled"):
+        build_dataset(
+            dual_consensus=[dual], ai_assisted=[], deterministic_weak=[],
+            strict_indices=[strict], output_dir=tmp_path / "invalid",
+            pair_multipliers={("UNCLEAR", "UNCLEAR"): 2},
+        )
+
+
+def test_frozen_exposure_registry_preserves_existing_dev_assignments(tmp_path: Path) -> None:
+    dual = tmp_path / "dual.jsonl"
+    strict = tmp_path / "strict.jsonl"
+    frozen = tmp_path / "frozen.jsonl"
+    dev_row = _row("old-dev", "event-dev", "issuer:dev", "chain:dev", "NOT_MATERIAL_ADVERSE", "NEUTRAL")
+    train_row = _row("old-train", "event-train", "issuer:train", "chain:train", "MATERIAL_ADVERSE", "ADVERSE")
+    _write(dual, [dev_row, train_row])
+    _write(strict, [])
+    _write(frozen, [
+        _frozen_registry_row(dev_row, "DEV"),
+        _frozen_registry_row(train_row, "TRAIN"),
+    ])
+
+    output = tmp_path / "output"
+    manifest = build_dataset(
+        dual_consensus=[dual], ai_assisted=[], deterministic_weak=[],
+        strict_indices=[strict], output_dir=output, frozen_split_registry=frozen,
+    )
+    dev = (output / "qwen_core_v4_dev.jsonl").read_text(encoding="utf-8")
+    train = (output / "qwen_core_v4_train_unique.jsonl").read_text(encoding="utf-8")
+    assert '"sample_id":"old-dev"' in dev
+    assert '"sample_id":"old-dev"' not in train
+    assert '"sample_id":"old-train"' in train
+    assert manifest["frozen_split_registry"]["split_counts"] == {"DEV": 1, "TRAIN": 1}
+
+
+def test_frozen_dev_membership_is_exact_and_connected_new_rows_fail_closed(tmp_path: Path) -> None:
+    dual = tmp_path / "dual.jsonl"
+    strict = tmp_path / "strict.jsonl"
+    frozen = tmp_path / "frozen.jsonl"
+    issuer_map = tmp_path / "issuer-map.jsonl"
+    old_dev = _row(
+        "old-dev", "event-dev", "issuer:dev", "chain:dev",
+        "NOT_MATERIAL_ADVERSE", "NEUTRAL",
+    )
+    connected_new = _row(
+        "connected-new", "event-new", "issuer:alias", "chain:new",
+        "NOT_MATERIAL_ADVERSE", "POSITIVE",
+    )
+    fresh_new = _row(
+        "fresh-new", "event-fresh", "issuer:fresh", "chain:fresh",
+        "MATERIAL_ADVERSE", "ADVERSE",
+    )
+    _write(dual, [old_dev, connected_new, fresh_new])
+    _write(strict, [])
+    _write(frozen, [_frozen_registry_row(old_dev, "DEV")])
+    _write(issuer_map, [
+        {
+            "sample_id": "old-dev", "event_id": "event-dev",
+            "canonical_issuer_key": "issuer:v1:sec_cik:0000000001",
+            "resolution_quality": "STRONG_CIK",
+        },
+        {
+            "sample_id": "connected-new", "event_id": "event-new",
+            "canonical_issuer_key": "issuer:v1:sec_cik:0000000001",
+            "resolution_quality": "STRONG_CIK",
+        },
+        {
+            "sample_id": "fresh-new", "event_id": "event-fresh",
+            "canonical_issuer_key": "issuer:v1:sec_cik:0000000002",
+            "resolution_quality": "STRONG_CIK",
+        },
+    ])
+
+    output = tmp_path / "output"
+    manifest = build_dataset(
+        dual_consensus=[dual], ai_assisted=[], deterministic_weak=[],
+        strict_indices=[strict], output_dir=output,
+        canonical_issuer_map=issuer_map, frozen_split_registry=frozen,
+    )
+
+    dev_rows = [
+        json.loads(line)
+        for line in (output / "qwen_core_v4_dev.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    train = (output / "qwen_core_v4_train_unique.jsonl").read_text(encoding="utf-8")
+    assert {
+        (
+            row["metadata"]["sample_id"],
+            row["metadata"]["event_id"],
+            row["metadata"]["content_sha256"],
+        )
+        for row in dev_rows
+    } == {
+        (
+            frozen_row["sample_id"],
+            frozen_row["event_id"],
+            frozen_row["content_sha256"],
+        )
+        for frozen_row in [_frozen_registry_row(old_dev, "DEV")]
+    }
+    assert '"sample_id":"fresh-new"' in train
+    assert '"sample_id":"connected-new"' not in train
+    assert manifest["frozen_dev_boundary_excluded_rows"] == 1
+    assert manifest["frozen_split_registry"]["dev_membership_exact_match"] is True
+    assert manifest["train_dev_canonical_issuer_overlap"] == 0
+    boundary = json.loads(
+        (output / "frozen_dev_boundary_exclusions.jsonl").read_text(encoding="utf-8").strip()
+    )
+    assert boundary["sample_id"] == "connected-new"
+    assert boundary["action"] == "EXCLUDED_FAIL_CLOSED"
