@@ -143,11 +143,13 @@ def summarize_predictions(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def gate_decision(metrics: dict[str, Any]) -> dict[str, Any]:
+    false_priority_rate = metrics["priority_review"]["false_priority_rate"]
     checks = {
         "parse_success_rate_ge_1_00": metrics["parse_success_rate"] >= 1.0,
         "materiality_macro_f1_ge_0_65": metrics["materiality"]["macro_f1_truth_supported_classes"] >= 0.65,
         "polarity_macro_f1_ge_0_55": metrics["polarity"]["macro_f1_truth_supported_classes"] >= 0.55,
         "priority_review_recall_ge_0_75": (metrics["priority_review"]["recall"] or 0.0) >= 0.75,
+        "false_priority_rate_le_0_10": false_priority_rate is not None and false_priority_rate <= 0.10,
     }
     return {
         "checks": checks,

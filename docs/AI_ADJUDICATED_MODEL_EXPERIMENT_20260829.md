@@ -5,7 +5,7 @@
 本轮没有把 A/B 分歧伪装成“第三位人工审核”，也没有改写人工金标。最终得到两个不同结论：
 
 - 风险路由器达到预先冻结的内部与外部评估门槛，定级为 `QUALIFIED_SHADOW_CANDIDATE`。它只能在影子模式中提供风险优先排序，不改变事件事实、证据状态或生产模型，也不能触发交易。
-- Qwen2.5-1.5B 语义 LoRA 连续三版均未达到优先事件召回门槛，定级为 `NOT_QUALIFIED`。owner holdout 未开启，不能部署，也不能在公开 UI 中显示为模型评级。
+- Qwen2.5-1.5B 语义 LoRA v1-v3 单独运行时均未达到优先事件召回门槛。随后从冻结的 14,402 事件快照中排除全部 720 个 owner 样本，扩充独立难例并训练 v4；v4 虽补回召回，但误报超限，仍不应替换 v3。最终由 v3 加窄规则锚点组成的混合方案通过开发验证，定级为 `QUALIFIED_SHADOW_SEMANTIC_CANDIDATE`，仍未读取 owner holdout、未部署生产。
 
 这不是“95% 准确率已经解决全部问题”。风险路由器的 95% 左右指标针对 `RISK_REVIEW / NON_TARGET / ABSTAIN` 路由任务；千问承担的是重大性、极性、负面强度和优先级四字段语义任务，两者不可混用。
 
@@ -60,7 +60,28 @@
 | v2 | 少数类重采样 | 1.0000 | 0.8848 | 0.6978 | 0.6667（6/9） | `NOT_QUALIFIED` |
 | v3 | 重采样 + 重大性机制提示 | 1.0000 | 0.8272 | 0.7433 | 0.6667（6/9） | `NOT_QUALIFIED` |
 
-v2 改善了正面极性识别，v3 进一步改善极性，但三版都漏掉相同数量的重大负面事件。问题不是 JSON 输出或普通类别准确率，而是少数关键机制的覆盖和样本支撑不足。继续针对 57 条验证集调提示会产生明显过拟合，因此本轮停止调参，保持 owner holdout 未消费。
+v2 改善了正面极性识别，v3 进一步改善极性，但三版都漏掉相同数量的重大负面事件。问题不是 JSON 输出或普通类别准确率，而是少数关键机制的覆盖和样本支撑不足。
+
+### 冻结快照难例扩充与 v4
+
+后续使用团队交付包中的完整冻结任务快照继续实验。两条任务轨合计读取 15,275 条记录，按事件 ID 去重后对应 owner index 的 14,402 条事件；在匹配规则之前排除了 owner manifest 的全部 720 个事件，同时按规范化文本哈希再次排重。没有读取验证/holdout 标签来生成新样本。
+
+- 独立高置信弱监督难例：444 条；它们明确标记为 `FROZEN_SOURCE_HIGH_PRECISION_WEAK_SUPERVISION`，不是人工金标。
+- 覆盖机制：破产与股权注销、融资断裂与经营收缩、持续经营与已发生违约、Form 25/强制停牌、正式执法或重述、关键临床/产品安全失败。
+- 同时加入反例：有偿并购退市、SPAC 生命周期持续经营提示、假设性清算/违约、问题已解决、普通治理与明确正面结果。
+- 与 171 条双人语义一致训练样本合并并重复强监督行后，共 786 条训练记录。输入只保留围绕命中机制的原文窗口；证据状态、价格、审核理由和旧模型输出均未进入训练目标。
+
+首次训练因个别 SEC 长附件超过本机 8 GiB 显存预算而中止。窗口化后最大训练输入降到 1,592 token，训练稳定。为避免在弱监督上继续过拟合，在第一完整 epoch 的 checkpoint-50 后停止。
+
+| 候选 | 完全四字段一致率 | Materiality Macro-F1 | Polarity Macro-F1 | 优先事件召回 | 非优先误报 | 严格决策 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| v4 checkpoint-25 | 0.8596 | 0.8081 | 0.7349 | 0.5556（5/9） | 0.0208（1/48） | `NOT_QUALIFIED` |
+| v4 checkpoint-50 | 0.7544 | 0.8638 | 0.6648 | 1.0000（9/9） | 0.1042（5/48） | `NOT_QUALIFIED` |
+| v3 + 窄规则锚点 | 0.8947 | 0.9394 | 0.8175 | 1.0000（9/9） | 0.0417（2/48） | `QUALIFIED_SHADOW_SEMANTIC_CANDIDATE` |
+
+原门槛只约束召回，无法阻止 v4 checkpoint-50 通过。现已补充“非优先误报率不高于 10%”的固定检查；因此 checkpoint-50 不再被误判为合格。混合方案只在 6/57 条验证记录上触发规则锚点，补回了 v3 漏掉的重整后股权注销、融资失败导致经营收缩及 Form 25；两条既有误报仍来自 Qwen，规则没有新增误报。
+
+这 57 条已经被多轮开发实验使用，只能称为开发验证，不能称为最终盲测。owner holdout 继续封存；正式晋级仍需在模型与规则冻结后，使用新建的独立双盲集只评一次。
 
 ### 模型文件
 
@@ -69,11 +90,13 @@ v2 改善了正面极性识别，v3 进一步改善极性，但三版都漏掉�
 - v1 checkpoint-36 adapter SHA-256 `709886a5252a397557410bf9baf029c61ff4b180ff52a087d933fe41ace54467`
 - v2 checkpoint-40 adapter SHA-256 `6681080cca27c4f0dd5f57e55f1d9152439f9250139736102a667ab514b651a5`
 - v3 checkpoint-40 adapter SHA-256 `25a313eddbe9294a391e23639f1bb82c304c56569a76ae890172026153396b87`
+- v4 checkpoint-25 adapter SHA-256 `efbed084c2afaeafbcd726c325a9c7fb7a9f000a52c95c913cdd54c0d81d44c9`
+- v4 checkpoint-50 adapter SHA-256 `0c63967b422517942108a3e424d7bd44c76a1e64ebd5673fdc44923d23615968`
 
 ## 最终裁决
 
 1. 保留风险路由候选及其五切分报告，下一步只能进行不改变事件状态的影子打分。
-2. 不接入本轮 Qwen LoRA；UI 继续只保留模型位，不展示虚构评级。
+2. 保留 v3 + 窄规则锚点为语义影子候选；不接入 v4，不替换生产模型，不把开发验证结果展示成正式评级。
 3. 不把 AI 仲裁样本写成 `human_gold`，不把外部兼容集称作人工真值。
 4. 不读取 owner holdout，不因时间不足降低门槛。
 5. 生产晋级前必须重新收集独立双盲的人类语义标签，并构建至少 120 条、优先事件至少 20 条的密封盲测；冻结模型后只评一次。
@@ -83,7 +106,11 @@ v2 改善了正面极性识别，v3 进一步改善极性，但三版都漏掉�
 - 风险仲裁、训练与评估：`scripts/train_risk_router_ai_adjudicated.py`
 - Qwen 共识语料准备：`scripts/prepare_qwen_semantic_consensus_sft.py`
 - Qwen 适配器评估：`scripts/evaluate_qwen_semantic_adapter.py`
+- 独立冻结快照难例准备：`scripts/prepare_qwen_semantic_hardcase_sft.py`
+- Qwen + 窄规则锚点评估：`scripts/evaluate_qwen_semantic_hybrid.py`
 - 主风险报告：`artifacts/ai_adjudicated_hgr_v1/report.json`
 - Qwen v1/v2/v3 验证报告：各版本目录下的 `evaluation_validation/report.json`
+- 混合方案报告：`artifacts/qwen_semantic_consensus_v3/evaluation_validation_hybrid/report.json`
+- v4 聚合数据与验证报告：`artifacts/qwen_semantic_hardcase_v4/manifest.json` 及其 `evaluation_validation_*` 子目录
 
 所有脚本默认只生成实验资产，不修改生产模型、不写生产账本、不部署、不交易。

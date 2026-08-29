@@ -1,0 +1,343 @@
+{
+  "schema_version": 1,
+  "evaluation_only": true,
+  "production_model_changed": false,
+  "owner_holdout_opened": false,
+  "human_gold_claimed": false,
+  "dataset_path": "D:\\FinanceRadarBuilds\\ai-adjudicated-risk-router\\artifacts\\qwen_semantic_consensus_v3\\qwen_risk_sft_validation.jsonl",
+  "dataset_sha256": "f956fe32175498487f4c4ca79a18332f2e3e4c7f4d11cb34dd28551dbe1b1275",
+  "model_predictions_path": "D:\\FinanceRadarBuilds\\ai-adjudicated-risk-router\\artifacts\\qwen_semantic_hardcase_v4\\evaluation_validation_checkpoint50\\predictions.jsonl",
+  "model_predictions_sha256": "0a987210d733564c2a8e7a9bd1f32e599cff914c9d841642398ee64e52fb0399",
+  "decision_source_counts": {
+    "DETERMINISTIC_HARDCASE_ANCHOR": 6,
+    "QWEN_ADAPTER": 51
+  },
+  "model_only_metrics": {
+    "rows": 57,
+    "contract_valid_rows": 57,
+    "parse_success_rate": 1.0,
+    "exact_payload_accuracy": 0.7543859649122807,
+    "materiality": {
+      "accuracy": 0.9122807017543859,
+      "macro_f1_truth_supported_classes": 0.8638318203535595,
+      "truth_supported_labels": [
+        "MATERIAL_ADVERSE",
+        "NOT_MATERIAL_ADVERSE"
+      ],
+      "per_class": {
+        "MATERIAL_ADVERSE": {
+          "support": 9,
+          "precision": 0.6428571428571429,
+          "recall": 1.0,
+          "f1": 0.782608695652174
+        },
+        "NOT_MATERIAL_ADVERSE": {
+          "support": 48,
+          "precision": 1.0,
+          "recall": 0.8958333333333334,
+          "f1": 0.945054945054945
+        }
+      },
+      "confusion": {
+        "MATERIAL_ADVERSE": {
+          "MATERIAL_ADVERSE": 9
+        },
+        "NOT_MATERIAL_ADVERSE": {
+          "MATERIAL_ADVERSE": 5,
+          "NOT_MATERIAL_ADVERSE": 43
+        }
+      }
+    },
+    "polarity": {
+      "accuracy": 0.7543859649122807,
+      "macro_f1_truth_supported_classes": 0.6647869674185464,
+      "truth_supported_labels": [
+        "ADVERSE",
+        "NEUTRAL",
+        "POSITIVE"
+      ],
+      "per_class": {
+        "ADVERSE": {
+          "support": 10,
+          "precision": 0.6428571428571429,
+          "recall": 0.9,
+          "f1": 0.75
+        },
+        "NEUTRAL": {
+          "support": 44,
+          "precision": 0.96875,
+          "recall": 0.7045454545454546,
+          "f1": 0.8157894736842106
+        },
+        "POSITIVE": {
+          "support": 3,
+          "precision": 0.2727272727272727,
+          "recall": 1.0,
+          "f1": 0.42857142857142855
+        }
+      },
+      "confusion": {
+        "ADVERSE": {
+          "ADVERSE": 9,
+          "NEUTRAL": 1
+        },
+        "NEUTRAL": {
+          "ADVERSE": 5,
+          "NEUTRAL": 31,
+          "POSITIVE": 8
+        },
+        "POSITIVE": {
+          "POSITIVE": 3
+        }
+      }
+    },
+    "adverse_strength": {
+      "accuracy": 0.8947368421052632,
+      "macro_f1_truth_supported_classes": 0.5719806763285024,
+      "truth_supported_labels": [
+        "HIGH",
+        "LOW",
+        "NONE"
+      ],
+      "per_class": {
+        "HIGH": {
+          "support": 9,
+          "precision": 0.6428571428571429,
+          "recall": 1.0,
+          "f1": 0.782608695652174
+        },
+        "LOW": {
+          "support": 1,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "NONE": {
+          "support": 47,
+          "precision": 0.9767441860465116,
+          "recall": 0.8936170212765957,
+          "f1": 0.9333333333333332
+        }
+      },
+      "confusion": {
+        "HIGH": {
+          "HIGH": 9
+        },
+        "LOW": {
+          "NONE": 1
+        },
+        "NONE": {
+          "HIGH": 5,
+          "NONE": 42
+        }
+      }
+    },
+    "semantic_priority": {
+      "accuracy": 0.9122807017543859,
+      "macro_f1_truth_supported_classes": 0.8638318203535595,
+      "truth_supported_labels": [
+        "PRIORITY_REVIEW",
+        "ROUTINE"
+      ],
+      "per_class": {
+        "PRIORITY_REVIEW": {
+          "support": 9,
+          "precision": 0.6428571428571429,
+          "recall": 1.0,
+          "f1": 0.782608695652174
+        },
+        "ROUTINE": {
+          "support": 48,
+          "precision": 1.0,
+          "recall": 0.8958333333333334,
+          "f1": 0.945054945054945
+        }
+      },
+      "confusion": {
+        "PRIORITY_REVIEW": {
+          "PRIORITY_REVIEW": 9
+        },
+        "ROUTINE": {
+          "PRIORITY_REVIEW": 5,
+          "ROUTINE": 43
+        }
+      }
+    },
+    "priority_review": {
+      "support": 9,
+      "recall": 1.0,
+      "non_priority_support": 48,
+      "false_priority_rate": 0.10416666666666667
+    }
+  },
+  "hybrid_metrics": {
+    "rows": 57,
+    "contract_valid_rows": 57,
+    "parse_success_rate": 1.0,
+    "exact_payload_accuracy": 0.7543859649122807,
+    "materiality": {
+      "accuracy": 0.9122807017543859,
+      "macro_f1_truth_supported_classes": 0.8638318203535595,
+      "truth_supported_labels": [
+        "MATERIAL_ADVERSE",
+        "NOT_MATERIAL_ADVERSE"
+      ],
+      "per_class": {
+        "MATERIAL_ADVERSE": {
+          "support": 9,
+          "precision": 0.6428571428571429,
+          "recall": 1.0,
+          "f1": 0.782608695652174
+        },
+        "NOT_MATERIAL_ADVERSE": {
+          "support": 48,
+          "precision": 1.0,
+          "recall": 0.8958333333333334,
+          "f1": 0.945054945054945
+        }
+      },
+      "confusion": {
+        "MATERIAL_ADVERSE": {
+          "MATERIAL_ADVERSE": 9
+        },
+        "NOT_MATERIAL_ADVERSE": {
+          "MATERIAL_ADVERSE": 5,
+          "NOT_MATERIAL_ADVERSE": 43
+        }
+      }
+    },
+    "polarity": {
+      "accuracy": 0.7543859649122807,
+      "macro_f1_truth_supported_classes": 0.6647869674185464,
+      "truth_supported_labels": [
+        "ADVERSE",
+        "NEUTRAL",
+        "POSITIVE"
+      ],
+      "per_class": {
+        "ADVERSE": {
+          "support": 10,
+          "precision": 0.6428571428571429,
+          "recall": 0.9,
+          "f1": 0.75
+        },
+        "NEUTRAL": {
+          "support": 44,
+          "precision": 0.96875,
+          "recall": 0.7045454545454546,
+          "f1": 0.8157894736842106
+        },
+        "POSITIVE": {
+          "support": 3,
+          "precision": 0.2727272727272727,
+          "recall": 1.0,
+          "f1": 0.42857142857142855
+        }
+      },
+      "confusion": {
+        "ADVERSE": {
+          "ADVERSE": 9,
+          "NEUTRAL": 1
+        },
+        "NEUTRAL": {
+          "ADVERSE": 5,
+          "NEUTRAL": 31,
+          "POSITIVE": 8
+        },
+        "POSITIVE": {
+          "POSITIVE": 3
+        }
+      }
+    },
+    "adverse_strength": {
+      "accuracy": 0.8947368421052632,
+      "macro_f1_truth_supported_classes": 0.5719806763285024,
+      "truth_supported_labels": [
+        "HIGH",
+        "LOW",
+        "NONE"
+      ],
+      "per_class": {
+        "HIGH": {
+          "support": 9,
+          "precision": 0.6428571428571429,
+          "recall": 1.0,
+          "f1": 0.782608695652174
+        },
+        "LOW": {
+          "support": 1,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "NONE": {
+          "support": 47,
+          "precision": 0.9767441860465116,
+          "recall": 0.8936170212765957,
+          "f1": 0.9333333333333332
+        }
+      },
+      "confusion": {
+        "HIGH": {
+          "HIGH": 9
+        },
+        "LOW": {
+          "NONE": 1
+        },
+        "NONE": {
+          "HIGH": 5,
+          "NONE": 42
+        }
+      }
+    },
+    "semantic_priority": {
+      "accuracy": 0.9122807017543859,
+      "macro_f1_truth_supported_classes": 0.8638318203535595,
+      "truth_supported_labels": [
+        "PRIORITY_REVIEW",
+        "ROUTINE"
+      ],
+      "per_class": {
+        "PRIORITY_REVIEW": {
+          "support": 9,
+          "precision": 0.6428571428571429,
+          "recall": 1.0,
+          "f1": 0.782608695652174
+        },
+        "ROUTINE": {
+          "support": 48,
+          "precision": 1.0,
+          "recall": 0.8958333333333334,
+          "f1": 0.945054945054945
+        }
+      },
+      "confusion": {
+        "PRIORITY_REVIEW": {
+          "PRIORITY_REVIEW": 9
+        },
+        "ROUTINE": {
+          "PRIORITY_REVIEW": 5,
+          "ROUTINE": 43
+        }
+      }
+    },
+    "priority_review": {
+      "support": 9,
+      "recall": 1.0,
+      "non_priority_support": 48,
+      "false_priority_rate": 0.10416666666666667
+    }
+  },
+  "hybrid_gate": {
+    "checks": {
+      "parse_success_rate_ge_1_00": true,
+      "materiality_macro_f1_ge_0_65": true,
+      "polarity_macro_f1_ge_0_55": true,
+      "priority_review_recall_ge_0_75": true,
+      "false_priority_rate_le_0_10": false
+    },
+    "passed": false,
+    "decision": "NOT_QUALIFIED"
+  },
+  "hybrid_predictions_sha256": "7641bf9cd67fc7978260a71cbc4344cb3d0d52369a12a3c6f810df7ff3f3370a"
+}

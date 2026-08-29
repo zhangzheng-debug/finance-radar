@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "contract_version": "qwen-semantic-independent-hardcase-weak-supervision-v1",
+  "semantic_contract_version": "qwen-risk-semantics-v1",
+  "owner_manifest_sha256": "e5b77b2b2fb9fdb265232d585b8d8babb36229b56270493732f83f7e69c0f6ab",
+  "owner_manifest_events_excluded": 720,
+  "frozen_packet_rows_seen": 15275,
+  "per_rule_cap": 48,
+  "base_human_consensus_repeat": 2,
+  "available_by_rule": {
+    "bankruptcy_restructuring_or_equity_cancellation": 112,
+    "binding_enforcement_fraud_or_restatement": 32,
+    "binding_listing_removal_or_suspension": 164,
+    "capital_exhaustion_or_operating_curtailment": 13,
+    "clearly_positive_operating_result": 43,
+    "contract_definition_not_realized": 1,
+    "going_concern_or_realized_default": 578,
+    "hypothetical_liquidation_or_default": 37,
+    "ordinary_adverse_result": 28,
+    "paid_or_completed_listing_exit": 20,
+    "pivotal_clinical_or_serious_safety_failure": 12,
+    "resolved_financial_or_listing_risk": 61,
+    "routine_governance_or_administration": 18,
+    "spac_going_concern_is_lifecycle_risk": 90
+  },
+  "selected_by_rule": {
+    "bankruptcy_restructuring_or_equity_cancellation": 48,
+    "binding_enforcement_fraud_or_restatement": 32,
+    "binding_listing_removal_or_suspension": 48,
+    "capital_exhaustion_or_operating_curtailment": 13,
+    "clearly_positive_operating_result": 43,
+    "contract_definition_not_realized": 1,
+    "going_concern_or_realized_default": 48,
+    "hypothetical_liquidation_or_default": 37,
+    "ordinary_adverse_result": 28,
+    "paid_or_completed_listing_exit": 20,
+    "pivotal_clinical_or_serious_safety_failure": 12,
+    "resolved_financial_or_listing_risk": 48,
+    "routine_governance_or_administration": 18,
+    "spac_going_concern_is_lifecycle_risk": 48
+  },
+  "exclusion_counts": {
+    "missing_or_duplicate_event_id": 873,
+    "no_high_precision_rule": 12431,
+    "owner_manifest_event": 720,
+    "empty_semantic_text": 8,
+    "duplicate_content": 34
+  },
+  "base_human_consensus_rows": 171,
+  "weak_supervision_rows": 444,
+  "combined_training_rows": 786,
+  "weak_pair_counts": {
+    "MATERIAL_ADVERSE|ADVERSE": 201,
+    "NOT_MATERIAL_ADVERSE|POSITIVE": 91,
+    "NOT_MATERIAL_ADVERSE|NEUTRAL": 124,
+    "NOT_MATERIAL_ADVERSE|ADVERSE": 28
+  },
+  "combined_pair_counts": {
+    "NOT_MATERIAL_ADVERSE|NEUTRAL": 388,
+    "MATERIAL_ADVERSE|ADVERSE": 257,
+    "NOT_MATERIAL_ADVERSE|POSITIVE": 109,
+    "NOT_MATERIAL_ADVERSE|ADVERSE": 32
+  },
+  "label_provenance": "FROZEN_SOURCE_HIGH_PRECISION_WEAK_SUPERVISION",
+  "human_gold_claimed": false,
+  "owner_holdout_opened": false,
+  "validation_or_holdout_rows_imported": false,
+  "evidence_state_used_as_model_target": false,
+  "post_event_market_data_included": false,
+  "production_model_changed": false,
+  "output_sha256": {
+    "weak": "f17b07dd00afe8a0bbf802e9a7c10ce559f264dde670d9e7224750c7d8db1227",
+    "combined": "897e75b886e7e6b1180ec345c9bb9f794ac641f6ac1138b1d0deeb5f7c47330b"
+  }
+}

@@ -62,6 +62,30 @@ def test_invalid_output_counts_against_all_axes():
     assert gate_decision(metrics)["passed"] is False
 
 
+def test_gate_rejects_excess_false_priority_rate():
+    priority = normalize_payload(
+        {
+            "materiality": "MATERIAL_ADVERSE",
+            "polarity": "ADVERSE",
+            "adverse_strength": "HIGH",
+            "semantic_priority": "PRIORITY_REVIEW",
+        }
+    )
+    routine = normalize_payload(
+        {
+            "materiality": "NOT_MATERIAL_ADVERSE",
+            "polarity": "NEUTRAL",
+            "adverse_strength": "NONE",
+            "semantic_priority": "ROUTINE",
+        }
+    )
+    metrics = summarize_predictions(
+        [_row(priority, priority), _row(routine, priority), _row(routine, routine)]
+    )
+    assert metrics["priority_review"]["false_priority_rate"] == 0.5
+    assert gate_decision(metrics)["passed"] is False
+
+
 def test_semantic_balancer_repeats_only_training_minority_pairs():
     def item(materiality, polarity, sample_id):
         return {
