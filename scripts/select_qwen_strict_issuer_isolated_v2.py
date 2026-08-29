@@ -120,6 +120,22 @@ _PROHIBITED_SUPERVISION_REGEXES = tuple(
     for name, pattern in PROHIBITED_SUPERVISION_TEXT_PATTERNS
 )
 
+# Some upstream detector rows contain source-backed facts, but their headline
+# or summary is still a generated detector scaffold rather than source-native
+# text.  Keeping these hints in a sealed benchmark would let a model identify
+# the detector family instead of interpreting the cited passage.
+PROHIBITED_DERIVED_DETECTOR_TEXT_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("REVERSE_SPLIT_CANDIDATE", r"\breverse[_ -]?split\s+candidate\b"),
+    (
+        "DERIVED_SPLIT_RATIO_VALUE",
+        r"\bsplit\s+value\s*(?:<=|>=|<|>|=)\s*-?\d+(?:\.\d+)?\s*;\s*value\s*=",
+    ),
+)
+_PROHIBITED_DERIVED_DETECTOR_REGEXES = tuple(
+    (name, re.compile(pattern, re.IGNORECASE))
+    for name, pattern in PROHIBITED_DERIVED_DETECTOR_TEXT_PATTERNS
+)
+
 HASH_FIELDS = (
     "content_sha256",
     "provider_text_sha256",
@@ -287,6 +303,16 @@ def _prohibited_supervision_text_reasons(value: Any) -> list[str]:
         f"POST_EVENT_SUPERVISION_TEXT:{name}"
         for text in _walk_strings(value)
         for name, regex in _PROHIBITED_SUPERVISION_REGEXES
+        if regex.search(text)
+    }
+    return sorted(matches)
+
+
+def _prohibited_derived_detector_text_reasons(value: Any) -> list[str]:
+    matches = {
+        f"DERIVED_DETECTOR_TEXT:{name}"
+        for text in _walk_strings(value)
+        for name, regex in _PROHIBITED_DERIVED_DETECTOR_REGEXES
         if regex.search(text)
     }
     return sorted(matches)
@@ -577,6 +603,7 @@ def _strong_parse_reasons(
 ) -> list[str]:
     reasons: list[str] = []
     reasons.extend(_prohibited_supervision_text_reasons(content))
+    reasons.extend(_prohibited_derived_detector_text_reasons(content))
     if not _is_strong_resolution_quality(resolution_quality):
         reasons.append("CANONICAL_ISSUER_NOT_STRONG_RESOLVED")
     subject = content.get("focal_subject") if isinstance(content.get("focal_subject"), dict) else {}
@@ -1024,6 +1051,7 @@ def select_issuer_isolated_benchmark_v2(
                         "NONEMPTY_HEADLINE",
                         "SOURCE_EVIDENCE_TEXT_AT_LEAST_80_CHARACTERS",
                         "NO_POST_EVENT_SUPERVISION_TEXT",
+                        "NO_DERIVED_DETECTOR_SCAFFOLDING",
                     ],
                 },
                 "candidate_rows_after_strong_parse_and_isolation": len(candidates),
@@ -1122,6 +1150,7 @@ def select_issuer_isolated_benchmark_v2(
                     "CANONICAL_ISSUER_MAP",
                     "EXPOSURE_REGISTRY",
                     "NEGATIVE_FILTER_POST_EVENT_SUPERVISION_PATTERN",
+                    "NEGATIVE_FILTER_DERIVED_DETECTOR_SCAFFOLD_PATTERN",
                 ],
                 "category_balancing_used": False,
                 "model_output_sampling_used": False,
@@ -1136,6 +1165,7 @@ def select_issuer_isolated_benchmark_v2(
                 "market_outcomes_read": False,
                 "post_event_supervision_leakage_screened": True,
                 "post_event_supervision_values_used": False,
+                "derived_detector_scaffolding_screened": True,
                 "prices_used": False,
                 "human_gold_claimed": False,
                 "legacy_v1_classification": "AI_NOT_HUMAN_GOLD",

@@ -351,6 +351,46 @@ def test_post_event_outcome_text_is_excluded_before_benchmark_selection(tmp_path
     assert manifest["provenance"]["post_event_supervision_values_used"] is False
 
 
+def test_derived_detector_scaffolding_is_excluded_before_benchmark_selection(tmp_path: Path) -> None:
+    old = _provider("old")
+    derived = _provider("derived")
+    derived["content"]["headline"] = "VIEWQ reverse_split candidate"
+    derived["content"]["summary"] = "split value < 1; value=0.01667"
+    clean = _provider("clean")
+    providers = [old, derived, clean]
+    owners = [
+        _owner(
+            row,
+            event=f"event-{row['sample_id']}",
+            entity=f"entity-{row['sample_id']}",
+            chain=f"chain-{row['sample_id']}",
+        )
+        for row in providers
+    ]
+    maps = [
+        _map_row(row["sample_id"], f"event-{row['sample_id']}", f"issuer:{row['sample_id']}")
+        for row in providers
+    ] + [_map_row("train", "event-train", "issuer:train")]
+    paths = _fixture_files(
+        tmp_path,
+        providers,
+        owners,
+        maps,
+        [_exposure("train", "event-train", "issuer:train", "chain-train", "d" * 64)],
+        ["old"],
+    )
+
+    manifest = _run(paths, tmp_path / "out", general=1, high=0, legacy=1)
+
+    selected = (tmp_path / "out" / PROVIDER_OUTPUT).read_text(encoding="utf-8")
+    assert '"sample_id":"clean"' in selected
+    assert '"sample_id":"derived"' not in selected
+    reasons = manifest["selection"]["exclusion_reason_counts"]
+    assert reasons["DERIVED_DETECTOR_TEXT:REVERSE_SPLIT_CANDIDATE"] == 1
+    assert reasons["DERIVED_DETECTOR_TEXT:DERIVED_SPLIT_RATIO_VALUE"] == 1
+    assert manifest["provenance"]["derived_detector_scaffolding_screened"] is True
+
+
 def test_rejects_answer_bearing_input_before_writing_output(tmp_path: Path) -> None:
     bad = _provider("bad")
     bad["content"]["materiality"] = "MATERIAL_ADVERSE"
