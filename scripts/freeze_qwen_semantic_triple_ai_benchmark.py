@@ -32,7 +32,11 @@ from app.models.qwen_risk_contract_v2 import (  # noqa: E402
     QWEN_RISK_CONTRACT_V2_VERSION,
     validate_semantic_v2_payload,
 )
-from scripts.build_qwen_semantic_core_v4_weak_dataset import SYSTEM_PROMPT, stable_json  # noqa: E402
+from scripts.build_qwen_semantic_core_v4_weak_dataset import (  # noqa: E402
+    SYSTEM_PROMPT,
+    TARGET_CONTRACT,
+    stable_json,
+)
 
 
 BENCHMARK_CONTRACT = "qwen-triple-ai-strict60-v1"
@@ -154,6 +158,7 @@ def freeze_benchmark(
             "event_chain_group": source.get("event_chain_group"),
             "content_sha256": hashlib.sha256(stable_json(normalized).encode("utf-8")).hexdigest(),
             "split": "SEALED_STRICT60_TEST",
+            "target_contract": TARGET_CONTRACT,
             "benchmark_stratum": benchmark_stratum,
             "benchmark_stratum_predicate_version": predicate_version,
             "label_provenance": "THREE_INDEPENDENT_AI_REVIEWS_WITH_AI_ARBITRATION",
@@ -195,6 +200,7 @@ def freeze_benchmark(
         "schema_version": 1,
         "benchmark_contract": BENCHMARK_CONTRACT,
         "semantic_v2_contract": QWEN_RISK_CONTRACT_V2_VERSION,
+        "target_contract": TARGET_CONTRACT,
         "classification": "AI_NOT_HUMAN_GOLD",
         "row_count": len(benchmark),
         "input_sha256": {

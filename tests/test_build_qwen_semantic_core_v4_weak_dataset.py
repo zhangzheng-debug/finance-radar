@@ -59,6 +59,17 @@ def test_builder_excludes_strict_entities_and_conflicting_duplicates(tmp_path: P
     assert "issuer:sealed" not in all_rows
     assert "issuer:conflict" not in all_rows
     assert "WEAK_SUPERVISION_NOT_HUMAN_GOLD" in all_rows
+    prepared = [
+        json.loads(line)
+        for path in (
+            output / "qwen_core_v4_train_unique.jsonl",
+            output / "qwen_core_v4_dev.jsonl",
+        )
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert all(row["metadata"]["target_contract"] == "core-v1" for row in prepared)
+    assert manifest["target_contract"] == "core-v1"
 
 
 def test_component_split_keeps_same_entity_together(tmp_path: Path) -> None:

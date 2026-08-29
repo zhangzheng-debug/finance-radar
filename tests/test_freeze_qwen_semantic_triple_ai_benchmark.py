@@ -47,7 +47,9 @@ def test_freezes_ordered_core_and_v2_artifacts(tmp_path: Path) -> None:
     assert row["metadata"]["qwen_prediction_included"] is False
     assert row["metadata"]["benchmark_stratum"] == "GENERAL"
     assert row["metadata"]["benchmark_stratum_predicate_version"] == "TEST_V1"
+    assert row["metadata"]["target_contract"] == "core-v1"
     assert manifest["benchmark_stratum_counts"] == {"GENERAL": 1}
+    assert manifest["target_contract"] == "core-v1"
     assert (output / "qwen_strict60_full_v2_truth.jsonl").exists()
 
 

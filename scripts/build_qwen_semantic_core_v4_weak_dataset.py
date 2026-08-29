@@ -35,6 +35,7 @@ from scripts.train_risk_router_ai_adjudicated import _risk_first_policy  # noqa:
 
 
 DATASET_CONTRACT = "qwen-core-v1-weak-supervision-v4"
+TARGET_CONTRACT = "core-v1"
 SPLIT_SALT = "finance-radar-qwen-core-v4-component-split-20260830"
 SYSTEM_PROMPT = (
     "你是金融雷达的语义风险分类器。只根据所给文本判断对焦点资产的极性与做空风险重大性；"
@@ -381,6 +382,7 @@ def _prepared(row: dict[str, Any], split: str) -> dict[str, Any]:
             "event_chain_group": row["event_chain_group"],
             "content_sha256": row["content_sha256"],
             "split": split,
+            "target_contract": TARGET_CONTRACT,
             "label_provenance": row["source"],
             "label_classification": "WEAK_SUPERVISION_NOT_HUMAN_GOLD",
             "weak_rule": row["weak_rule"],
@@ -704,6 +706,7 @@ def build_dataset(
         "schema_version": 1,
         "dataset_contract": DATASET_CONTRACT,
         "semantic_contract": QWEN_RISK_CONTRACT_VERSION,
+        "target_contract": TARGET_CONTRACT,
         "label_classification": "WEAK_SUPERVISION_NOT_HUMAN_GOLD",
         "split_salt": SPLIT_SALT,
         "input_counts": dict(sorted(input_counts.items())),
