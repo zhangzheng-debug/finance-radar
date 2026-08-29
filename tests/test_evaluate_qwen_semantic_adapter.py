@@ -41,10 +41,42 @@ def test_summarize_and_gate_perfect_payloads():
             "semantic_priority": "ROUTINE",
         }
     )
-    metrics = summarize_predictions([_row(priority, priority), _row(routine, routine)])
+    metrics = summarize_predictions(
+        [_row(priority, priority) for _ in range(20)]
+        + [_row(routine, routine) for _ in range(100)]
+    )
     assert metrics["exact_payload_accuracy"] == 1.0
     assert metrics["priority_review"]["recall"] == 1.0
     assert gate_decision(metrics)["passed"] is True
+
+
+def test_gate_rejects_tiny_or_priority_sparse_reference_sets():
+    priority = normalize_payload(
+        {
+            "materiality": "MATERIAL_ADVERSE",
+            "polarity": "ADVERSE",
+            "adverse_strength": "HIGH",
+            "semantic_priority": "PRIORITY_REVIEW",
+        }
+    )
+    routine = normalize_payload(
+        {
+            "materiality": "NOT_MATERIAL_ADVERSE",
+            "polarity": "NEUTRAL",
+            "adverse_strength": "NONE",
+            "semantic_priority": "ROUTINE",
+        }
+    )
+    tiny = gate_decision(summarize_predictions([_row(priority, priority)] * 20))
+    sparse = gate_decision(
+        summarize_predictions(
+            [_row(priority, priority)] * 19 + [_row(routine, routine)] * 101
+        )
+    )
+    assert tiny["checks"]["rows_ge_120"] is False
+    assert sparse["checks"]["priority_support_ge_20"] is False
+    assert tiny["passed"] is False
+    assert sparse["passed"] is False
 
 
 def test_invalid_output_counts_against_all_axes():

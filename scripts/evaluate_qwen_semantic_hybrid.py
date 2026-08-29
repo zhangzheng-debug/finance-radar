@@ -92,6 +92,7 @@ def evaluate(*, dataset: Path, predictions: Path, output_dir: Path) -> dict[str,
             for source in ("DETERMINISTIC_HARDCASE_ANCHOR", "QWEN_ADAPTER")
         },
         "model_only_metrics": model_metrics,
+        "model_only_gate": gate_decision(model_metrics),
         "hybrid_metrics": hybrid_metrics,
         "hybrid_gate": gate_decision(hybrid_metrics),
         "hybrid_predictions_sha256": sha256_file(output_path),
