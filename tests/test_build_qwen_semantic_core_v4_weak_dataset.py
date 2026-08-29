@@ -144,3 +144,40 @@ def test_legacy_hardcase_is_rejoined_to_canonical_entity_before_split(tmp_path: 
     all_rows = (output / "qwen_core_v4_train_unique.jsonl").read_text() + (output / "qwen_core_v4_dev.jsonl").read_text()
     assert "issuer:hash" in all_rows
     assert "LEGACY NAME" not in all_rows
+
+
+def test_provisional_canonical_issuer_is_excluded_from_training(tmp_path: Path) -> None:
+    dual = tmp_path / "dual.jsonl"
+    strict = tmp_path / "strict.jsonl"
+    issuer_map = tmp_path / "issuer-map.jsonl"
+    _write(dual, [
+        _row("provisional", "event-p", "issuer:p", "chain:p", "NOT_MATERIAL_ADVERSE", "NEUTRAL"),
+        _row("strong", "event-s", "issuer:s", "chain:s", "MATERIAL_ADVERSE", "ADVERSE"),
+    ])
+    _write(strict, [])
+    _write(issuer_map, [
+        {
+            "sample_id": "provisional", "event_id": "event-p",
+            "canonical_issuer_key": "issuer:v1:raw_ticker:TEST",
+            "resolution_quality": "PROVISIONAL_RAW_TICKER",
+        },
+        {
+            "sample_id": "strong", "event_id": "event-s",
+            "canonical_issuer_key": "issuer:v1:sec_cik:0000000001",
+            "resolution_quality": "STRONG_CIK",
+        },
+    ])
+    output = tmp_path / "output"
+    manifest = build_dataset(
+        dual_consensus=[dual], ai_assisted=[], deterministic_weak=[],
+        strict_indices=[strict], canonical_issuer_map=issuer_map, output_dir=output,
+    )
+    assert manifest["canonical_provisional_excluded_rows"] == 1
+    audit = (output / "leakage_exclusions.jsonl").read_text(encoding="utf-8")
+    assert "canonical_issuer_not_strong" in audit
+    outputs = (
+        (output / "qwen_core_v4_train_unique.jsonl").read_text(encoding="utf-8")
+        + (output / "qwen_core_v4_dev.jsonl").read_text(encoding="utf-8")
+    )
+    assert '"sample_id":"provisional"' not in outputs
+    assert '"sample_id":"strong"' in outputs

@@ -238,33 +238,56 @@ D:\FinanceRadarModels\envs\qwen-risk-py312\Scripts\swift.exe sft `
   --dataset qwen_risk_sft_train_balanced.jsonl `
   --val_dataset qwen_risk_sft_dev.jsonl `
   --split_dataset_ratio 0 `
-  --train_type lora `
+  --tuner_type lora `
   --quant_method bnb `
   --quant_bits 4 `
   --bnb_4bit_quant_type nf4 `
   --bnb_4bit_use_double_quant true `
   --lora_rank 8 `
   --lora_alpha 32 `
+  --lora_dropout 0.05 `
   --target_modules all-linear `
   --torch_dtype float16 `
-  --num_train_epochs 3 `
+  --num_train_epochs 2 `
   --per_device_train_batch_size 1 `
   --per_device_eval_batch_size 1 `
   --gradient_accumulation_steps 16 `
-  --learning_rate 0.0001 `
+  --learning_rate 0.00005 `
+  --lr_scheduler_type cosine `
+  --weight_decay 0.1 `
+  --max_grad_norm 1.0 `
   --max_length 2048 `
   --eval_steps 20 `
   --save_steps 20 `
-  --save_total_limit 2 `
+  --save_total_limit 6 `
   --logging_steps 5 `
   --warmup_ratio 0.05 `
   --dataloader_num_workers 0 `
+  --seed 42 `
+  --data_seed 42 `
+  --report_to none `
   --strict true `
   --output_dir D:\FinanceRadarModels\experiments\qwen-semantic-v4-core
 ```
 
 For `full-v2`, change the working/output directories to their `-full` paths.
 The unique TEST file is deliberately absent from both training commands.
+
+For an issuer-isolated run, first build a canonical issuer map from label-free
+identity packets, then build the weak-supervision corpus with that map and an
+owner-only training exposure registry. Raw name-only and ticker-only mappings
+are provisional: they may be used to detect possible overlap, but they are
+excluded from TRAIN/DEV. Before training, run
+`scripts/audit_qwen_source_similarity.py` against TRAIN+DEV and the unlabeled
+strict provider input. Both bidirectional headline overlap and three-token
+Jaccard at or above `0.8` must be zero.
+
+Freeze the strict benchmark only after the source code is committed. The
+selector records the commit and its own script hash; its provider file contains
+only `sample_id` and source content. Independent AI reviews must be declared
+`INDEPENDENT_AI_REVIEW_NOT_HUMAN_GOLD`. Checkpoint selection is DEV-only via
+`scripts/summarize_qwen_v4_checkpoint_evaluations.py`; the sealed benchmark is
+opened once only after a checkpoint clears every DEV gate.
 
 ## Strict external fixed TEST
 
