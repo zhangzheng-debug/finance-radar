@@ -142,6 +142,18 @@ def summarize_predictions(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return metrics
 
 
+def summarize_prediction_strata(
+    rows: list[dict[str, Any]], *, field: str = "benchmark_stratum",
+) -> dict[str, dict[str, Any]]:
+    """Report source-frozen benchmark strata without using them for selection."""
+
+    values = sorted({str(row.get(field) or "").strip() for row in rows} - {""})
+    return {
+        value: summarize_predictions([row for row in rows if str(row.get(field) or "").strip() == value])
+        for value in values
+    }
+
+
 def gate_decision(metrics: dict[str, Any]) -> dict[str, Any]:
     false_priority_rate = metrics["priority_review"]["false_priority_rate"]
     checks = {
@@ -219,6 +231,7 @@ def run_inference(
                 "index": index,
                 "sample_id": row["metadata"]["sample_id"],
                 "event_id": row["metadata"].get("event_id"),
+                "benchmark_stratum": row["metadata"].get("benchmark_stratum"),
                 "expected": expected,
                 "predicted": predicted,
                 "raw_output": raw_output,
@@ -235,6 +248,7 @@ def run_inference(
         "".join(stable_json(row) + "\n" for row in predictions), encoding="utf-8"
     )
     metrics = summarize_predictions(predictions)
+    metrics_by_benchmark_stratum = summarize_prediction_strata(predictions)
     report = {
         "schema_version": 1,
         "evaluation_only": True,
@@ -245,6 +259,7 @@ def run_inference(
         "base_model": str(base_model),
         "adapter": str(adapter),
         "metrics": metrics,
+        "metrics_by_benchmark_stratum": metrics_by_benchmark_stratum,
         "gate": gate_decision(metrics),
         "predictions_sha256": sha256_file(prediction_path),
     }

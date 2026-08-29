@@ -2,6 +2,7 @@ from scripts.evaluate_qwen_semantic_adapter import (
     extract_json_object,
     gate_decision,
     normalize_payload,
+    summarize_prediction_strata,
     summarize_predictions,
 )
 from scripts.prepare_qwen_semantic_consensus_sft import (
@@ -92,6 +93,33 @@ def test_invalid_output_counts_against_all_axes():
     assert metrics["parse_success_rate"] == 0.0
     assert metrics["materiality"]["accuracy"] == 0.0
     assert gate_decision(metrics)["passed"] is False
+
+
+def test_benchmark_strata_are_reported_separately_without_a_subgroup_gate():
+    priority = normalize_payload(
+        {
+            "materiality": "MATERIAL_ADVERSE",
+            "polarity": "ADVERSE",
+            "adverse_strength": "HIGH",
+            "semantic_priority": "PRIORITY_REVIEW",
+        }
+    )
+    routine = normalize_payload(
+        {
+            "materiality": "NOT_MATERIAL_ADVERSE",
+            "polarity": "NEUTRAL",
+            "adverse_strength": "NONE",
+            "semantic_priority": "ROUTINE",
+        }
+    )
+    general = {**_row(routine, routine), "benchmark_stratum": "GENERAL"}
+    high_risk = {**_row(priority, priority), "benchmark_stratum": "HIGH_RISK"}
+
+    strata = summarize_prediction_strata([general, high_risk])
+
+    assert set(strata) == {"GENERAL", "HIGH_RISK"}
+    assert strata["GENERAL"]["rows"] == 1
+    assert strata["HIGH_RISK"]["priority_review"]["recall"] == 1.0
 
 
 def test_gate_rejects_excess_false_priority_rate():
