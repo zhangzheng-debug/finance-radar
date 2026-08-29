@@ -2079,19 +2079,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         internal_reader: bool = Depends(internal_reader_access),
     ):
         try:
-            latest_backup = operations.latest_verified_backup()
+            snapshot_data, health_snapshot_status = overview_snapshot.read()
+            latest_backup = snapshot_data["latest_verified_backup"]
             ledger_health = public_health_paths(
                 health_from_latest_verified_backup(
-                    ledger.health(run_integrity_check=False),
+                    snapshot_data["ledger_health_base"],
                     latest_backup,
                 )
             )
-            # A request-time PRAGMA quick_check scans the complete operations
-            # database.  On production-sized review/evidence stores, repeated
-            # probes can form an I/O thundering herd and make the liveness
-            # endpoint itself unavailable.  Full restore-time integrity checks
-            # remain mandatory in the independently verified backup workflow.
-            ops_health = public_health_paths(operations.health(run_integrity_check=False))
+            ops_health = public_health_paths(snapshot_data["operations_health_base"])
             model_health = router.status()
             if not internal_reader:
                 model_health = public_model_status(model_health)
@@ -2101,10 +2097,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 {
                     "status": status,
                     "service_version": __version__,
-                    "demo_mode": operations.demo_mode(settings.demo_mode),
+                    "demo_mode": snapshot_data["demo_mode"],
                     "ledger": ledger_health,
                     "operations": ops_health,
                     "model": model_health,
+                    "health_snapshot": health_snapshot_status,
                     "capabilities": [
                         "events",
                         "evidence",
@@ -2123,8 +2120,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "forbidden_capabilities": ["orders", "positions", "balances", "trade_execution"],
                 },
             )
+        except SnapshotUnavailable as exc:
+            raise HTTPException(
+                503,
+                {
+                    "code": "HEALTH_SNAPSHOT_UNAVAILABLE",
+                    "message": "health snapshot has not completed successfully yet",
+                },
+            ) from exc
         except FileNotFoundError as exc:
             raise HTTPException(503, {"code": "LEDGER_UNAVAILABLE", "message": str(exc)}) from exc
+
+    @application.get("/api/v1/health/deep", dependencies=[Depends(require_admin)])
+    def deep_health(request: Request):
+        """Run protected on-demand database diagnostics outside public probes."""
+
+        latest_backup = operations.latest_verified_backup()
+        ledger_health = public_health_paths(
+            health_from_latest_verified_backup(
+                ledger.health(run_integrity_check=False),
+                latest_backup,
+            )
+        )
+        ops_health = public_health_paths(operations.health(run_integrity_check=False))
+        return envelope(
+            request,
+            {
+                "status": (
+                    "ok"
+                    if ledger_health["status"] == ops_health["status"] == "ok"
+                    else "degraded"
+                ),
+                "service_version": __version__,
+                "ledger": ledger_health,
+                "operations": ops_health,
+                "model": router.status(),
+                "request_path": "protected_on_demand_deep_check",
+                "no_trading": True,
+            },
+        )
 
     @application.get("/api/v1/overview")
     def overview(

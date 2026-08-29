@@ -2829,7 +2829,16 @@ class OperationsRepository:
             row = connection.execute(
                 f"""SELECT backup_id,backup_path,source_bytes,backup_bytes,
                            quick_check,restored_count_json,status,created_at,
-                           verified_at,error,manifest_path,snapshot_kind
+                           verified_at,error,manifest_path,snapshot_kind,
+                           (SELECT COUNT(*)
+                              FROM json_each(backup_runs.components_json))
+                               AS component_count,
+                           (SELECT json_group_array(key)
+                              FROM (
+                                  SELECT key
+                                    FROM json_each(backup_runs.components_json)
+                                   ORDER BY key
+                              )) AS component_names_json
                     FROM backup_runs {where}
                     ORDER BY created_at DESC LIMIT 1""",
                 params,
@@ -2842,6 +2851,12 @@ class OperationsRepository:
             if item["restored_count_json"]
             else None
         )
+        component_count = int(item.pop("component_count") or 0)
+        component_names = json.loads(item.pop("component_names_json") or "[]")
+        item["component_summary"] = {
+            "count": component_count,
+            "names": component_names,
+        }
         return item
 
     def latest_backup_summary(self) -> dict[str, Any] | None:
@@ -2948,4 +2963,52 @@ class OperationsRepository:
             "latest_verified_backup": self.latest_verified_backup(),
             "backup_summary": self.backup_summary(),
             "audit_reconciliation": audit_reconciliation,
+        }
+
+    def health_summary(self) -> dict[str, Any]:
+        """Build the bounded operations projection used by public health.
+
+        The full operator health document intentionally includes the latest
+        worker report and recovery-bundle component inventory.  Either field
+        can be several megabytes and neither belongs on a request-time path.
+        This summary performs the database work in the external snapshot
+        publisher and keeps only clocks, counts and integrity receipts.
+        """
+
+        with closing(self.connect()) as connection:
+            counts = {
+                table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in (
+                    "replay_runs",
+                    "model_runs",
+                    "worker_cycles",
+                    "backup_runs",
+                    "agent_decisions",
+                    "capture_interpretation_runs",
+                    "capture_interpretation_attempts",
+                    "light_verification_runs",
+                    "formal_mutation_audits",
+                    "evidence_objects",
+                    "human_overrides",
+                    "adjudication_samples",
+                    "adjudication_reviews",
+                    "adjudication_freezes",
+                )
+            }
+        audit_reconciliation = self.audit_reconciliation_status()
+        return {
+            "status": "ok" if audit_reconciliation["status"] == "ok" else "degraded",
+            "database": str(self.path),
+            "schema_version": OPS_SCHEMA_VERSION,
+            "quick_check": "deferred",
+            "integrity_check_source": "not_run",
+            "counts": counts,
+            "demo_mode": self.demo_mode(),
+            "latest_worker_cycle": self.latest_worker_cycle_summary(),
+            "worker_window_24h": self.worker_window(),
+            "latest_backup": self.latest_backup_summary(),
+            "latest_verified_backup": self.latest_verified_backup_summary(),
+            "backup_summary": self.backup_summary(),
+            "audit_reconciliation": audit_reconciliation,
+            "projection": "precomputed_bounded_summary",
         }

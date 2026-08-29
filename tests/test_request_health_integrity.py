@@ -175,8 +175,8 @@ def test_health_bounds_inventory_but_does_not_claim_protected_artifact_is_fresh(
                 raise PermissionError("root-only recovery bundle")
             return real_stat(path, *args, **kwargs)
 
-        with patch.object(Path, "stat", protected_stat):
-            response = TestClient(application).get("/api/v1/health")
+        with patch.object(Path, "stat", protected_stat), TestClient(application) as client:
+            response = client.get("/api/v1/health")
 
     assert response.status_code == 200
     assert len(response.content) < 100_000
@@ -245,8 +245,8 @@ def test_root_health_receipt_proves_fresh_protected_backup_without_opening_bundl
         ), patch(
             "app.api.main._backup_artifact_visibility",
             return_value=(None, "protected"),
-        ):
-            response = TestClient(application).get("/api/v1/health")
+        ), TestClient(application) as client:
+            response = client.get("/api/v1/health")
 
     assert response.status_code == 200
     health = response.json()["data"]
@@ -297,8 +297,8 @@ def test_tampered_or_mismatched_health_receipt_remains_fail_closed() -> None:
         ), patch(
             "app.api.main._backup_artifact_visibility",
             return_value=(None, "protected"),
-        ):
-            response = TestClient(application).get("/api/v1/health")
+        ), TestClient(application) as client:
+            response = client.get("/api/v1/health")
 
     health = response.json()["data"]
     assert health["status"] == "degraded"

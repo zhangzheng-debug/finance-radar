@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from app.services.event_admission import (
     extract_evidence_fact_slots,
     evaluate_event_admission,
@@ -515,6 +517,70 @@ def test_other_company_action_is_not_misbound_to_filing_issuer() -> None:
     assert document_pronoun_only.facts[0].subject_binding == "DOCUMENT_ISSUER_PRONOUN"
     assert document_pronoun_only.supports_specific_fact is False
 
+    cik_bound = extract_evidence_fact_slots(
+        evidence_passage="The company completed a merger.",
+        event_type="merger_or_acquisition",
+        expected_subject="Example Corp",
+        document_issuer_bound=True,
+    )
+    assert cik_bound.supports_specific_fact is True
+    assert cik_bound.supported_facts[0].subject_binding == "DOCUMENT_ISSUER_CIK_MATCH"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "passage", "predicate"),
+    (
+        (
+            "going_concern_financing_dependency",
+            "These conditions raise substantial doubt about our ability to continue as a going concern.",
+            "GOING_CONCERN_DOUBT_DISCLOSED",
+        ),
+        (
+            "share_repurchase_authorization_expansion",
+            "The Company announced an increase in its share repurchase program.",
+            "SHARE_REPURCHASE_AUTHORIZATION_INCREASED",
+        ),
+        (
+            "bankruptcy",
+            "The Company filed a voluntary petition for relief under Chapter 11.",
+            "BANKRUPTCY_PETITION_FILED",
+        ),
+        (
+            "reverse_split",
+            "The Company approved a reverse stock split.",
+            "REVERSE_STOCK_SPLIT_APPROVED",
+        ),
+        (
+            "clinical_trial_update",
+            "The Company announced a pivotal Phase 3 clinical trial.",
+            "CLINICAL_TRIAL_UPDATE_ANNOUNCED",
+        ),
+        (
+            "spac_ipo_closing",
+            "The Company completed its initial public offering.",
+            "INITIAL_PUBLIC_OFFERING_CLOSED",
+        ),
+    ),
+)
+def test_exact_sec_cik_binding_enables_narrow_legacy_family_facts(
+    event_type: str, passage: str, predicate: str
+) -> None:
+    unbound = extract_evidence_fact_slots(
+        evidence_passage=passage,
+        event_type=event_type,
+        expected_subject="Example Corp",
+    )
+    bound = extract_evidence_fact_slots(
+        evidence_passage=passage,
+        event_type=event_type,
+        expected_subject="Example Corp",
+        document_issuer_bound=True,
+    )
+
+    assert unbound.supports_specific_fact is False
+    assert bound.supports_specific_fact is True
+    assert bound.supported_facts[0].predicate == predicate
+
 
 def test_postposed_denial_removes_the_prior_machine_fact() -> None:
     next_sentence_denial = extract_evidence_fact_slots(
@@ -846,11 +912,10 @@ def test_specific_fact_gate_covers_requested_high_risk_event_families() -> None:
         assert requires_specific_fact_extraction(event_type) is True
         assert supports_deterministic_fact_extraction(event_type) is True
 
-    # Classification families without an implemented extractor are still
-    # required to provide a specific fact and therefore fail closed.
+    # Common SEC disclosure families now have narrow deterministic extractors.
     for event_type in ("bankruptcy", "earnings_or_guidance"):
         assert requires_specific_fact_extraction(event_type) is True
-        assert supports_deterministic_fact_extraction(event_type) is False
+        assert supports_deterministic_fact_extraction(event_type) is True
 
     # These composite types require relations that a loose keyword extractor
     # cannot prove safely.  They remain discovery leads for human review.

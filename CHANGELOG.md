@@ -5,6 +5,24 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.29.1
+
+- Move the public health endpoint onto the atomically published overview
+  snapshot so repeated probes remain constant-time on production-sized
+  ledgers. Retain an administrator-only deep diagnostic for current database
+  counts and bounded integrity receipts.
+- Re-extract specific facts for common SEC disclosure families including
+  earnings, guidance, going-concern language, repurchase expansions,
+  bankruptcy, defaults, restructuring, reverse splits, recalls, clinical
+  updates and SPAC IPO closings. A filing pronoun may bind to an issuer only
+  when the canonical and SEC-document CIK values match exactly; ambiguous or
+  misclassified records continue to fail closed.
+- Replace four provider-unavailable country funds with supported broad-market
+  proxies and label the broader exposure honestly. The mapping remains
+  read-only, direction-neutral and excluded from ranking, models and trading.
+- Keep Qwen risk publication disabled until the separate 720-row dual-human
+  gold, training, blind-evaluation and approval contract is complete.
+
 ## 2026.08.26.3
 
 - Add a compact Public research-signal projection that appears only when a
