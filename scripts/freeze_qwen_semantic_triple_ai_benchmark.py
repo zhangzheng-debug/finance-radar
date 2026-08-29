@@ -36,6 +36,10 @@ from scripts.build_qwen_semantic_core_v4_weak_dataset import SYSTEM_PROMPT, stab
 
 
 BENCHMARK_CONTRACT = "qwen-triple-ai-strict60-v1"
+ALLOWED_BENCHMARK_STRATA = {
+    "GENERAL",
+    "HIGH_RISK_MECHANISM_ENRICHED",
+}
 
 
 def sha256_file(path: Path) -> str:
@@ -97,7 +101,10 @@ def freeze_benchmark(
     if not all(provider_order) or len(set(provider_order)) != len(provider_order):
         raise ValueError("provider sample IDs missing or duplicated")
     index_all = read_jsonl(source_index)
-    index_by_id = {str(row.get("sample_id") or ""): row for row in index_all}
+    index_ids = [str(row.get("sample_id") or "") for row in index_all]
+    if not all(index_ids) or len(set(index_ids)) != len(index_ids):
+        raise ValueError("source index sample IDs missing or duplicated")
+    index_by_id = dict(zip(index_ids, index_all))
     missing_index = sorted(set(provider_order) - set(index_by_id))
     if missing_index:
         raise ValueError(f"provider rows missing source index: {missing_index[:3]}")
@@ -117,6 +124,7 @@ def freeze_benchmark(
 
     benchmark: list[dict[str, Any]] = []
     v2_truth: list[dict[str, Any]] = []
+    stratum_counts: Counter[str] = Counter()
     for row, sample_id in zip(providers, provider_order):
         content = row.get("content")
         if not isinstance(content, dict):
@@ -125,6 +133,20 @@ def freeze_benchmark(
         final = labels_c[sample_id]
         target = expected_semantic_payload(final["materiality"], final["polarity"])
         source = index_by_id[sample_id]
+        benchmark_stratum = str(source.get("benchmark_stratum") or "").strip()
+        if benchmark_stratum not in ALLOWED_BENCHMARK_STRATA:
+            raise ValueError(
+                f"invalid or missing benchmark_stratum for {sample_id}: "
+                f"{benchmark_stratum!r}"
+            )
+        predicate_version = str(
+            source.get("benchmark_stratum_predicate_version") or ""
+        ).strip()
+        if not predicate_version:
+            raise ValueError(
+                "missing benchmark_stratum_predicate_version for " + sample_id
+            )
+        stratum_counts[benchmark_stratum] += 1
         metadata = {
             "sample_id": sample_id,
             "event_id": source.get("source_event_id"),
@@ -132,6 +154,8 @@ def freeze_benchmark(
             "event_chain_group": source.get("event_chain_group"),
             "content_sha256": hashlib.sha256(stable_json(normalized).encode("utf-8")).hexdigest(),
             "split": "SEALED_STRICT60_TEST",
+            "benchmark_stratum": benchmark_stratum,
+            "benchmark_stratum_predicate_version": predicate_version,
             "label_provenance": "THREE_INDEPENDENT_AI_REVIEWS_WITH_AI_ARBITRATION",
             "label_classification": "AI_NOT_HUMAN_GOLD",
             "reviewer_ab_all_axis_agreement": all(labels_a[sample_id][axis] == labels_b[sample_id][axis] for axis in axes),
@@ -184,6 +208,7 @@ def freeze_benchmark(
         "reviewer_ab_axis_agreement": agreement,
         "reviewer_ab_all_axis_agreement": all_axis_agreement,
         "core_pair_counts": dict(sorted(pair_counts.items())),
+        "benchmark_stratum_counts": dict(sorted(stratum_counts.items())),
         "qwen_predictions_used": False,
         "market_outcomes_used": False,
         "human_gold_claimed": False,

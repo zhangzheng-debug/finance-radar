@@ -29,7 +29,11 @@ def test_freezes_ordered_core_and_v2_artifacts(tmp_path: Path) -> None:
     b = tmp_path / "b.jsonl"
     c = tmp_path / "c.jsonl"
     _write(provider, [{"sample_id": "s1", "content": {"headline": "ordinary update", "summary": "completed", "passages": []}}])
-    _write(index, [{"sample_id": "s1", "source_event_id": "e1", "entity_group": "issuer:1", "event_chain_group": "chain:1"}])
+    _write(index, [{
+        "sample_id": "s1", "source_event_id": "e1", "entity_group": "issuer:1",
+        "event_chain_group": "chain:1", "benchmark_stratum": "GENERAL",
+        "benchmark_stratum_predicate_version": "TEST_V1",
+    }])
     for path in (a, b, c):
         _write(path, [{"sample_id": "s1", "review": _review()}])
     output = tmp_path / "output"
@@ -41,6 +45,9 @@ def test_freezes_ordered_core_and_v2_artifacts(tmp_path: Path) -> None:
     row = json.loads((output / "qwen_strict60_core_v1.jsonl").read_text().splitlines()[0])
     assert row["expected"]["semantic_priority"] == "ROUTINE"
     assert row["metadata"]["qwen_prediction_included"] is False
+    assert row["metadata"]["benchmark_stratum"] == "GENERAL"
+    assert row["metadata"]["benchmark_stratum_predicate_version"] == "TEST_V1"
+    assert manifest["benchmark_stratum_counts"] == {"GENERAL": 1}
     assert (output / "qwen_strict60_full_v2_truth.jsonl").exists()
 
 
@@ -51,7 +58,10 @@ def test_rejects_order_mismatch(tmp_path: Path) -> None:
     b = tmp_path / "b.jsonl"
     c = tmp_path / "c.jsonl"
     _write(provider, [{"sample_id": "s1", "content": {"headline": "x", "summary": "x", "passages": []}}])
-    _write(index, [{"sample_id": "s1"}])
+    _write(index, [{
+        "sample_id": "s1", "benchmark_stratum": "GENERAL",
+        "benchmark_stratum_predicate_version": "TEST_V1",
+    }])
     _write(a, [{"sample_id": "s1", "review": _review()}])
     _write(b, [{"sample_id": "s2", "review": _review()}])
     _write(c, [{"sample_id": "s1", "review": _review()}])
@@ -61,3 +71,35 @@ def test_rejects_order_mismatch(tmp_path: Path) -> None:
         assert "order mismatch" in str(error)
     else:
         raise AssertionError("expected order mismatch")
+
+
+def test_rejects_missing_or_unknown_benchmark_stratum(tmp_path: Path) -> None:
+    provider = tmp_path / "provider.jsonl"
+    index = tmp_path / "index.jsonl"
+    a = tmp_path / "a.jsonl"
+    b = tmp_path / "b.jsonl"
+    c = tmp_path / "c.jsonl"
+    _write(provider, [{
+        "sample_id": "s1",
+        "content": {"headline": "x", "summary": "x", "passages": []},
+    }])
+    _write(index, [{
+        "sample_id": "s1", "benchmark_stratum": "UNKNOWN",
+        "benchmark_stratum_predicate_version": "TEST_V1",
+    }])
+    for path in (a, b, c):
+        _write(path, [{"sample_id": "s1", "review": _review()}])
+
+    try:
+        freeze_benchmark(
+            provider_input=provider,
+            source_index=index,
+            review_a=a,
+            review_b=b,
+            arbiter=c,
+            output_dir=tmp_path / "out",
+        )
+    except ValueError as error:
+        assert "benchmark_stratum" in str(error)
+    else:
+        raise AssertionError("expected benchmark stratum validation failure")
