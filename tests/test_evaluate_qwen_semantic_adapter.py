@@ -1,6 +1,14 @@
+import json
+from pathlib import Path
+
+import pytest
+
 from scripts.evaluate_qwen_semantic_adapter import (
+    adapter_fingerprint,
+    base_model_fingerprint,
     extract_json_object,
     gate_decision,
+    load_evaluation_dataset,
     normalize_payload,
     summarize_prediction_strata,
     summarize_predictions,
@@ -18,6 +26,113 @@ def _row(expected, predicted, *, valid=True):
         "contract_valid": valid,
         "exact_match": valid and expected == predicted,
     }
+
+
+def _dataset_row(
+    sample_id: str = "sample-1", *, split: str = "DEV", target_contract: str = "core-v1"
+):
+    return {
+        "messages": [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "{}"},
+            {
+                "role": "assistant",
+                "content": json.dumps(
+                    {
+                        "materiality": "MATERIAL_ADVERSE",
+                        "polarity": "ADVERSE",
+                        "adverse_strength": "HIGH",
+                        "semantic_priority": "PRIORITY_REVIEW",
+                    }
+                ),
+            },
+        ],
+        "metadata": {
+            "sample_id": sample_id,
+            "split": split,
+            "target_contract": target_contract,
+        },
+    }
+
+
+def _write_dataset(path: Path, rows: list[dict]) -> Path:
+    path.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+    return path
+
+
+def test_dataset_preflight_accepts_core_v1_dev_before_inference(tmp_path: Path):
+    dataset = _write_dataset(tmp_path / "dev.jsonl", [_dataset_row()])
+
+    assert load_evaluation_dataset(dataset, dataset_role="DEV_SELECTION_ONLY") == [
+        _dataset_row()
+    ]
+
+
+def test_dataset_preflight_rejects_wrong_final_role_and_target_contract(tmp_path: Path):
+    wrong_role = _dataset_row()
+    wrong_role["messages"][-1]["role"] = "user"
+    with pytest.raises(ValueError, match="final message is not assistant"):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "wrong-role.jsonl", [wrong_role]),
+            dataset_role="DIAGNOSTIC_ONLY",
+        )
+
+    wrong_contract = _dataset_row(target_contract="full-v2")
+    with pytest.raises(ValueError, match="target_contract must be core-v1"):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "wrong-contract.jsonl", [wrong_contract]),
+            dataset_role="DIAGNOSTIC_ONLY",
+        )
+
+
+def test_dataset_preflight_rejects_invalid_target_duplicate_id_and_non_dev_split(
+    tmp_path: Path,
+):
+    invalid_target = _dataset_row()
+    invalid_target["messages"][-1]["content"] = json.dumps(
+        {"materiality": "MATERIAL_ADVERSE"}
+    )
+    with pytest.raises(ValueError, match="target contract invalid"):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "invalid-target.jsonl", [invalid_target]),
+            dataset_role="DIAGNOSTIC_ONLY",
+        )
+
+    duplicate = [_dataset_row("same"), _dataset_row("same")]
+    with pytest.raises(ValueError, match="duplicate or missing sample_id"):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "duplicate.jsonl", duplicate),
+            dataset_role="DIAGNOSTIC_ONLY",
+        )
+
+    with pytest.raises(ValueError, match="metadata.split=DEV"):
+        load_evaluation_dataset(
+            _write_dataset(tmp_path / "test.jsonl", [_dataset_row(split="TEST")]),
+            dataset_role="DEV_SELECTION_ONLY",
+        )
+
+
+def test_model_and_adapter_fingerprints_are_reproducible_and_content_bound(
+    tmp_path: Path,
+):
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "config.json").write_text('{"model":"qwen"}', encoding="utf-8")
+    first_model = base_model_fingerprint(model)
+    assert base_model_fingerprint(model) == first_model
+    (model / "config.json").write_text('{"model":"changed"}', encoding="utf-8")
+    assert base_model_fingerprint(model)["sha256"] != first_model["sha256"]
+
+    adapter = tmp_path / "checkpoint-28"
+    adapter.mkdir()
+    (adapter / "adapter_config.json").write_text("{}", encoding="utf-8")
+    weights = adapter / "adapter_model.safetensors"
+    weights.write_bytes(b"adapter-v1")
+    first_adapter = adapter_fingerprint(adapter)
+    weights.write_bytes(b"adapter-v2")
+    assert adapter_fingerprint(adapter)["sha256"] != first_adapter["sha256"]
 
 
 def test_extract_json_object_accepts_fence_and_surrounding_text():

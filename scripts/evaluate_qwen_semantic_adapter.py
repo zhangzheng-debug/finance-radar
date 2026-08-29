@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Evaluate a Qwen semantic LoRA adapter without changing production state.
 
-The evaluator consumes the immutable JSONL splits produced by
-``prepare_qwen_semantic_consensus_sft.py``.  It decodes only the assistant
+The evaluator consumes an explicitly-role-bound core-v1 JSONL split.  It
+preflights every target before loading a model, decodes only the assistant
 continuation, validates the bounded semantic contract, writes every prediction,
-and reports exact/axis metrics plus a risk-priority gate decision.
+and reports exact/axis metrics plus an advisory risk-priority gate decision.
+Only the strict checkpoint selector may select a DEV checkpoint.
 """
 
 from __future__ import annotations
@@ -23,6 +24,18 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.models.qwen_risk_contract import validate_semantic_payload  # noqa: E402
+
+
+DATASET_ROLES = frozenset(
+    {"DEV_SELECTION_ONLY", "SEALED_BENCHMARK_ONLY", "DIAGNOSTIC_ONLY"}
+)
+TARGET_CONTRACT = "core-v1"
+BASE_MODEL_FULL_HASH_MAX_BYTES = 8 * 1024 * 1024
+BASE_MODEL_SAMPLE_BYTES = 1024 * 1024
+ADAPTER_CONFIG_NAME = "adapter_config.json"
+ADAPTER_WEIGHT_NAMES = ("adapter_model.safetensors", "adapter_model.bin")
+
 
 def stable_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -34,6 +47,78 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _sampled_file_fingerprint(path: Path) -> dict[str, Any]:
+    """Hash small files fully and sample the ends of large base-model files."""
+
+    size = path.stat().st_size
+    digest = hashlib.sha256()
+    digest.update(f"size:{size}\n".encode("ascii"))
+    mode = "full"
+    with path.open("rb") as handle:
+        if size <= BASE_MODEL_FULL_HASH_MAX_BYTES:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        else:
+            mode = "head_tail"
+            digest.update(handle.read(BASE_MODEL_SAMPLE_BYTES))
+            handle.seek(max(0, size - BASE_MODEL_SAMPLE_BYTES))
+            digest.update(handle.read(BASE_MODEL_SAMPLE_BYTES))
+    return {"bytes": size, "mode": mode, "sha256": digest.hexdigest()}
+
+
+def base_model_fingerprint(path: Path) -> dict[str, Any]:
+    """Build a path-independent, lightweight and reproducible model fingerprint."""
+
+    if not path.is_dir():
+        raise FileNotFoundError(f"base model directory missing: {path}")
+    files = sorted(item for item in path.rglob("*") if item.is_file())
+    if not files:
+        raise ValueError(f"base model directory contains no files: {path}")
+    entries = []
+    for item in files:
+        entries.append(
+            {
+                "path": item.relative_to(path).as_posix(),
+                **_sampled_file_fingerprint(item),
+            }
+        )
+    return {
+        "scheme": "sha256-directory-manifest-full-small-head-tail-large-v1",
+        "full_hash_max_bytes": BASE_MODEL_FULL_HASH_MAX_BYTES,
+        "sample_bytes": BASE_MODEL_SAMPLE_BYTES,
+        "sha256": hashlib.sha256(stable_json(entries).encode("utf-8")).hexdigest(),
+        "file_count": len(entries),
+        "total_bytes": sum(entry["bytes"] for entry in entries),
+        "files": entries,
+    }
+
+
+def adapter_fingerprint(path: Path) -> dict[str, Any]:
+    """Fully hash the PEFT configuration and adapter weight files used for loading."""
+
+    if not path.is_dir():
+        raise FileNotFoundError(f"adapter directory missing: {path}")
+    config = path / ADAPTER_CONFIG_NAME
+    weights = [path / name for name in ADAPTER_WEIGHT_NAMES if (path / name).is_file()]
+    if not config.is_file() or not weights:
+        raise ValueError(
+            f"adapter must contain {ADAPTER_CONFIG_NAME} and one of "
+            f"{', '.join(ADAPTER_WEIGHT_NAMES)}: {path}"
+        )
+    files = [config, *weights]
+    entries = [
+        {"path": item.name, "bytes": item.stat().st_size, "sha256": sha256_file(item)}
+        for item in files
+    ]
+    return {
+        "scheme": "sha256-peft-adapter-files-v1",
+        "sha256": hashlib.sha256(stable_json(entries).encode("utf-8")).hexdigest(),
+        "file_count": len(entries),
+        "total_bytes": sum(entry["bytes"] for entry in entries),
+        "files": entries,
+    }
 
 
 def extract_json_object(text: str) -> dict[str, Any] | None:
@@ -172,8 +257,85 @@ def gate_decision(metrics: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def load_jsonl(path: Path) -> list[dict[str, Any]]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+def load_evaluation_dataset(
+    path: Path, *, dataset_role: str
+) -> list[dict[str, Any]]:
+    """Validate the complete evaluation dataset before model or GPU initialization."""
+
+    if dataset_role not in DATASET_ROLES:
+        raise ValueError(f"unsupported dataset role: {dataset_role}")
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    rows: list[dict[str, Any]] = []
+    seen_sample_ids: set[str] = set()
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"dataset line {line_number} is not valid JSON") from exc
+        if not isinstance(row, dict):
+            raise ValueError(f"dataset line {line_number} is not an object")
+
+        messages = row.get("messages")
+        if not isinstance(messages, list) or len(messages) < 2:
+            raise ValueError(f"dataset line {line_number} has invalid messages")
+        for message_index, message in enumerate(messages):
+            if not isinstance(message, dict):
+                raise ValueError(
+                    f"dataset line {line_number} message {message_index} is not an object"
+                )
+            role = str(message.get("role") or "").strip().lower()
+            if role not in {"system", "user", "assistant"}:
+                raise ValueError(
+                    f"dataset line {line_number} message {message_index} has invalid role"
+                )
+            if not isinstance(message.get("content"), str):
+                raise ValueError(
+                    f"dataset line {line_number} message {message_index} content is not text"
+                )
+        if str(messages[-1].get("role") or "").strip().lower() != "assistant":
+            raise ValueError(f"dataset line {line_number} final message is not assistant")
+
+        try:
+            target = json.loads(messages[-1]["content"])
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"dataset line {line_number} assistant target is not valid JSON"
+            ) from exc
+        target_issues = validate_semantic_payload(target)
+        if target_issues:
+            raise ValueError(
+                f"dataset line {line_number} target contract invalid: {target_issues}"
+            )
+
+        metadata = row.get("metadata")
+        if not isinstance(metadata, dict):
+            raise ValueError(f"dataset line {line_number} metadata missing")
+        sample_id = str(metadata.get("sample_id") or "").strip()
+        if not sample_id or sample_id in seen_sample_ids:
+            raise ValueError(
+                f"dataset line {line_number} has duplicate or missing sample_id"
+            )
+        seen_sample_ids.add(sample_id)
+        target_contract = str(metadata.get("target_contract") or "").strip()
+        if target_contract != TARGET_CONTRACT:
+            raise ValueError(
+                f"dataset line {line_number} target_contract must be {TARGET_CONTRACT}"
+            )
+        if dataset_role == "DEV_SELECTION_ONLY" and (
+            str(metadata.get("split") or "").strip().upper() != "DEV"
+        ):
+            raise ValueError(
+                f"dataset line {line_number} DEV_SELECTION_ONLY requires metadata.split=DEV"
+            )
+        rows.append(row)
+    if not rows:
+        raise ValueError("evaluation dataset is empty")
+    return rows
 
 
 def run_inference(
@@ -181,14 +343,23 @@ def run_inference(
     base_model: Path,
     adapter: Path,
     dataset: Path,
+    dataset_role: str,
     output_dir: Path,
     max_new_tokens: int,
 ) -> dict[str, Any]:
+    if max_new_tokens < 1:
+        raise ValueError("max_new_tokens must be positive")
+    dataset_rows = load_evaluation_dataset(dataset, dataset_role=dataset_role)
+    model_fingerprint = base_model_fingerprint(base_model)
+    peft_fingerprint = adapter_fingerprint(adapter)
+    generation_config = {
+        "max_new_tokens": max_new_tokens,
+        "do_sample": False,
+    }
+
     import torch
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-
-    from app.models.qwen_risk_contract import validate_semantic_payload
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, local_files_only=True)
     quantization = BitsAndBytesConfig(
@@ -208,7 +379,7 @@ def run_inference(
     model.eval()
 
     predictions: list[dict[str, Any]] = []
-    for index, row in enumerate(load_jsonl(dataset), start=1):
+    for index, row in enumerate(dataset_rows, start=1):
         messages = row["messages"][:-1]
         expected = normalize_payload(json.loads(row["messages"][-1]["content"]))
         prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -250,17 +421,28 @@ def run_inference(
     metrics = summarize_predictions(predictions)
     metrics_by_benchmark_stratum = summarize_prediction_strata(predictions)
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "evaluation_only": True,
         "production_model_changed": False,
         "human_gold_claimed": False,
+        "dataset_role": dataset_role,
+        "reserved_test_only": dataset_role == "SEALED_BENCHMARK_ONLY",
+        "target_contract": TARGET_CONTRACT,
         "dataset_path": str(dataset),
         "dataset_sha256": sha256_file(dataset),
         "base_model": str(base_model),
+        "base_model_fingerprint": model_fingerprint,
         "adapter": str(adapter),
+        "adapter_fingerprint": peft_fingerprint,
+        "max_new_tokens": max_new_tokens,
+        "generation_config": generation_config,
         "metrics": metrics,
         "metrics_by_benchmark_stratum": metrics_by_benchmark_stratum,
         "gate": gate_decision(metrics),
+        "evaluator_gate_advisory_only": True,
+        "checkpoint_selection_authority": (
+            "summarize_qwen_v4_checkpoint_evaluations.py strict selector gate"
+        ),
         "predictions_sha256": sha256_file(prediction_path),
     }
     (output_dir / "report.json").write_text(
@@ -274,6 +456,9 @@ def main() -> int:
     parser.add_argument("--base-model", type=Path, required=True)
     parser.add_argument("--adapter", type=Path, required=True)
     parser.add_argument("--dataset", type=Path, required=True)
+    parser.add_argument(
+        "--dataset-role", choices=sorted(DATASET_ROLES), required=True
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--max-new-tokens", type=int, default=96)
     args = parser.parse_args()
@@ -281,6 +466,7 @@ def main() -> int:
         base_model=args.base_model.resolve(),
         adapter=args.adapter.resolve(),
         dataset=args.dataset.resolve(),
+        dataset_role=args.dataset_role,
         output_dir=args.output_dir.resolve(),
         max_new_tokens=args.max_new_tokens,
     )

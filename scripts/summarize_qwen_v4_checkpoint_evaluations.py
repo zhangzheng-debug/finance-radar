@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Select a Qwen v4 checkpoint from issuer-isolated DEV reports only.
 
-This script does not run inference, read prediction rows, or inspect a reserved
-benchmark.  It verifies that all supplied reports bind to the same explicitly
-named DEV dataset, applies the frozen v4 development gates, and ranks only the
-checkpoints that pass every gate.
+This script does not run inference or inspect a reserved benchmark.  It verifies
+the adjacent prediction-file digest for every DEV-only report, requires matching
+base-model fingerprints and generation settings, applies the authoritative
+frozen v4 development gates, and ranks only checkpoints that pass every gate.
 """
 
 from __future__ import annotations
@@ -19,6 +19,10 @@ from typing import Any
 
 
 CHECKPOINT_RE = re.compile(r"(?:^|[\\/])checkpoint-(\d+)(?:$|[\\/])")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+DEV_SELECTION_ROLE = "DEV_SELECTION_ONLY"
+REPORT_SCHEMA_VERSION = 2
+TARGET_CONTRACT = "core-v1"
 GATE_THRESHOLDS = {
     "rows_min": 120,
     "priority_support_min": 20,
@@ -29,6 +33,10 @@ GATE_THRESHOLDS = {
     "priority_recall_min": 0.80,
     "false_priority_rate_max": 0.08,
 }
+
+
+def _stable_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _sha256(path: Path) -> str:
@@ -56,18 +64,68 @@ def _bounded_rate(value: Any, *, field: str, path: Path) -> float:
     return number
 
 
+def _fingerprint(value: Any, *, field: str, path: Path) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{field} missing in {path}")
+    digest = str(value.get("sha256") or "").strip().lower()
+    scheme = str(value.get("scheme") or "").strip()
+    files = value.get("files")
+    if not SHA256_RE.fullmatch(digest) or not scheme or not isinstance(files, list) or not files:
+        raise ValueError(f"invalid {field} in {path}")
+    return value
+
+
+def _generation_config(value: Any, *, path: Path) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"generation_config missing in {path}")
+    if set(value) != {"max_new_tokens", "do_sample"}:
+        raise ValueError(f"unsupported generation_config in {path}")
+    max_new_tokens = value.get("max_new_tokens")
+    if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens < 1:
+        raise ValueError(f"invalid max_new_tokens in {path}")
+    if value.get("do_sample") is not False:
+        raise ValueError(f"selection requires deterministic generation in {path}")
+    return value
+
+
 def _load_report(path: Path, expected_dataset_sha256: str) -> dict[str, Any]:
     report = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(report, dict):
         raise ValueError(f"report is not an object: {path}")
+    if report.get("schema_version") != REPORT_SCHEMA_VERSION:
+        raise ValueError(f"unsupported report schema: {path}")
     if report.get("evaluation_only") is not True:
         raise ValueError(f"report is not evaluation-only: {path}")
     if report.get("production_model_changed") is not False:
         raise ValueError(f"report changed production state: {path}")
-    if report.get("reserved_test_only") is True:
+    if report.get("dataset_role") != DEV_SELECTION_ROLE:
+        raise ValueError(f"selector accepts only {DEV_SELECTION_ROLE}: {path}")
+    if report.get("reserved_test_only") is not False:
         raise ValueError(f"reserved TEST report cannot select a checkpoint: {path}")
+    if report.get("target_contract") != TARGET_CONTRACT:
+        raise ValueError(f"selector requires target_contract={TARGET_CONTRACT}: {path}")
+    if report.get("evaluator_gate_advisory_only") is not True:
+        raise ValueError(f"evaluator gate authority missing: {path}")
     if str(report.get("dataset_sha256") or "").lower() != expected_dataset_sha256:
         raise ValueError(f"DEV dataset digest mismatch: {path}")
+    predictions = path.parent / "predictions.jsonl"
+    if not predictions.is_file():
+        raise ValueError(f"adjacent predictions.jsonl missing: {path}")
+    expected_predictions_sha256 = str(report.get("predictions_sha256") or "").lower()
+    if not SHA256_RE.fullmatch(expected_predictions_sha256):
+        raise ValueError(f"invalid predictions_sha256: {path}")
+    actual_predictions_sha256 = _sha256(predictions)
+    if actual_predictions_sha256 != expected_predictions_sha256:
+        raise ValueError(f"predictions.jsonl digest mismatch: {path}")
+    base_model_fingerprint = _fingerprint(
+        report.get("base_model_fingerprint"), field="base_model_fingerprint", path=path
+    )
+    adapter_fingerprint = _fingerprint(
+        report.get("adapter_fingerprint"), field="adapter_fingerprint", path=path
+    )
+    generation_config = _generation_config(report.get("generation_config"), path=path)
+    if report.get("max_new_tokens") != generation_config["max_new_tokens"]:
+        raise ValueError(f"max_new_tokens binding mismatch: {path}")
     metrics = report.get("metrics")
     if not isinstance(metrics, dict):
         raise ValueError(f"metrics missing: {path}")
@@ -146,7 +204,14 @@ def _load_report(path: Path, expected_dataset_sha256: str) -> dict[str, Any]:
     return {
         "report_path": str(path.resolve()),
         "report_sha256": _sha256(path),
+        "predictions_path": str(predictions.resolve()),
+        "predictions_sha256": actual_predictions_sha256,
         "adapter": adapter,
+        "adapter_fingerprint": adapter_fingerprint,
+        "base_model_fingerprint": base_model_fingerprint,
+        "generation_config": generation_config,
+        "dataset_role": DEV_SELECTION_ROLE,
+        "target_contract": TARGET_CONTRACT,
         "checkpoint_step": step,
         "metrics": values,
         "checks": checks,
@@ -182,14 +247,30 @@ def summarize(
     steps = [row["checkpoint_step"] for row in rows]
     if len(set(steps)) != len(steps):
         raise ValueError("duplicate checkpoint step")
+    base_model_fingerprint = rows[0]["base_model_fingerprint"]
+    generation_config = rows[0]["generation_config"]
+    for row in rows[1:]:
+        if _stable_json(row["base_model_fingerprint"]) != _stable_json(
+            base_model_fingerprint
+        ):
+            raise ValueError("base model fingerprint mismatch across reports")
+        if row["generation_config"] != generation_config:
+            raise ValueError("generation configuration mismatch across reports")
     passing = sorted((row for row in rows if row["passed"]), key=_rank_key)
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "selection_scope": "ISSUER_ISOLATED_DEV_ONLY",
+        "accepted_dataset_role": DEV_SELECTION_ROLE,
         "reserved_benchmark_opened": False,
         "production_model_changed": False,
+        "strict_selector_gate_authoritative": True,
+        "evaluator_gate_used_for_selection": False,
+        "selection_standard": "STRICT_SELECTOR_GATE_ONLY",
+        "target_contract": TARGET_CONTRACT,
         "dataset_path": str(expected_dataset),
         "dataset_sha256": dataset_sha256,
+        "base_model_fingerprint": base_model_fingerprint,
+        "generation_config": generation_config,
         "gate_thresholds": GATE_THRESHOLDS,
         "evaluated_checkpoints": sorted(rows, key=lambda row: row["checkpoint_step"]),
         "passing_checkpoint_count": len(passing),
