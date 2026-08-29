@@ -5,6 +5,14 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.29.3
+
+- Align the embedded application version with the accepted GitHub release and
+  production release marker after the legacy SEC issuer-identity recovery.
+- Preserve the completed historical primary-source re-admission as production
+  data state; no Qwen result is published until the separate 720-row dual-human
+  gold, training, blind-evaluation and approval contract is complete.
+
 ## 2026.08.29.1
 
 - Move the public health endpoint onto the atomically published overview
