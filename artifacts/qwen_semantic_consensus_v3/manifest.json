@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "contract_version": "qwen-semantic-dual-review-consensus-experiment-v3",
+  "semantic_contract_version": "qwen-risk-semantics-v1",
+  "prompt_version": "qwen-risk-dual-review-consensus-v2",
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "owner_manifest_sha256": "e5b77b2b2fb9fdb265232d585b8d8babb36229b56270493732f83f7e69c0f6ab",
+  "input_rows": 720,
+  "exact_semantic_pair_consensus_rows": 289,
+  "policy_screened_rows": 4,
+  "train_rows": 171,
+  "train_balanced_rows": 260,
+  "validation_rows": 57,
+  "owner_holdout_rows": 57,
+  "adverse_strength_counts": {
+    "TRAIN": {
+      "NONE": 141,
+      "HIGH": 28,
+      "LOW": 2
+    },
+    "VALIDATION": {
+      "NONE": 47,
+      "HIGH": 9,
+      "LOW": 1
+    },
+    "OWNER_HOLDOUT": {
+      "NONE": 47,
+      "HIGH": 9,
+      "LOW": 1
+    }
+  },
+  "training_pair_counts_unique": {
+    "NOT_MATERIAL_ADVERSE|NEUTRAL": 132,
+    "MATERIAL_ADVERSE|ADVERSE": 28,
+    "NOT_MATERIAL_ADVERSE|POSITIVE": 9,
+    "NOT_MATERIAL_ADVERSE|ADVERSE": 2
+  },
+  "training_pair_counts_effective": {
+    "NOT_MATERIAL_ADVERSE|NEUTRAL": 132,
+    "MATERIAL_ADVERSE|ADVERSE": 84,
+    "NOT_MATERIAL_ADVERSE|POSITIVE": 36,
+    "NOT_MATERIAL_ADVERSE|ADVERSE": 8
+  },
+  "training_target_multipliers": {
+    "MATERIAL_ADVERSE|ADVERSE": 3,
+    "NOT_MATERIAL_ADVERSE|POSITIVE": 4,
+    "NOT_MATERIAL_ADVERSE|ADVERSE": 4
+  },
+  "output_sha256": {
+    "train": "0e5d70cde90e3de28b8102759e87654e06f222a43218019f1256cc88791f7015",
+    "train_balanced": "4f7e7a96260d95a8d1f1e57d4c5f0d6f643b3e28ecd568b8dbef34d1a1f342bc",
+    "validation": "f956fe32175498487f4c4ca79a18332f2e3e4c7f4d11cb34dd28551dbe1b1275",
+    "owner_holdout": "92febb2f8d4065922a0513733ad26919efa03c0ba95224201b609af93a51b78c",
+    "screened": "705fc1531439cbb844a123aaaca062fef684f4bd9d8eb7decba7b7e91d043cd4"
+  },
+  "label_provenance": "DUAL_REVIEW_SEMANTIC_PAIR_CONSENSUS",
+  "human_gold_claimed": false,
+  "ai_conflict_labels_used": false,
+  "evidence_state_used_as_model_target": false,
+  "post_event_market_data_included": false,
+  "production_model_changed": false,
+  "no_trading": true
+}

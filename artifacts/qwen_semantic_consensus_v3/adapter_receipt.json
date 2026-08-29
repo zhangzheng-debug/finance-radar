@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "experiment_only": true,
+  "production_model_changed": false,
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "adapter_checkpoint": "D:/FinanceRadarModels/experiments/qwen-risk-consensus-v3-train/v0-20260829-180141/checkpoint-40",
+  "adapter_model_sha256": "25a313eddbe9294a391e23639f1bb82c304c56569a76ae890172026153396b87",
+  "adapter_config_sha256": "2ddc4d4ec3d03b80ec68da07eb45abebc3a30f031a478075432e22adbeb9f6da",
+  "training_args_sha256": "e1ca3d5b4a8759dc08c544e95c8084e4d910a5b199c2a1a64a2f03e506efe29f",
+  "trainer_state_sha256": "ca4a79d2ef0959bff38e45b5dae9f05d07f6f0e114f7e2633f5f4c3b14dd8370",
+  "validation_dataset_sha256": "f956fe32175498487f4c4ca79a18332f2e3e4c7f4d11cb34dd28551dbe1b1275",
+  "validation_predictions_sha256": "4154c0a025954a0b1b56367d6a372c17976c23478752eda09faa81a56dceef49",
+  "validation_decision": "NOT_QUALIFIED",
+  "failed_gate": "priority_review_recall_ge_0_75",
+  "owner_holdout_consumed": false,
+  "human_gold_claimed": false,
+  "no_trading": true
+}

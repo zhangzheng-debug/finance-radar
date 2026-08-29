@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "experiment_date": "2026-08-29",
+  "base_commit": "6874ba4",
+  "production_changed": false,
+  "human_gold_mutated": false,
+  "no_trading": true,
+  "inputs": {
+    "review_a_commit": "38846a082facfa78bd497ffa8b319836f9e3a324",
+    "review_a_sha256": "eec36513194bf4e09ae8db7f3fb52c23ab19ee9baca98aa2aec1e8f24746da65",
+    "review_b_commit": "e1ed54eb36846437e8738cd57e12e63a5c07311f",
+    "review_b_blob": "90d27d7f2c81125c3728370bf3fb561a7b1fda88",
+    "owner_package_sha256": "6262dd89cd9fce2f84c622ee412d53871569972d03fb45853601e05f51e09a09",
+    "owner_manifest_sha256": "e5b77b2b2fb9fdb265232d585b8d8babb36229b56270493732f83f7e69c0f6ab",
+    "rows": 720
+  },
+  "risk_router": {
+    "decision": "QUALIFIED_SHADOW_CANDIDATE",
+    "primary_model_version": "risk-router-ai-adjudicated-55b58f71ca36",
+    "primary_artifact_sha256": "7dd0327d936cd88e6523f4d472842439f8f7df01a5f35ecb2c869b057db718da",
+    "human_arbitration_claimed": false,
+    "splits": 5,
+    "aggregate": {
+      "internal_macro_f1_mean": 0.9275317489009733,
+      "internal_macro_f1_min": 0.8409090909090909,
+      "internal_risk_recall_mean": 0.9555555555555555,
+      "internal_risk_recall_min": 0.8888888888888888,
+      "internal_false_risk_rate_mean": 0.03235294117647059,
+      "internal_false_risk_rate_max": 0.07352941176470588,
+      "external_macro_f1_mean": 0.9519271657698875,
+      "external_macro_f1_min": 0.927055702917772,
+      "external_risk_recall_mean": 0.9173789173789174,
+      "external_risk_recall_min": 0.8888888888888888,
+      "external_false_risk_rate_max": 0.03571428571428571
+    },
+    "consensus_only_ablation": {
+      "internal_macro_f1_mean": 0.9668567453428002,
+      "internal_risk_recall_min": 0.7777777777777778,
+      "internal_false_risk_rate_max": 0.014705882352941176,
+      "external_macro_f1_mean": 0.9085696941946942,
+      "external_risk_recall_min": 0.8,
+      "external_false_risk_rate_max": 0.03333333333333333
+    }
+  },
+  "qwen_semantic_lora": {
+    "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "decision": "NOT_QUALIFIED",
+    "owner_holdout_consumed": false,
+    "validation_priority_support": 9,
+    "minimum_priority_recall_gate": 0.75,
+    "runs": [
+      {
+        "version": "v1",
+        "adapter_sha256": "709886a5252a397557410bf9baf029c61ff4b180ff52a087d933fe41ace54467",
+        "parse_success_rate": 1.0,
+        "materiality_macro_f1": 0.8848484848484849,
+        "polarity_macro_f1": 0.5587719298245614,
+        "priority_recall": 0.6666666666666666,
+        "decision": "NOT_QUALIFIED"
+      },
+      {
+        "version": "v2",
+        "adapter_sha256": "6681080cca27c4f0dd5f57e55f1d9152439f9250139736102a667ab514b651a5",
+        "parse_success_rate": 1.0,
+        "materiality_macro_f1": 0.8848484848484849,
+        "polarity_macro_f1": 0.6977736163129421,
+        "priority_recall": 0.6666666666666666,
+        "decision": "NOT_QUALIFIED"
+      },
+      {
+        "version": "v3",
+        "adapter_sha256": "25a313eddbe9294a391e23639f1bb82c304c56569a76ae890172026153396b87",
+        "parse_success_rate": 1.0,
+        "materiality_macro_f1": 0.8271679805942996,
+        "polarity_macro_f1": 0.7432950191570881,
+        "priority_recall": 0.6666666666666666,
+        "false_priority_rate": 0.041666666666666664,
+        "decision": "NOT_QUALIFIED"
+      }
+    ]
+  }
+}

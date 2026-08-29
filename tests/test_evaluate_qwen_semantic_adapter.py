@@ -1,0 +1,97 @@
+from scripts.evaluate_qwen_semantic_adapter import (
+    extract_json_object,
+    gate_decision,
+    normalize_payload,
+    summarize_predictions,
+)
+from scripts.prepare_qwen_semantic_consensus_sft import (
+    EXPERIMENT_SYSTEM_PROMPT,
+    _balanced_training_rows,
+)
+
+
+def _row(expected, predicted, *, valid=True):
+    return {
+        "expected": expected,
+        "predicted": predicted,
+        "contract_valid": valid,
+        "exact_match": valid and expected == predicted,
+    }
+
+
+def test_extract_json_object_accepts_fence_and_surrounding_text():
+    assert extract_json_object('```json\n{"polarity":"ADVERSE"}\n```') == {"polarity": "ADVERSE"}
+    assert extract_json_object('answer: {"polarity":"NEUTRAL"} done') == {"polarity": "NEUTRAL"}
+
+
+def test_summarize_and_gate_perfect_payloads():
+    priority = normalize_payload(
+        {
+            "materiality": "MATERIAL_ADVERSE",
+            "polarity": "ADVERSE",
+            "adverse_strength": "HIGH",
+            "semantic_priority": "PRIORITY_REVIEW",
+        }
+    )
+    routine = normalize_payload(
+        {
+            "materiality": "NOT_MATERIAL_ADVERSE",
+            "polarity": "NEUTRAL",
+            "adverse_strength": "NONE",
+            "semantic_priority": "ROUTINE",
+        }
+    )
+    metrics = summarize_predictions([_row(priority, priority), _row(routine, routine)])
+    assert metrics["exact_payload_accuracy"] == 1.0
+    assert metrics["priority_review"]["recall"] == 1.0
+    assert gate_decision(metrics)["passed"] is True
+
+
+def test_invalid_output_counts_against_all_axes():
+    expected = normalize_payload(
+        {
+            "materiality": "MATERIAL_ADVERSE",
+            "polarity": "ADVERSE",
+            "adverse_strength": "HIGH",
+            "semantic_priority": "PRIORITY_REVIEW",
+        }
+    )
+    metrics = summarize_predictions([_row(expected, None, valid=False)])
+    assert metrics["parse_success_rate"] == 0.0
+    assert metrics["materiality"]["accuracy"] == 0.0
+    assert gate_decision(metrics)["passed"] is False
+
+
+def test_semantic_balancer_repeats_only_training_minority_pairs():
+    def item(materiality, polarity, sample_id):
+        return {
+            "messages": [
+                {},
+                {},
+                {
+                    "content": __import__("json").dumps(
+                        {
+                            "materiality": materiality,
+                            "polarity": polarity,
+                            "adverse_strength": "HIGH" if materiality == "MATERIAL_ADVERSE" else "NONE",
+                            "semantic_priority": "PRIORITY_REVIEW" if materiality == "MATERIAL_ADVERSE" else "ROUTINE",
+                        }
+                    )
+                },
+            ],
+            "metadata": {"sample_id": sample_id},
+        }
+
+    neutral = item("NOT_MATERIAL_ADVERSE", "NEUTRAL", "neutral")
+    priority = item("MATERIAL_ADVERSE", "ADVERSE", "priority")
+    balanced = _balanced_training_rows([neutral, priority])
+    assert len(balanced) == 4
+    assert [row["metadata"]["sample_id"] for row in balanced].count("priority") == 3
+    assert all("training_repeat" not in row["metadata"] for row in (balanced[0], balanced[1]))
+    assert balanced[-1]["metadata"]["origin_sample_id"] == "priority"
+
+
+def test_experiment_prompt_names_realized_risk_and_rejects_keyword_shortcuts():
+    assert "Form 25" in EXPERIMENT_SYSTEM_PROMPT
+    assert "假设性清算" in EXPERIMENT_SYSTEM_PROMPT
+    assert "不得仅凭关键词" in EXPERIMENT_SYSTEM_PROMPT

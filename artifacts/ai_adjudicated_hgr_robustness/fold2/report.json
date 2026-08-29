@@ -1,0 +1,513 @@
+{
+  "schema_version": 1,
+  "contract_version": "ai-adjudicated-dual-review-router-v1",
+  "split_salt": "finance-radar-ai-arbitration-v2",
+  "model_version": "risk-router-ai-adjudicated-f416f8b2d646",
+  "artifact_sha256": "ab7773520cfb2221ffff1f6d2afe146a09559c45eb6a38d70da86aebf9686fc6",
+  "dataset_sha256": "f416f8b2d6461c30f14ad1759b4c7eeb2cb8f274c2c186836de1a8d1c5499312",
+  "inputs": {
+    "owner_manifest_sha256": "e5b77b2b2fb9fdb265232d585b8d8babb36229b56270493732f83f7e69c0f6ab",
+    "A_strict_valid": true,
+    "B_strict_valid": true,
+    "rows": 720
+  },
+  "review_alignment": {
+    "target_consensus": 404,
+    "target_conflicts": 316,
+    "a_b_target_conflicts": 305,
+    "policy_screened_consensus": 11,
+    "consensus_labels": {
+      "NON_TARGET": 342,
+      "ABSTAIN": 19,
+      "RISK_REVIEW": 43
+    }
+  },
+  "protected_splits": {
+    "consensus_train": 231,
+    "consensus_validation": 77,
+    "consensus_internal_holdout": 77,
+    "consensus_abstain_gate": 19,
+    "validation_and_holdout_are_consensus_only": true
+  },
+  "ai_arbitration": {
+    "total_conflicts": 316,
+    "used_for_training": 287,
+    "quarantined": 29,
+    "labels": {
+      "NON_TARGET": 232,
+      "RISK_REVIEW": 55,
+      "ABSTAIN": 29
+    },
+    "basis": {
+      "CONSENSUS_SEED_MODEL_HIGH_CONFIDENCE": 214,
+      "RISK_FIRST_POLICY:clearly_positive_results": 16,
+      "RISK_FIRST_POLICY:bankruptcy_insolvency_or_receivership": 12,
+      "RISK_FIRST_POLICY:going_concern_or_default": 14,
+      "AI_ARBITRATION_QUARANTINED_LOW_CONFIDENCE": 29,
+      "RISK_FIRST_POLICY:binding_enforcement_or_fraud": 8,
+      "RISK_FIRST_POLICY:form25_listing_removal": 5,
+      "RISK_FIRST_POLICY:binding_enforcement_or_accounting_failure": 4,
+      "RISK_FIRST_POLICY:serious_product_safety": 5,
+      "RISK_FIRST_POLICY:resolved_or_alleviated_risk": 2,
+      "RISK_FIRST_POLICY:routine_policy_or_statistics": 3,
+      "RISK_FIRST_POLICY:active_listing_noncompliance": 1,
+      "RISK_FIRST_POLICY:documented_financial_distress": 2,
+      "RISK_FIRST_POLICY:resolution_or_administrative_action": 1
+    },
+    "human_arbitration_claimed": false
+  },
+  "development": {
+    "rows": 518,
+    "labels": {
+      "RISK_REVIEW": 80,
+      "NON_TARGET": 438
+    },
+    "provenance": {
+      "DUAL_REVIEW_TARGET_CONSENSUS": 231,
+      "AI_POLICY_OR_CONSENSUS_SEED_ADJUDICATION_NOT_HUMAN": 287
+    }
+  },
+  "threshold_selection": {
+    "threshold": 0.35,
+    "metrics": {
+      "rows": 77,
+      "label_counts": {
+        "RISK_REVIEW": 9,
+        "NON_TARGET": 68
+      },
+      "accuracy": 0.974025974025974,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "risk_precision": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176,
+      "confusion_matrix": [
+        [
+          8,
+          1
+        ],
+        [
+          1,
+          67
+        ]
+      ],
+      "errors": [
+        {
+          "sample_id": "hbv3-eaee4be3426ff21c9a62de09",
+          "event_id": "FR-LIVE-736615574eee6d8a41478f6458021c50",
+          "event_family": "audit_governance",
+          "source_id": "sec_current_filings",
+          "expected": "RISK_REVIEW",
+          "predicted": "NON_TARGET",
+          "decision_basis": "TRAINED_MODEL",
+          "decision_confidence": 0.842368,
+          "risk_probability": 0.157632,
+          "text_preview": "6-K - Amber International Holding Ltd (0001697818) (Filer) Filed: 2026-07-28 AccNo: 0001104659-26-087303 Size: 45 KB … as of December 31, 2025 expressed an adverse opinion as a result of the existence of material weaknesses described in Item 15 of the Company’s annual report on Form 20-F for the fiscal year ended Decem"
+        },
+        {
+          "sample_id": "hbv3-3fe29bc71951b97bbf97c66f",
+          "event_id": "FR-LIVE-28f348baef523195b265eff84633bbb8",
+          "event_family": "listing_compliance",
+          "source_id": "sec_current_filings",
+          "expected": "NON_TARGET",
+          "predicted": "RISK_REVIEW",
+          "decision_basis": "TRAINED_MODEL",
+          "decision_confidence": 0.780573,
+          "risk_probability": 0.780573,
+          "text_preview": "10-Q - Future Vision II Acquisition Corp. (0002010653) (Filer) Filed: 2026-08-11 AccNo: 0001829126-26-008575 Size: 3 MB …written notice (the “Notice”) from the Listing Qualifications Department of The Nasdaq Stock Market LLC (“Nasdaq”) indicating that the Company is no longer in compliance with Nasdaq Listing Rule 5550"
+        }
+      ]
+    }
+  },
+  "threshold_selection_policy": "FALLBACK_MAX_VALIDATION_MACRO_F1",
+  "threshold_sweep": [
+    {
+      "threshold": 0.35,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176
+    },
+    {
+      "threshold": 0.38,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176
+    },
+    {
+      "threshold": 0.41,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176
+    },
+    {
+      "threshold": 0.44,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176
+    },
+    {
+      "threshold": 0.47,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176
+    },
+    {
+      "threshold": 0.5,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176
+    },
+    {
+      "threshold": 0.53,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176
+    },
+    {
+      "threshold": 0.56,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176
+    },
+    {
+      "threshold": 0.59,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176
+    },
+    {
+      "threshold": 0.62,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176
+    },
+    {
+      "threshold": 0.65,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176
+    },
+    {
+      "threshold": 0.68,
+      "macro_f1": 0.9008158007728639,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.014705882352941176
+    }
+  ],
+  "internal_holdout": {
+    "rows": 77,
+    "label_counts": {
+      "RISK_REVIEW": 9,
+      "NON_TARGET": 68
+    },
+    "accuracy": 0.961038961038961,
+    "macro_f1": 0.9172932330827067,
+    "risk_recall": 1.0,
+    "risk_precision": 0.75,
+    "non_target_false_risk_rate": 0.04411764705882353,
+    "confusion_matrix": [
+      [
+        9,
+        0
+      ],
+      [
+        3,
+        65
+      ]
+    ],
+    "errors": [
+      {
+        "sample_id": "hbv3-11d18d1c742b8c892cb882f5",
+        "event_id": "FR-LIVE-ad4713d92499b6a0633d98882c2fc0dd",
+        "event_family": "corporate_action",
+        "source_id": "sec_current_filings",
+        "expected": "NON_TARGET",
+        "predicted": "RISK_REVIEW",
+        "decision_basis": "TRAINED_MODEL",
+        "decision_confidence": 0.678493,
+        "risk_probability": 0.678493,
+        "text_preview": "10-Q - ASPAC II Acquisition Corp. (0001876716) (Filer) Filed: 2026-08-10 AccNo: 0001213900-26-086997 Size: 4 MB …Capital Loans (see Note 5); however, the Sponsor is not obligated to make any such loans. There is no assurance that the Company’s plans to consummate a business combination will be successful within the Com"
+      },
+      {
+        "sample_id": "hbv3-804c4b090b8433a46e820bbe",
+        "event_id": "FR-LIVE-e065c8920fa2fff8db596f6042f5a48b",
+        "event_family": "fundamental_distress",
+        "source_id": "sec_current_filings",
+        "expected": "NON_TARGET",
+        "predicted": "RISK_REVIEW",
+        "decision_basis": "TRAINED_MODEL",
+        "decision_confidence": 0.586495,
+        "risk_probability": 0.586495,
+        "text_preview": "6-K - NICOLA MINING INC. (0001526475) (Filer) Filed: 2026-08-13 AccNo: 0001104659-26-095876 Size: 679 KB …potential adverse impact on the Company’s performance to movements in individual equity prices or general movements in the level of the stock market. Capital Management The Company considers capital to be the eleme"
+      },
+      {
+        "sample_id": "hbv3-8a8b6f079072b519ed750696",
+        "event_id": "FR-LIVE-de32d4cc0c4d0de90a0c67a7892ed288",
+        "event_family": "capital_structure",
+        "source_id": "sec_current_filings",
+        "expected": "NON_TARGET",
+        "predicted": "RISK_REVIEW",
+        "decision_basis": "TRAINED_MODEL",
+        "decision_confidence": 0.544343,
+        "risk_probability": 0.544343,
+        "text_preview": "6-K - Jin Medical International Ltd. (0001837821) (Filer) Filed: 2026-08-04 AccNo: 0001213900-26-085283 Size: 9 MB … of entering into contractual arrangements; ● impose fines or other requirements with which the Company’s PRC subsidiaries and VIE may not be able to comply; ● require the Company or the Company’s PRC sub"
+      }
+    ]
+  },
+  "external_blind_v3": {
+    "rows": 73,
+    "overlap_excluded": 7,
+    "overlap_audit": {
+      "event_id": 7,
+      "entity_group": 0,
+      "event_chain_group": 0,
+      "text_sha256": 0
+    },
+    "remaining_overlap_audit": {
+      "event_id": 0,
+      "entity_group": 0,
+      "event_chain_group": 0,
+      "text_sha256": 0
+    },
+    "full_accuracy": 0.9726027397260274,
+    "semantic": {
+      "rows": 53,
+      "label_counts": {
+        "NON_TARGET": 27,
+        "RISK_REVIEW": 26
+      },
+      "accuracy": 0.9622641509433962,
+      "macro_f1": 0.9621428571428572,
+      "risk_recall": 0.9230769230769231,
+      "risk_precision": 1.0,
+      "non_target_false_risk_rate": 0.0,
+      "confusion_matrix": [
+        [
+          24,
+          2
+        ],
+        [
+          0,
+          27
+        ]
+      ]
+    },
+    "abstain_rows": 20,
+    "abstain_recall": 1.0
+  },
+  "abstain_gate": {
+    "rows": 19,
+    "expected_abstain": 19,
+    "structured_gate_recall": 1.0
+  },
+  "baseline_comparison": {
+    "baseline_model_version": "risk-router-v4-c82cfde20465",
+    "internal_holdout": {
+      "rows": 77,
+      "label_counts": {
+        "RISK_REVIEW": 9,
+        "NON_TARGET": 68
+      },
+      "accuracy": 0.8571428571428571,
+      "macro_f1": 0.7663448275862069,
+      "risk_recall": 1.0,
+      "risk_precision": 0.45,
+      "non_target_false_risk_rate": 0.16176470588235295,
+      "confusion_matrix": [
+        [
+          9,
+          0
+        ],
+        [
+          11,
+          57
+        ]
+      ]
+    },
+    "external_blind_v3": {
+      "rows": 80,
+      "full_accuracy": 0.9625,
+      "semantic": {
+        "rows": 60,
+        "label_counts": {
+          "NON_TARGET": 30,
+          "RISK_REVIEW": 30
+        },
+        "accuracy": 0.95,
+        "macro_f1": 0.9499861072520144,
+        "risk_recall": 0.9666666666666667,
+        "risk_precision": 0.9354838709677419,
+        "non_target_false_risk_rate": 0.06666666666666667,
+        "confusion_matrix": [
+          [
+            29,
+            1
+          ],
+          [
+            2,
+            28
+          ]
+        ]
+      },
+      "abstain_recall": 1.0
+    }
+  },
+  "consensus_only_ablation": {
+    "purpose": "MEASURE_INCREMENTAL_EFFECT_OF_AI_ADJUDICATED_TRAINING_ROWS",
+    "training_rows": 231,
+    "threshold": 0.35,
+    "threshold_policy": "FALLBACK_MAX_VALIDATION_MACRO_F1",
+    "threshold_selection": {
+      "threshold": 0.35,
+      "metrics": {
+        "rows": 77,
+        "label_counts": {
+          "RISK_REVIEW": 9,
+          "NON_TARGET": 68
+        },
+        "accuracy": 0.974025974025974,
+        "macro_f1": 0.9370915032679739,
+        "risk_recall": 0.8888888888888888,
+        "risk_precision": 0.8888888888888888,
+        "non_target_false_risk_rate": 0.014705882352941176,
+        "confusion_matrix": [
+          [
+            8,
+            1
+          ],
+          [
+            1,
+            67
+          ]
+        ],
+        "errors": [
+          {
+            "sample_id": "hbv3-eaee4be3426ff21c9a62de09",
+            "event_id": "FR-LIVE-736615574eee6d8a41478f6458021c50",
+            "event_family": "audit_governance",
+            "source_id": "sec_current_filings",
+            "expected": "RISK_REVIEW",
+            "predicted": "NON_TARGET",
+            "decision_basis": "TRAINED_MODEL",
+            "decision_confidence": 0.778554,
+            "risk_probability": 0.221446,
+            "text_preview": "6-K - Amber International Holding Ltd (0001697818) (Filer) Filed: 2026-07-28 AccNo: 0001104659-26-087303 Size: 45 KB … as of December 31, 2025 expressed an adverse opinion as a result of the existence of material weaknesses described in Item 15 of the Company’s annual report on Form 20-F for the fiscal year ended Decem"
+          },
+          {
+            "sample_id": "hbv3-3fe29bc71951b97bbf97c66f",
+            "event_id": "FR-LIVE-28f348baef523195b265eff84633bbb8",
+            "event_family": "listing_compliance",
+            "source_id": "sec_current_filings",
+            "expected": "NON_TARGET",
+            "predicted": "RISK_REVIEW",
+            "decision_basis": "TRAINED_MODEL",
+            "decision_confidence": 0.578638,
+            "risk_probability": 0.578638,
+            "text_preview": "10-Q - Future Vision II Acquisition Corp. (0002010653) (Filer) Filed: 2026-08-11 AccNo: 0001829126-26-008575 Size: 3 MB …written notice (the “Notice”) from the Listing Qualifications Department of The Nasdaq Stock Market LLC (“Nasdaq”) indicating that the Company is no longer in compliance with Nasdaq Listing Rule 5550"
+          }
+        ]
+      }
+    },
+    "internal_holdout": {
+      "rows": 77,
+      "label_counts": {
+        "RISK_REVIEW": 9,
+        "NON_TARGET": 68
+      },
+      "accuracy": 1.0,
+      "macro_f1": 1.0,
+      "risk_recall": 1.0,
+      "risk_precision": 1.0,
+      "non_target_false_risk_rate": 0.0,
+      "confusion_matrix": [
+        [
+          9,
+          0
+        ],
+        [
+          0,
+          68
+        ]
+      ],
+      "errors": []
+    },
+    "external_blind_v3": {
+      "rows": 79,
+      "overlap_excluded": 1,
+      "overlap_audit": {
+        "event_id": 1,
+        "entity_group": 0,
+        "event_chain_group": 0,
+        "text_sha256": 0
+      },
+      "remaining_overlap_audit": {
+        "event_id": 0,
+        "entity_group": 0,
+        "event_chain_group": 0,
+        "text_sha256": 0
+      },
+      "full_accuracy": 0.9240506329113924,
+      "semantic": {
+        "rows": 59,
+        "label_counts": {
+          "NON_TARGET": 29,
+          "RISK_REVIEW": 30
+        },
+        "accuracy": 0.8983050847457628,
+        "macro_f1": 0.8975694444444444,
+        "risk_recall": 0.8,
+        "risk_precision": 1.0,
+        "non_target_false_risk_rate": 0.0,
+        "confusion_matrix": [
+          [
+            24,
+            6
+          ],
+          [
+            0,
+            29
+          ]
+        ]
+      },
+      "abstain_rows": 20,
+      "abstain_recall": 1.0
+    }
+  },
+  "overlap_audit": {
+    "development_vs_internal_holdout": {
+      "event_id": 0,
+      "entity_group": 0,
+      "event_chain_group": 0,
+      "text_sha256": 0
+    },
+    "development_vs_external": {
+      "event_id": 7,
+      "entity_group": 0,
+      "event_chain_group": 0,
+      "text_sha256": 0
+    }
+  },
+  "gates": {
+    "internal_macro_f1": true,
+    "internal_risk_recall": true,
+    "internal_false_risk": true,
+    "external_macro_f1": true,
+    "external_risk_recall": true,
+    "external_false_risk": true,
+    "no_internal_overlap": true,
+    "no_remaining_external_overlap": true
+  },
+  "gate_thresholds": {
+    "internal_macro_f1_min": 0.8,
+    "internal_risk_recall_min": 0.8,
+    "internal_false_risk_max": 0.15,
+    "external_macro_f1_min": 0.85,
+    "external_risk_recall_min": 0.85,
+    "external_false_risk_max": 0.1
+  },
+  "gate_pass": true,
+  "promotion_decision": "QUALIFIED_SHADOW_CANDIDATE",
+  "human_gold_mutated": false,
+  "human_only_labels_claimed": false,
+  "production_model_changed": false,
+  "no_trading": true
+}
