@@ -47,16 +47,16 @@ def test_default_policy_is_strict_versioned_and_content_addressed() -> None:
     load_asset_mapping_policy.cache_clear()
     policy = load_asset_mapping_policy()
 
-    assert policy.policy_version == "event-asset-mapping-v1.5.0"
+    assert policy.policy_version == "event-asset-mapping-v1.6.0"
     assert policy.policy_sha256 == hashlib.sha256(MAPPING_PATH.read_bytes()).hexdigest()
     assert policy.max_assets_per_event == 3
     assert policy.direction == "ABSTAIN"
     assert policy.impact_score == 0
     assert policy.no_trading == 1
-    assert len(policy.asset_registry) == 160
+    assert len(policy.asset_registry) == 156
     priorities = [rule.priority for rule in policy.rules]
     assert priorities == sorted(priorities)
-    assert len(priorities) == len(set(priorities)) == 41
+    assert len(priorities) == len(set(priorities)) == 45
 
 
 def test_claim_bound_bitcoin_event_maps_spot_then_us_listed_proxy() -> None:
@@ -132,7 +132,7 @@ def test_asset_universe_covers_major_regions_sectors_rates_fx_commodities_and_cr
         "EWU", "FEZ", "EWG", "EWQ", "EZA", "EIS", "TUR", "KSA", "UAE", "QAT",
         "EWS", "EIDO", "EWM", "THD", "VNM", "EPHE", "ENZL", "EWN",
         "EWO", "EWK", "EWD", "ENOR", "EDEN", "EFNL", "EPOL", "GREK",
-        "EIRL", "PGAL", "ECH", "EPU", "ARGT", "GXG", "EGPT", "PAK", "KWT", "NGE",
+        "EIRL", "ECH", "EPU", "ARGT", "GXG", "KWT",
         # Sectors and themes.
         "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB",
         "XLRE", "XLC", "SMH", "KRE", "XBI", "ITA", "CIBR", "ICLN",
@@ -173,6 +173,10 @@ def test_asset_universe_covers_major_regions_sectors_rates_fx_commodities_and_cr
         ("Saudi Arabia revises its economic growth forecast", ["KSA"]),
         ("UAE revises its economic growth forecast", ["UAE"]),
         ("Qatar central bank changes its policy stance", ["QAT"]),
+        ("Portugal revises its economic growth forecast", ["FEZ"]),
+        ("Central Bank of Egypt changes its policy rate", ["EEM"]),
+        ("State Bank of Pakistan changes its policy rate", ["EEM"]),
+        ("Central Bank of Nigeria changes its policy rate", ["EEM"]),
     ],
 )
 def test_atomic_country_market_events_map_to_country_proxies(
@@ -191,7 +195,8 @@ def test_atomic_country_market_events_map_to_country_proxies(
     )
 
     assert _symbols(items) == expected
-    assert all(item["role"] == "THEMATIC_PROXY" for item in items)
+    expected_role = "MARKET_BENCHMARK" if expected == ["EEM"] else "THEMATIC_PROXY"
+    assert all(item["role"] == expected_role for item in items)
 
 
 def test_country_name_in_company_earnings_does_not_create_a_country_proxy() -> None:
@@ -624,7 +629,7 @@ def test_all_mappings_obey_read_only_directionless_contract(event: dict[str, str
         assert item["direction"] == "ABSTAIN"
         assert item["impact_score"] == 0
         assert item["no_trading"] == 1
-        assert item["policy_version"] == "event-asset-mapping-v1.5.0"
+        assert item["policy_version"] == "event-asset-mapping-v1.6.0"
         assert len(str(item["policy_sha256"])) == 64
         assert item["rule_id"]
         assert item["role"]

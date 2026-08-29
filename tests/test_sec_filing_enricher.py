@@ -206,7 +206,7 @@ class SecFilingEnricherTests(unittest.TestCase):
         self.assertIn("尚不能通过确定性规则回答", lead["claim_summary"])
         self.assertEqual(event_count, 0)
 
-    def test_unimplemented_fact_extractors_fail_closed_after_sec_classification(self) -> None:
+    def test_common_sec_disclosure_families_promote_with_specific_facts(self) -> None:
         cases = {
             "bankruptcy": (
                 "Example Corp filed a bankruptcy petition under chapter 11 and began proceedings."
@@ -237,14 +237,14 @@ class SecFilingEnricherTests(unittest.TestCase):
                 ).fetchone()[0]
                 connection.close()
 
-            self.assertEqual(result["needs_evidence"], 1)
-            self.assertEqual(result["promoted"], 0)
-            self.assertEqual(lead["status"], "NEEDS_EVIDENCE")
+            self.assertEqual(result["needs_evidence"], 0)
+            self.assertEqual(result["promoted"], 1)
+            self.assertEqual(lead["status"], "PROMOTED")
             self.assertEqual(lead["claim_action"], expected_type)
-            self.assertIn("EVENT_PREDICATE_NOT_SUPPORTED", lead["admission_reasons_json"])
-            self.assertIn("候选分类，不能当作已发生事实", lead["claim_summary"])
-            self.assertEqual(event_count, 0)
-            self.assertEqual(relation_count, 0)
+            self.assertEqual(lead["admission_reasons_json"], "[]")
+            self.assertNotIn("候选分类，不能当作已发生事实", lead["claim_summary"])
+            self.assertEqual(event_count, 1)
+            self.assertEqual(relation_count, 1)
 
     def test_fact_slot_gate_rejects_cross_entity_and_denied_actions_end_to_end(self) -> None:
         cases = {

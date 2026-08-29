@@ -35,6 +35,8 @@ def build_overview_payload(
     operations = operations or OperationsRepository(settings.operations_db)
     return {
         "overview_base": ledger.overview(run_integrity_check=False),
+        "ledger_health_base": ledger.health(run_integrity_check=False),
+        "operations_health_base": operations.health_summary(),
         # A verified recovery bundle may carry a multi-megabyte per-file
         # inventory.  Keep that protected operator artifact out of the public
         # snapshot just as we do for full worker reports.

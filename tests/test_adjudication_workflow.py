@@ -341,7 +341,12 @@ def test_api_exposes_guarded_queue_and_review_contract(workflow) -> None:
             },
         )
         assert spoofed.status_code == 422
-        health = client.get("/api/v1/health").json()["data"]
+        # Public health is an O(1) lifecycle snapshot. Use the protected deep
+        # diagnostic when this test needs to observe mutations made in-flight.
+        health = client.get(
+            "/api/v1/health/deep",
+            headers={"X-Admin-Token": "test-secret"},
+        ).json()["data"]
         assert health["operations"]["schema_version"] == 10
         assert health["operations"]["counts"]["adjudication_freezes"] == 0
         assert health["operations"]["counts"]["adjudication_samples"] == 1

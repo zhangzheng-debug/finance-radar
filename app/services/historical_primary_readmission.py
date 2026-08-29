@@ -53,6 +53,22 @@ APPLY_ACTION = "apply_historical_primary_readmission"
 CHANGE_REASON = "authorized_historical_primary_readmission_v1"
 
 
+def _document_issuer_is_bound(
+    receipt: dict[str, Any], evidence: dict[str, Any]
+) -> bool:
+    """Require an exact non-empty SEC CIK match before binding filing pronouns."""
+
+    canonical_type = _text(receipt.get("canonical_issuer_identity_type")).upper()
+    document_type = _text(evidence.get("document_issuer_identity_type")).upper()
+    canonical_value = _text(receipt.get("canonical_issuer_identity_value")).lstrip("0")
+    document_value = _text(evidence.get("document_issuer_identity_value")).lstrip("0")
+    return bool(
+        canonical_type == document_type == "CIK"
+        and canonical_value
+        and canonical_value == document_value
+    )
+
+
 def _known_at(evidence: dict[str, Any]) -> str:
     published = _aware_timestamp(evidence.get("source_published_at"))
     received = _aware_timestamp(evidence.get("local_received_at"))
@@ -142,6 +158,7 @@ def _candidate(
             evidence_passage=passage,
             event_type=action,
             expected_subject=subject,
+            document_issuer_bound=_document_issuer_is_bound(receipt, evidence),
         )
         summary = public_fact_summary(
             subject=subject,
@@ -165,6 +182,7 @@ def _candidate(
             subject_match=extraction.supports_specific_fact,
             event_claim_supported=extraction.supports_specific_fact,
             date_coherent=_date_coherent(receipt, evidence),
+            document_issuer_bound=_document_issuer_is_bound(receipt, evidence),
             fact_extraction=extraction,
             public_fact_summary_text=summary,
         )

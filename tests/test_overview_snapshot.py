@@ -70,6 +70,25 @@ def test_overview_request_never_reopens_operational_state(tmp_path: Path) -> Non
     assert response.json()["data"]["overview_snapshot"]["status"] == "READY"
 
 
+def test_health_requests_only_read_the_precomputed_snapshot(tmp_path: Path) -> None:
+    application = create_app(_settings(tmp_path))
+
+    def unexpected_read(*_args, **_kwargs):
+        raise AssertionError("public health must not aggregate SQLite per request")
+
+    with TestClient(application) as client:
+        application.state.ledger.health = unexpected_read
+        application.state.operations.health = unexpected_read
+        application.state.operations.health_summary = unexpected_read
+        application.state.operations.latest_verified_backup = unexpected_read
+        response = client.get("/api/v1/health")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["health_snapshot"]["status"] == "READY"
+    assert data["operations"]["projection"] == "precomputed_bounded_summary"
+
+
 def test_refresh_failure_keeps_last_good_snapshot() -> None:
     state = {"fail": False}
 

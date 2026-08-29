@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
@@ -134,6 +134,7 @@ class EvidenceFactExtraction:
             in {
                 "EXPLICIT_ISSUER",
                 "EXPLICIT_ISSUER_CONTEXT",
+                "DOCUMENT_ISSUER_CIK_MATCH",
             }
             and fact_supports_event_type(self.event_type, fact)
         )
@@ -215,6 +216,17 @@ DETERMINISTIC_FACT_SLOT_EVENT_TYPES = frozenset(
         "credit_facility_amendment",
         "merger_or_acquisition",
         "material_corporate_transaction",
+        "earnings_or_guidance",
+        "going_concern_financing_dependency",
+        "share_repurchase_authorization_expansion",
+        "bankruptcy",
+        "bankruptcy_liquidation",
+        "debt_default",
+        "restructuring",
+        "reverse_split",
+        "product_recall",
+        "clinical_trial_update",
+        "spac_ipo_closing",
     }
 )
 
@@ -289,6 +301,25 @@ EVENT_TYPE_ALLOWED_PREDICATES: dict[str, frozenset[str]] = {
             "TRANSACTION_ABANDONED",
         }
     ),
+    "earnings_or_guidance": frozenset(
+        {"FINANCIAL_RESULTS_REPORTED", "FINANCIAL_GUIDANCE_ISSUED"}
+    ),
+    "going_concern_financing_dependency": frozenset(
+        {"GOING_CONCERN_DOUBT_DISCLOSED"}
+    ),
+    "share_repurchase_authorization_expansion": frozenset(
+        {"SHARE_REPURCHASE_AUTHORIZATION_INCREASED"}
+    ),
+    "bankruptcy": frozenset({"BANKRUPTCY_PETITION_FILED"}),
+    "bankruptcy_liquidation": frozenset(
+        {"BANKRUPTCY_PETITION_FILED", "LIQUIDATION_APPROVED"}
+    ),
+    "debt_default": frozenset({"DEBT_DEFAULT_DISCLOSED"}),
+    "restructuring": frozenset({"RESTRUCTURING_INITIATED", "RESTRUCTURING_COMPLETED"}),
+    "reverse_split": frozenset({"REVERSE_STOCK_SPLIT_APPROVED", "REVERSE_STOCK_SPLIT_EFFECTED"}),
+    "product_recall": frozenset({"PRODUCT_RECALL_ANNOUNCED"}),
+    "clinical_trial_update": frozenset({"CLINICAL_TRIAL_UPDATE_ANNOUNCED"}),
+    "spac_ipo_closing": frozenset({"INITIAL_PUBLIC_OFFERING_CLOSED"}),
 }
 
 
@@ -1423,8 +1454,235 @@ def _extract_transaction_facts(
     return facts
 
 
+_ADDITIONAL_DISCLOSURE_PATTERNS: dict[
+    str, tuple[tuple[str, re.Pattern[str]], ...]
+] = {
+    "earnings_or_guidance": (
+        (
+            "FINANCIAL_RESULTS_REPORTED",
+            re.compile(
+                r"(?P<action>reported|announced|released|published)\s+"
+                r"(?:(?:its|the|quarterly|annual|preliminary|unaudited)\s+){0,5}"
+                r"(?P<object>financial\s+results|results|earnings|revenue|net\s+sales|"
+                r"net\s+(?:income|loss)|adjusted\s+EBITDA)\b",
+                re.I,
+            ),
+        ),
+        (
+            "FINANCIAL_GUIDANCE_ISSUED",
+            re.compile(
+                r"(?P<action>issued|provided|raised|lowered|reaffirmed|updated)\s+"
+                r"(?:(?:its|the|full-year|annual|quarterly)\s+){0,5}"
+                r"(?P<object>guidance|outlook|forecast)\b",
+                re.I,
+            ),
+        ),
+    ),
+    "going_concern_financing_dependency": (
+        (
+            "GOING_CONCERN_DOUBT_DISCLOSED",
+            re.compile(
+                r"(?P<action>raise(?:s|d)?|exist(?:s|ed)?)\s+"
+                r"(?P<object>substantial\s+doubt\s+(?:about|regarding)\s+"
+                r"(?:(?P<issuer_pronoun>our|the\s+Company['’]s|the\s+Registrant['’]s)\s+)?"
+                r"ability\s+to\s+continue\s+as\s+a\s+going\s+concern)\b",
+                re.I,
+            ),
+        ),
+    ),
+    "share_repurchase_authorization_expansion": (
+        (
+            "SHARE_REPURCHASE_AUTHORIZATION_INCREASED",
+            re.compile(
+                r"(?P<action>announced|approved|authorized|increased|expanded)\s+"
+                r"(?:(?:an?|the|its|additional)\s+){0,5}"
+                r"(?P<object>(?:increase|expansion)\s+(?:in|of|to)\s+(?:its|the)\s+"
+                r"share\s+repurchase\s+(?:program|authorization)|"
+                r"share\s+repurchase\s+(?:program|authorization))\b",
+                re.I,
+            ),
+        ),
+    ),
+    "bankruptcy": (
+        (
+            "BANKRUPTCY_PETITION_FILED",
+            re.compile(
+                r"(?P<action>filed)\s+(?P<object>"
+                r"(?:(?:a|the|its)\s+)?(?:(?:voluntary|involuntary)\s+)?"
+                r"(?:bankruptcy\s+)?petitions?(?:\s+for\s+relief)?\s+"
+                r"under\s+Chapter\s+(?:7|11|15)|"
+                r"for\s+bankruptcy\s+under\s+Chapter\s+(?:7|11|15))\b",
+                re.I,
+            ),
+        ),
+    ),
+    "bankruptcy_liquidation": (
+        (
+            "BANKRUPTCY_PETITION_FILED",
+            re.compile(
+                r"(?P<action>filed)\s+(?P<object>"
+                r"(?:(?:a|the|its)\s+)?(?:(?:voluntary|involuntary)\s+)?"
+                r"(?:bankruptcy\s+)?petitions?(?:\s+for\s+relief)?\s+"
+                r"under\s+Chapter\s+(?:7|11|15)|"
+                r"for\s+bankruptcy\s+under\s+Chapter\s+(?:7|11|15))\b",
+                re.I,
+            ),
+        ),
+        (
+            "LIQUIDATION_APPROVED",
+            re.compile(
+                r"(?P<action>approved|commenced|completed)\s+"
+                r"(?:(?:a|the|its|plan\s+of)\s+){0,4}"
+                r"(?P<object>liquidation|winding\s+up)\b",
+                re.I,
+            ),
+        ),
+    ),
+    "debt_default": (
+        (
+            "DEBT_DEFAULT_DISCLOSED",
+            re.compile(
+                r"(?P<action>defaulted|failed\s+to\s+pay|breached)\s+"
+                r"(?:(?:on|under|its|the|a)\s+){0,4}"
+                r"(?P<object>debt|notes?|loan|credit\s+facility|covenant)\b",
+                re.I,
+            ),
+        ),
+    ),
+    "restructuring": (
+        (
+            "RESTRUCTURING_INITIATED",
+            re.compile(
+                r"(?P<action>initiated|commenced|approved|announced)\s+"
+                r"(?:(?:a|the|its|strategic|operational|financial)\s+){0,5}"
+                r"(?P<object>restructuring(?:\s+plan)?)\b",
+                re.I,
+            ),
+        ),
+        (
+            "RESTRUCTURING_COMPLETED",
+            re.compile(
+                r"(?P<action>completed)\s+(?:(?:a|the|its)\s+){0,3}"
+                r"(?P<object>restructuring(?:\s+plan)?)\b",
+                re.I,
+            ),
+        ),
+    ),
+    "reverse_split": (
+        (
+            "REVERSE_STOCK_SPLIT_APPROVED",
+            re.compile(
+                r"(?P<action>approved|authorized)\s+(?:(?:a|the|its)\s+){0,3}"
+                r"(?P<object>reverse\s+(?:stock|share)\s+split)\b",
+                re.I,
+            ),
+        ),
+        (
+            "REVERSE_STOCK_SPLIT_EFFECTED",
+            re.compile(
+                r"(?P<action>effected|implemented|completed)\s+"
+                r"(?:(?:a|the|its)\s+){0,3}"
+                r"(?P<object>reverse\s+(?:stock|share)\s+split)\b",
+                re.I,
+            ),
+        ),
+    ),
+    "product_recall": (
+        (
+            "PRODUCT_RECALL_ANNOUNCED",
+            re.compile(
+                r"(?P<action>recalled|announced|initiated)\s+"
+                r"(?:(?:a|the|its|voluntary)\s+){0,4}"
+                r"(?P<object>(?:product\s+)?recall|[A-Za-z0-9][^.;]{0,80}\s+recall)\b",
+                re.I,
+            ),
+        ),
+    ),
+    "clinical_trial_update": (
+        (
+            "CLINICAL_TRIAL_UPDATE_ANNOUNCED",
+            re.compile(
+                r"(?P<action>announced|reported|completed|initiated|enrolled|scheduled)\s+"
+                r"(?:(?:a|the|its|new|first|pivotal|Phase\s+[123](?:a|b)?)\s+){0,6}"
+                r"(?P<object>clinical\s+trial|study|trial\s+results|FDA\s+meeting|"
+                r"end-of-Phase\s+2\s+meeting)\b",
+                re.I,
+            ),
+        ),
+    ),
+    "spac_ipo_closing": (
+        (
+            "INITIAL_PUBLIC_OFFERING_CLOSED",
+            re.compile(
+                r"(?P<action>completed|closed|consummated)\s+"
+                r"(?:(?:a|the|its)\s+){0,3}"
+                r"(?P<object>initial\s+public\s+offering|IPO)\b",
+                re.I,
+            ),
+        ),
+    ),
+    "material_corporate_transaction": (
+        (
+            "TRANSACTION_AGREEMENT_ENTERED",
+            re.compile(
+                r"(?P<action>entered\s+into|executed|signed)\s+(?:a|an|the)?\s*"
+                r"(?P<object>debt\s+conversion\s+agreement|asset\s+purchase\s+agreement|"
+                r"stock\s+purchase\s+agreement|definitive\s+agreement)\b",
+                re.I,
+            ),
+        ),
+    ),
+}
+
+
+def _extract_additional_disclosure_facts(
+    sentences: tuple[str, ...], expected_subject: str, event_type: str
+) -> list[EvidenceFactSlots]:
+    """Extract affirmative action-object pairs; category keywords never suffice."""
+
+    facts: list[EvidenceFactSlots] = []
+    for sentence in sentences:
+        for predicate, pattern in _ADDITIONAL_DISCLOSURE_PATTERNS.get(event_type, ()):
+            relation = pattern.search(sentence)
+            if relation is None:
+                continue
+            action = re.compile(re.escape(relation.group("action")), re.I).search(
+                sentence, relation.start("action"), relation.end("action")
+            )
+            if action is None or not _action_is_affirmed(
+                sentence,
+                action,
+                support_start=relation.start(),
+                support_end=relation.end(),
+            ):
+                continue
+            subject_override = None
+            issuer_pronoun = relation.groupdict().get("issuer_pronoun")
+            if issuer_pronoun:
+                subject_override = (
+                    issuer_pronoun,
+                    "DOCUMENT_ISSUER_PRONOUN",
+                    False,
+                )
+            _append_fact(
+                facts,
+                sentence=sentence,
+                expected_subject=expected_subject,
+                predicate=predicate,
+                action=action,
+                object_text=relation.group("object"),
+                subject_override=subject_override,
+                extraction_rule="additional-disclosure-family-v1",
+            )
+    return facts
+
+
 def extract_evidence_fact_slots(
-    *, evidence_passage: str, event_type: str, expected_subject: str = ""
+    *,
+    evidence_passage: str,
+    event_type: str,
+    expected_subject: str = "",
+    document_issuer_bound: bool = False,
 ) -> EvidenceFactExtraction:
     """Extract narrow event facts without an LLM or unstated completion.
 
@@ -1456,17 +1714,39 @@ def extract_evidence_fact_slots(
         facts = _extract_transaction_facts(sentences, expected_subject)
     else:
         facts = []
+    facts.extend(
+        _extract_additional_disclosure_facts(
+            sentences,
+            expected_subject,
+            normalized_type,
+        )
+    )
     facts = _drop_cross_sentence_ambiguous_pronouns(
         facts,
         sentences,
         expected_subject,
     )
     facts = _drop_postposed_denied_facts(facts, sentences)
+    if document_issuer_bound:
+        facts = [
+            replace(
+                fact,
+                subject_binding="DOCUMENT_ISSUER_CIK_MATCH",
+                extraction_rule=f"{fact.extraction_rule}+sec-cik-issuer-binding-v1",
+            )
+            if fact.subject_binding == "DOCUMENT_ISSUER_PRONOUN"
+            else fact
+            for fact in facts
+        ]
 
     missing: list[str] = []
     compatible_supported = tuple(
         fact.subject_binding
-        in {"EXPLICIT_ISSUER", "EXPLICIT_ISSUER_CONTEXT"}
+        in {
+            "EXPLICIT_ISSUER",
+            "EXPLICIT_ISSUER_CONTEXT",
+            "DOCUMENT_ISSUER_CIK_MATCH",
+        }
         and fact_supports_event_type(normalized_type, fact)
         for fact in facts
     )
@@ -1586,6 +1866,7 @@ def evaluate_event_admission(
     subject_match: bool,
     event_claim_supported: bool,
     date_coherent: bool,
+    document_issuer_bound: bool = False,
     fact_extraction: EvidenceFactExtraction | None = None,
     public_fact_summary_text: str = "",
 ) -> AdmissionDecision:
@@ -1631,6 +1912,7 @@ def evaluate_event_admission(
         evidence_passage=evidence_passage,
         event_type=action,
         expected_subject=subject,
+        document_issuer_bound=document_issuer_bound,
     )
     expected_summary = ""
     if fact_extraction is None:
@@ -1718,6 +2000,20 @@ _PREDICATE_LABELS = {
     "TRANSACTION_CONSUMMATED": "完成交易",
     "TRANSACTION_TERMINATED": "终止交易",
     "TRANSACTION_ABANDONED": "放弃交易",
+    "FINANCIAL_RESULTS_REPORTED": "披露财务结果",
+    "FINANCIAL_GUIDANCE_ISSUED": "发布财务指引",
+    "GOING_CONCERN_DOUBT_DISCLOSED": "披露持续经营重大疑虑",
+    "SHARE_REPURCHASE_AUTHORIZATION_INCREASED": "扩大股份回购授权",
+    "BANKRUPTCY_PETITION_FILED": "提交破产申请",
+    "LIQUIDATION_APPROVED": "批准或推进清算",
+    "DEBT_DEFAULT_DISCLOSED": "披露债务违约",
+    "RESTRUCTURING_INITIATED": "启动重组",
+    "RESTRUCTURING_COMPLETED": "完成重组",
+    "REVERSE_STOCK_SPLIT_APPROVED": "批准反向拆股",
+    "REVERSE_STOCK_SPLIT_EFFECTED": "实施反向拆股",
+    "PRODUCT_RECALL_ANNOUNCED": "宣布产品召回",
+    "CLINICAL_TRIAL_UPDATE_ANNOUNCED": "披露临床试验进展",
+    "INITIAL_PUBLIC_OFFERING_CLOSED": "完成首次公开发行",
 }
 
 
