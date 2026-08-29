@@ -20,6 +20,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import unquote, urlsplit
 
 from app.evidence_policy import (
     DUAL_HUMAN_EVIDENCE_STATUS,
@@ -147,6 +148,73 @@ def _event_claim(connection: sqlite3.Connection, event_id: str) -> dict[str, Any
     return dict(row) if row is not None else {}
 
 
+_SEC_ARCHIVES_CIK_RE = re.compile(
+    r"/Archives/edgar/data/0*([0-9]+)/",
+    re.I,
+)
+
+
+def _normalize_cik(value: Any) -> str:
+    compact = _text(value).strip()
+    if not compact.isdigit():
+        return ""
+    return compact.lstrip("0") or "0"
+
+
+def _sec_cik_from_url(value: Any) -> str:
+    """Return one issuer CIK only from an actual SEC Archives URL.
+
+    ``ixviewer`` links carry the filing path in an encoded ``doc`` query
+    parameter, so the complete URL is decoded before matching.  A look-alike
+    path on a non-SEC host is deliberately rejected.
+    """
+
+    raw = _text(value)
+    if not raw:
+        return ""
+    parsed = urlsplit(raw)
+    hostname = (parsed.hostname or "").casefold().rstrip(".")
+    if hostname != "sec.gov" and not hostname.endswith(".sec.gov"):
+        return ""
+    decoded = unquote(raw).replace("\\", "/")
+    matches = {
+        _normalize_cik(match.group(1))
+        for match in _SEC_ARCHIVES_CIK_RE.finditer(decoded)
+    } - {""}
+    return next(iter(matches)) if len(matches) == 1 else ""
+
+
+def _linked_primary_sec_issuer_cik(
+    connection: sqlite3.Connection,
+    event_id: str,
+) -> str:
+    """Recover one legacy event identity from linked primary SEC records.
+
+    Old ledgers often omitted ``facts_json.cik`` even though the canonical SEC
+    observation URL retained it.  We accept this fallback only when every
+    usable linked P0/P1 SEC URL resolves to the same non-empty CIK.  Missing or
+    conflicting URLs remain unbound rather than falling back to ticker/name
+    guesses.
+    """
+
+    rows = connection.execute(
+        """SELECT r.canonical_url,s.authority_tier
+           FROM event_observations eo
+           JOIN latest_source_content r ON r.observation_id=eo.observation_id
+           LEFT JOIN sources s ON s.source_id=r.source_id
+           WHERE eo.event_id=? AND eo.relation_type!='filtered_aggregated_noise'""",
+        (event_id,),
+    ).fetchall()
+    values = {
+        cik
+        for row in rows
+        if is_primary_authority_tier(row["authority_tier"])
+        for cik in (_sec_cik_from_url(row["canonical_url"]),)
+        if cik
+    }
+    return next(iter(values)) if len(values) == 1 else ""
+
+
 _EVENT_EVIDENCE_SQL = """SELECT ee.evidence_id,ee.observation_id,ee.evidence_url,
                                  ee.filing_date,ee.form,ee.items,
                                  ee.evidence_passage,ee.passage_score,ee.evidence_status,
@@ -207,13 +275,12 @@ def _event_evidence(connection: sqlite3.Connection, event_id: str) -> list[dict[
         ).hexdigest()
         item["authority_tier"] = _text(item.get("authority_tier")) or "UNKNOWN"
         item["source_name"] = _text(item.get("source_name")) or _text(item.get("source_id"))
-        cik_match = re.search(
-            r"/Archives/edgar/data/0*([0-9]+)/",
-            _text(item.get("evidence_url")),
-            re.I,
+        document_cik = _sec_cik_from_url(item.get("evidence_url"))
+        item["document_issuer_identity_type"] = "CIK" if document_cik else ""
+        item["document_issuer_identity_value"] = document_cik
+        item["document_issuer_identity_source"] = (
+            "EVIDENCE_SEC_ARCHIVES_URL" if document_cik else ""
         )
-        item["document_issuer_identity_type"] = "CIK" if cik_match else ""
-        item["document_issuer_identity_value"] = cik_match.group(1) if cik_match else ""
         evidence.append(item)
     return evidence
 
@@ -226,14 +293,9 @@ def event_receipt(connection: sqlite3.Connection, event_id: str) -> dict[str, An
                   ce.discovery_source,ce.last_updated_at,ce.no_trading,
                   CASE
                     WHEN json_valid(ev.facts_json)
-                     AND LENGTH(TRIM(COALESCE(json_extract(ev.facts_json,'$.cik'),'')))>0
-                    THEN 'CIK' ELSE ''
-                  END AS canonical_issuer_identity_type,
-                  CASE
-                    WHEN json_valid(ev.facts_json)
-                    THEN LTRIM(TRIM(COALESCE(json_extract(ev.facts_json,'$.cik'),'')),'0')
+                    THEN TRIM(COALESCE(json_extract(ev.facts_json,'$.cik'),''))
                     ELSE ''
-                  END AS canonical_issuer_identity_value
+                  END AS stored_canonical_issuer_cik
            FROM canonical_events ce
            LEFT JOIN event_versions ev
              ON ev.event_id=ce.event_id AND ev.version=ce.current_version
@@ -245,6 +307,20 @@ def event_receipt(connection: sqlite3.Connection, event_id: str) -> dict[str, An
     event = dict(row)
     event["current_version"] = int(event["current_version"])
     event["no_trading"] = True
+    stored_cik = _normalize_cik(event.pop("stored_canonical_issuer_cik", ""))
+    linked_cik = (
+        "" if stored_cik else _linked_primary_sec_issuer_cik(connection, event_id)
+    )
+    canonical_cik = stored_cik or linked_cik
+    event["canonical_issuer_identity_type"] = "CIK" if canonical_cik else ""
+    event["canonical_issuer_identity_value"] = canonical_cik
+    event["canonical_issuer_identity_source"] = (
+        "EVENT_FACTS_CIK"
+        if stored_cik
+        else "LINKED_PRIMARY_SEC_ARCHIVES_URL"
+        if linked_cik
+        else ""
+    )
     claim = _event_claim(connection, event_id)
     evidence = _event_evidence(connection, event_id)
     fingerprint_payload = {
