@@ -25,13 +25,15 @@ def _seed(
     passage: str,
     status: str = "candidate",
     cik: str = "",
+    url_cik: str = "",
 ) -> None:
     now = "2026-08-07T12:00:00+00:00"
     observation_id = f"obs-{event_id}"
     evidence_id = f"evidence-{event_id}"
+    document_cik = cik or url_cik
     url = (
-        f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip('0')}/{event_id}.htm"
-        if cik
+        f"https://www.sec.gov/Archives/edgar/data/{document_cik.lstrip('0')}/{event_id}.htm"
+        if document_cik
         else f"https://www.sec.gov/Archives/{event_id}.htm"
     )
     content_sha = hashlib.sha256((event_id + passage).encode()).hexdigest()
@@ -166,6 +168,53 @@ def test_plan_accepts_document_pronoun_only_after_exact_cik_match(tmp_path: Path
     assert "cik-bound" in by_id
     fact = by_id["cik-bound"]["facts"]["claim_fact_slots"]["facts"][0]
     assert fact["subject_binding"] == "DOCUMENT_ISSUER_CIK_MATCH"
+
+
+def test_plan_recovers_legacy_cik_from_exact_linked_sec_url(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path / "ledger.sqlite3")
+    with open_ledger(ledger) as connection:
+        _seed(
+            connection,
+            event_id="legacy-url-cik-bound",
+            passage="The Company appointed Jane Doe as Chief Financial Officer.",
+            url_cik="0000123456",
+        )
+        connection.commit()
+
+    plan = build_readmission_plan(ledger)
+    by_id = {row["event_id"]: row for row in plan["records"]}
+
+    assert "legacy-url-cik-bound" in by_id
+    fact = by_id["legacy-url-cik-bound"]["facts"]["claim_fact_slots"]["facts"][0]
+    assert fact["subject_binding"] == "DOCUMENT_ISSUER_CIK_MATCH"
+
+
+def test_plan_rejects_legacy_cik_when_claim_and_evidence_urls_disagree(
+    tmp_path: Path,
+) -> None:
+    ledger = _ledger(tmp_path / "ledger.sqlite3")
+    with open_ledger(ledger) as connection:
+        _seed(
+            connection,
+            event_id="legacy-url-cik-mismatch",
+            passage="The Company appointed Jane Doe as Chief Financial Officer.",
+            url_cik="0000123456",
+        )
+        connection.execute(
+            "UPDATE event_evidence SET evidence_url=? WHERE event_id=?",
+            (
+                "https://www.sec.gov/Archives/edgar/data/9999999/other.htm",
+                "legacy-url-cik-mismatch",
+            ),
+        )
+        connection.commit()
+
+    plan = build_readmission_plan(ledger)
+
+    assert "legacy-url-cik-mismatch" not in {
+        row["event_id"] for row in plan["records"]
+    }
+    assert plan["blocked_reason_counts"]["SUBJECT_NOT_BOUND_TO_EVIDENCE"] >= 1
 
 
 def test_apply_creates_new_reader_ready_version_without_verifying(tmp_path: Path) -> None:

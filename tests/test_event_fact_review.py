@@ -20,6 +20,7 @@ from app.evidence_policy import canonicalize_human_fact_claim
 from app.services.event_fact_review import (
     _EVENT_EVIDENCE_SQL,
     _event_evidence,
+    _sec_cik_from_url,
     apply_consensus,
     build_assignment,
     build_authorization_template,
@@ -29,6 +30,27 @@ from app.services.event_fact_review import (
     validate_submission,
 )
 from app.storage.ledger import LedgerRepository
+
+
+def test_sec_cik_parser_requires_real_sec_host_and_handles_ixviewer() -> None:
+    assert (
+        _sec_cik_from_url(
+            "https://www.sec.gov/ixviewer/doc/action?doc=%2FArchives%2Fedgar%2Fdata%2F0000123456%2Ffiling.htm"
+        )
+        == "123456"
+    )
+    assert (
+        _sec_cik_from_url(
+            "https://sec.gov/Archives/edgar/data/0000123456/filing.htm"
+        )
+        == "123456"
+    )
+    assert (
+        _sec_cik_from_url(
+            "https://example.com/Archives/edgar/data/0000123456/filing.htm"
+        )
+        == ""
+    )
 
 
 def queue_row(candidate_id: str, ticker: str, family: str = "bankruptcy_or_distress") -> dict[str, str]:
