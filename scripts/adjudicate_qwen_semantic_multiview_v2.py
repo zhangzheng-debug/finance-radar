@@ -83,8 +83,14 @@ TRANSACTION_ROLES = frozenset({"TARGET", "ACQUIRER", "UNKNOWN", "NOT_APPLICABLE"
 # These literals are pipeline leakage, not ordinary contemporaneous price text.
 # They identify post-event target construction that must never reach a provider.
 PROHIBITED_SUPERVISION_TEXT = (
-    re.compile(r"\bret_(?:1d|5d|21d)\s*(?:<=|>=|=)\s*-?\d", re.IGNORECASE),
-    re.compile(r"\b(?:one|five|twenty[_ -]?one)[_ -]?day[_ -]?crash\s+candidate\b", re.IGNORECASE),
+    re.compile(r"\bret_(?:1d|3d|5d|10d|20d|21d)\s*(?:<=|>=|=)\s*-?\d", re.IGNORECASE),
+    re.compile(
+        r"\b(?:one|three|five|ten|twenty[_ -]?one|1|3|5|10|20|21)"
+        r"[_ -]?day[_ -]?crash\s+candidate\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bvolume[_ -]?crash\s+candidate\b", re.IGNORECASE),
+    re.compile(r"\bvolume_ratio\s*=", re.IGNORECASE),
 )
 
 PROHIBITED_INPUT_KEYS = frozenset(

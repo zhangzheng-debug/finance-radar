@@ -658,3 +658,32 @@ def test_literal_post_event_return_leakage_is_rejected_before_provider(
             requester=requester,
         )
     assert called is False
+
+
+def test_volume_crash_outcome_leakage_is_rejected_before_provider(tmp_path: Path) -> None:
+    input_path = tmp_path / "inputs.jsonl"
+    env_file = tmp_path / "secret.env"
+    output_dir = tmp_path / "output"
+    _source(
+        input_path,
+        extra_content={
+            "headline": "WAYS volume_crash candidate",
+            "summary": "ret_1d <= -15%; value=ret_1d=-0.99;volume_ratio=60.0",
+        },
+    )
+    _env_file(env_file)
+    called = False
+
+    def requester(url, headers, payload, timeout):
+        nonlocal called
+        called = True
+        return _response(_payload("boundary"))
+
+    with pytest.raises(ValueError, match="prohibited post-event supervision text"):
+        adjudicate_multiview(
+            input_path=input_path,
+            env_file=env_file,
+            output_dir=output_dir,
+            requester=requester,
+        )
+    assert called is False
