@@ -2200,7 +2200,11 @@ restore_qwen_risk_runtime() {
             printf 'cannot resume Qwen risk timer without its accepted model bundle\n' >&2
             return 1
         }
-        systemctl start finance-radar-qwen-risk-model.service || return 1
+        # The candidate may change llama.cpp context, parallelism or adapter
+        # verification arguments. A plain start is a no-op when the old model
+        # is still active and leaves the new worker talking to stale runtime
+        # parameters, so restart only after the worker has been quiesced.
+        systemctl restart finance-radar-qwen-risk-model.service || return 1
         systemctl start "$timer" || return 1
         systemctl is-active --quiet finance-radar-qwen-risk-model.service "$timer" || return 1
         printf 'qwen_risk_timer=RESTORED_ACTIVE enabled=%s\n' "$was_enabled"
