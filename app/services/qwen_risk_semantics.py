@@ -20,6 +20,10 @@ from app.models.qwen_risk_contract import (
     normalize_qwen_risk_content,
     validate_semantic_payload,
 )
+from app.models.qwen_risk_hybrid import (
+    QWEN_HYBRID_POLICY_VERSION,
+    apply_qwen_hybrid_anchor,
+)
 from app.models.risk_router import derive_evidence_context
 
 
@@ -311,16 +315,22 @@ class QwenRiskModelProvider:
         if contract.get("input_sufficient") is not True:
             raise QwenRiskContractError("QWEN_RISK_INPUT_INSUFFICIENT")
         raw, latency_ms = self.predict_content(contract["content"])
+        prediction, decision_source, hybrid_rule = apply_qwen_hybrid_anchor(
+            contract["content"], raw
+        )
         event = detail.get("event") if isinstance(detail.get("event"), dict) else {}
         return {
-            **raw,
+            **prediction,
             **contract,
-            "label": raw["semantic_priority"],
+            "label": prediction["semantic_priority"],
             "confidence": 0.0,
             "confidence_applicable": False,
             "event_version": int(event.get("current_version") or 0),
             "event_status": str(event.get("status") or "unknown"),
-            "decision_source": "HUMAN_GOLD_TRAINED_QWEN",
+            "decision_source": decision_source,
+            "hybrid_policy_version": QWEN_HYBRID_POLICY_VERSION,
+            "hybrid_rule": hybrid_rule,
+            "training_basis": "DUAL_REVIEW_AI_CONSENSUS",
             "call_kind": QWEN_RISK_MODEL_TASK,
             "semantic_model_invoked": True,
             "conditional_language_required": contract["assessment_scope"] == "SOURCE_CONDITIONAL",

@@ -433,11 +433,35 @@ def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() ->
     )
     assert qwen["label"] == "负面 · 强度高"
     assert qwen["polarity_label"] == "负面"
-    assert qwen["materiality_label"] == "重大"
+    assert qwen["materiality_label"] == "重大负面"
     assert qwen["strength_label"] == "高"
     assert qwen["explanation"] == "基于来源文本的风险语义判断。"
     assert qwen["basis_label"] == "基于来源文本"
     assert qwen["confidence"] == ""
+    assert qwen["decision_source_label"] == "千问混合语义模型"
+
+    ai_consensus = public_event_risk_assessment(
+        {
+            "semantic_assessment": {
+                "polarity": "POSITIVE",
+                "materiality": "NOT_MATERIAL_ADVERSE",
+                "adverse_strength": "NONE",
+                "semantic_priority": "ROUTINE",
+                "assessment_scope": "EVIDENCE_SUPPORTED",
+                "publication_state": "PUBLIC_APPROVED",
+                "training_basis": "DUAL_REVIEW_AI_CONSENSUS",
+                "automatic": True,
+                "shadow": False,
+                "no_trading": True,
+                "confirms_event_fact": False,
+                "current": True,
+            }
+        }
+    )
+    assert ai_consensus["label"] == "正面"
+    assert ai_consensus["materiality_label"] == "非重大负面"
+    assert ai_consensus["strength_label"] == "无"
+    assert ai_consensus["current"] is True
 
 
 def test_public_risk_assessment_hides_internal_rules_fallback_and_unknown_source() -> None:

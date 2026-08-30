@@ -56,14 +56,14 @@ class Provider:
             **contract,
             "model_task": "QWEN_RISK_SEMANTICS",
             "contract_version": "qwen-risk-semantics-v1",
-            "prompt_version": "qwen-risk-human-gold-sft-v1",
+            "prompt_version": "qwen-risk-dual-review-consensus-v2",
             "assessment_scope": "SOURCE_CONDITIONAL",
             "event_version": 1,
             "event_status": "candidate",
             "label": "PRIORITY_REVIEW",
             "confidence": 0.0,
             "confidence_applicable": False,
-            "decision_source": "HUMAN_GOLD_TRAINED_QWEN",
+            "decision_source": "QWEN_ADAPTER",
             "call_kind": "QWEN_RISK_SEMANTICS",
             "latency_ms": 1.0,
             "shadow": True,
@@ -140,6 +140,44 @@ def test_training_and_runtime_share_one_canonical_content_shape() -> None:
     import json
 
     assert json.loads(request_content) == normalize_qwen_risk_content(content)
+
+
+def test_provider_applies_narrow_hybrid_anchor_after_model_inference() -> None:
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": expected_semantic_payload(
+                                "NOT_MATERIAL_ADVERSE", "NEUTRAL"
+                            )
+                        }
+                    }
+                ]
+            }
+
+    item = _item(1)
+    item["detail"]["preferred_source"]["summary"] = (
+        "The issuer filed a voluntary petition under Chapter 11 in bankruptcy court."
+    )
+    provider = QwenRiskModelProvider(
+        "http://127.0.0.1:18602",
+        "qwen-risk-test",
+        "a" * 64,
+        request_fn=lambda *args, **kwargs: Response(),
+    )
+
+    result = provider.assess(item["detail"], [])
+
+    assert result["materiality"] == "MATERIAL_ADVERSE"
+    assert result["polarity"] == "ADVERSE"
+    assert result["decision_source"] == "DETERMINISTIC_HARDCASE_ANCHOR"
+    assert result["hybrid_rule"] == "bankruptcy_restructuring_or_equity_cancellation"
+    assert result["training_basis"] == "DUAL_REVIEW_AI_CONSENSUS"
 
 
 def test_qwen_worker_persists_without_reprocessing_current_input(tmp_path: Path) -> None:

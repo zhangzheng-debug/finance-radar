@@ -5,6 +5,23 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.30.2
+
+- Promote the best current Qwen2.5-1.5B v3 LoRA plus narrow deterministic
+  hard-case anchors to the loopback-only production research-semantic service,
+  following explicit project-owner authorization. Its frozen development
+  validation reached 0.8947 exact four-field accuracy, 0.9394 materiality
+  Macro-F1, 0.8175 polarity Macro-F1, 1.0000 priority recall and 0.0417 false
+  priority rate.
+- Bind the base GGUF, LoRA, adapter, training manifest, model report, hybrid
+  report and owner publication policy by SHA-256. The service fails closed on
+  any mismatch and remains unable to change event facts, evidence state,
+  pricing, ranking or trading behavior.
+- Render Qwen direction, materiality and risk strength only after a current
+  result exists and matches the approved model/input contract. Remove empty
+  model slots and avoid describing positive or neutral results as low-strength
+  adverse signals.
+
 ## 2026.08.30.1
 
 - Integrate the independently reproducible AI-assisted adjudication, leakage

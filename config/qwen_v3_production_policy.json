@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "contract": "finance-radar-qwen-v3-production-policy-v1",
+  "accepted_gate": "QUALIFIED_SHADOW_SEMANTIC_CANDIDATE",
+  "minimum_metrics": {
+    "rows": 57,
+    "exact_payload_accuracy": 0.85,
+    "materiality_macro_f1": 0.9,
+    "polarity_macro_f1": 0.8,
+    "priority_review_recall": 0.95,
+    "false_priority_rate": 0.05
+  },
+  "frozen_hashes": {
+    "model_sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+    "lora_sha256": "c03dc3341ddbdc514ceacb4e08b87ab4e8155f6b986060b5289d056a4b6517c3",
+    "adapter_sha256": "25a313eddbe9294a391e23639f1bb82c304c56569a76ae890172026153396b87",
+    "sft_manifest_sha256": "34ba3b95ee0a53310f796821030322b6a49c181697ed7cd65a9cd2c2472ba155",
+    "model_report_sha256": "cbae202baa95f4a7c3acbecf162ec282c0ab3638d39373e1870acfffea8b38d0",
+    "hybrid_report_sha256": "f871a1daee24cd30c0c5f597f886ed27baf261fc6280ade480b59fb001a0b6c2"
+  },
+  "production_authorization": {
+    "authority": "PROJECT_OWNER_EXPLICIT",
+    "authorized_at": "2026-08-30",
+    "scope": "PUBLIC_RESEARCH_SEMANTICS",
+    "no_trading": true
+  },
+  "training_basis": "DUAL_REVIEW_AI_CONSENSUS",
+  "human_gold_claimed": false,
+  "no_trading": true
+}
