@@ -16,7 +16,7 @@ Environment=FINANCE_RADAR_OPS_DB=/opt/finance-radar/shared/data/finance_radar_op
 Environment=FINANCE_RADAR_QWEN_RISK_ENABLED=1
 Environment=FINANCE_RADAR_QWEN_RISK_URL=http://127.0.0.1:18602
 EnvironmentFile=/etc/finance-radar-qwen-risk.env
-ExecStart=/opt/finance-radar/venv/bin/python -B scripts/run_qwen_risk_worker.py --limit 20 --scan-limit 100
+ExecStart=/opt/finance-radar/venv/bin/python -B scripts/run_qwen_risk_worker.py --limit 40 --scan-limit 200 --concurrency 2
 NoNewPrivileges=true
 UMask=0077
 PrivateTmp=true

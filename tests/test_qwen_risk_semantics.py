@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import threading
+import time
 from pathlib import Path
 
 from app.models.qwen_risk_contract import (
@@ -33,9 +35,26 @@ def _item(index: int) -> dict:
 class Ledger:
     def __init__(self) -> None:
         self.items = [_item(index) for index in range(6)]
+        self.semantic_calls = 0
 
-    def shadow_batch(self, *, limit: int, offset: int = 0, order: str = "latest"):
+    def shadow_batch(
+        self,
+        *,
+        limit: int,
+        offset: int = 0,
+        order: str = "latest",
+        after_event_id: str | None = None,
+        semantic_events_only: bool = False,
+    ):
+        assert semantic_events_only is True
+        self.semantic_calls += 1
         values = list(reversed(self.items)) if order == "latest" else self.items
+        if after_event_id is not None:
+            values = [
+                item
+                for item in values
+                if item["detail"]["event"]["event_id"] > after_event_id
+            ]
         return values[offset : offset + limit]
 
 
@@ -228,3 +247,58 @@ def test_qwen_worker_persists_without_reprocessing_current_input(tmp_path: Path)
     assert second["already_current"] >= 1
     assert all(row["output"]["model_task"] == "QWEN_RISK_SEMANTICS" for row in selected.values())
     assert first["independent_from_collection"] is True
+    assert first["selection"]["fair_after_event_id"] is None
+    assert first["selection"]["next_after_event_id"] == "event-0"
+
+
+def test_qwen_worker_keyset_queue_covers_every_semantic_event(tmp_path: Path) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    ledger = Ledger()
+
+    for _index in range(8):
+        run_qwen_risk_batch(
+            ledger,
+            operations,
+            Provider(),
+            scan_limit=4,
+            run_limit=2,
+        )
+
+    selected = operations.latest_qwen_risk_runs_for_versions(
+        {f"event-{index}": 1 for index in range(6)}
+    )
+    assert set(selected) == {f"event-{index}" for index in range(6)}
+    assert ledger.semantic_calls > 0
+
+
+def test_qwen_worker_can_use_two_bounded_model_slots(tmp_path: Path) -> None:
+    class ConcurrentProvider(Provider):
+        def __init__(self) -> None:
+            self.lock = threading.Lock()
+            self.active = 0
+            self.maximum = 0
+
+        def assess(self, detail, evidence):
+            with self.lock:
+                self.active += 1
+                self.maximum = max(self.maximum, self.active)
+            try:
+                time.sleep(0.03)
+                return super().assess(detail, evidence)
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    provider = ConcurrentProvider()
+    result = run_qwen_risk_batch(
+        Ledger(),
+        OperationsRepository(tmp_path / "operations.sqlite3"),
+        provider,
+        scan_limit=6,
+        run_limit=4,
+        concurrency=2,
+    )
+
+    assert result["recorded"] == 4
+    assert result["concurrency"] == 2
+    assert provider.maximum == 2

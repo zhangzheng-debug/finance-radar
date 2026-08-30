@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from app.storage.ledger import LedgerRepository
@@ -123,6 +124,76 @@ def test_deep_public_page_uses_stable_browse_indexes(tmp_path: Path) -> None:
         "idx_events_public_event_date",
         "idx_events_public_subject",
     } <= indexes
+
+
+def test_public_semantic_gate_keeps_sec_metadata_out_of_event_feed(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "semantic.sqlite3"
+    _large_unreviewed_ledger(ledger_path, event_count=3)
+    complete_fact = {
+        "public_fact_summary": (
+            "Example Corp disclosed that its chief financial officer resigned "
+            "and named an interim successor."
+        ),
+        "claim_subject": "Example Corp",
+        "claim_action": "chief financial officer resigned",
+        "claim_stage": "DISCLOSED",
+        "known_at": "2026-08-21T12:00:00+00:00",
+    }
+    with open_ledger(ledger_path) as connection:
+        connection.execute(
+            "UPDATE canonical_events SET discovery_source='sec_current_filings' "
+            "WHERE event_id IN ('browse-00000','browse-00001')"
+        )
+        connection.execute(
+            "UPDATE event_versions SET facts_json=? WHERE event_id='browse-00001'",
+            (json.dumps(complete_fact, sort_keys=True),),
+        )
+        connection.commit()
+
+    repository = LedgerRepository(ledger_path)
+    unfiltered = repository.list_events(limit=10)
+    public = repository.list_events(limit=10, semantic_events_only=True)
+
+    assert unfiltered["total"] == 3
+    assert public["total"] == 2
+    assert {item["event_id"] for item in public["items"]} == {
+        "browse-00001",
+        "browse-00002",
+    }
+    assert public["semantic_events_only"] is True
+    assert repository.event_detail(
+        "browse-00000", semantic_events_only=True
+    ) is None
+    assert repository.event_detail(
+        "browse-00001", semantic_events_only=True
+    ) is not None
+
+    facets = repository.event_facets(semantic_events_only=True)
+    assert {item["value"]: item["count"] for item in facets["sources"]} == {
+        "sec_current_filings": 1,
+        "src": 1,
+    }
+
+    fair = repository.shadow_batch(
+        limit=10,
+        order="event_id",
+        semantic_events_only=True,
+    )
+    assert [item["detail"]["event"]["event_id"] for item in fair] == [
+        "browse-00001",
+        "browse-00002",
+    ]
+    after = repository.shadow_batch(
+        limit=10,
+        order="event_id",
+        after_event_id="browse-00001",
+        semantic_events_only=True,
+    )
+    assert [item["detail"]["event"]["event_id"] for item in after] == [
+        "browse-00002"
+    ]
 
 
 def test_shadow_batch_scopes_source_revision_work_to_bounded_window(

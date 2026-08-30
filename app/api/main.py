@@ -1191,9 +1191,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         event_id: str,
         *,
         require_reader_ready: bool = False,
+        require_public_semantics: bool = False,
         allow_excluded_capture_archive: bool = False,
     ) -> dict[str, Any]:
-        event = ledger.event_detail(event_id)
+        event = ledger.event_detail(
+            event_id,
+            semantic_events_only=require_public_semantics,
+        )
         if event is None:
             raise HTTPException(404, {"code": "EVENT_NOT_FOUND", "message": f"event not found: {event_id}"})
         public_event = event.get("event") or {}
@@ -1923,7 +1927,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         """Project the cache-only public state of zero-evidence AI explanation."""
 
-        event_data = event_data or event_or_404(event_id, require_reader_ready=False)
+        event_data = event_data or event_or_404(
+            event_id,
+            require_reader_ready=False,
+            require_public_semantics=True,
+        )
         event = dict(event_data.get("event") or {})
         eligibility = ledger.capture_interpretation_eligibility(event_id)
         result: dict[str, Any] = {
@@ -2325,11 +2333,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 },
             )
         # Public visibility and evidentiary readiness are different concepts.
-        # Every canonical event is browsable; ``reader_ready`` remains a strict
-        # per-item quality flag and an authenticated review filter.  Silently
-        # forcing the public feed to ``reader_ready=true`` previously made a
-        # healthy 14k-event ledger look empty whenever the evidence gate was
-        # tightened or historical relations still needed recovery.
+        # A source capture can be useful without passing the citation gate, but
+        # a SEC form/accession/size directory row is not itself an event.  Keep
+        # such rows in the internal ledger while the public feed admits only SEC
+        # records with a concrete structured fact.  ``reader_ready`` remains a
+        # separate authenticated review filter.
         effective_reader_ready = reader_ready if internal_reader else None
 
         def read_events() -> dict[str, Any]:
@@ -2344,6 +2352,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 reader_ready=effective_reader_ready,
                 captured_source_required=False,
                 exclude_nonfinancial_retractions=not internal_reader,
+                semantic_events_only=not internal_reader,
                 # The public card renders at most 360 characters.  Avoid
                 # pulling multi-megabyte provider summaries from historical
                 # observations only to discard them in ``public_event_item``.
@@ -2357,7 +2366,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if internal_reader:
             data = read_events()
         else:
-            cache_key = "public-event-feed-v4:" + repr(
+            cache_key = "public-event-feed-v5:" + repr(
                 (
                     status,
                     public_state,
@@ -2392,13 +2401,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         internal_reader: bool = Depends(internal_reader_access),
     ):
         effective_reader_ready = reader_ready if internal_reader else None
-        cache_key = f"event-facets-v3:{effective_reader_ready!r}:{not internal_reader!r}"
+        cache_key = f"event-facets-v4:{effective_reader_ready!r}:{not internal_reader!r}"
         data = cached_read(
             cache_key,
             60.0,
             lambda: ledger.event_facets(
                 reader_ready=effective_reader_ready,
                 exclude_nonfinancial_retractions=not internal_reader,
+                semantic_events_only=not internal_reader,
             ),
         )
         return envelope(request, data)
@@ -2415,7 +2425,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
 
         def read_dossier() -> dict[str, Any]:
-            data = event_or_404(event_id, require_reader_ready=False)
+            data = event_or_404(
+                event_id,
+                require_reader_ready=False,
+                require_public_semantics=True,
+            )
             evidence = reader_scoped_evidence(event_id, internal_reader=False)
             facts = (
                 data.get("current_version", {}).get("facts", {})
@@ -2473,6 +2487,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data = event_or_404(
             event_id,
             require_reader_ready=False,
+            require_public_semantics=not internal_reader,
         )
         evidence = reader_scoped_evidence(event_id, internal_reader=internal_reader)
         facts = data.get("current_version", {}).get("facts", {}) if data.get("current_version") else {}
@@ -2521,6 +2536,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data = event_or_404(
             event_id,
             require_reader_ready=False,
+            require_public_semantics=True,
         )
         event = data.get("event") or {}
         return envelope(
@@ -2548,6 +2564,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         event_or_404(
             event_id,
             require_reader_ready=False,
+            require_public_semantics=not internal_reader,
         )
         return envelope(
             request,
@@ -2563,6 +2580,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         event_or_404(
             event_id,
             require_reader_ready=False,
+            require_public_semantics=not internal_reader,
         )
         items = ledger.captured_sources(event_id)
         if not internal_reader:
@@ -2592,6 +2610,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         event_data = event_or_404(
             event_id,
             require_reader_ready=False,
+            require_public_semantics=not internal_reader,
         )
         event = dict(event_data.get("event") or {})
         captures = ledger.captured_sources(event_id)

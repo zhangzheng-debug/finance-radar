@@ -22,6 +22,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--scan-limit", type=int, default=100)
+    parser.add_argument("--concurrency", type=int, default=1)
     args = parser.parse_args()
     settings = Settings.from_env()
     if not settings.qwen_risk_enabled:
@@ -41,6 +42,7 @@ def main() -> int:
         provider,
         scan_limit=args.scan_limit,
         run_limit=args.limit,
+        concurrency=args.concurrency,
     )
     operations.set_state(
         "qwen_risk_worker_runtime_v1",
@@ -52,6 +54,7 @@ def main() -> int:
             "recorded": result.get("recorded", 0),
             "input_insufficient": result.get("input_insufficient", 0),
             "errors": len(result.get("errors") or []),
+            "concurrency": result.get("concurrency", 1),
             "shadow": True,
             "no_trading": True,
         },
