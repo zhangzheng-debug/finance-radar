@@ -5,6 +5,19 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.30.1
+
+- Integrate the independently reproducible AI-assisted adjudication, leakage
+  guards, semantic-data contracts, training/evaluation runners and frozen
+  experiment receipts from PR #47 as the accepted research baseline.
+- Retain the risk router and Qwen hybrid work as shadow candidates only. The
+  fresh-development semantic fallback failed its frozen gates, no Qwen result
+  is promoted to Public, and the production model/runtime configuration remains
+  unchanged.
+- Preserve the owner holdout and no-trading boundary. A future semantic release
+  still requires a newly frozen independent blind set, a one-time evaluation,
+  explicit approval and a separate production activation.
+
 ## 2026.08.29.3
 
 - Align the embedded application version with the accepted GitHub release and
