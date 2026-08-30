@@ -65,6 +65,23 @@ QWEN_SEMANTIC_PRIORITIES = frozenset(
 )
 QWEN_ASSESSMENT_SCOPES = frozenset({"EVIDENCE_SUPPORTED", "SOURCE_CONDITIONAL"})
 PUBLIC_HEADLINE_MODES = frozenset({"FACT", "ATTRIBUTED_SOURCE", "RECORD"})
+SEC_STRUCTURED_ACTION_HEADLINES = {
+    "bankruptcy": " 披露破产或重整程序",
+    "bankruptcy_liquidation": " 披露破产或清算程序",
+    "delisting": " 披露退市或上市资格变化",
+    "debt_default": " 披露债务违约或契约事项",
+    "going_concern_financing_dependency": " 申报文件披露持续经营存在重大疑虑",
+    "management_change": " 披露管理层变动",
+    "earnings_or_guidance": " 披露业绩或业绩指引更新",
+    "spac_ipo_closing": " 披露 SPAC 首次公开募股完成",
+    "share_repurchase_authorization_expansion": " 扩大股份回购授权",
+    "offering_or_dilution": " 披露证券发行或潜在稀释",
+    "cfo_appointment": " 任命首席财务官",
+    "restructuring": " 披露重组事项",
+    "material_corporate_transaction": " 披露重大公司交易",
+    "minimum_bid_deficiency_notice": " 收到最低买价不合规通知",
+    "merger_or_acquisition": " 披露并购事项",
+}
 GENERIC_SOURCE_HEADLINE = re.compile(
     r"^(?:sec\s+)?(?:8-k|6-k|10-k|10-q|20-f|40-f|25(?:-nse)?|15-12g)"
     r"(?:\s+[a-z0-9.\-]+|\s*[-:]\s*[^:]{0,90})?$|"
@@ -110,6 +127,49 @@ def _is_generic_source_summary(value: str | None) -> bool:
     return normalized.startswith(GENERIC_SOURCE_SUMMARY_PREFIXES) or bool(
         normalized and GENERIC_SEC_FILING_SUMMARY.fullmatch(normalized)
     )
+
+
+def _structured_sec_source_headline(
+    event: dict[str, Any],
+    fact_summary: str | None,
+) -> str | None:
+    """Turn a complete SEC fact slot into a concise attributed headline.
+
+    Current-filings enrichment already binds an issuer, a concrete action, a
+    stage and a known-at timestamp before the record can enter the semantic
+    public feed.  Some of those rows have not yet completed the stricter
+    claim-to-passage citation contract, so they must not be labelled as a
+    verified fact.  Hiding their structured action, however, leaves readers
+    with only accession/size metadata.  Render the bounded action as an
+    attributed SEC statement while keeping ``citation_ready`` false.
+    """
+
+    if str(event.get("discovery_source") or "").strip() != "sec_current_filings":
+        return None
+    if not fact_summary or _count(event.get("reader_has_fact_summary")) != 1:
+        return None
+    subject = _bounded_text(
+        event.get("claim_subject") or event.get("company_name"),
+        100,
+    )
+    action = str(event.get("claim_action") or "").strip().casefold()
+    suffix = SEC_STRUCTURED_ACTION_HEADLINES.get(action)
+    if subject and suffix:
+        return _bounded_text(subject + suffix, 180)
+
+    # New deterministic actions may reach production before presentation copy
+    # receives a dedicated label.  Their generated fact summary starts with a
+    # concrete passage-derived sentence and ends with internal process prose.
+    # Keep only the first fact sentence; never expose the workflow disclaimer
+    # as a headline and never fall back to accession/size metadata.
+    first_sentence = str(fact_summary).split("。", 1)[0].strip()
+    if (
+        len(first_sentence) < 20
+        or "尚不能通过确定性规则" in first_sentence
+        or "仅是候选分类" in first_sentence
+    ):
+        return None
+    return _bounded_text(first_sentence + "。", 180)
 
 
 def _count(value: Any) -> int:
@@ -293,6 +353,14 @@ def derive_public_display_headline(
             "display_headline": fact_summary,
             "headline_mode": "FACT",
             "headline_source": None,
+        }
+
+    structured_sec_headline = _structured_sec_source_headline(event, fact_summary)
+    if structured_sec_headline:
+        return {
+            "display_headline": structured_sec_headline,
+            "headline_mode": "ATTRIBUTED_SOURCE",
+            "headline_source": "SEC",
         }
 
     source = captured_source if isinstance(captured_source, dict) else event
