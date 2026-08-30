@@ -17,6 +17,7 @@ from app.models.qwen_risk_contract import (
     QWEN_RISK_PROMPT_VERSION,
     QWEN_RISK_SYSTEM_PROMPT,
     assessment_scope,
+    expected_semantic_payload,
     normalize_qwen_risk_content,
     validate_semantic_payload,
 )
@@ -225,12 +226,7 @@ class QwenRiskModelProvider:
         return {
             "type": "object",
             "additionalProperties": False,
-            "required": [
-                "materiality",
-                "polarity",
-                "adverse_strength",
-                "semantic_priority",
-            ],
+            "required": ["materiality", "polarity"],
             "properties": {
                 "materiality": {
                     "type": "string",
@@ -239,14 +235,6 @@ class QwenRiskModelProvider:
                 "polarity": {
                     "type": "string",
                     "enum": ["ADVERSE", "POSITIVE", "NEUTRAL", "MIXED", "UNCLEAR"],
-                },
-                "adverse_strength": {
-                    "type": "string",
-                    "enum": ["HIGH", "LOW", "NONE", "UNCLEAR"],
-                },
-                "semantic_priority": {
-                    "type": "string",
-                    "enum": ["PRIORITY_REVIEW", "ROUTINE", "UNDECIDABLE"],
                 },
             },
         }
@@ -294,10 +282,21 @@ class QwenRiskModelProvider:
             json.JSONDecodeError,
         ) as exc:
             raise QwenRiskContractError("QWEN_RISK_MODEL_REQUEST_FAILED") from exc
-        issues = validate_semantic_payload(raw)
+        if not isinstance(raw, dict):
+            raise QwenRiskContractError("QWEN_RISK_INVALID_OUTPUT:payload_not_object")
+        try:
+            prediction = expected_semantic_payload(
+                str(raw.get("materiality") or ""),
+                str(raw.get("polarity") or ""),
+            )
+        except ValueError as exc:
+            raise QwenRiskContractError(
+                "QWEN_RISK_INVALID_OUTPUT:invalid_materiality_or_polarity"
+            ) from exc
+        issues = validate_semantic_payload(prediction)
         if issues:
             raise QwenRiskContractError("QWEN_RISK_INVALID_OUTPUT:" + ",".join(issues))
-        return ({key: str(value) for key, value in raw.items()}, (time.perf_counter() - started) * 1000)
+        return (prediction, (time.perf_counter() - started) * 1000)
 
     def input_contract(
         self, detail: dict[str, Any], evidence: list[dict[str, Any]]

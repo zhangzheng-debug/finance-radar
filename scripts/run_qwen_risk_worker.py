@@ -57,7 +57,11 @@ def main() -> int:
         },
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0 if not result["errors"] else 1
+    # A bounded batch can still make durable progress when individual model
+    # requests time out or fail contract validation.  Keep the timer healthy
+    # after partial success, while failing closed if the whole attempted batch
+    # produced no usable result.
+    return 1 if result["errors"] and not result.get("recorded") else 0
 
 
 if __name__ == "__main__":
