@@ -1,10 +1,16 @@
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from scripts.build_qwen_authorized_runtime_manifest import build
 from scripts.publish_qwen_risk_runtime import publish
 from scripts.verify_qwen_risk_runtime_model import verify
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _write_json(path: Path, value: dict) -> None:
@@ -111,3 +117,40 @@ def test_authorized_runtime_build_verify_and_publish(tmp_path: Path) -> None:
     publication = publish(manifest_path, operations_db)
     assert publication["state"] == "PUBLIC_APPROVED"
     assert publication["model_version"] == "qwen-risk-" + _sha(adapter)[:16]
+
+
+def test_qwen_runtime_scripts_resolve_project_imports_outside_repo(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env["FINANCE_RADAR_QWEN_RISK_ENABLED"] = "0"
+    worker = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "run_qwen_risk_worker.py"),
+            "--limit",
+            "1",
+            "--scan-limit",
+            "1",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert worker.returncode == 0, worker.stderr
+    assert json.loads(worker.stdout)["status"] == "DISABLED"
+
+    publisher = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "publish_qwen_risk_runtime.py"),
+            "--help",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert publisher.returncode == 0, publisher.stderr
+    assert "--manifest" in publisher.stdout
