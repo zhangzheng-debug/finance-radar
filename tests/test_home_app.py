@@ -238,9 +238,9 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "信息依据" not in rendered
     assert "影响路径" not in rendered
     assert "原文支持" in rendered
-    assert "千问风险研判" in rendered
-    assert "模型接口已预留" in rendered
-    assert "做空重大性" in rendered
+    assert "千问研判" not in rendered
+    assert "模型接口已预留" not in rendered
+    assert "做空重大性" not in rendered
     assert "<article><span>模型研判</span>" not in rendered
     assert "自动研判 · 暂不判断" not in rendered
     assert "时间口径" not in rendered
@@ -309,10 +309,10 @@ def test_public_valid_qwen_signal_keeps_its_evidence_basis(
 
     assert not page.exception
     assert "研究信号" in rendered
-    assert "千问风险研判" in rendered
+    assert "千问研判" in rendered
     assert "方向</small><strong>负面" in rendered
-    assert "做空重大性</small><strong>重大" in rendered
-    assert "强度</small><strong>高" in rendered
+    assert "重大性</small><strong>重大负面" in rendered
+    assert "风险强度</small><strong>高" in rendered
     assert "自动研判" in rendered
     assert "模型接口已预留" not in rendered
     assert basis_label in rendered
@@ -396,7 +396,7 @@ def test_public_detail_shows_only_available_market_reaction(monkeypatch) -> None
     assert "-3.12%" not in rendered
 
 
-def test_public_detail_hides_empty_market_reaction_but_keeps_qwen_slot(monkeypatch) -> None:
+def test_public_detail_hides_empty_market_reaction_and_empty_qwen_slot(monkeypatch) -> None:
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(web_common, "api_request", _fake_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10)
@@ -406,9 +406,9 @@ def test_public_detail_hides_empty_market_reaction_but_keeps_qwen_slot(monkeypat
 
     assert not page.exception
     assert "消息发布后的市场变化" not in rendered
-    assert 'class="market-reaction research-signals"' in rendered
-    assert "千问风险研判" in rendered
-    assert "模型接口已预留" in rendered
+    assert 'class="market-reaction research-signals"' not in rendered
+    assert "千问研判" not in rendered
+    assert "模型接口已预留" not in rendered
     assert "PENDING" not in rendered
     assert "MISSED" not in rendered
 

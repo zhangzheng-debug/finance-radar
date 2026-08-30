@@ -114,3 +114,12 @@ v2 改善了正面极性识别，v3 进一步改善极性，但三版都漏掉�
 - v4 聚合数据与验证报告：`artifacts/qwen_semantic_hardcase_v4/manifest.json` 及其 `evaluation_validation_*` 子目录
 
 所有脚本默认只生成实验资产，不修改生产模型、不写生产账本、不部署、不交易。
+
+## 2026-08-30 生产授权补充
+
+在上述实验结论冻结后，项目负责人明确授权将“v3 + 窄规则锚点”用于 Public 的研究语义展示。
+这是一项有边界的 owner 产品决策，不追溯改写原实验，也不把 57 条开发验证冒充独立人类盲测。
+生产发布使用 `finance-radar-qwen-risk-runtime-v2` 清单，逐一绑定基座 GGUF、LoRA、adapter、
+训练清单、模型报告、混合报告与 `config/qwen_v3_production_policy.json`；只有当前模型、当前输入、
+当前事件版本和发布批准完全一致的持久化结果可以显示。该结果不确认事实、不改变证据状态、不参与
+价格审计或排序，且不具备交易能力。

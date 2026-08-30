@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from app.models.qwen_risk_contract import expected_semantic_payload, normalize_qwen_risk_content
+from app.models.qwen_risk_contract import (
+    QWEN_RISK_PROMPT_VERSION,
+    expected_semantic_payload,
+    normalize_qwen_risk_content,
+)
 from scripts.evaluate_qwen_risk_blind import evaluate
 
 
@@ -67,7 +71,7 @@ def _bundle(tmp_path: Path, rows: int = 3):
             {
                 "frozen_dataset_sha256": _sha(dataset),
                 "semantic_contract_version": "qwen-risk-semantics-v1",
-                "prompt_version": "qwen-risk-human-gold-sft-v1",
+                "prompt_version": QWEN_RISK_PROMPT_VERSION,
                 "outputs": {blind.name: _sha(blind)},
             }
         ),

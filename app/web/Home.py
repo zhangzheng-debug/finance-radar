@@ -214,29 +214,24 @@ def public_research_signal_markup(
     signal_rows: list[str] = []
     qwen_ready = bool(public_copy.get("risk_route") and public_copy.get("risk_label"))
     basis = " ".join(str(public_copy.get("risk_basis_label") or "").split())
-    qwen_values = (
-        (
-            str(public_copy.get("risk_polarity_label") or "—"),
-            str(public_copy.get("risk_materiality_label") or "—"),
-            str(public_copy.get("risk_strength_label") or "—"),
+    if qwen_ready:
+        qwen_values = (
+            str(public_copy.get("risk_polarity_label") or ""),
+            str(public_copy.get("risk_materiality_label") or ""),
+            str(public_copy.get("risk_strength_label") or ""),
         )
-        if qwen_ready
-        else ("—", "—", "—")
-    )
-    qwen_metrics = "".join(
-        '<span class="qwen-signal-metric">'
-        f'<small>{escape(label)}</small><strong>{escape(value)}</strong></span>'
-        for label, value in zip(("方向", "做空重大性", "强度"), qwen_values, strict=True)
-    )
-    signal_rows.append(
-        '<div class="research-signal-row qwen-signal-row"'
-        + (f' title="{escape(basis)}"' if basis else "")
-        + '><span>千问风险研判</span><div class="qwen-signal-metrics">'
-        + qwen_metrics
-        + '</div><small class="qwen-slot-state">'
-        + ("自动研判" if qwen_ready else "模型接口已预留")
-        + "</small></div>"
-    )
+        qwen_metrics = "".join(
+            '<span class="qwen-signal-metric">'
+            f'<small>{escape(label)}</small><strong>{escape(value)}</strong></span>'
+            for label, value in zip(("方向", "重大性", "风险强度"), qwen_values, strict=True)
+        )
+        signal_rows.append(
+            '<div class="research-signal-row qwen-signal-row"'
+            + (f' title="{escape(basis)}"' if basis else "")
+            + '><span>千问研判</span><div class="qwen-signal-metrics">'
+            + qwen_metrics
+            + '</div><small class="qwen-slot-state">自动研判</small></div>'
+        )
 
     if normalized:
         # Select one shared window so values are comparable. Coverage wins;

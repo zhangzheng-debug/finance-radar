@@ -2195,7 +2195,8 @@ restore_qwen_risk_runtime() {
     if [ "$was_active" -eq 1 ]; then
         [ -s /etc/finance-radar-qwen-risk.env ] && \
         [ -s /opt/finance-radar/qwen-risk/model-manifest.json ] && \
-        [ -s /opt/finance-radar/qwen-risk/finance-radar-qwen-risk-v1.gguf ] || {
+        [ -s /opt/finance-radar/qwen-risk/qwen2.5-1.5b-instruct-q4_k_m.gguf ] && \
+        [ -s /opt/finance-radar/qwen-risk/finance-radar-qwen-risk-v3-lora-f16.gguf ] || {
             printf 'cannot resume Qwen risk timer without its accepted model bundle\n' >&2
             return 1
         }

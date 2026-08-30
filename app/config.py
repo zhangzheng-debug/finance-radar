@@ -115,8 +115,8 @@ class Settings:
     # A zero daily cap means unlimited. The worker still has bounded batches,
     # leases, retry counts, timeouts and output tokens.
     capture_llm_daily_request_cap: int = 0
-    # Human-gold-trained Qwen semantic risk service.  It is loopback-only and
-    # remains disabled until a frozen adapter hash has passed blind evaluation.
+    # Qwen semantic risk service. It is loopback-only and remains disabled
+    # until an exact adapter/runtime bundle has passed its publication policy.
     qwen_risk_enabled: bool = False
     qwen_risk_url: str = "http://127.0.0.1:18602"
     qwen_risk_model: str = ""

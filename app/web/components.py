@@ -122,13 +122,13 @@ QWEN_POLARITY_LABELS = {
 QWEN_STRENGTH_LABELS = {
     "HIGH": "高",
     "LOW": "低",
-    "NONE": "低",
+    "NONE": "无",
     "UNCLEAR": "",
 }
 
 QWEN_MATERIALITY_LABELS = {
-    "MATERIAL_ADVERSE": "重大",
-    "NOT_MATERIAL_ADVERSE": "一般",
+    "MATERIAL_ADVERSE": "重大负面",
+    "NOT_MATERIAL_ADVERSE": "非重大负面",
     "UNCLEAR": "",
 }
 
@@ -1002,7 +1002,8 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
         isinstance(semantic, dict)
         and semantic.get("current") is True
         and semantic.get("publication_state") == "PUBLIC_APPROVED"
-        and semantic.get("training_basis") == "INDEPENDENT_DUAL_HUMAN_GOLD"
+        and semantic.get("training_basis")
+        in {"INDEPENDENT_DUAL_HUMAN_GOLD", "DUAL_REVIEW_AI_CONSENSUS"}
         and semantic.get("automatic") is True
         and semantic.get("shadow") is False
         and semantic.get("no_trading") is True
@@ -1030,10 +1031,11 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
                     "ROUTINE": "NON_TARGET",
                     "UNDECIDABLE": "ABSTAIN",
                 }[priority],
-                "label": (
-                    QWEN_POLARITY_LABELS[polarity]
-                    + " · "
-                    + ("强度" + QWEN_STRENGTH_LABELS[strength])
+                "label": QWEN_POLARITY_LABELS[polarity]
+                + (
+                    " · 强度" + QWEN_STRENGTH_LABELS[strength]
+                    if polarity in {"ADVERSE", "MIXED"}
+                    else ""
                 ),
                 "polarity_label": QWEN_POLARITY_LABELS[polarity],
                 "materiality_label": QWEN_MATERIALITY_LABELS[materiality],
@@ -1047,8 +1049,8 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
                 "basis_label": "基于来源文本" if conditional else "基于关键原文",
                 "confidence": "",
                 "model_version": "",
-                "decision_source": "HUMAN_GOLD_TRAINED_QWEN",
-                "decision_source_label": "人类金标训练模型",
+                "decision_source": "QWEN_V3_HYBRID",
+                "decision_source_label": "千问混合语义模型",
                 "trained_model": True,
                 "shadow": False,
                 "current": True,

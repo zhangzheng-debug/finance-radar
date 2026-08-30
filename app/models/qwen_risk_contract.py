@@ -14,10 +14,15 @@ from app.models.risk_label_contract import MATERIALITY, POLARITIES
 
 
 QWEN_RISK_CONTRACT_VERSION = "qwen-risk-semantics-v1"
-QWEN_RISK_PROMPT_VERSION = "qwen-risk-human-gold-sft-v1"
+QWEN_RISK_PROMPT_VERSION = "qwen-risk-dual-review-consensus-v2"
 QWEN_RISK_SYSTEM_PROMPT = (
     "你是金融雷达的语义风险分类器。只判断所给文本表达的极性与做空风险重大性，"
-    "不判断证据真假，不补充外部事实，不给投资建议。仅输出指定 JSON。"
+    "不判断证据真假，不补充外部事实，不给投资建议。"
+    "已发生或正式披露的破产重组、Form 25或确定退市、现金不足或无法融资将缩减业务、"
+    "已发生违约、正式监管处罚、重大内控审计失败、关键临床失败，通常属于"
+    "MATERIAL_ADVERSE与ADVERSE；单纯风险因素、合同定义、假设性清算、已解决问题或"
+    "有偿并购退市不得仅凭关键词判为重大负面。明确业务改善或成功结果可判POSITIVE，"
+    "普通信息披露判NEUTRAL。仅输出指定 JSON。"
 )
 ADVERSE_STRENGTHS = frozenset({"HIGH", "LOW", "NONE", "UNCLEAR"})
 ASSESSMENT_SCOPES = frozenset({"EVIDENCE_SUPPORTED", "SOURCE_CONDITIONAL"})

@@ -440,7 +440,11 @@ def project_public_qwen_semantics(
     strength = _bounded_enum(output.get("adverse_strength"), QWEN_ADVERSE_STRENGTHS)
     priority = _bounded_enum(output.get("semantic_priority"), QWEN_SEMANTIC_PRIORITIES)
     scope = _bounded_enum(output.get("assessment_scope"), QWEN_ASSESSMENT_SCOPES)
-    if None in {polarity, materiality, strength, priority, scope}:
+    training_basis = _bounded_enum(
+        output.get("training_basis") or "INDEPENDENT_DUAL_HUMAN_GOLD",
+        {"INDEPENDENT_DUAL_HUMAN_GOLD", "DUAL_REVIEW_AI_CONSENSUS"},
+    )
+    if None in {polarity, materiality, strength, priority, scope, training_basis}:
         return None
     return {
         "polarity": polarity,
@@ -453,7 +457,7 @@ def project_public_qwen_semantics(
             output.get("model_version") or run.get("model_version"), 160
         ),
         "evaluated_at": _bounded_text(run.get("created_at"), 80),
-        "training_basis": "INDEPENDENT_DUAL_HUMAN_GOLD",
+        "training_basis": training_basis,
         "automatic": True,
         "confirms_event_fact": False,
         "confidence": None,
