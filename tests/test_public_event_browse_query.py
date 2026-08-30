@@ -163,6 +163,14 @@ def test_public_semantic_gate_keeps_sec_metadata_out_of_event_feed(
         "browse-00002",
     }
     assert public["semantic_events_only"] is True
+    semantic_item = next(
+        item for item in public["items"] if item["event_id"] == "browse-00001"
+    )
+    assert semantic_item["public_fact_summary"] == complete_fact["public_fact_summary"]
+    assert semantic_item["claim_subject"] == "Example Corp"
+    assert semantic_item["claim_action"] == "chief financial officer resigned"
+    assert semantic_item["claim_stage"] == "DISCLOSED"
+    assert semantic_item["known_at"] == "2026-08-21T12:00:00+00:00"
     assert repository.event_detail(
         "browse-00000", semantic_events_only=True
     ) is None

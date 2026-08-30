@@ -255,6 +255,54 @@ def test_public_display_headline_preserves_provenance_modes() -> None:
     }
 
 
+def test_public_display_headline_uses_complete_sec_action_without_promoting_it() -> None:
+    result = derive_public_display_headline(
+        {
+            "reader_ready": 0,
+            "reader_has_fact_summary": 1,
+            "discovery_source": "sec_current_filings",
+            "company_name": "Example Corp",
+            "claim_subject": "Example Corp",
+            "claim_action": "going_concern_financing_dependency",
+            "public_fact_summary": (
+                "原文中的 the Company 披露持续经营重大疑虑。"
+                "系统记录阶段为 DISCLOSED；以上仅为规则抽取，尚待人工核验。"
+            ),
+            "event_date": "2026-08-26",
+        },
+        {
+            "source_title": "8-K - Example Corp (0000123456) (Filer)",
+            "source_name": "SEC",
+        },
+    )
+
+    assert result == {
+        "display_headline": "Example Corp 申报文件披露持续经营存在重大疑虑",
+        "headline_mode": "ATTRIBUTED_SOURCE",
+        "headline_source": "SEC",
+    }
+    assert "尚待" not in result["display_headline"]
+    assert "规则抽取" not in result["display_headline"]
+
+    future_action = derive_public_display_headline(
+        {
+            "reader_ready": 0,
+            "reader_has_fact_summary": 1,
+            "discovery_source": "sec_current_filings",
+            "claim_subject": "Example Corp",
+            "claim_action": "future_deterministic_action",
+            "public_fact_summary": (
+                "Example Corp 批准一项新的确定性公司行动。"
+                "系统记录阶段为 DISCLOSED；以上仅为规则抽取，尚待人工核验。"
+            ),
+        }
+    )
+    assert future_action["display_headline"] == (
+        "Example Corp 批准一项新的确定性公司行动。"
+    )
+    assert future_action["headline_mode"] == "ATTRIBUTED_SOURCE"
+
+
 def test_public_display_headline_skips_generic_recovery_title() -> None:
     result = derive_public_display_headline(
         {"reader_ready": 0, "discovery_source": "historical_recovery"},
@@ -630,6 +678,49 @@ def test_public_list_detail_and_dossier_share_current_semantics(tmp_path: Path) 
         assert event["display_headline"] == "Semantic Corp filing report"
         assert event["headline_mode"] == "ATTRIBUTED_SOURCE"
         assert event["headline_source"] == "Source"
+
+
+def test_public_sec_list_keeps_semantic_headline_without_exposing_claim_slots(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    structured_fact = {
+        "public_fact_summary": (
+            "原文中的 the Company 披露持续经营重大疑虑。"
+            "系统记录阶段为 DISCLOSED；以上仅为规则抽取，尚待人工核验。"
+        ),
+        "claim_subject": "Semantic Corp",
+        "claim_action": "going_concern_financing_dependency",
+        "claim_stage": "DISCLOSED",
+        "known_at": "2026-08-23T00:00:00+00:00",
+    }
+    with sqlite3.connect(ledger_path) as connection:
+        connection.execute(
+            "UPDATE canonical_events SET discovery_source='sec_current_filings' "
+            "WHERE event_id='semantic-event'"
+        )
+        connection.execute(
+            "UPDATE event_versions SET facts_json=? WHERE event_id='semantic-event'",
+            (json.dumps(structured_fact, sort_keys=True),),
+        )
+        connection.commit()
+
+    application = create_app(_api_settings(tmp_path, ledger_path))
+    with TestClient(application) as client:
+        response = client.get("/api/v1/events?source=sec_current_filings")
+
+    assert response.status_code == 200
+    event = response.json()["data"]["items"][0]
+    assert event["display_headline"] == (
+        "Semantic Corp 申报文件披露持续经营存在重大疑虑"
+    )
+    assert event["headline_mode"] == "ATTRIBUTED_SOURCE"
+    assert event["headline_source"] == "SEC"
+    assert event["citation_ready"] is False
+    assert event["public_fact_summary"] is None
+    assert event["claim_action"] is None
+    assert "尚待" not in event["display_headline"]
 
 
 def test_qwen_publication_is_closed_until_approved_and_current_input_matches(
