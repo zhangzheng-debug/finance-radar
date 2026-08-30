@@ -49,6 +49,18 @@ MARKET_TIMER = (
     / "systemd"
     / "finance-radar-market.timer"
 )
+QWEN_MODEL_UNIT = (
+    Path(__file__).parents[1]
+    / "deployment"
+    / "systemd"
+    / "finance-radar-qwen-risk-model.service"
+)
+QWEN_WORKER_UNIT = (
+    Path(__file__).parents[1]
+    / "deployment"
+    / "systemd"
+    / "finance-radar-qwen-risk-worker.service"
+)
 RECEIPT_VALIDATOR = Path(__file__).parents[1] / "deployment" / "systemd" / "verify_backup_receipt.py"
 CODE_ONLY_VALIDATOR = (
     Path(__file__).parents[1]
@@ -356,6 +368,22 @@ def test_deploy_quiesces_capture_interpretation_and_restores_only_timer_state() 
     assert "for attempt in $(seq 1 480); do" in source
     assert "did not become quiescent within 480 seconds" in source
     assert "never kills or restarts it" in source
+
+
+def test_qwen_runtime_uses_one_cpu_bound_lane_and_restarts_after_unit_refresh() -> None:
+    installer = INSTALLER.read_text(encoding="utf-8")
+    model = QWEN_MODEL_UNIT.read_text(encoding="utf-8")
+    worker = QWEN_WORKER_UNIT.read_text(encoding="utf-8")
+
+    assert "--parallel 1" in model
+    assert "--parallel 2" not in model
+    assert "FINANCE_RADAR_QWEN_RISK_TIMEOUT_SECONDS=90" in worker
+    assert "--limit 20 --scan-limit 200 --concurrency 1" in worker
+    restore = installer.split("restore_qwen_risk_runtime() {", 1)[1].split(
+        "preserve_failed_predeploy_backup_hold() {", 1
+    )[0]
+    assert "systemctl restart finance-radar-qwen-risk-model.service" in restore
+    assert "systemctl start finance-radar-qwen-risk-model.service" not in restore
 
 
 def test_direct_nginx_denies_framing_including_release_marker() -> None:

@@ -16,7 +16,11 @@ Environment=FINANCE_RADAR_OPS_DB=/opt/finance-radar/shared/data/finance_radar_op
 Environment=FINANCE_RADAR_QWEN_RISK_ENABLED=1
 Environment=FINANCE_RADAR_QWEN_RISK_URL=http://127.0.0.1:18602
 EnvironmentFile=/etc/finance-radar-qwen-risk.env
-ExecStart=/opt/finance-radar/venv/bin/python -B scripts/run_qwen_risk_worker.py --limit 40 --scan-limit 200 --concurrency 2
+# The t3.medium runtime has two vCPUs. One in-flight request lets llama.cpp use
+# both threads for prompt ingestion instead of making two requests miss the
+# same timeout while they contend for one CPU-bound model.
+Environment=FINANCE_RADAR_QWEN_RISK_TIMEOUT_SECONDS=90
+ExecStart=/opt/finance-radar/venv/bin/python -B scripts/run_qwen_risk_worker.py --limit 20 --scan-limit 200 --concurrency 1
 NoNewPrivileges=true
 UMask=0077
 PrivateTmp=true
