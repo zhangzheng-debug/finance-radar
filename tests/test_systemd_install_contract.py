@@ -377,7 +377,7 @@ def test_qwen_runtime_uses_one_cpu_bound_lane_and_restarts_after_unit_refresh() 
 
     assert "--parallel 1" in model
     assert "--parallel 2" not in model
-    assert "FINANCE_RADAR_QWEN_RISK_TIMEOUT_SECONDS=90" in worker
+    assert "FINANCE_RADAR_QWEN_RISK_TIMEOUT_SECONDS=120" in worker
     assert "--limit 20 --scan-limit 200 --concurrency 1" in worker
     restore = installer.split("restore_qwen_risk_runtime() {", 1)[1].split(
         "preserve_failed_predeploy_backup_hold() {", 1
