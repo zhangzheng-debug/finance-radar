@@ -10,6 +10,10 @@ from app.models.qwen_risk_contract import (
     normalize_qwen_risk_content,
 )
 from app.services.qwen_risk_semantics import QwenRiskModelProvider
+from app.services.qwen_risk_semantics import (
+    QWEN_RISK_RUNTIME_INPUT_VERSION,
+    build_qwen_risk_runtime_input,
+)
 from app.services.qwen_risk_worker import run_qwen_risk_batch
 from app.storage import OperationsRepository
 
@@ -118,7 +122,7 @@ def test_provider_contract_fails_closed_when_all_semantic_input_is_empty() -> No
     assert contract["input_sufficient"] is False
 
 
-def test_training_and_runtime_share_one_canonical_content_shape() -> None:
+def test_runtime_wire_is_bounded_while_canonical_content_stays_complete() -> None:
     calls = []
 
     class Response:
@@ -149,9 +153,13 @@ def test_training_and_runtime_share_one_canonical_content_shape() -> None:
         request_fn=request,
     )
     content = {
-        "headline": "  Issuer   may default  ",
-        "summary": "  source   summary ",
-        "passages": [{"passage": "  exact   source text  "}],
+        "headline": "  Issuer   may default  " + ("headline " * 100),
+        "summary": "  source   summary " + ("summary " * 400),
+        "passages": [
+            {"passage": "START " + ("exact source text " * 250) + " END"},
+            {"passage": "SECOND " + ("context " * 300) + " TAIL"},
+            {"passage": "third passage must not reach the runtime wire"},
+        ],
     }
     prediction, _latency = provider.predict_content(content)
     assert prediction == expected_semantic_payload("MATERIAL_ADVERSE", "ADVERSE")
@@ -160,7 +168,15 @@ def test_training_and_runtime_share_one_canonical_content_shape() -> None:
     request_content = calls[0][1]["json"]["messages"][1]["content"]
     import json
 
-    assert json.loads(request_content) == normalize_qwen_risk_content(content)
+    canonical = normalize_qwen_risk_content(content)
+    runtime = json.loads(request_content)
+    assert runtime == build_qwen_risk_runtime_input(content)
+    assert runtime != canonical
+    assert len(canonical["passages"]) == 3
+    assert len(runtime["passages"]) == 2
+    assert runtime["passages"][0]["passage"].startswith("START")
+    assert runtime["passages"][0]["passage"].endswith("END")
+    assert len(request_content) < 2_500
 
 
 def test_provider_derives_strength_and_priority_instead_of_trusting_model() -> None:
@@ -234,6 +250,8 @@ def test_provider_applies_narrow_hybrid_anchor_after_model_inference() -> None:
     assert result["decision_source"] == "DETERMINISTIC_HARDCASE_ANCHOR"
     assert result["hybrid_rule"] == "bankruptcy_restructuring_or_equity_cancellation"
     assert result["training_basis"] == "DUAL_REVIEW_AI_CONSENSUS"
+    assert result["runtime_input_version"] == QWEN_RISK_RUNTIME_INPUT_VERSION
+    assert len(result["runtime_input_sha256"]) == 64
 
 
 def test_qwen_worker_persists_without_reprocessing_current_input(tmp_path: Path) -> None:
