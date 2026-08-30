@@ -29,6 +29,15 @@ from app.models.risk_router import derive_evidence_context
 
 
 QWEN_RISK_MODEL_TASK = "QWEN_RISK_SEMANTICS"
+QWEN_RISK_RUNTIME_INPUT_VERSION = "qwen-risk-runtime-wire-v2"
+
+# The canonical input above remains the audit/SFT identity.  The small CPU-only
+# production model receives a separate bounded wire view so one unusually long
+# filing cannot monopolize the single inference slot and stall the fair queue.
+_RUNTIME_HEADLINE_UNITS = 360
+_RUNTIME_SUMMARY_UNITS = 480
+_RUNTIME_PASSAGE_UNITS = 760
+_RUNTIME_PASSAGE_LIMIT = 2
 
 
 class QwenRiskContractError(RuntimeError):
@@ -43,6 +52,94 @@ def _stable_json(value: Any) -> str:
 
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _text_units(value: str) -> int:
+    """Approximate tokenizer cost without importing the training runtime.
+
+    ASCII text is roughly four characters per token for these finance sources,
+    while CJK and other non-ASCII characters can each consume a token.  Counting
+    them as four ASCII-equivalent units gives the runtime a conservative bound.
+    """
+
+    return sum(1 if ord(character) < 128 else 4 for character in value)
+
+
+def _take_text_units(value: str, budget: int, *, reverse: bool = False) -> str:
+    characters = reversed(value) if reverse else iter(value)
+    selected: list[str] = []
+    used = 0
+    for character in characters:
+        cost = 1 if ord(character) < 128 else 4
+        if used + cost > budget:
+            break
+        selected.append(character)
+        used += cost
+    if reverse:
+        selected.reverse()
+    return "".join(selected)
+
+
+def _clip_runtime_text(value: Any, budget: int) -> str:
+    normalized = " ".join(str(value or "").split())
+    if _text_units(normalized) <= budget:
+        return normalized
+    separator = " ... "
+    remaining = max(1, budget - _text_units(separator))
+    head_budget = max(1, int(remaining * 0.78))
+    tail_budget = max(1, remaining - head_budget)
+    head = _take_text_units(normalized, head_budget).rstrip()
+    tail = _take_text_units(normalized, tail_budget, reverse=True).lstrip()
+    return head + separator + tail
+
+
+def build_qwen_risk_runtime_input(content: dict[str, Any]) -> dict[str, Any]:
+    """Build the compact, deterministic view sent to the loopback model.
+
+    This does not replace the canonical content stored in ``input_contract``.
+    Headline and summary carry the main claim; the first two relevance-ordered
+    evidence passages add source context with a head/tail window for qualifiers.
+    """
+
+    normalized = normalize_qwen_risk_content(content)
+    passages: list[dict[str, Any]] = []
+    remaining_passage_units = _RUNTIME_PASSAGE_UNITS
+    selected = list(normalized.get("passages") or [])[:_RUNTIME_PASSAGE_LIMIT]
+    for index, item in enumerate(selected):
+        remaining_slots = len(selected) - index
+        if remaining_slots <= 1:
+            passage_budget = remaining_passage_units
+        else:
+            passage_budget = max(
+                1,
+                remaining_passage_units - (remaining_slots - 1) * 260,
+            )
+        passage = _clip_runtime_text(item.get("passage"), passage_budget)
+        if not passage:
+            continue
+        passages.append(
+            {
+                "document_type": str(item.get("document_type") or "")[:80],
+                "item_section": str(item.get("item_section") or "")[:120],
+                "published_at": item.get("published_at"),
+                "passage": passage,
+            }
+        )
+        remaining_passage_units = max(
+            0,
+            remaining_passage_units - _text_units(passage),
+        )
+    return {
+        "as_of": normalized.get("as_of"),
+        "event_date": normalized.get("event_date"),
+        "headline": _clip_runtime_text(
+            normalized.get("headline"), _RUNTIME_HEADLINE_UNITS
+        ),
+        "summary": _clip_runtime_text(
+            normalized.get("summary"), _RUNTIME_SUMMARY_UNITS
+        ),
+        "passages": passages,
+    }
 
 
 def _is_loopback_url(value: str) -> bool:
@@ -242,7 +339,7 @@ class QwenRiskModelProvider:
     def predict_content(self, content: dict[str, Any]) -> tuple[dict[str, str], float]:
         """Return one strict semantic prediction for canonicalized content."""
 
-        normalized = normalize_qwen_risk_content(content)
+        runtime_input = build_qwen_risk_runtime_input(content)
         request_payload = {
             "model": self.model,
             "temperature": 0,
@@ -257,7 +354,7 @@ class QwenRiskModelProvider:
             },
             "messages": [
                 {"role": "system", "content": QWEN_RISK_SYSTEM_PROMPT},
-                {"role": "user", "content": _stable_json(normalized)},
+                {"role": "user", "content": _stable_json(runtime_input)},
             ],
         }
         started = time.perf_counter()
@@ -314,6 +411,7 @@ class QwenRiskModelProvider:
         if contract.get("input_sufficient") is not True:
             raise QwenRiskContractError("QWEN_RISK_INPUT_INSUFFICIENT")
         raw, latency_ms = self.predict_content(contract["content"])
+        runtime_input = build_qwen_risk_runtime_input(contract["content"])
         prediction, decision_source, hybrid_rule = apply_qwen_hybrid_anchor(
             contract["content"], raw
         )
@@ -332,6 +430,8 @@ class QwenRiskModelProvider:
             "training_basis": "DUAL_REVIEW_AI_CONSENSUS",
             "call_kind": QWEN_RISK_MODEL_TASK,
             "semantic_model_invoked": True,
+            "runtime_input_version": QWEN_RISK_RUNTIME_INPUT_VERSION,
+            "runtime_input_sha256": _sha256(_stable_json(runtime_input)),
             "conditional_language_required": contract["assessment_scope"] == "SOURCE_CONDITIONAL",
             "adapter_sha256": self.adapter_sha256.strip().casefold(),
             "latency_ms": round(latency_ms, 3),
