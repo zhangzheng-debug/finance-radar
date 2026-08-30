@@ -164,6 +164,22 @@ prompt/target/provenance/payload 合同和 metadata/assistant 目标一致性；
 event/content 绑定；模型写入 input/runtime/gate 合同，并生成包含四个输出文件哈希的
 `output_manifest.json`。这些加固不改变上述失败指标，也不会恢复 DEV 的“未使用”状态。
 
+在干净 Git commit `bacabc06db828b294ce02e30d34e0d6a17a91d6e` 上又执行了一次显式
+`CONSUMED_DIAGNOSTIC_REPRODUCTION`。复算结果逐项不变，并由 runner 强制
+`selection_allowed=false`，最终决策为 `REJECTED_CONSUMED_DEV_DIAGNOSTIC`：
+
+- 复算目录：
+  `D:\FinanceRadarModels\experiments\semantic-axes-router-v15-tfidf-consumed-reproduction-20260830-v2`；
+- runner SHA-256：
+  `2f7ae4b43f62f7ea6be17e5f6ef0a9b5c4b7b97d270eab83f3a02f963620dbe3`；
+- output manifest SHA-256：
+  `ff653f1683789e5019f6ddaed43ab23a22635cf2b18f589db2355baeffab4d0c`；
+- 复算 artifact SHA-256：
+  `2d348d98b76b94a5bb13ece9a5486cb304dd71a802ae4dd71dd8db63cda2094f`。
+
+复算 artifact 因新增 manifest/runtime/gate 合同而与旧 artifact 字节不同；模型预测
+逐条相同。预测文件哈希差异仅来自旧版 Windows CRLF 与加固版固定 LF 的换行编码。
+
 ### 停止与下一轮
 
 本 DEV 已消费，不再用于改特征、类别权重、阈值或规则后重新宣称通过。下一轮若要
