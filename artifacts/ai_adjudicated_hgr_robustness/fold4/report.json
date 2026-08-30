@@ -1,0 +1,622 @@
+{
+  "schema_version": 1,
+  "contract_version": "ai-adjudicated-dual-review-router-v1",
+  "split_salt": "finance-radar-ai-arbitration-v4",
+  "model_version": "risk-router-ai-adjudicated-ee6940a297e7",
+  "artifact_sha256": "36f97b26272498fe84a242b08ef090a626590646b583b91c6d17ae3261679ee3",
+  "dataset_sha256": "ee6940a297e74b3bca806e491b5fdc581d58ab4f819d5089114e064ae8fe92d5",
+  "inputs": {
+    "owner_manifest_sha256": "e5b77b2b2fb9fdb265232d585b8d8babb36229b56270493732f83f7e69c0f6ab",
+    "A_strict_valid": true,
+    "B_strict_valid": true,
+    "rows": 720
+  },
+  "review_alignment": {
+    "target_consensus": 404,
+    "target_conflicts": 316,
+    "a_b_target_conflicts": 305,
+    "policy_screened_consensus": 11,
+    "consensus_labels": {
+      "NON_TARGET": 342,
+      "ABSTAIN": 19,
+      "RISK_REVIEW": 43
+    }
+  },
+  "protected_splits": {
+    "consensus_train": 231,
+    "consensus_validation": 77,
+    "consensus_internal_holdout": 77,
+    "consensus_abstain_gate": 19,
+    "validation_and_holdout_are_consensus_only": true
+  },
+  "ai_arbitration": {
+    "total_conflicts": 316,
+    "used_for_training": 296,
+    "quarantined": 20,
+    "labels": {
+      "NON_TARGET": 234,
+      "ABSTAIN": 20,
+      "RISK_REVIEW": 62
+    },
+    "basis": {
+      "CONSENSUS_SEED_MODEL_HIGH_CONFIDENCE": 223,
+      "AI_ARBITRATION_QUARANTINED_LOW_CONFIDENCE": 20,
+      "RISK_FIRST_POLICY:clearly_positive_results": 16,
+      "RISK_FIRST_POLICY:bankruptcy_insolvency_or_receivership": 12,
+      "RISK_FIRST_POLICY:going_concern_or_default": 14,
+      "RISK_FIRST_POLICY:binding_enforcement_or_fraud": 8,
+      "RISK_FIRST_POLICY:form25_listing_removal": 5,
+      "RISK_FIRST_POLICY:binding_enforcement_or_accounting_failure": 4,
+      "RISK_FIRST_POLICY:serious_product_safety": 5,
+      "RISK_FIRST_POLICY:resolved_or_alleviated_risk": 2,
+      "RISK_FIRST_POLICY:routine_policy_or_statistics": 3,
+      "RISK_FIRST_POLICY:active_listing_noncompliance": 1,
+      "RISK_FIRST_POLICY:documented_financial_distress": 2,
+      "RISK_FIRST_POLICY:resolution_or_administrative_action": 1
+    },
+    "human_arbitration_claimed": false
+  },
+  "development": {
+    "rows": 527,
+    "labels": {
+      "RISK_REVIEW": 87,
+      "NON_TARGET": 440
+    },
+    "provenance": {
+      "DUAL_REVIEW_TARGET_CONSENSUS": 231,
+      "AI_POLICY_OR_CONSENSUS_SEED_ADJUDICATION_NOT_HUMAN": 296
+    }
+  },
+  "threshold_selection": {
+    "threshold": 0.35,
+    "metrics": {
+      "rows": 77,
+      "label_counts": {
+        "RISK_REVIEW": 9,
+        "NON_TARGET": 68
+      },
+      "accuracy": 0.948051948051948,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "risk_precision": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353,
+      "confusion_matrix": [
+        [
+          7,
+          2
+        ],
+        [
+          2,
+          66
+        ]
+      ],
+      "errors": [
+        {
+          "sample_id": "hbv3-2218717b760d36e767e2d4a0",
+          "event_id": "FR-LIVE-0e3185b5dd0ed4b5f3a5b196e00af6a8",
+          "event_family": "distress",
+          "source_id": "sec_current_filings",
+          "expected": "RISK_REVIEW",
+          "predicted": "NON_TARGET",
+          "decision_basis": "TRAINED_MODEL",
+          "decision_confidence": 0.976841,
+          "risk_probability": 0.023159,
+          "text_preview": "8-K - EchoStar CORP (0001415404) (Filer) Filed: 2026-08-03 AccNo: 0001415404-26-000038 Size: 251 KB Item 1.03: Bankruptcy or Receivership Item 2.04: Triggering Events That Accelerate or Increase a Direct Financial Obligation or an Obligation under an Off-Balance Sheet Arrangement Item 5.02: Departure of Directors or Ce"
+        },
+        {
+          "sample_id": "hbv3-ad54d0a68869e22884354ca7",
+          "event_id": "FR-LIVE-7132c6e821d37fdac5ba3185b2918199",
+          "event_family": "fundamental_distress",
+          "source_id": "sec_current_filings",
+          "expected": "RISK_REVIEW",
+          "predicted": "NON_TARGET",
+          "decision_basis": "TRAINED_MODEL",
+          "decision_confidence": 0.762885,
+          "risk_probability": 0.237115,
+          "text_preview": "10-Q - NovelStem International Corp. (0000912544) (Filer) Filed: 2026-08-14 AccNo: 0001493152-26-038089 Size: 4 MB …e decrease in current liabilities is primarily due to the reduction of accounts payable and the repayment of $50,000 on short-term borrowings as offset by interest accrued on debt and advances on short-te"
+        },
+        {
+          "sample_id": "hbv3-3fe29bc71951b97bbf97c66f",
+          "event_id": "FR-LIVE-28f348baef523195b265eff84633bbb8",
+          "event_family": "listing_compliance",
+          "source_id": "sec_current_filings",
+          "expected": "NON_TARGET",
+          "predicted": "RISK_REVIEW",
+          "decision_basis": "TRAINED_MODEL",
+          "decision_confidence": 0.956601,
+          "risk_probability": 0.956601,
+          "text_preview": "10-Q - Future Vision II Acquisition Corp. (0002010653) (Filer) Filed: 2026-08-11 AccNo: 0001829126-26-008575 Size: 3 MB …written notice (the “Notice”) from the Listing Qualifications Department of The Nasdaq Stock Market LLC (“Nasdaq”) indicating that the Company is no longer in compliance with Nasdaq Listing Rule 5550"
+        },
+        {
+          "sample_id": "hbv3-9b1ba728a762cac070f37a50",
+          "event_id": "FR-LIVE-e6ed5810f98690e0f75bc76ed1efd8c4",
+          "event_family": "listing_status",
+          "source_id": "sec_current_filings",
+          "expected": "NON_TARGET",
+          "predicted": "RISK_REVIEW",
+          "decision_basis": "TRAINED_MODEL",
+          "decision_confidence": 0.996119,
+          "risk_probability": 0.996119,
+          "text_preview": "8-K - Eightco Holdings Inc. (0001892492) (Filer) Filed: 2026-08-07 AccNo: 0001493152-26-036618 Size: 2 MB Item 3.01: Notice of Delisting or Failure to Satisfy a Continued Listing Rule or Standard; Transfer of Listing Item 9.01: Financial Statements and Exhibits …ecurities Exchange Act of 1934 (§240.12b-2 of this chapte"
+        }
+      ]
+    }
+  },
+  "threshold_selection_policy": "FALLBACK_MAX_VALIDATION_MACRO_F1",
+  "threshold_sweep": [
+    {
+      "threshold": 0.35,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    },
+    {
+      "threshold": 0.38,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    },
+    {
+      "threshold": 0.41,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    },
+    {
+      "threshold": 0.44,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    },
+    {
+      "threshold": 0.47,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    },
+    {
+      "threshold": 0.5,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    },
+    {
+      "threshold": 0.53,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    },
+    {
+      "threshold": 0.56,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    },
+    {
+      "threshold": 0.59,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    },
+    {
+      "threshold": 0.62,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    },
+    {
+      "threshold": 0.65,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    },
+    {
+      "threshold": 0.68,
+      "macro_f1": 0.8741830065359477,
+      "risk_recall": 0.7777777777777778,
+      "non_target_false_risk_rate": 0.029411764705882353
+    }
+  ],
+  "internal_holdout": {
+    "rows": 77,
+    "label_counts": {
+      "RISK_REVIEW": 9,
+      "NON_TARGET": 68
+    },
+    "accuracy": 0.922077922077922,
+    "macro_f1": 0.8409090909090909,
+    "risk_recall": 0.8888888888888888,
+    "risk_precision": 0.6153846153846154,
+    "non_target_false_risk_rate": 0.07352941176470588,
+    "confusion_matrix": [
+      [
+        8,
+        1
+      ],
+      [
+        5,
+        63
+      ]
+    ],
+    "errors": [
+      {
+        "sample_id": "hbv3-eaee4be3426ff21c9a62de09",
+        "event_id": "FR-LIVE-736615574eee6d8a41478f6458021c50",
+        "event_family": "audit_governance",
+        "source_id": "sec_current_filings",
+        "expected": "RISK_REVIEW",
+        "predicted": "NON_TARGET",
+        "decision_basis": "TRAINED_MODEL",
+        "decision_confidence": 0.975302,
+        "risk_probability": 0.024698,
+        "text_preview": "6-K - Amber International Holding Ltd (0001697818) (Filer) Filed: 2026-07-28 AccNo: 0001104659-26-087303 Size: 45 KB … as of December 31, 2025 expressed an adverse opinion as a result of the existence of material weaknesses described in Item 15 of the Company’s annual report on Form 20-F for the fiscal year ended Decem"
+      },
+      {
+        "sample_id": "hbv3-06c074f5bf6f1ea740e544f4",
+        "event_id": "FR-LIVE-c2d12364a035815342abd08bb16c797f",
+        "event_family": "capital_structure",
+        "source_id": "sec_current_filings",
+        "expected": "NON_TARGET",
+        "predicted": "RISK_REVIEW",
+        "decision_basis": "TRAINED_MODEL",
+        "decision_confidence": 0.404574,
+        "risk_probability": 0.404574,
+        "text_preview": "6-K - AC Immune SA (0001651625) (Filer) Filed: 2026-08-05 AccNo: 0001104659-26-090704 Size: 18 MB … this Form 6-K, after considering the Company’s cash position of CHF 27.8 million and short-term financial assets of CHF 47.6 million as of June 30, 2026. Hence, these unaudited Interim Condensed Consolidated Financial St"
+      },
+      {
+        "sample_id": "hbv3-804c4b090b8433a46e820bbe",
+        "event_id": "FR-LIVE-e065c8920fa2fff8db596f6042f5a48b",
+        "event_family": "fundamental_distress",
+        "source_id": "sec_current_filings",
+        "expected": "NON_TARGET",
+        "predicted": "RISK_REVIEW",
+        "decision_basis": "TRAINED_MODEL",
+        "decision_confidence": 0.564638,
+        "risk_probability": 0.564638,
+        "text_preview": "6-K - NICOLA MINING INC. (0001526475) (Filer) Filed: 2026-08-13 AccNo: 0001104659-26-095876 Size: 679 KB …potential adverse impact on the Company’s performance to movements in individual equity prices or general movements in the level of the stock market. Capital Management The Company considers capital to be the eleme"
+      },
+      {
+        "sample_id": "hbv3-e1f36a6f87925880e6ab0dde",
+        "event_id": "FR-LIVE-07007d2a817fb91929315b44fc37441a",
+        "event_family": "listing_status",
+        "source_id": "sec_current_filings",
+        "expected": "NON_TARGET",
+        "predicted": "RISK_REVIEW",
+        "decision_basis": "TRAINED_MODEL",
+        "decision_confidence": 0.877113,
+        "risk_probability": 0.877113,
+        "text_preview": "8-K - Construction Partners, Inc. (0001718227) (Filer) Filed: 2026-08-10 AccNo: 0001628280-26-055282 Size: 180 KB Item 3.01: Notice of Delisting or Failure to Satisfy a Continued Listing Rule or Standard; Transfer of Listing Item 3.02: Unregistered Sales of Equity Securities Item 7.01: Regulation FD Disclosure Item 9.0"
+      },
+      {
+        "sample_id": "hbv3-abc26f9bf32da82d3a2c5629",
+        "event_id": "FR-LIVE-9c1824de503ee41037afee40c4b16d1d",
+        "event_family": "listing_status",
+        "source_id": "sec_current_filings",
+        "expected": "NON_TARGET",
+        "predicted": "RISK_REVIEW",
+        "decision_basis": "TRAINED_MODEL",
+        "decision_confidence": 0.682049,
+        "risk_probability": 0.682049,
+        "text_preview": "25-NSE - Cboe BZX Exchange, Inc. (0001417835) (Filed by) Filed: 2026-07-28 AccNo: 0001417835-26-000226 Size: 3 KB EX-99.25 2 ruleprovisionnotice.txt RULE PROVISION NOTICE RULE PROVISION NOTICE Re: T-REX 2X Long PAAS Daily Target ETF (Ticker Symbol: PAAU), a series of ETF Opportunities Trust This notice is submitted in "
+      },
+      {
+        "sample_id": "hbv3-c4b689feedc4612634921872",
+        "event_id": "FR-LIVE-a7e65c4c99a8cca58ec73a0eb6e73625",
+        "event_family": "distress",
+        "source_id": "sec_current_filings",
+        "expected": "NON_TARGET",
+        "predicted": "RISK_REVIEW",
+        "decision_basis": "TRAINED_MODEL",
+        "decision_confidence": 0.590416,
+        "risk_probability": 0.590416,
+        "text_preview": "8-K - Latch, Inc. (0001826000) (Filer) Filed: 2026-07-30 AccNo: 0001104659-26-088410 Size: 528 KB Item 8.01: Other Events Item 9.01: Financial Statements and Exhibits …or counterclaim. 7.8 This Settlement may not be terminated, modified, or amended, except by an agreement in writing signed by the Parties or their respe"
+      }
+    ]
+  },
+  "external_blind_v3": {
+    "rows": 75,
+    "overlap_excluded": 5,
+    "overlap_audit": {
+      "event_id": 5,
+      "entity_group": 0,
+      "event_chain_group": 0,
+      "text_sha256": 0
+    },
+    "remaining_overlap_audit": {
+      "event_id": 0,
+      "entity_group": 0,
+      "event_chain_group": 0,
+      "text_sha256": 0
+    },
+    "full_accuracy": 0.96,
+    "semantic": {
+      "rows": 55,
+      "label_counts": {
+        "NON_TARGET": 28,
+        "RISK_REVIEW": 27
+      },
+      "accuracy": 0.9454545454545454,
+      "macro_f1": 0.945382323733863,
+      "risk_recall": 0.9259259259259259,
+      "risk_precision": 0.9615384615384616,
+      "non_target_false_risk_rate": 0.03571428571428571,
+      "confusion_matrix": [
+        [
+          25,
+          2
+        ],
+        [
+          1,
+          27
+        ]
+      ]
+    },
+    "abstain_rows": 20,
+    "abstain_recall": 1.0
+  },
+  "abstain_gate": {
+    "rows": 19,
+    "expected_abstain": 19,
+    "structured_gate_recall": 1.0
+  },
+  "baseline_comparison": {
+    "baseline_model_version": "risk-router-v4-c82cfde20465",
+    "internal_holdout": {
+      "rows": 77,
+      "label_counts": {
+        "RISK_REVIEW": 9,
+        "NON_TARGET": 68
+      },
+      "accuracy": 0.7922077922077922,
+      "macro_f1": 0.6844262295081966,
+      "risk_recall": 0.8888888888888888,
+      "risk_precision": 0.34782608695652173,
+      "non_target_false_risk_rate": 0.22058823529411764,
+      "confusion_matrix": [
+        [
+          8,
+          1
+        ],
+        [
+          15,
+          53
+        ]
+      ]
+    },
+    "external_blind_v3": {
+      "rows": 80,
+      "full_accuracy": 0.9625,
+      "semantic": {
+        "rows": 60,
+        "label_counts": {
+          "NON_TARGET": 30,
+          "RISK_REVIEW": 30
+        },
+        "accuracy": 0.95,
+        "macro_f1": 0.9499861072520144,
+        "risk_recall": 0.9666666666666667,
+        "risk_precision": 0.9354838709677419,
+        "non_target_false_risk_rate": 0.06666666666666667,
+        "confusion_matrix": [
+          [
+            29,
+            1
+          ],
+          [
+            2,
+            28
+          ]
+        ]
+      },
+      "abstain_recall": 1.0
+    }
+  },
+  "consensus_only_ablation": {
+    "purpose": "MEASURE_INCREMENTAL_EFFECT_OF_AI_ADJUDICATED_TRAINING_ROWS",
+    "training_rows": 231,
+    "threshold": 0.35,
+    "threshold_policy": "FALLBACK_MAX_VALIDATION_MACRO_F1",
+    "threshold_selection": {
+      "threshold": 0.35,
+      "metrics": {
+        "rows": 77,
+        "label_counts": {
+          "RISK_REVIEW": 9,
+          "NON_TARGET": 68
+        },
+        "accuracy": 0.948051948051948,
+        "macro_f1": 0.8741830065359477,
+        "risk_recall": 0.7777777777777778,
+        "risk_precision": 0.7777777777777778,
+        "non_target_false_risk_rate": 0.029411764705882353,
+        "confusion_matrix": [
+          [
+            7,
+            2
+          ],
+          [
+            2,
+            66
+          ]
+        ],
+        "errors": [
+          {
+            "sample_id": "hbv3-2218717b760d36e767e2d4a0",
+            "event_id": "FR-LIVE-0e3185b5dd0ed4b5f3a5b196e00af6a8",
+            "event_family": "distress",
+            "source_id": "sec_current_filings",
+            "expected": "RISK_REVIEW",
+            "predicted": "NON_TARGET",
+            "decision_basis": "TRAINED_MODEL",
+            "decision_confidence": 0.985909,
+            "risk_probability": 0.014091,
+            "text_preview": "8-K - EchoStar CORP (0001415404) (Filer) Filed: 2026-08-03 AccNo: 0001415404-26-000038 Size: 251 KB Item 1.03: Bankruptcy or Receivership Item 2.04: Triggering Events That Accelerate or Increase a Direct Financial Obligation or an Obligation under an Off-Balance Sheet Arrangement Item 5.02: Departure of Directors or Ce"
+          },
+          {
+            "sample_id": "hbv3-ad54d0a68869e22884354ca7",
+            "event_id": "FR-LIVE-7132c6e821d37fdac5ba3185b2918199",
+            "event_family": "fundamental_distress",
+            "source_id": "sec_current_filings",
+            "expected": "RISK_REVIEW",
+            "predicted": "NON_TARGET",
+            "decision_basis": "TRAINED_MODEL",
+            "decision_confidence": 0.803653,
+            "risk_probability": 0.196347,
+            "text_preview": "10-Q - NovelStem International Corp. (0000912544) (Filer) Filed: 2026-08-14 AccNo: 0001493152-26-038089 Size: 4 MB …e decrease in current liabilities is primarily due to the reduction of accounts payable and the repayment of $50,000 on short-term borrowings as offset by interest accrued on debt and advances on short-te"
+          },
+          {
+            "sample_id": "hbv3-3fe29bc71951b97bbf97c66f",
+            "event_id": "FR-LIVE-28f348baef523195b265eff84633bbb8",
+            "event_family": "listing_compliance",
+            "source_id": "sec_current_filings",
+            "expected": "NON_TARGET",
+            "predicted": "RISK_REVIEW",
+            "decision_basis": "TRAINED_MODEL",
+            "decision_confidence": 0.821014,
+            "risk_probability": 0.821014,
+            "text_preview": "10-Q - Future Vision II Acquisition Corp. (0002010653) (Filer) Filed: 2026-08-11 AccNo: 0001829126-26-008575 Size: 3 MB …written notice (the “Notice”) from the Listing Qualifications Department of The Nasdaq Stock Market LLC (“Nasdaq”) indicating that the Company is no longer in compliance with Nasdaq Listing Rule 5550"
+          },
+          {
+            "sample_id": "hbv3-9b1ba728a762cac070f37a50",
+            "event_id": "FR-LIVE-e6ed5810f98690e0f75bc76ed1efd8c4",
+            "event_family": "listing_status",
+            "source_id": "sec_current_filings",
+            "expected": "NON_TARGET",
+            "predicted": "RISK_REVIEW",
+            "decision_basis": "TRAINED_MODEL",
+            "decision_confidence": 0.898339,
+            "risk_probability": 0.898339,
+            "text_preview": "8-K - Eightco Holdings Inc. (0001892492) (Filer) Filed: 2026-08-07 AccNo: 0001493152-26-036618 Size: 2 MB Item 3.01: Notice of Delisting or Failure to Satisfy a Continued Listing Rule or Standard; Transfer of Listing Item 9.01: Financial Statements and Exhibits …ecurities Exchange Act of 1934 (§240.12b-2 of this chapte"
+          }
+        ]
+      }
+    },
+    "internal_holdout": {
+      "rows": 77,
+      "label_counts": {
+        "RISK_REVIEW": 9,
+        "NON_TARGET": 68
+      },
+      "accuracy": 0.974025974025974,
+      "macro_f1": 0.9370915032679739,
+      "risk_recall": 0.8888888888888888,
+      "risk_precision": 0.8888888888888888,
+      "non_target_false_risk_rate": 0.014705882352941176,
+      "confusion_matrix": [
+        [
+          8,
+          1
+        ],
+        [
+          1,
+          67
+        ]
+      ],
+      "errors": [
+        {
+          "sample_id": "hbv3-eaee4be3426ff21c9a62de09",
+          "event_id": "FR-LIVE-736615574eee6d8a41478f6458021c50",
+          "event_family": "audit_governance",
+          "source_id": "sec_current_filings",
+          "expected": "RISK_REVIEW",
+          "predicted": "NON_TARGET",
+          "decision_basis": "TRAINED_MODEL",
+          "decision_confidence": 0.963763,
+          "risk_probability": 0.036237,
+          "text_preview": "6-K - Amber International Holding Ltd (0001697818) (Filer) Filed: 2026-07-28 AccNo: 0001104659-26-087303 Size: 45 KB … as of December 31, 2025 expressed an adverse opinion as a result of the existence of material weaknesses described in Item 15 of the Company’s annual report on Form 20-F for the fiscal year ended Decem"
+        },
+        {
+          "sample_id": "hbv3-e1f36a6f87925880e6ab0dde",
+          "event_id": "FR-LIVE-07007d2a817fb91929315b44fc37441a",
+          "event_family": "listing_status",
+          "source_id": "sec_current_filings",
+          "expected": "NON_TARGET",
+          "predicted": "RISK_REVIEW",
+          "decision_basis": "TRAINED_MODEL",
+          "decision_confidence": 0.535693,
+          "risk_probability": 0.535693,
+          "text_preview": "8-K - Construction Partners, Inc. (0001718227) (Filer) Filed: 2026-08-10 AccNo: 0001628280-26-055282 Size: 180 KB Item 3.01: Notice of Delisting or Failure to Satisfy a Continued Listing Rule or Standard; Transfer of Listing Item 3.02: Unregistered Sales of Equity Securities Item 7.01: Regulation FD Disclosure Item 9.0"
+        }
+      ]
+    },
+    "external_blind_v3": {
+      "rows": 80,
+      "overlap_excluded": 0,
+      "overlap_audit": {
+        "event_id": 0,
+        "entity_group": 0,
+        "event_chain_group": 0,
+        "text_sha256": 0
+      },
+      "remaining_overlap_audit": {
+        "event_id": 0,
+        "entity_group": 0,
+        "event_chain_group": 0,
+        "text_sha256": 0
+      },
+      "full_accuracy": 0.95,
+      "semantic": {
+        "rows": 60,
+        "label_counts": {
+          "NON_TARGET": 30,
+          "RISK_REVIEW": 30
+        },
+        "accuracy": 0.9333333333333333,
+        "macro_f1": 0.9330357142857143,
+        "risk_recall": 0.8666666666666667,
+        "risk_precision": 1.0,
+        "non_target_false_risk_rate": 0.0,
+        "confusion_matrix": [
+          [
+            26,
+            4
+          ],
+          [
+            0,
+            30
+          ]
+        ]
+      },
+      "abstain_rows": 20,
+      "abstain_recall": 1.0
+    }
+  },
+  "overlap_audit": {
+    "development_vs_internal_holdout": {
+      "event_id": 0,
+      "entity_group": 0,
+      "event_chain_group": 0,
+      "text_sha256": 0
+    },
+    "development_vs_external": {
+      "event_id": 5,
+      "entity_group": 0,
+      "event_chain_group": 0,
+      "text_sha256": 0
+    }
+  },
+  "gates": {
+    "internal_macro_f1": true,
+    "internal_risk_recall": true,
+    "internal_false_risk": true,
+    "external_macro_f1": true,
+    "external_risk_recall": true,
+    "external_false_risk": true,
+    "no_internal_overlap": true,
+    "no_remaining_external_overlap": true
+  },
+  "gate_thresholds": {
+    "internal_macro_f1_min": 0.8,
+    "internal_risk_recall_min": 0.8,
+    "internal_false_risk_max": 0.15,
+    "external_macro_f1_min": 0.85,
+    "external_risk_recall_min": 0.85,
+    "external_false_risk_max": 0.1
+  },
+  "gate_pass": true,
+  "promotion_decision": "QUALIFIED_SHADOW_CANDIDATE",
+  "human_gold_mutated": false,
+  "human_only_labels_claimed": false,
+  "production_model_changed": false,
+  "no_trading": true
+}

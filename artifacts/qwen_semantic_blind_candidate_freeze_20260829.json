@@ -1,0 +1,66 @@
+{
+  "schema_version": 2,
+  "contract": "qwen-semantic-ai-assisted-reference-candidate-freeze-v2",
+  "frozen_at": "2026-08-29T13:17:20.4702489Z",
+  "candidate_commit": "759774a79caf81342e5e7e16ebd992daa92e6dd3",
+  "base_model": {
+    "name": "Qwen2.5-1.5B-Instruct",
+    "config_sha256": "98d2ff8cc47488d08a2b0b3acf4eb99ef210779b42bd48605f6b8e36acdbf670",
+    "generation_config_sha256": "e558847a8b4402616f1273797b015104dc266fe4b520056fca88823ba8f8ebe6",
+    "model_safetensors_sha256": "dd924a11b4c220f385b51ffa522daea7c9f3d850e31b162bb5661df483c6d3ee",
+    "tokenizer_config_sha256": "5b5d4f65d0acd3b2d56a35b56d374a36cbc1c8fa5cf3b3febbbfabf22f359583",
+    "tokenizer_json_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+  },
+  "adapter": {
+    "path": "D:\\FinanceRadarModels\\experiments\\qwen-risk-consensus-v3-train\\v0-20260829-180141\\checkpoint-40\\adapter_model.safetensors",
+    "sha256": "25a313eddbe9294a391e23639f1bb82c304c56569a76ae890172026153396b87",
+    "adapter_config_sha256": "2ddc4d4ec3d03b80ec68da07eb45abebc3a30f031a478075432e22adbeb9f6da",
+    "trainer_state_sha256": "ca4a79d2ef0959bff38e45b5dae9f05d07f6f0e114f7e2633f5f4c3b14dd8370",
+    "training_args_sha256": "9c9e78ec3401b46eebd2b1030650ad0d9d8201feb09ee3a7780fae5cb90ccd91"
+  },
+  "hybrid_policy": {
+    "qwen_adapter": "v3-checkpoint-40",
+    "hardcase_anchor_script": "scripts/prepare_qwen_semantic_hardcase_sft.py",
+    "hardcase_anchor_script_sha256": "9ec20ada123e6009bff5a9cd83d5d10e87848cd7473456cc98408c2195b41405",
+    "hybrid_evaluator_script": "scripts/evaluate_qwen_semantic_hybrid.py",
+    "hybrid_evaluator_script_sha256": "ef2e2a76126f21d64c73ec675ed97435ca5accd6d614d2b70c3982f48e273160",
+    "model_evaluator_script_sha256": "5c0f8ec2be2b279e743c3056298e42ef641358a8fed1f3efa22ac760f6abc5a0"
+  },
+  "predeclared_gate": {
+    "minimum_rows": 120,
+    "minimum_priority_review_support": 20,
+    "parse_success_rate_min": 1.0,
+    "materiality_macro_f1_min": 0.65,
+    "polarity_macro_f1_min": 0.55,
+    "priority_review_recall_min": 0.75,
+    "false_priority_rate_max": 0.1
+  },
+  "label_boundary": {
+    "owner_samples": 720,
+    "exclude_v3_train_validation_and_prior_holdout": true,
+    "evaluation_pool_frozen_before_qwen_prediction": true,
+    "dual_human_consensus_remaining_rows": 4,
+    "primary_reference": "AI_ASSISTED_REFERENCE_MATCHING_AT_LEAST_ONE_INDEPENDENT_HUMAN",
+    "human_gold_claimed": false,
+    "disagreements_require_independent_third_adjudication": true,
+    "ai_adjudication_is_human_gold": false,
+    "rerun_or_tuning_after_unseal_allowed": false
+  },
+  "runtime": {
+    "python": "3.12.2",
+    "torch": "2.11.0+cu128",
+    "transformers": "5.15.1",
+    "peft": "0.19.1",
+    "quantization": "bnb-4bit-nf4-double-quant-fp16",
+    "generation": {"do_sample": false, "max_new_tokens": 96}
+  },
+  "pipeline_hashes": {
+    "blind_input_builder_sha256": "8fbed9016248b408148fef2ba5a045a7e886e865e55626240e91e6e2d6ffff33",
+    "independent_adjudicator_sha256": "def10375ab1eab8c0fcc7b7980731ca9db80bd5095db67925ca6f0ad00ca5c01",
+    "reference_freezer_sha256": "0709b64d332e8a04b40aa82f2509791a49c13fcc10455c9dfd1c58a472c41e56",
+    "semantic_contract_sha256": "3b0b41e372198f9a160596deaf894cedc4e5a09823096a65ad55de5ab1445fbc"
+  },
+  "production_model_changed": false,
+  "production_ledger_changed": false,
+  "no_trading": true
+}

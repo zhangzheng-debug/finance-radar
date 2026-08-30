@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "contract_version": "qwen-semantic-dual-review-consensus-experiment-v1",
+  "semantic_contract_version": "qwen-risk-semantics-v1",
+  "prompt_version": "qwen-risk-human-gold-sft-v1",
+  "base_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "owner_manifest_sha256": "e5b77b2b2fb9fdb265232d585b8d8babb36229b56270493732f83f7e69c0f6ab",
+  "input_rows": 720,
+  "exact_semantic_pair_consensus_rows": 289,
+  "policy_screened_rows": 4,
+  "train_rows": 171,
+  "train_balanced_rows": 191,
+  "validation_rows": 57,
+  "owner_holdout_rows": 57,
+  "adverse_strength_counts": {
+    "TRAIN": {
+      "NONE": 141,
+      "HIGH": 28,
+      "LOW": 2
+    },
+    "VALIDATION": {
+      "NONE": 47,
+      "HIGH": 9,
+      "LOW": 1
+    },
+    "OWNER_HOLDOUT": {
+      "NONE": 47,
+      "HIGH": 9,
+      "LOW": 1
+    }
+  },
+  "output_sha256": {
+    "train": "35e516768ae4864cc6ff5f35d34c8129a321e84b7ceaeb2037aba16ad1975ed0",
+    "train_balanced": "63f25a7f9b213c1b002aab3b00d1a8d0d0755fd4c9d8c2bb34fa91806c8248da",
+    "validation": "a7352ff1564ea2dafb05cd7531c9b684c697122e6ebdd2f9f102b9e23a452594",
+    "owner_holdout": "ad4c635eb53de98289fb3bd79592b1ef5750101b2f174eb34405a1c74bac2d6d",
+    "screened": "705fc1531439cbb844a123aaaca062fef684f4bd9d8eb7decba7b7e91d043cd4"
+  },
+  "label_provenance": "DUAL_REVIEW_SEMANTIC_PAIR_CONSENSUS",
+  "human_gold_claimed": false,
+  "ai_conflict_labels_used": false,
+  "evidence_state_used_as_model_target": false,
+  "post_event_market_data_included": false,
+  "production_model_changed": false,
+  "no_trading": true
+}

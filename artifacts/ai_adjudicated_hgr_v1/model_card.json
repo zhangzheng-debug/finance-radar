@@ -1,0 +1,530 @@
+{
+  "schema_version": 1,
+  "model_version": "risk-router-ai-adjudicated-55b58f71ca36",
+  "artifact_sha256": "7dd0327d936cd88e6523f4d472842439f8f7df01a5f35ecb2c869b057db718da",
+  "label_provenance": "DUAL_REVIEW_CONSENSUS_PLUS_AI_ADJUDICATION_NOT_HUMAN_GOLD",
+  "human_labels_claimed": false,
+  "human_gold_status": "UNCHANGED_NOT_FROZEN",
+  "evaluation": {
+    "schema_version": 1,
+    "contract_version": "ai-adjudicated-dual-review-router-v1",
+    "split_salt": "finance-radar-ai-arbitration-v1",
+    "model_version": "risk-router-ai-adjudicated-55b58f71ca36",
+    "artifact_sha256": "7dd0327d936cd88e6523f4d472842439f8f7df01a5f35ecb2c869b057db718da",
+    "dataset_sha256": "55b58f71ca36916718fe9fe3abbfeb2605807eb95871473463dbc49bfc4e60be",
+    "inputs": {
+      "owner_manifest_sha256": "e5b77b2b2fb9fdb265232d585b8d8babb36229b56270493732f83f7e69c0f6ab",
+      "A_strict_valid": true,
+      "B_strict_valid": true,
+      "rows": 720
+    },
+    "review_alignment": {
+      "target_consensus": 404,
+      "target_conflicts": 316,
+      "a_b_target_conflicts": 305,
+      "policy_screened_consensus": 11,
+      "consensus_labels": {
+        "NON_TARGET": 342,
+        "ABSTAIN": 19,
+        "RISK_REVIEW": 43
+      }
+    },
+    "protected_splits": {
+      "consensus_train": 231,
+      "consensus_validation": 77,
+      "consensus_internal_holdout": 77,
+      "consensus_abstain_gate": 19,
+      "validation_and_holdout_are_consensus_only": true
+    },
+    "ai_arbitration": {
+      "total_conflicts": 316,
+      "used_for_training": 294,
+      "quarantined": 22,
+      "labels": {
+        "NON_TARGET": 243,
+        "RISK_REVIEW": 51,
+        "ABSTAIN": 22
+      },
+      "basis": {
+        "CONSENSUS_SEED_MODEL_HIGH_CONFIDENCE": 221,
+        "RISK_FIRST_POLICY:clearly_positive_results": 16,
+        "RISK_FIRST_POLICY:bankruptcy_insolvency_or_receivership": 12,
+        "RISK_FIRST_POLICY:going_concern_or_default": 14,
+        "AI_ARBITRATION_QUARANTINED_LOW_CONFIDENCE": 22,
+        "RISK_FIRST_POLICY:binding_enforcement_or_fraud": 8,
+        "RISK_FIRST_POLICY:form25_listing_removal": 5,
+        "RISK_FIRST_POLICY:binding_enforcement_or_accounting_failure": 4,
+        "RISK_FIRST_POLICY:serious_product_safety": 5,
+        "RISK_FIRST_POLICY:resolved_or_alleviated_risk": 2,
+        "RISK_FIRST_POLICY:routine_policy_or_statistics": 3,
+        "RISK_FIRST_POLICY:active_listing_noncompliance": 1,
+        "RISK_FIRST_POLICY:documented_financial_distress": 2,
+        "RISK_FIRST_POLICY:resolution_or_administrative_action": 1
+      },
+      "human_arbitration_claimed": false
+    },
+    "development": {
+      "rows": 525,
+      "labels": {
+        "RISK_REVIEW": 76,
+        "NON_TARGET": 449
+      },
+      "provenance": {
+        "DUAL_REVIEW_TARGET_CONSENSUS": 231,
+        "AI_POLICY_OR_CONSENSUS_SEED_ADJUDICATION_NOT_HUMAN": 294
+      }
+    },
+    "threshold_selection": {
+      "threshold": 0.35,
+      "metrics": {
+        "rows": 77,
+        "label_counts": {
+          "RISK_REVIEW": 9,
+          "NON_TARGET": 68
+        },
+        "accuracy": 0.974025974025974,
+        "macro_f1": 0.9425373134328359,
+        "risk_recall": 1.0,
+        "risk_precision": 0.8181818181818182,
+        "non_target_false_risk_rate": 0.029411764705882353,
+        "confusion_matrix": [
+          [
+            9,
+            0
+          ],
+          [
+            2,
+            66
+          ]
+        ],
+        "errors": [
+          {
+            "sample_id": "hbv3-9b1ba728a762cac070f37a50",
+            "event_id": "FR-LIVE-e6ed5810f98690e0f75bc76ed1efd8c4",
+            "event_family": "listing_status",
+            "source_id": "sec_current_filings",
+            "expected": "NON_TARGET",
+            "predicted": "RISK_REVIEW",
+            "decision_basis": "TRAINED_MODEL",
+            "decision_confidence": 0.485517,
+            "risk_probability": 0.485517,
+            "text_preview": "8-K - Eightco Holdings Inc. (0001892492) (Filer) Filed: 2026-08-07 AccNo: 0001493152-26-036618 Size: 2 MB Item 3.01: Notice of Delisting or Failure to Satisfy a Continued Listing Rule or Standard; Transfer of Listing Item 9.01: Financial Statements and Exhibits …ecurities Exchange Act of 1934 (§240.12b-2 of this chapte"
+          },
+          {
+            "sample_id": "hbv3-9a7379f41a6e0565405c6bb7",
+            "event_id": "FR-LIVE-60cd4ae3f240cf660db4c673c6721b4d",
+            "event_family": "fundamental_distress",
+            "source_id": "sec_current_filings",
+            "expected": "NON_TARGET",
+            "predicted": "RISK_REVIEW",
+            "decision_basis": "TRAINED_MODEL",
+            "decision_confidence": 0.887824,
+            "risk_probability": 0.887824,
+            "text_preview": "6-K - Ferrovial N.V. (0001468522) (Filer) Filed: 2026-07-28 AccNo: 0001628280-26-050224 Size: 18 MB …EUR 4,271 million at December 2025). In the Financial Statements for the year 2025, the Group analyzed future cash needs as of December 2025, focusing on the financial years 2026 and 2027, and also including a pessimist"
+          }
+        ]
+      }
+    },
+    "threshold_selection_policy": "LOWEST_VALIDATION_THRESHOLD_WITH_RECALL_GE_0.90_AND_FALSE_RISK_LE_0.05",
+    "threshold_sweep": [
+      {
+        "threshold": 0.35,
+        "macro_f1": 0.9425373134328359,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.029411764705882353
+      },
+      {
+        "threshold": 0.38,
+        "macro_f1": 0.9425373134328359,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.029411764705882353
+      },
+      {
+        "threshold": 0.41,
+        "macro_f1": 0.9425373134328359,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.029411764705882353
+      },
+      {
+        "threshold": 0.44,
+        "macro_f1": 0.9425373134328359,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.029411764705882353
+      },
+      {
+        "threshold": 0.47,
+        "macro_f1": 0.9425373134328359,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.029411764705882353
+      },
+      {
+        "threshold": 0.5,
+        "macro_f1": 0.969980506822612,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.014705882352941176
+      },
+      {
+        "threshold": 0.53,
+        "macro_f1": 0.969980506822612,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.014705882352941176
+      },
+      {
+        "threshold": 0.56,
+        "macro_f1": 0.969980506822612,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.014705882352941176
+      },
+      {
+        "threshold": 0.59,
+        "macro_f1": 0.969980506822612,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.014705882352941176
+      },
+      {
+        "threshold": 0.62,
+        "macro_f1": 0.969980506822612,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.014705882352941176
+      },
+      {
+        "threshold": 0.65,
+        "macro_f1": 0.969980506822612,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.014705882352941176
+      },
+      {
+        "threshold": 0.68,
+        "macro_f1": 0.969980506822612,
+        "risk_recall": 1.0,
+        "non_target_false_risk_rate": 0.014705882352941176
+      }
+    ],
+    "internal_holdout": {
+      "rows": 77,
+      "label_counts": {
+        "RISK_REVIEW": 9,
+        "NON_TARGET": 68
+      },
+      "accuracy": 0.974025974025974,
+      "macro_f1": 0.9425373134328359,
+      "risk_recall": 1.0,
+      "risk_precision": 0.8181818181818182,
+      "non_target_false_risk_rate": 0.029411764705882353,
+      "confusion_matrix": [
+        [
+          9,
+          0
+        ],
+        [
+          2,
+          66
+        ]
+      ],
+      "errors": [
+        {
+          "sample_id": "hbv3-c4b689feedc4612634921872",
+          "event_id": "FR-LIVE-a7e65c4c99a8cca58ec73a0eb6e73625",
+          "event_family": "distress",
+          "source_id": "sec_current_filings",
+          "expected": "NON_TARGET",
+          "predicted": "RISK_REVIEW",
+          "decision_basis": "TRAINED_MODEL",
+          "decision_confidence": 0.588938,
+          "risk_probability": 0.588938,
+          "text_preview": "8-K - Latch, Inc. (0001826000) (Filer) Filed: 2026-07-30 AccNo: 0001104659-26-088410 Size: 528 KB Item 8.01: Other Events Item 9.01: Financial Statements and Exhibits …or counterclaim. 7.8 This Settlement may not be terminated, modified, or amended, except by an agreement in writing signed by the Parties or their respe"
+        },
+        {
+          "sample_id": "hbv3-c9689f080597e8a19c540e73",
+          "event_id": "FR-LIVE-3825feb54108ae548d7a906d83509fbd",
+          "event_family": "spac_capital_formation",
+          "source_id": "sec_current_filings",
+          "expected": "NON_TARGET",
+          "predicted": "RISK_REVIEW",
+          "decision_basis": "TRAINED_MODEL",
+          "decision_confidence": 0.580742,
+          "risk_probability": 0.580742,
+          "text_preview": "10-Q - Keystone Acquisition Corp. (0002102771) (Filer) Filed: 2026-08-13 AccNo: 0001213900-26-089140 Size: 4 MB …e that the Company will be able to consummate any Business Combination by March 4, 2028. No adjustments have been made to the carrying amounts of assets or liabilities should the Company be required to liqui"
+        }
+      ]
+    },
+    "external_blind_v3": {
+      "rows": 73,
+      "overlap_excluded": 7,
+      "overlap_audit": {
+        "event_id": 7,
+        "entity_group": 0,
+        "event_chain_group": 0,
+        "text_sha256": 0
+      },
+      "remaining_overlap_audit": {
+        "event_id": 0,
+        "entity_group": 0,
+        "event_chain_group": 0,
+        "text_sha256": 0
+      },
+      "full_accuracy": 0.9726027397260274,
+      "semantic": {
+        "rows": 53,
+        "label_counts": {
+          "NON_TARGET": 27,
+          "RISK_REVIEW": 26
+        },
+        "accuracy": 0.9622641509433962,
+        "macro_f1": 0.9621428571428572,
+        "risk_recall": 0.9230769230769231,
+        "risk_precision": 1.0,
+        "non_target_false_risk_rate": 0.0,
+        "confusion_matrix": [
+          [
+            24,
+            2
+          ],
+          [
+            0,
+            27
+          ]
+        ]
+      },
+      "abstain_rows": 20,
+      "abstain_recall": 1.0
+    },
+    "abstain_gate": {
+      "rows": 19,
+      "expected_abstain": 19,
+      "structured_gate_recall": 1.0
+    },
+    "baseline_comparison": {
+      "baseline_model_version": "risk-router-v4-c82cfde20465",
+      "internal_holdout": {
+        "rows": 77,
+        "label_counts": {
+          "RISK_REVIEW": 9,
+          "NON_TARGET": 68
+        },
+        "accuracy": 0.7922077922077922,
+        "macro_f1": 0.6507936507936508,
+        "risk_recall": 0.6666666666666666,
+        "risk_precision": 0.3157894736842105,
+        "non_target_false_risk_rate": 0.19117647058823528,
+        "confusion_matrix": [
+          [
+            6,
+            3
+          ],
+          [
+            13,
+            55
+          ]
+        ]
+      },
+      "external_blind_v3": {
+        "rows": 80,
+        "full_accuracy": 0.9625,
+        "semantic": {
+          "rows": 60,
+          "label_counts": {
+            "NON_TARGET": 30,
+            "RISK_REVIEW": 30
+          },
+          "accuracy": 0.95,
+          "macro_f1": 0.9499861072520144,
+          "risk_recall": 0.9666666666666667,
+          "risk_precision": 0.9354838709677419,
+          "non_target_false_risk_rate": 0.06666666666666667,
+          "confusion_matrix": [
+            [
+              29,
+              1
+            ],
+            [
+              2,
+              28
+            ]
+          ]
+        },
+        "abstain_recall": 1.0
+      }
+    },
+    "consensus_only_ablation": {
+      "purpose": "MEASURE_INCREMENTAL_EFFECT_OF_AI_ADJUDICATED_TRAINING_ROWS",
+      "training_rows": 231,
+      "threshold": 0.35,
+      "threshold_policy": "LOWEST_VALIDATION_THRESHOLD_WITH_RECALL_GE_0.90_AND_FALSE_RISK_LE_0.05",
+      "threshold_selection": {
+        "threshold": 0.35,
+        "metrics": {
+          "rows": 77,
+          "label_counts": {
+            "RISK_REVIEW": 9,
+            "NON_TARGET": 68
+          },
+          "accuracy": 0.987012987012987,
+          "macro_f1": 0.969980506822612,
+          "risk_recall": 1.0,
+          "risk_precision": 0.9,
+          "non_target_false_risk_rate": 0.014705882352941176,
+          "confusion_matrix": [
+            [
+              9,
+              0
+            ],
+            [
+              1,
+              67
+            ]
+          ],
+          "errors": [
+            {
+              "sample_id": "hbv3-9a7379f41a6e0565405c6bb7",
+              "event_id": "FR-LIVE-60cd4ae3f240cf660db4c673c6721b4d",
+              "event_family": "fundamental_distress",
+              "source_id": "sec_current_filings",
+              "expected": "NON_TARGET",
+              "predicted": "RISK_REVIEW",
+              "decision_basis": "TRAINED_MODEL",
+              "decision_confidence": 0.671863,
+              "risk_probability": 0.671863,
+              "text_preview": "6-K - Ferrovial N.V. (0001468522) (Filer) Filed: 2026-07-28 AccNo: 0001628280-26-050224 Size: 18 MB …EUR 4,271 million at December 2025). In the Financial Statements for the year 2025, the Group analyzed future cash needs as of December 2025, focusing on the financial years 2026 and 2027, and also including a pessimist"
+            }
+          ]
+        }
+      },
+      "internal_holdout": {
+        "rows": 77,
+        "label_counts": {
+          "RISK_REVIEW": 9,
+          "NON_TARGET": 68
+        },
+        "accuracy": 0.974025974025974,
+        "macro_f1": 0.9302536231884058,
+        "risk_recall": 0.7777777777777778,
+        "risk_precision": 1.0,
+        "non_target_false_risk_rate": 0.0,
+        "confusion_matrix": [
+          [
+            7,
+            2
+          ],
+          [
+            0,
+            68
+          ]
+        ],
+        "errors": [
+          {
+            "sample_id": "hbv3-7a155b894ec618f4ad60b119",
+            "event_id": "FR-LIVE-2b4079a3b3409bae9cb1928337607aad",
+            "event_family": "listing_status",
+            "source_id": "sec_current_filings",
+            "expected": "RISK_REVIEW",
+            "predicted": "NON_TARGET",
+            "decision_basis": "TRAINED_MODEL",
+            "decision_confidence": 0.866502,
+            "risk_probability": 0.133498,
+            "text_preview": "8-K - Fly-E Group, Inc. (0001975940) (Filer) Filed: 2026-07-23 AccNo: 0001213900-26-080994 Size: 207 KB Item 3.01: Notice of Delisting or Failure to Satisfy a Continued Listing Rule or Standard; Transfer of Listing Item 9.01: Financial Statements and Exhibits …curities Exchange Act of 1934 (§240.12b-2 of this chapter)."
+          },
+          {
+            "sample_id": "hbv3-ad54d0a68869e22884354ca7",
+            "event_id": "FR-LIVE-7132c6e821d37fdac5ba3185b2918199",
+            "event_family": "fundamental_distress",
+            "source_id": "sec_current_filings",
+            "expected": "RISK_REVIEW",
+            "predicted": "NON_TARGET",
+            "decision_basis": "TRAINED_MODEL",
+            "decision_confidence": 0.666719,
+            "risk_probability": 0.333281,
+            "text_preview": "10-Q - NovelStem International Corp. (0000912544) (Filer) Filed: 2026-08-14 AccNo: 0001493152-26-038089 Size: 4 MB …e decrease in current liabilities is primarily due to the reduction of accounts payable and the repayment of $50,000 on short-term borrowings as offset by interest accrued on debt and advances on short-te"
+          }
+        ]
+      },
+      "external_blind_v3": {
+        "rows": 79,
+        "overlap_excluded": 1,
+        "overlap_audit": {
+          "event_id": 1,
+          "entity_group": 0,
+          "event_chain_group": 0,
+          "text_sha256": 0
+        },
+        "remaining_overlap_audit": {
+          "event_id": 0,
+          "entity_group": 0,
+          "event_chain_group": 0,
+          "text_sha256": 0
+        },
+        "full_accuracy": 0.9367088607594937,
+        "semantic": {
+          "rows": 59,
+          "label_counts": {
+            "NON_TARGET": 29,
+            "RISK_REVIEW": 30
+          },
+          "accuracy": 0.9152542372881356,
+          "macro_f1": 0.9148629148629148,
+          "risk_recall": 0.8333333333333334,
+          "risk_precision": 1.0,
+          "non_target_false_risk_rate": 0.0,
+          "confusion_matrix": [
+            [
+              25,
+              5
+            ],
+            [
+              0,
+              29
+            ]
+          ]
+        },
+        "abstain_rows": 20,
+        "abstain_recall": 1.0
+      }
+    },
+    "overlap_audit": {
+      "development_vs_internal_holdout": {
+        "event_id": 0,
+        "entity_group": 0,
+        "event_chain_group": 0,
+        "text_sha256": 0
+      },
+      "development_vs_external": {
+        "event_id": 7,
+        "entity_group": 0,
+        "event_chain_group": 0,
+        "text_sha256": 0
+      }
+    },
+    "gates": {
+      "internal_macro_f1": true,
+      "internal_risk_recall": true,
+      "internal_false_risk": true,
+      "external_macro_f1": true,
+      "external_risk_recall": true,
+      "external_false_risk": true,
+      "no_internal_overlap": true,
+      "no_remaining_external_overlap": true
+    },
+    "gate_thresholds": {
+      "internal_macro_f1_min": 0.8,
+      "internal_risk_recall_min": 0.8,
+      "internal_false_risk_max": 0.15,
+      "external_macro_f1_min": 0.85,
+      "external_risk_recall_min": 0.85,
+      "external_false_risk_max": 0.1
+    },
+    "gate_pass": true,
+    "promotion_decision": "QUALIFIED_SHADOW_CANDIDATE",
+    "human_gold_mutated": false,
+    "human_only_labels_claimed": false,
+    "production_model_changed": false,
+    "no_trading": true
+  },
+  "limitations": [
+    "Conflict arbitration is AI policy/seed-model output, not a third human review.",
+    "Internal validation and holdout use only A/B target-label consensus but are not a sealed external human blind set.",
+    "External blind v3 is AI-rubric labeled and remains a compatibility test, not human ground truth.",
+    "The candidate is shadow-only and cannot place trades."
+  ],
+  "shadow": true,
+  "no_trading": true
+}

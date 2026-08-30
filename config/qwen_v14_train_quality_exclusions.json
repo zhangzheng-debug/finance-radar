@@ -1,0 +1,26 @@
+{
+  "contract_version": "qwen-train-quality-exclusions-v1",
+  "label_classification": "AI_REVIEW_NOT_HUMAN_GOLD",
+  "entries": [
+    {
+      "sample_id": "weak-372cb0dfc5038ca655133f2c",
+      "reason_code": "SOURCE_FIELD_CONFLICT",
+      "reason": "The passage reports restored Nasdaq equity-rule compliance, while the same input summary reports a Staff delisting determination and appeal; the resolved positive label does not cover the full contradictory input."
+    },
+    {
+      "sample_id": "hbv3-cc642de34dd2a89a472bd60b",
+      "reason_code": "SEQUENCE_LENGTH_HARDWARE_EXCLUSION",
+      "reason": "Label-blind TRAIN-only token audit measured 1344 tokens, above the fixed 1280-token all-linear LoRA hardware ceiling after an atomic OOM recovery."
+    },
+    {
+      "sample_id": "hbv3-4b1e8a246c40dd6d3f4a2ee9",
+      "reason_code": "SEQUENCE_LENGTH_HARDWARE_EXCLUSION",
+      "reason": "Label-blind TRAIN-only token audit measured 1321 tokens, above the fixed 1280-token all-linear LoRA hardware ceiling after an atomic OOM recovery."
+    },
+    {
+      "sample_id": "hbv3-eca21f9c101d2c5565242064",
+      "reason_code": "SEQUENCE_LENGTH_HARDWARE_EXCLUSION",
+      "reason": "Label-blind TRAIN-only token audit measured 1313 tokens, above the fixed 1280-token all-linear LoRA hardware ceiling after an atomic OOM recovery."
+    }
+  ]
+}
