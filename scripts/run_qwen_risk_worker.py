@@ -5,7 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from app.config import Settings
 from app.services import QwenRiskModelProvider, run_qwen_risk_batch
@@ -51,7 +57,11 @@ def main() -> int:
         },
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0 if not result["errors"] else 1
+    # A bounded batch can still make durable progress when individual model
+    # requests time out or fail contract validation.  Keep the timer healthy
+    # after partial success, while failing closed if the whole attempted batch
+    # produced no usable result.
+    return 1 if result["errors"] and not result.get("recorded") else 0
 
 
 if __name__ == "__main__":

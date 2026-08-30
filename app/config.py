@@ -121,8 +121,8 @@ class Settings:
     qwen_risk_url: str = "http://127.0.0.1:18602"
     qwen_risk_model: str = ""
     qwen_risk_adapter_sha256: str = ""
-    qwen_risk_timeout_seconds: float = 30.0
-    qwen_risk_max_tokens: int = 180
+    qwen_risk_timeout_seconds: float = 60.0
+    qwen_risk_max_tokens: int = 64
 
     def __post_init__(self) -> None:
         """Fail closed when scoped credentials can impersonate one another.
@@ -273,11 +273,11 @@ class Settings:
             ).strip().casefold(),
             qwen_risk_timeout_seconds=max(
                 1.0,
-                float(os.getenv("FINANCE_RADAR_QWEN_RISK_TIMEOUT_SECONDS", "30")),
+                float(os.getenv("FINANCE_RADAR_QWEN_RISK_TIMEOUT_SECONDS", "60")),
             ),
             qwen_risk_max_tokens=max(
                 64,
-                int(os.getenv("FINANCE_RADAR_QWEN_RISK_MAX_TOKENS", "180")),
+                int(os.getenv("FINANCE_RADAR_QWEN_RISK_MAX_TOKENS", "64")),
             ),
         )
 

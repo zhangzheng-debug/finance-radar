@@ -136,10 +136,47 @@ def test_training_and_runtime_share_one_canonical_content_shape() -> None:
     }
     prediction, _latency = provider.predict_content(content)
     assert prediction == expected_semantic_payload("MATERIAL_ADVERSE", "ADVERSE")
+    response_schema = calls[0][1]["json"]["response_format"]["json_schema"]["schema"]
+    assert response_schema["required"] == ["materiality", "polarity"]
     request_content = calls[0][1]["json"]["messages"][1]["content"]
     import json
 
     assert json.loads(request_content) == normalize_qwen_risk_content(content)
+
+
+def test_provider_derives_strength_and_priority_instead_of_trusting_model() -> None:
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": {
+                                "materiality": "NOT_MATERIAL_ADVERSE",
+                                "polarity": "POSITIVE",
+                                "adverse_strength": "HIGH",
+                                "semantic_priority": "PRIORITY_REVIEW",
+                            }
+                        }
+                    }
+                ]
+            }
+
+    provider = QwenRiskModelProvider(
+        "http://127.0.0.1:18602",
+        "qwen-risk-test",
+        "a" * 64,
+        request_fn=lambda *args, **kwargs: Response(),
+    )
+
+    prediction, _latency = provider.predict_content(
+        {"headline": "Revenue guidance was raised", "summary": "", "passages": []}
+    )
+
+    assert prediction == expected_semantic_payload("NOT_MATERIAL_ADVERSE", "POSITIVE")
 
 
 def test_provider_applies_narrow_hybrid_anchor_after_model_inference() -> None:
