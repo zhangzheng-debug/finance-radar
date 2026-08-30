@@ -15,6 +15,9 @@ from app.models.qwen_weak_supervision_contract import (
 )
 from scripts import build_qwen_semantic_core_v4_weak_dataset as builder
 from scripts.build_qwen_semantic_core_v4_weak_dataset import build_dataset, stable_json
+from scripts.qwen_supervision_leakage_guard import (
+    post_event_supervision_reasons,
+)
 
 
 def _row(sample: str, event: str, entity: str, chain: str, materiality: str, polarity: str) -> dict:
@@ -95,6 +98,77 @@ def test_builder_excludes_strict_entities_and_conflicting_duplicates(tmp_path: P
     ]
     assert all(row["metadata"]["target_contract"] == "core-v1" for row in prepared)
     assert manifest["target_contract"] == "core-v1"
+
+
+def test_builder_excludes_post_event_market_literals_in_source_text(tmp_path: Path) -> None:
+    dual = tmp_path / "dual.jsonl"
+    strict = tmp_path / "strict.jsonl"
+    leaked = _row(
+        "market-leak", "event-leak", "issuer:leak", "chain:leak",
+        "MATERIAL_ADVERSE", "ADVERSE",
+    )
+    leaked_content = json.loads(leaked["messages"][1]["content"])
+    leaked_content["headline"] = "CERO volume_crash candidate"
+    leaked_content["summary"] = (
+        "ret_1d <= -15%; value=ret_1d=-0.946927;volume_ratio=362.157"
+    )
+    leaked["messages"][1]["content"] = stable_json(leaked_content)
+
+    ordinary = _row(
+        "ordinary-price", "event-price", "issuer:price", "chain:price",
+        "NOT_MATERIAL_ADVERSE", "NEUTRAL",
+    )
+    ordinary_content = json.loads(ordinary["messages"][1]["content"])
+    ordinary_content["summary"] = "Shares closed at $10 after the filing."
+    ordinary["messages"][1]["content"] = stable_json(ordinary_content)
+
+    _write(dual, [leaked, ordinary])
+    _write(strict, [])
+    output = tmp_path / "output"
+    manifest = build_dataset(
+        dual_consensus=[dual], ai_assisted=[], deterministic_weak=[],
+        strict_indices=[strict], output_dir=output,
+    )
+
+    assert manifest["post_event_supervision_excluded_rows"] == 1
+    audit = (output / "leakage_exclusions.jsonl").read_text(encoding="utf-8")
+    assert "post_event_return_threshold" in audit
+    assert "post_event_volume_crash_candidate" in audit
+    assert "post_event_volume_ratio" in audit
+    outputs = (
+        (output / "qwen_core_v4_train_unique.jsonl").read_text(encoding="utf-8")
+        + (output / "qwen_core_v4_dev.jsonl").read_text(encoding="utf-8")
+    )
+    assert '"sample_id":"market-leak"' not in outputs
+    assert '"sample_id":"ordinary-price"' in outputs
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "ret_5m",
+        "return_30m",
+        "price_change_2h",
+        "next_close_return",
+        "abnormal_return_1d",
+        "relative_return_5d",
+    ),
+)
+def test_recursive_guard_rejects_structured_market_windows(field: str) -> None:
+    reasons = post_event_supervision_reasons(
+        {"nested": [{"audit": {field: -0.125}}]}
+    )
+
+    assert "post_event_structured_metric" in reasons
+
+
+def test_recursive_guard_preserves_ordinary_source_price_facts() -> None:
+    assert post_event_supervision_reasons(
+        {
+            "headline": "Shares closed at $10 after the filing.",
+            "summary": "The filing says revenue was $25 million.",
+        }
+    ) == []
 
 
 def test_component_split_keeps_same_entity_together(tmp_path: Path) -> None:

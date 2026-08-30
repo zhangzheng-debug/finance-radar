@@ -17,6 +17,7 @@ from scripts.evaluate_qwen_semantic_adapter import (
     extract_json_object,
     gate_decision,
     load_evaluation_dataset,
+    load_jsonl,
     normalize_expected_payload,
     normalize_model_output,
     normalize_payload,
@@ -38,6 +39,21 @@ def _row(expected, predicted, *, valid=True):
         "contract_valid": valid,
         "exact_match": valid and expected == predicted,
     }
+
+
+def test_load_jsonl_supports_offline_companion_evaluators(tmp_path: Path) -> None:
+    path = tmp_path / "rows.jsonl"
+    path.write_text('{"sample_id":"one"}\n\n{"sample_id":"two"}\n', encoding="utf-8")
+
+    assert load_jsonl(path) == [{"sample_id": "one"}, {"sample_id": "two"}]
+
+
+def test_load_jsonl_rejects_non_object_rows(tmp_path: Path) -> None:
+    path = tmp_path / "rows.jsonl"
+    path.write_text('[1,2,3]\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="is not an object"):
+        load_jsonl(path)
 
 
 def _dataset_row(

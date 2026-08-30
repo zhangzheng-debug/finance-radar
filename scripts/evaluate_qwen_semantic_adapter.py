@@ -61,6 +61,27 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def load_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Load an object-only JSONL file for offline companion evaluators."""
+
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    rows: list[dict[str, Any]] = []
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"JSONL line {line_number} is not valid JSON: {path}") from exc
+        if not isinstance(row, dict):
+            raise ValueError(f"JSONL line {line_number} is not an object: {path}")
+        rows.append(row)
+    return rows
+
+
 def _sampled_file_fingerprint(path: Path) -> dict[str, Any]:
     """Hash small files fully and sample the ends of large base-model files."""
 

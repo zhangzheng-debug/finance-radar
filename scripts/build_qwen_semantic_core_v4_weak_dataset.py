@@ -41,6 +41,9 @@ from app.models.qwen_weak_supervision_contract import (  # noqa: E402
     QWEN_WEAK_SYSTEM_PROMPT,
 )
 from scripts.train_risk_router_ai_adjudicated import _risk_first_policy  # noqa: E402
+from scripts.qwen_supervision_leakage_guard import (  # noqa: E402
+    post_event_supervision_reasons,
+)
 
 
 DATASET_CONTRACT = QWEN_WEAK_SUPERVISION_VERSION
@@ -56,7 +59,6 @@ PAIR_MULTIPLIERS = {
     (materiality, polarity): multiplier
     for materiality, polarity, multiplier in QWEN_WEAK_DEFAULT_PAIR_MULTIPLIERS
 }
-
 
 def stable_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -631,6 +633,7 @@ def build_dataset(
     leak_free: list[dict[str, Any]] = []
     for row in candidates:
         reasons = _leak_reasons(row, strict)
+        reasons.extend(post_event_supervision_reasons(row["content"]))
         if canonical_issuers is not None and not row.get("canonical_issuer_key"):
             reasons.append("canonical_issuer_unresolved")
         if (
@@ -936,6 +939,13 @@ def build_dataset(
         "canonical_provisional_excluded_rows": sum(
             "canonical_issuer_not_strong" in row.get("reasons", []) for row in leakage
         ),
+        "post_event_supervision_excluded_rows": sum(
+            any(
+                str(reason).startswith("post_event_")
+                for reason in row.get("reasons", [])
+            )
+            for row in leakage
+        ),
         "quality_excluded_rows": len(quality_removed),
         "policy_excluded_rows": 0,
         "policy_disagreement_rows": len(policy_disagreements),
@@ -991,6 +1001,7 @@ def build_dataset(
         "leakage_policy": [
             "sample_id", "event_id", "entity_group", "canonical_issuer_key",
             "event_chain_group", "content_and_provider_hashes",
+            "recursive_post_event_supervision_fields_and_literals",
         ],
         "qwen_predictions_used": False,
         "market_outcomes_used": False,

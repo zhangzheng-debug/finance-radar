@@ -1,0 +1,11 @@
+{
+  "contract_version": "qwen-train-quality-exclusions-v1",
+  "label_classification": "AI_REVIEW_NOT_HUMAN_GOLD",
+  "entries": [
+    {
+      "sample_id": "weak-372cb0dfc5038ca655133f2c",
+      "reason_code": "SOURCE_FIELD_CONFLICT",
+      "reason": "The passage reports restored Nasdaq equity-rule compliance, while the same input summary reports a Staff delisting determination and appeal; the resolved positive label does not cover the full contradictory input."
+    }
+  ]
+}

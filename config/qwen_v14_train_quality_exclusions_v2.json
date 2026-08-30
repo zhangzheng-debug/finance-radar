@@ -1,0 +1,182 @@
+{
+  "contract_version": "qwen-train-quality-exclusions-v2",
+  "label_classification": "AI_REVIEW_NOT_HUMAN_GOLD",
+  "entries": [
+    {
+      "sample_id": "weak-372cb0dfc5038ca655133f2c",
+      "reason_code": "SOURCE_FIELD_CONFLICT",
+      "reason": "The passage reports restored Nasdaq equity-rule compliance, while the same input summary reports a Staff delisting determination and appeal; the resolved positive label does not cover the full contradictory input."
+    },
+    {
+      "sample_id": "hbv3-cc642de34dd2a89a472bd60b",
+      "reason_code": "SEQUENCE_LENGTH_HARDWARE_EXCLUSION",
+      "reason": "Label-blind TRAIN-only token audit measured 1344 tokens, above the fixed 1280-token all-linear LoRA hardware ceiling after an atomic OOM recovery.",
+      "evidence": {
+        "measured_full_tokens": 1344,
+        "max_length": 1280,
+        "source_unique_row_sha256": "02168751c23cd828cc70cb647b56a5a0c508d043f55f1f8b57ff7d38c130d9bc",
+        "unique_dataset_sha256": "84a56b8818da9f6050235843cd26a77ad90f1bab2bc18c436cb2e12ca561a7af",
+        "base_model_weights_sha256": "dd924a11b4c220f385b51ffa522daea7c9f3d850e31b162bb5661df483c6d3ee",
+        "tokenizer_bundle_sha256": "d6924ecc540a1e1b135355a3493282626178f2ff724dc184838195a0eda69020",
+        "chat_template_sha256": "cd8e9439f0570856fd70470bf8889ebd8b5d1107207f67a5efb46e342330527f",
+        "measurement_tool_version": "qwen-train-token-audit-v2",
+        "target_modules": [
+          "down_proj",
+          "gate_proj",
+          "k_proj",
+          "o_proj",
+          "q_proj",
+          "up_proj",
+          "v_proj"
+        ],
+        "hardware_plan": {
+          "contract_version": "qwen-sequence-length-hardware-plan-v1",
+          "quantization": {
+            "load_in_4bit": true,
+            "bnb_4bit_quant_type": "nf4",
+            "bnb_4bit_use_double_quant": true,
+            "bnb_4bit_compute_dtype": "float16",
+            "bnb_4bit_quant_storage": "uint8"
+          },
+          "lora": {
+            "r": 8,
+            "lora_alpha": 32,
+            "lora_dropout": 0.05,
+            "target_modules": [
+              "down_proj",
+              "gate_proj",
+              "k_proj",
+              "o_proj",
+              "q_proj",
+              "up_proj",
+              "v_proj"
+            ]
+          },
+          "training": {
+            "per_device_train_batch_size": 1,
+            "gradient_accumulation_steps": 16,
+            "max_length": 1280,
+            "optimizer": "paged_adamw_8bit",
+            "gradient_checkpointing": true
+          }
+        },
+        "hardware_plan_sha256": "cce7f77d432d9e4b44483a7f00b084861d0042590e3cf7cb5c8e571174d0dc2e",
+        "token_audit_receipt_sha256": "eda7dcdedaaae79ee78b72c2d7ab113209adf08f30df7630c9ad2ec9a59ac739"
+      }
+    },
+    {
+      "sample_id": "hbv3-4b1e8a246c40dd6d3f4a2ee9",
+      "reason_code": "SEQUENCE_LENGTH_HARDWARE_EXCLUSION",
+      "reason": "Label-blind TRAIN-only token audit measured 1321 tokens, above the fixed 1280-token all-linear LoRA hardware ceiling after an atomic OOM recovery.",
+      "evidence": {
+        "measured_full_tokens": 1321,
+        "max_length": 1280,
+        "source_unique_row_sha256": "8e69f7c5ee1d2a53bd05e8b054f4205a7bf932112cb4290edcfac2d17e9acff4",
+        "unique_dataset_sha256": "84a56b8818da9f6050235843cd26a77ad90f1bab2bc18c436cb2e12ca561a7af",
+        "base_model_weights_sha256": "dd924a11b4c220f385b51ffa522daea7c9f3d850e31b162bb5661df483c6d3ee",
+        "tokenizer_bundle_sha256": "d6924ecc540a1e1b135355a3493282626178f2ff724dc184838195a0eda69020",
+        "chat_template_sha256": "cd8e9439f0570856fd70470bf8889ebd8b5d1107207f67a5efb46e342330527f",
+        "measurement_tool_version": "qwen-train-token-audit-v2",
+        "target_modules": [
+          "down_proj",
+          "gate_proj",
+          "k_proj",
+          "o_proj",
+          "q_proj",
+          "up_proj",
+          "v_proj"
+        ],
+        "hardware_plan": {
+          "contract_version": "qwen-sequence-length-hardware-plan-v1",
+          "quantization": {
+            "load_in_4bit": true,
+            "bnb_4bit_quant_type": "nf4",
+            "bnb_4bit_use_double_quant": true,
+            "bnb_4bit_compute_dtype": "float16",
+            "bnb_4bit_quant_storage": "uint8"
+          },
+          "lora": {
+            "r": 8,
+            "lora_alpha": 32,
+            "lora_dropout": 0.05,
+            "target_modules": [
+              "down_proj",
+              "gate_proj",
+              "k_proj",
+              "o_proj",
+              "q_proj",
+              "up_proj",
+              "v_proj"
+            ]
+          },
+          "training": {
+            "per_device_train_batch_size": 1,
+            "gradient_accumulation_steps": 16,
+            "max_length": 1280,
+            "optimizer": "paged_adamw_8bit",
+            "gradient_checkpointing": true
+          }
+        },
+        "hardware_plan_sha256": "cce7f77d432d9e4b44483a7f00b084861d0042590e3cf7cb5c8e571174d0dc2e",
+        "token_audit_receipt_sha256": "9f75cb89e687fb3ee7ab16777eb5bbf68763529dd0b3934749ab68a0f6669c69"
+      }
+    },
+    {
+      "sample_id": "hbv3-eca21f9c101d2c5565242064",
+      "reason_code": "SEQUENCE_LENGTH_HARDWARE_EXCLUSION",
+      "reason": "Label-blind TRAIN-only token audit measured 1313 tokens, above the fixed 1280-token all-linear LoRA hardware ceiling after an atomic OOM recovery.",
+      "evidence": {
+        "measured_full_tokens": 1313,
+        "max_length": 1280,
+        "source_unique_row_sha256": "0bcf6c5c1168456fe9052fa76c9243257cfa7405640aa7c9a1e902c5cf380b82",
+        "unique_dataset_sha256": "84a56b8818da9f6050235843cd26a77ad90f1bab2bc18c436cb2e12ca561a7af",
+        "base_model_weights_sha256": "dd924a11b4c220f385b51ffa522daea7c9f3d850e31b162bb5661df483c6d3ee",
+        "tokenizer_bundle_sha256": "d6924ecc540a1e1b135355a3493282626178f2ff724dc184838195a0eda69020",
+        "chat_template_sha256": "cd8e9439f0570856fd70470bf8889ebd8b5d1107207f67a5efb46e342330527f",
+        "measurement_tool_version": "qwen-train-token-audit-v2",
+        "target_modules": [
+          "down_proj",
+          "gate_proj",
+          "k_proj",
+          "o_proj",
+          "q_proj",
+          "up_proj",
+          "v_proj"
+        ],
+        "hardware_plan": {
+          "contract_version": "qwen-sequence-length-hardware-plan-v1",
+          "quantization": {
+            "load_in_4bit": true,
+            "bnb_4bit_quant_type": "nf4",
+            "bnb_4bit_use_double_quant": true,
+            "bnb_4bit_compute_dtype": "float16",
+            "bnb_4bit_quant_storage": "uint8"
+          },
+          "lora": {
+            "r": 8,
+            "lora_alpha": 32,
+            "lora_dropout": 0.05,
+            "target_modules": [
+              "down_proj",
+              "gate_proj",
+              "k_proj",
+              "o_proj",
+              "q_proj",
+              "up_proj",
+              "v_proj"
+            ]
+          },
+          "training": {
+            "per_device_train_batch_size": 1,
+            "gradient_accumulation_steps": 16,
+            "max_length": 1280,
+            "optimizer": "paged_adamw_8bit",
+            "gradient_checkpointing": true
+          }
+        },
+        "hardware_plan_sha256": "cce7f77d432d9e4b44483a7f00b084861d0042590e3cf7cb5c8e571174d0dc2e",
+        "token_audit_receipt_sha256": "8dea5c09a80af4a797397971a58cb326a4f654750188eb33a392484c5ff4c425"
+      }
+    }
+  ]
+}
