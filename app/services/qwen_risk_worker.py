@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Protocol
 
 from app.storage import LedgerRepository, OperationsRepository
 
 
-QWEN_RISK_FAIR_CURSOR_STATE_KEY = "qwen_risk_fair_cursor_v1"
+QWEN_RISK_FAIR_CURSOR_STATE_KEY = "qwen_risk_fair_cursor_v2"
 
 
 class QwenProvider(Protocol):
@@ -31,23 +32,32 @@ def _fair_batch(
     operations: OperationsRepository,
     *,
     scan_limit: int,
-) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, int]]:
+) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, Any]]:
     recent_limit = max(1, scan_limit // 2)
     fair_limit = max(0, scan_limit - recent_limit)
-    recent = ledger.shadow_batch(limit=recent_limit)
+    recent = ledger.shadow_batch(
+        limit=recent_limit,
+        semantic_events_only=True,
+    )
     state = operations.get_state(QWEN_RISK_FAIR_CURSOR_STATE_KEY, {})
-    try:
-        fair_offset = max(0, int((state or {}).get("next_offset") or 0))
-    except (AttributeError, TypeError, ValueError):
-        fair_offset = 0
+    fair_after_event_id = str((state or {}).get("after_event_id") or "").strip() or None
     fair = (
-        ledger.shadow_batch(limit=fair_limit, offset=fair_offset, order="event_id")
+        ledger.shadow_batch(
+            limit=fair_limit,
+            order="event_id",
+            after_event_id=fair_after_event_id,
+            semantic_events_only=True,
+        )
         if fair_limit
         else []
     )
-    if fair_limit and not fair and fair_offset:
-        fair_offset = 0
-        fair = ledger.shadow_batch(limit=fair_limit, offset=0, order="event_id")
+    if fair_limit and not fair and fair_after_event_id:
+        fair_after_event_id = None
+        fair = ledger.shadow_batch(
+            limit=fair_limit,
+            order="event_id",
+            semantic_events_only=True,
+        )
     selected: list[tuple[str, dict[str, Any]]] = []
     for index in range(max(len(recent), len(fair))):
         if index < len(recent):
@@ -57,9 +67,20 @@ def _fair_batch(
     return selected, {
         "recent_loaded": len(recent),
         "fair_loaded": len(fair),
-        "fair_offset": fair_offset,
+        "fair_after_event_id": fair_after_event_id,
         "fair_limit": fair_limit,
     }
+
+
+def _assess_candidate(
+    provider: QwenProvider,
+    candidate: tuple[str, dict[str, Any], list[dict[str, Any]]],
+) -> tuple[str, dict[str, Any] | None, Exception | None]:
+    event_id, detail, evidence = candidate
+    try:
+        return event_id, provider.assess(detail, evidence), None
+    except Exception as exc:  # isolated per immutable event input
+        return event_id, None, exc
 
 
 def run_qwen_risk_batch(
@@ -69,11 +90,13 @@ def run_qwen_risk_batch(
     *,
     scan_limit: int = 100,
     run_limit: int = 20,
+    concurrency: int = 1,
 ) -> dict[str, Any]:
     """Assess a bounded recent/fair window without blocking collection or UI."""
 
     scan_limit = max(2, min(int(scan_limit), 200))
     run_limit = max(1, min(int(run_limit), 100))
+    concurrency = max(1, min(int(concurrency), 4))
     selected, selection = _fair_batch(ledger, operations, scan_limit=scan_limit)
     versions: dict[str, int] = {}
     for _lane, item in selected:
@@ -91,13 +114,17 @@ def run_qwen_risk_batch(
     errors: list[str] = []
     seen: set[str] = set()
     fair_examined = 0
+    last_fair_event_id: str | None = None
+    candidates: list[tuple[str, dict[str, Any], list[dict[str, Any]]]] = []
     for lane, item in selected:
         if counters["attempted"] >= run_limit:
             break
-        if lane == "fair":
-            fair_examined += 1
         event = _event(item)
         event_id = str(event.get("event_id") or "")
+        if lane == "fair":
+            fair_examined += 1
+            if event_id:
+                last_fair_event_id = event_id
         if not event_id or event_id in seen:
             counters["deduplicated" if event_id else "missing"] += 1
             continue
@@ -119,7 +146,31 @@ def run_qwen_risk_batch(
                 counters["already_current"] += 1
                 continue
             counters["attempted"] += 1
-            result = provider.assess(detail, evidence)
+            candidates.append((event_id, detail, evidence))
+        except Exception as exc:
+            counters["errors"] += 1
+            errors.append(f"{event_id}:{type(exc).__name__}:{str(exc)[:240]}")
+
+    if concurrency == 1:
+        outcomes = [_assess_candidate(provider, candidate) for candidate in candidates]
+    else:
+        with ThreadPoolExecutor(
+            max_workers=concurrency,
+            thread_name_prefix="qwen-risk",
+        ) as executor:
+            outcomes = list(
+                executor.map(
+                    lambda candidate: _assess_candidate(provider, candidate),
+                    candidates,
+                )
+            )
+    for event_id, result, error in outcomes:
+        if error is not None or result is None:
+            exc = error or RuntimeError("QWEN_RISK_EMPTY_RESULT")
+            counters["errors"] += 1
+            errors.append(f"{event_id}:{type(exc).__name__}:{str(exc)[:240]}")
+            continue
+        try:
             _run_id, created = operations.record_model_run_once(event_id, result)
             counters["recorded" if created else "already_current"] += 1
             counters[f"priority:{result.get('semantic_priority')}"] += int(created)
@@ -130,15 +181,17 @@ def run_qwen_risk_batch(
 
     fair_loaded = selection["fair_loaded"]
     if fair_examined >= fair_loaded and fair_loaded < selection["fair_limit"]:
-        next_offset = 0
+        next_after_event_id = None
     else:
-        next_offset = selection["fair_offset"] + fair_examined
+        next_after_event_id = (
+            last_fair_event_id or selection["fair_after_event_id"]
+        )
     if selection["fair_limit"]:
         operations.set_state(
             QWEN_RISK_FAIR_CURSOR_STATE_KEY,
             {
-                "next_offset": next_offset,
-                "last_window_offset": selection["fair_offset"],
+                "after_event_id": next_after_event_id,
+                "last_window_after_event_id": selection["fair_after_event_id"],
                 "last_loaded": fair_loaded,
                 "last_examined": fair_examined,
             },
@@ -160,7 +213,12 @@ def run_qwen_risk_batch(
             for key, value in counters.items()
             if key.startswith("scope:")
         },
-        "selection": {**selection, "fair_examined": fair_examined, "next_offset": next_offset},
+        "selection": {
+            **selection,
+            "fair_examined": fair_examined,
+            "next_after_event_id": next_after_event_id,
+        },
+        "concurrency": concurrency,
         "independent_from_collection": True,
         "persisted_before_display": True,
         "no_trading": True,

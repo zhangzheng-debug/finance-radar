@@ -71,6 +71,13 @@ GENERIC_SOURCE_HEADLINE = re.compile(
     r"^[a-z0-9.\-]+\s+[a-z0-9_\-]+\s+candidate$",
     re.I,
 )
+GENERIC_SEC_FILING_SUMMARY = re.compile(
+    r"^(?:filed|提交日期)\s*[:：]\s*\d{4}-\d{2}-\d{2}"
+    r"(?:\s+(?:accno|accession(?:\s+number)?|注册号)\s*[:：]\s*[0-9-]+)?"
+    r"(?:\s+(?:size|大小)\s*[:：]\s*\d+(?:\.\d+)?\s*(?:bytes?|kb|mb|gb))?"
+    r"(?:\s+items?\s+.*)?$",
+    re.I,
+)
 GENERIC_SOURCE_SUMMARY_PREFIXES = (
     "action in delisted/voluntarydelisting; value=delisted",
     "certifies that it has reasonable grounds to believe that it meets all of the requirements for filing the form 25",
@@ -100,7 +107,9 @@ def _is_generic_source_summary(value: str | None) -> bool:
     """Return whether an excerpt is provider/form boilerplate, not event text."""
 
     normalized = " ".join(str(value or "").casefold().split())
-    return normalized.startswith(GENERIC_SOURCE_SUMMARY_PREFIXES)
+    return normalized.startswith(GENERIC_SOURCE_SUMMARY_PREFIXES) or bool(
+        normalized and GENERIC_SEC_FILING_SUMMARY.fullmatch(normalized)
+    )
 
 
 def _count(value: Any) -> int:

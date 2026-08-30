@@ -306,6 +306,26 @@ def test_public_display_headline_rejects_form_25_and_discovery_boilerplate() -> 
         assert result["display_headline"] == "Example Corp · 2026-08-26"
 
 
+def test_public_display_headline_rejects_sec_directory_metadata() -> None:
+    result = derive_public_display_headline(
+        {
+            "reader_ready": 0,
+            "company_name": "Nano Dimension Ltd.",
+            "event_date": "2026-08-18",
+        },
+        {
+            "source_title": "8-K - Nano Dimension Ltd. (0001643303) (Filer)",
+            "source_summary": (
+                "Filed: 2026-08-18 AccNo: 0001193125-26-354738 Size: 207 KB "
+                "Item 5.02: Departure of Directors or Certain Officers"
+            ),
+        },
+    )
+
+    assert result["headline_mode"] == "RECORD"
+    assert result["display_headline"] == "Nano Dimension Ltd. · 2026-08-18"
+
+
 def test_public_risk_projection_requires_current_version_and_applicable_confidence() -> None:
     run = {
         "output_label": "RISK_REVIEW",

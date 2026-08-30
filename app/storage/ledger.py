@@ -32,6 +32,50 @@ EVIDENCE_SNAPSHOT_SOURCE_IDS = (
 )
 
 
+def _public_semantic_event_sql(alias: str) -> str:
+    """Return the public meaning gate for one canonical-event SQL alias.
+
+    Historical ``sec_current_filings`` rows include both real extracted events
+    and filing-directory captures.  A form name, accession number and file size
+    are useful source metadata, but they do not answer what happened.  Keep the
+    captures in the ledger for enrichment/audit while admitting only SEC rows
+    whose current version has the complete structured-fact contract.
+
+    Non-SEC sources already enter through source-specific semantic collectors;
+    they remain visible without being forced into the SEC fact schema.
+    """
+
+    if alias not in {"ce", "e"}:
+        raise ValueError(f"unsupported event SQL alias: {alias}")
+    return f"""(
+      COALESCE({alias}.discovery_source,'')!='sec_current_filings'
+      OR EXISTS (
+        SELECT 1
+        FROM event_versions semantic_version
+        WHERE semantic_version.event_id={alias}.event_id
+          AND semantic_version.version={alias}.current_version
+          AND json_valid(semantic_version.facts_json)
+          AND LENGTH(TRIM(COALESCE(json_extract(
+                semantic_version.facts_json,'$.public_fact_summary'
+              ),'')))>=20
+          AND LENGTH(TRIM(COALESCE(json_extract(
+                semantic_version.facts_json,'$.claim_subject'
+              ),'')))>=2
+          AND LENGTH(TRIM(COALESCE(json_extract(
+                semantic_version.facts_json,'$.claim_action'
+              ),'')))>=3
+          AND UPPER(TRIM(COALESCE(json_extract(
+                semantic_version.facts_json,'$.claim_stage'
+              ),''))) IN (
+                'PROPOSED','FILED','DISCLOSED','EFFECTIVE','ONGOING','COMPLETED'
+              )
+          AND LENGTH(TRIM(COALESCE(json_extract(
+                semantic_version.facts_json,'$.known_at'
+              ),'')))>=20
+      )
+    )"""
+
+
 _CURRENT_SOURCE_CONTENT_CTES = """
 ranked_source_revisions AS (
     SELECT sr.*,
@@ -1735,6 +1779,8 @@ class LedgerRepository:
         offset: int = 0,
         order: str = "latest",
         event_ids: list[str] | None = None,
+        after_event_id: str | None = None,
+        semantic_events_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Load recent shadow-router inputs with two bounded SQL queries.
 
@@ -1742,9 +1788,11 @@ class LedgerRepository:
         page and again for every event.  On the production ledger that made a
         bounded shadow batch take longer than the whole worker deadline.
 
-        ``order='event_id'`` plus ``offset`` is reserved for the durable fair
-        queue.  It walks the whole canonical ledger in stable windows while the
-        default recent lane keeps newly changed events responsive.
+        ``order='event_id'`` plus ``after_event_id`` is reserved for the durable
+        fair queue.  Keyset traversal cannot skip rows when the eligible set
+        changes while the default recent lane keeps newly changed events
+        responsive.  ``semantic_events_only`` prevents source-directory
+        metadata from consuming model capacity.
         """
 
         requested_event_ids = list(
@@ -1756,12 +1804,17 @@ class LedgerRepository:
         )[:200]
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
+        after_event_id = str(after_event_id or "").strip() or None
         sort_orders = {
             "latest": "ce.last_updated_at DESC,ce.event_id DESC",
             "event_id": "ce.event_id ASC",
         }
         if order not in sort_orders:
             raise ValueError(f"unsupported shadow batch order: {order}")
+        if after_event_id is not None and order != "event_id":
+            raise ValueError("after_event_id requires order='event_id'")
+        if after_event_id is not None and offset:
+            raise ValueError("after_event_id and offset are mutually exclusive")
         with closing(self.connect()) as connection:
             # Select the bounded event window before touching observations or
             # revisions.  The previous query embedded the global
@@ -1769,13 +1822,31 @@ class LedgerRepository:
             # revision before SQLite could apply LIMIT.  On the production
             # ledger that made a 200-event shadow window consume the outer
             # ten-minute worker deadline.
-            event_filter = ""
+            event_conditions: list[str] = []
             event_params: list[Any] = []
             if requested_event_ids:
-                event_filter = "WHERE ce.event_id IN (" + ",".join(
-                    "?" for _ in requested_event_ids
-                ) + ")"
+                event_conditions.append(
+                    "ce.event_id IN ("
+                    + ",".join("?" for _ in requested_event_ids)
+                    + ")"
+                )
                 event_params.extend(requested_event_ids)
+            if semantic_events_only:
+                event_conditions.append(_public_semantic_event_sql("ce"))
+            if after_event_id is not None:
+                event_conditions.append("ce.event_id>?")
+                event_params.append(after_event_id)
+            event_filter = (
+                "WHERE " + " AND ".join(event_conditions)
+                if event_conditions
+                else ""
+            )
+            pagination_sql = (
+                "LIMIT ?" if after_event_id is not None else "LIMIT ? OFFSET ?"
+            )
+            pagination_params: tuple[Any, ...] = (
+                (limit,) if after_event_id is not None else (limit, offset)
+            )
             event_rows = connection.execute(
                 f"""SELECT ce.*,v.facts_json
                     FROM canonical_events ce
@@ -1783,8 +1854,8 @@ class LedgerRepository:
                       ON v.event_id=ce.event_id AND v.version=ce.current_version
                     {event_filter}
                     ORDER BY {sort_orders[order]}
-                    LIMIT ? OFFSET ?""",
-                (*event_params, limit, offset),
+                    {pagination_sql}""",
+                (*event_params, *pagination_params),
             ).fetchall()
             event_ids = [str(row["event_id"]) for row in event_rows]
             preferred_source_by_event: dict[str, dict[str, Any]] = {
@@ -2470,6 +2541,7 @@ class LedgerRepository:
         reader_ready: bool | None = None,
         captured_source_required: bool = False,
         exclude_nonfinancial_retractions: bool = False,
+        semantic_events_only: bool = False,
         source_excerpt_chars: int | None = None,
         sort: str = "event_date",
         limit: int = 50,
@@ -2510,6 +2582,8 @@ class LedgerRepository:
 
         where: list[str] = []
         params: list[Any] = []
+        if semantic_events_only:
+            where.append(_public_semantic_event_sql("e"))
         if exclude_nonfinancial_retractions:
             where.append(
                 "NOT EXISTS (SELECT 1 FROM event_versions vnoise "
@@ -2619,6 +2693,7 @@ class LedgerRepository:
                 "reader_ready": reader_ready,
                 "captured_source_required": captured_source_required,
                 "exclude_nonfinancial_retractions": exclude_nonfinancial_retractions,
+                "semantic_events_only": semantic_events_only,
                 "sort": sort,
             }
 
@@ -2734,6 +2809,7 @@ class LedgerRepository:
             "reader_ready": reader_ready,
             "captured_source_required": captured_source_required,
             "exclude_nonfinancial_retractions": exclude_nonfinancial_retractions,
+            "semantic_events_only": semantic_events_only,
             "sort": sort,
         }
 
@@ -2742,10 +2818,13 @@ class LedgerRepository:
         *,
         reader_ready: bool | None = None,
         exclude_nonfinancial_retractions: bool = False,
+        semantic_events_only: bool = False,
     ) -> dict[str, Any]:
         """Return bounded, live filter suggestions without exposing event content."""
         source_table = "canonical_events" if reader_ready is None else "event_public"
         conditions = [] if reader_ready is None else ["e.reader_ready=?"]
+        if semantic_events_only:
+            conditions.append(_public_semantic_event_sql("e"))
         if exclude_nonfinancial_retractions:
             conditions.append(
                 "NOT EXISTS (SELECT 1 FROM event_versions vnoise "
@@ -2789,19 +2868,28 @@ class LedgerRepository:
             "sources": sources,
             "reader_ready": reader_ready,
             "exclude_nonfinancial_retractions": exclude_nonfinancial_retractions,
+            "semantic_events_only": semantic_events_only,
             "read_only": True,
             "no_trading": True,
         }
 
-    def event_detail(self, event_id: str) -> dict[str, Any] | None:
+    def event_detail(
+        self,
+        event_id: str,
+        *,
+        semantic_events_only: bool = False,
+    ) -> dict[str, Any] | None:
         with closing(self.connect()) as connection:
             # A detail read must not evaluate the public evidence contract for
             # every event in the ledger.  The public feed already uses this
             # page-scoped projection; bounding it to one canonical row keeps a
             # cold dossier read proportional to the selected event instead of
             # the full production history.
+            event_where = "WHERE e.event_id=?"
+            if semantic_events_only:
+                event_where += " AND " + _public_semantic_event_sql("e")
             event_state_cte = _page_scoped_public_event_state_cte(
-                where_sql="WHERE e.event_id=?",
+                where_sql=event_where,
                 sort_sql="e.event_id ASC",
             )
             event = _dict(
