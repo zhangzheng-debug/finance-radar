@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from streamlit.testing.v1 import AppTest
+
+import app.web.common as web_common
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "app" / "web" / "pages" / "5_Method_and_Boundaries.py"
+
+
+@pytest.fixture(autouse=True)
+def _authenticated_public_reader(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "require_public_login", lambda: None)
 
 
 def test_public_method_page_explains_evidence_without_internal_details() -> None:

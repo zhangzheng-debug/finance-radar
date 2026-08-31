@@ -36,6 +36,140 @@
     }
     button, input, select { font: inherit; }
     button { cursor: pointer; }
+    body:not(.is-authenticated) .shell { display: none; }
+    body.is-authenticated .login-screen { display: none; }
+    .login-screen {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 32px;
+      background:
+        radial-gradient(circle at 18% 12%, rgb(0 127 121 / .09), transparent 33%),
+        linear-gradient(135deg, var(--surface) 0 48%, var(--canvas) 48% 100%);
+    }
+    .login-frame {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(340px, .72fr);
+      width: min(980px, 100%);
+      min-height: 590px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .login-story {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 54px;
+      overflow: hidden;
+      background: linear-gradient(145deg, #edf5f0, #f8f8f3 62%);
+      border-right: 1px solid var(--line);
+    }
+    .login-story::after {
+      content: "";
+      position: absolute;
+      right: -110px;
+      bottom: -120px;
+      width: 360px;
+      height: 360px;
+      border: 1px solid rgb(0 127 121 / .20);
+      border-radius: 50%;
+      box-shadow: 0 0 0 42px rgb(0 127 121 / .035), 0 0 0 92px rgb(0 127 121 / .025);
+    }
+    .login-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: relative;
+      z-index: 1;
+    }
+    .login-brand strong { display: block; font-size: 14px; letter-spacing: .05em; }
+    .login-brand span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .login-copy { position: relative; z-index: 1; max-width: 520px; }
+    .login-copy .kicker { margin-bottom: 16px; }
+    .login-copy h1 {
+      margin: 0;
+      max-width: 520px;
+      font-family: Georgia, "Songti SC", "Noto Serif SC", serif;
+      font-size: clamp(40px, 5vw, 66px);
+      font-weight: 400;
+      line-height: 1.06;
+      letter-spacing: -.04em;
+    }
+    .login-copy p { max-width: 470px; margin: 22px 0 0; color: var(--muted); line-height: 1.85; }
+    .login-route {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      max-width: 460px;
+    }
+    .login-route span {
+      padding-top: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      border-top: 1px solid var(--line);
+    }
+    .login-route b { display: block; margin-bottom: 5px; color: var(--teal); font-size: 12px; font-weight: 600; }
+    .login-panel {
+      align-self: center;
+      padding: 54px 48px;
+    }
+    .login-panel h2 {
+      margin: 0;
+      font-family: Georgia, "Songti SC", "Noto Serif SC", serif;
+      font-size: 30px;
+      font-weight: 400;
+    }
+    .login-panel > p { margin: 10px 0 30px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    .login-field { display: grid; gap: 8px; margin-top: 18px; }
+    .login-field label { color: var(--muted); font-size: 12px; }
+    .login-field input {
+      width: 100%;
+      height: 46px;
+      padding: 0 13px;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      outline: 0;
+    }
+    .login-field input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgb(0 127 121 / .10); }
+    .login-submit {
+      width: 100%;
+      height: 46px;
+      margin-top: 24px;
+      color: #fff;
+      background: var(--teal);
+      border: 0;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .login-submit:hover { background: #006d68; }
+    .login-message { min-height: 20px; margin: 12px 0 0; color: var(--red); font-size: 12px; }
+    .login-security {
+      display: grid;
+      grid-template-columns: 20px 1fr;
+      gap: 8px;
+      margin-top: 26px;
+      padding-top: 18px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.7;
+      border-top: 1px solid var(--line-soft);
+    }
+    .logout-button {
+      margin-left: 10px;
+      padding: 5px 9px;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      font-size: 11px;
+    }
     .shell {
       display: grid;
       grid-template-columns: 230px minmax(0, 1fr);
@@ -639,6 +773,8 @@
     }
 
     @media (max-width: 980px) {
+      .login-frame { grid-template-columns: 1fr; width: min(680px, 100%); }
+      .login-story { min-height: 380px; padding: 36px; border-right: 0; border-bottom: 1px solid var(--line); }
       .shell { grid-template-columns: 1fr; background: var(--canvas); }
       .rail {
         position: static;
@@ -670,6 +806,12 @@
     }
 
     @media (max-width: 560px) {
+      .login-screen { padding: 0; place-items: stretch; }
+      .login-frame { min-height: 100vh; border: 0; }
+      .login-story { min-height: 330px; padding: 28px 22px; }
+      .login-copy h1 { font-size: 42px; }
+      .login-copy p { margin-top: 16px; }
+      .login-panel { padding: 34px 22px 42px; }
       .topbar { align-items: start; flex-direction: column; padding: 14px 0; }
       .nav { grid-template-columns: 1fr; }
       .hero { padding-top: 24px; }
@@ -684,6 +826,42 @@
   </style>
 </head>
 <body>
+  <section class="login-screen" aria-labelledby="login-title">
+    <div class="login-frame">
+      <div class="login-story">
+        <div class="login-brand">
+          <div class="mark">◎</div>
+          <div><strong>Finance Radar</strong><span>Evidence-first financial intelligence</span></div>
+        </div>
+        <div class="login-copy">
+          <div class="kicker">受控访问 · 只读研究</div>
+          <h1 id="login-title">把噪声留在门外</h1>
+          <p>登录后查看公开事件、关键原文、千问风险语义和消息发布后的市场观察。系统不连接交易账户，也不提供下单能力。</p>
+        </div>
+        <div class="login-route" aria-label="访问边界">
+          <span><b>01</b>服务器校验</span>
+          <span><b>02</b>会话内访问</span>
+          <span><b>03</b>安全退出</span>
+        </div>
+      </div>
+      <form class="login-panel" data-login-form>
+        <h2>进入研究工作台</h2>
+        <p>请输入管理员分配的访问凭据。连续失败会触发短暂冷却。</p>
+        <div class="login-field">
+          <label for="preview-username">用户名</label>
+          <input id="preview-username" name="username" autocomplete="username" required>
+        </div>
+        <div class="login-field">
+          <label for="preview-password">密码</label>
+          <input id="preview-password" name="password" type="password" autocomplete="current-password" minlength="8" required>
+        </div>
+        <button class="login-submit" type="submit">验证并进入</button>
+        <p class="login-message" data-login-message aria-live="polite"></p>
+        <div class="login-security"><span>◇</span><span>此静态页面只演示登录视觉和交互；生产版本由服务器验证哈希凭据，密码不会写进 HTML 或仓库。</span></div>
+      </form>
+    </div>
+  </section>
+
   <div class="shell">
     <aside class="rail">
       <div class="brand">
@@ -710,8 +888,8 @@
 
     <main class="main">
       <div class="topbar">
-        <span>基线：GitHub main 8ec7600 · PR #38 后公开读者方向</span>
-        <span class="live">静态 UI 预览 · 不调用写接口</span>
+        <span>基线：GitHub main 76caae3 · Finance Radar Final 2026.08.31.3</span>
+        <span class="live">受控只读预览 <button class="logout-button" type="button" data-logout>安全退出</button></span>
       </div>
 
       <section class="page is-active" data-page="radar">
@@ -719,7 +897,7 @@
           <div>
             <div class="kicker">先看来源，再看判断</div>
             <h1>今天哪些金融事件值得核对</h1>
-            <p>公开读者第一屏只服务四件事：发现潜在下行事件、看懂来源说了什么、打开证据核对、在结果完整时查看 Qwen 风险语义和消息后的价格反应。</p>
+            <p>公开读者第一屏只服务四件事：发现潜在下行事件、看懂来源说了什么、打开证据核对、在结果完整时查看千问混合语义模型和消息后的价格反应。</p>
           </div>
           <div class="snapshot" aria-label="数据快照">
             <div><span>公开可浏览事件</span><strong>14,391</strong></div>
@@ -733,7 +911,7 @@
           <div class="metric"><span>今日新增</span><strong>38</strong></div>
           <div class="metric"><span>Primary supported</span><strong>546</strong></div>
           <div class="metric"><span>Source captured</span><strong>8,413</strong></div>
-          <div class="metric"><span>Risk review</span><strong>312</strong></div>
+          <div class="metric"><span>千问研判可显示</span><strong>312</strong></div>
         </div>
 
         <div class="reader-grid">
@@ -811,7 +989,7 @@
                   <span class="box-label">研究信号</span>
                   <div class="signal-stack">
                     <div class="signal-row"><span>证据姿态</span><strong data-posture>Primary supported</strong></div>
-                    <div class="signal-row" data-qwen-row><span>Qwen</span><strong class="negative" data-qwen>Risk review · high materiality</strong></div>
+                    <div class="signal-row" data-qwen-row><span>千问模型</span><strong class="negative" data-qwen>负面 · 重大负面 · 强度高</strong></div>
                     <div class="signal-row" data-price-row><span>价格</span><strong class="negative" data-price>OFD T+30m -6.8%</strong></div>
                   </div>
                 </article>
@@ -859,7 +1037,7 @@
             <section class="tab-panel" data-tab="model">
               <article class="source-box">
                 <span class="box-label">模型职责</span>
-                <p data-model-copy>Qwen 只展示已批准、当前版本绑定的风险语义；DeepSeek 只在缺少可引用证据时解释捕获文本。两者都不改变证据状态。</p>
+                <p data-model-copy>千问只展示已批准、当前版本绑定的风险语义；DeepSeek 只在缺少可引用证据时解释捕获文本。两者都不改变证据状态。</p>
               </article>
             </section>
             <section class="tab-panel" data-tab="trace">
@@ -888,7 +1066,7 @@
         </header>
         <div class="case-grid">
           <article class="case-card"><h3>从线索到证据</h3><p>聚合新闻先进入来源捕获，等 P0/P1 原始材料到位后才展示正式事实摘要。</p></article>
-          <article class="case-card"><h3>从证据到语义</h3><p>Qwen 风险语义是独立研究信号，不会把弱证据升级为真事实。</p></article>
+          <article class="case-card"><h3>从证据到语义</h3><p>千问风险语义是独立研究信号，不会把弱证据升级为真事实。</p></article>
           <article class="case-card"><h3>从发布时间到价格窗口</h3><p>行情只显示已经完成的事件后固定窗口，错过窗口不会用当前报价补写。</p></article>
         </div>
       </section>
@@ -908,7 +1086,7 @@
         </header>
         <div class="method-grid">
           <article class="method-card"><h3>01 · 证据姿态</h3><p>Primary supported、Primary source available、Source captured、No source 分开显示，不混用内部核验状态。</p></article>
-          <article class="method-card"><h3>02 · 模型语义</h3><p>Qwen 和 DeepSeek 各有边界，结果缺失或未批准时不生成占位卡片。</p></article>
+          <article class="method-card"><h3>02 · 模型语义</h3><p>千问和 DeepSeek 各有边界，结果缺失或未批准时不生成占位卡片。</p></article>
           <article class="method-card"><h3>03 · 市场上下文</h3><p>资产映射只选择观察标的。价格窗口是审计背景，不是交易建议。</p></article>
         </div>
       </section>
@@ -925,6 +1103,10 @@
     const filter = document.querySelector("[data-filter]");
     const count = document.querySelector("[data-count]");
     const detail = document.querySelector("[data-detail]");
+    const loginForm = document.querySelector("[data-login-form]");
+    const loginMessage = document.querySelector("[data-login-message]");
+    const logout = document.querySelector("[data-logout]");
+    const previewSessionKey = "finance-radar-ui-preview-authenticated";
 
     const details = {
       0: {
@@ -933,7 +1115,7 @@
         summary: "SEC 原文包含管理层对持续经营能力的重大疑虑。当前事件为正式可引用事实，风险语义和价格反应独立展示，不改变证据状态。",
         evidence: "Management concluded that substantial doubt exists about the company's ability to continue as a going concern within one year after issuance of the financial statements.",
         posture: "Primary supported",
-        qwen: "Risk review · high materiality",
+        qwen: "负面 · 重大负面 · 强度高",
         price: "OFD T+30m -6.8%",
         market: {
           asset: "OFD",
@@ -942,7 +1124,7 @@
           bars: [["T+5m", "34%", "-2.4%"], ["T+30m", "72%", "-6.8%"], ["T+1d", "55%", "-4.9%"]]
         },
         source: "标题、摘要和原文摘录去重展示。正式结论优先回到 P0/P1 原始材料；聚合页只作为发现入口。",
-        model: "Qwen 展示已批准、当前版本绑定的做空风险语义；DeepSeek 不参与这一条，因为证据已经闭合。"
+        model: "千问混合语义模型只展示当前事件版本绑定且 PUBLIC_APPROVED 的方向、重大性与风险强度；它不确认事实、不改变证据状态，也不触发交易。"
       },
       1: {
         meta: "Biotech · 2026-08-27 | 来源捕获 18:42 UTC | 证据关系未闭合",
@@ -1076,6 +1258,36 @@
       const selected = rows.find(row => row.getAttribute("aria-selected") === "true");
       if (selected?.hidden) selectRow(rows.find(row => !row.hidden));
     }
+
+    function setPreviewAuthentication(authenticated) {
+      document.body.classList.toggle("is-authenticated", authenticated);
+      if (authenticated) {
+        sessionStorage.setItem(previewSessionKey, "1");
+      } else {
+        sessionStorage.removeItem(previewSessionKey);
+      }
+    }
+
+    loginForm.addEventListener("submit", event => {
+      event.preventDefault();
+      const values = new FormData(loginForm);
+      const username = String(values.get("username") || "").trim();
+      const password = String(values.get("password") || "");
+      if (!username || password.length < 8) {
+        loginMessage.textContent = "请输入有效的用户名和至少 8 位密码。";
+        return;
+      }
+      loginMessage.textContent = "";
+      setPreviewAuthentication(true);
+    });
+
+    logout.addEventListener("click", () => {
+      setPreviewAuthentication(false);
+      loginForm.reset();
+      document.querySelector("#preview-username").focus();
+    });
+
+    setPreviewAuthentication(sessionStorage.getItem(previewSessionKey) === "1");
 
     pageButtons.forEach(button => button.addEventListener("click", () => activatePage(button.dataset.pageTarget)));
     tabButtons.forEach(button => button.addEventListener("click", () => activateTab(button.dataset.tabTarget)));

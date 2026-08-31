@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import hashlib
+import hmac
 import ipaddress
 import re
 import time
@@ -19,18 +20,77 @@ from typing import Any
 
 import streamlit as st
 
+from app.web.public_auth import (
+    public_credential_fingerprint,
+    verify_public_password,
+)
+
 
 API_URL = os.getenv("FINANCE_RADAR_API_URL", "http://127.0.0.1:8000").rstrip("/")
 ADMIN_TOKEN = os.getenv("FINANCE_RADAR_ADMIN_TOKEN")
 REVIEWER_TOKEN = os.getenv("FINANCE_RADAR_REVIEWER_TOKEN")
 OPERATOR_TOKEN = os.getenv("FINANCE_RADAR_OPERATOR_TOKEN")
 SHOW_DEBUG = os.getenv("FINANCE_RADAR_SHOW_DEBUG") == "1"
+PUBLIC_USERNAME = os.getenv("FINANCE_RADAR_PUBLIC_USERNAME", "").strip()
+PUBLIC_PASSWORD_HASH = os.getenv("FINANCE_RADAR_PUBLIC_PASSWORD_HASH", "").strip()
 UI_ROLES = frozenset({"public", "reviewer", "operator", "admin"})
 _configured_ui_role = os.getenv("FINANCE_RADAR_UI_ROLE", "public").strip().lower()
 UI_ROLE = _configured_ui_role if _configured_ui_role in UI_ROLES else "public"
 DEEP_LINK_STATE_KEY = "_finance_radar_deep_link"
+PUBLIC_AUTH_SESSION_KEY = "_finance_radar_public_auth_v1"
+PUBLIC_AUTH_FAILURES_KEY = "_finance_radar_public_auth_failures_v1"
+PUBLIC_AUTH_COOLDOWN_KEY = "_finance_radar_public_auth_cooldown_v1"
 DESIGN_TOKENS_V3 = Path(__file__).with_name("design_tokens_v3.css").read_text(encoding="utf-8")
 STYLE_V3 = Path(__file__).with_name("style_v3.css").read_text(encoding="utf-8")
+
+PUBLIC_LOGIN_CSS = """
+[data-testid="stSidebar"] { display: none !important; }
+[data-testid="stHeader"] { background: transparent !important; }
+.stApp {
+    background:
+        radial-gradient(circle at 15% 10%, rgba(0, 127, 121, .10), transparent 31%),
+        linear-gradient(135deg, #fcfcf8 0 48%, #f6f7f3 48% 100%) !important;
+    color: #172029 !important;
+}
+.block-container { max-width: 980px !important; padding-top: 5.2rem !important; }
+.public-login-brand {
+    display: flex; align-items: center; gap: 11px; margin-bottom: 5.5rem;
+    color: #172029;
+}
+.public-login-mark {
+    display: grid; width: 32px; height: 32px; place-items: center;
+    color: #007f79; border: 1px solid currentColor; border-radius: 50%;
+}
+.public-login-brand strong { display: block; font-size: 13px; letter-spacing: .06em; }
+.public-login-brand small { display: block; margin-top: 2px; color: #64717b; font-size: 11px; }
+.public-login-kicker { color: #007f79; font-size: 12px; font-weight: 600; }
+.public-login-title {
+    max-width: 560px; margin: 14px 0 18px;
+    color: #172029; font: 400 clamp(2.8rem, 6vw, 4.7rem)/1.04 Georgia, "Songti SC", serif;
+    letter-spacing: -.045em;
+}
+.public-login-copy { max-width: 560px; color: #64717b; line-height: 1.85; }
+.public-login-form-head { margin: 5rem 0 1.4rem; }
+.public-login-form-head h2 { color: #172029; font: 400 1.8rem Georgia, "Songti SC", serif; }
+.public-login-form-head p, .public-login-security { color: #64717b; font-size: .78rem; line-height: 1.7; }
+.public-login-security { margin-top: 1.2rem; padding-top: 1rem; border-top: 1px solid #d9ded6; }
+[data-testid="stForm"] {
+    padding: 0 !important; background: transparent !important; border: 0 !important;
+}
+[data-testid="stForm"] label { color: #64717b !important; }
+[data-testid="stForm"] input {
+    color: #172029 !important; background: #fff !important; border-color: #d9ded6 !important;
+}
+[data-testid="stForm"] button {
+    min-height: 44px !important; color: #fff !important; background: #007f79 !important;
+    border: 0 !important; border-radius: 6px !important;
+}
+@media (max-width: 760px) {
+    .block-container { padding: 2rem 1.25rem 3rem !important; }
+    .public-login-brand { margin-bottom: 3rem; }
+    .public-login-form-head { margin-top: 2.2rem; }
+}
+""".strip()
 
 
 @dataclass(frozen=True)
@@ -267,6 +327,99 @@ def require_admin_ui() -> None:
     require_ui_role("admin")
 
 
+def public_auth_configured() -> bool:
+    """Return whether the public Web credential contract is present."""
+
+    return (
+        3 <= len(PUBLIC_USERNAME) <= 64
+        and PUBLIC_PASSWORD_HASH.startswith("pbkdf2_sha256$")
+        and len(PUBLIC_PASSWORD_HASH) <= 512
+    )
+
+
+def require_public_login() -> None:
+    """Fail closed before any public page performs API work."""
+
+    if UI_ROLE != "public":
+        return
+    fingerprint = (
+        public_credential_fingerprint(PUBLIC_USERNAME, PUBLIC_PASSWORD_HASH)
+        if public_auth_configured()
+        else ""
+    )
+    if fingerprint and hmac.compare_digest(
+        str(st.session_state.get(PUBLIC_AUTH_SESSION_KEY) or ""), fingerprint
+    ):
+        return
+
+    st.markdown(f"<style>{PUBLIC_LOGIN_CSS}</style>", unsafe_allow_html=True)
+    st.markdown(
+        '<div class="public-login-brand">'
+        '<span class="public-login-mark">◎</span>'
+        '<span><strong>FINANCE RADAR</strong><small>Evidence-first financial intelligence</small></span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    story, login = st.columns([1.18, 0.82], gap="large")
+    with story:
+        st.markdown(
+            '<div class="public-login-kicker">受控访问 · 只读研究</div>'
+            '<div class="public-login-title">把噪声留在门外</div>'
+            '<p class="public-login-copy">登录后查看公开事件、关键原文、千问风险语义和消息发布后的市场观察。'
+            '系统不连接交易账户，也不提供下单能力。</p>',
+            unsafe_allow_html=True,
+        )
+    with login:
+        st.markdown(
+            '<div class="public-login-form-head"><h2>进入研究工作台</h2>'
+            '<p>请输入管理员分配的访问凭据。连续失败会触发短暂冷却。</p></div>',
+            unsafe_allow_html=True,
+        )
+        if not public_auth_configured():
+            st.error("公开访问凭据尚未配置，当前页面已安全关闭。")
+            st.caption(
+                "管理员需要配置 FINANCE_RADAR_PUBLIC_USERNAME 和"
+                " FINANCE_RADAR_PUBLIC_PASSWORD_HASH 后重启公共 Web 服务。"
+            )
+            st.stop()
+
+        now = time.monotonic()
+        blocked_until = float(st.session_state.get(PUBLIC_AUTH_COOLDOWN_KEY) or 0.0)
+        blocked = blocked_until > now
+        with st.form("public_access_login", clear_on_submit=False, border=False):
+            username = st.text_input("用户名", max_chars=64)
+            password = st.text_input("密码", type="password", max_chars=256)
+            submitted = st.form_submit_button(
+                "验证并进入", use_container_width=True, disabled=blocked
+            )
+        if blocked:
+            st.warning(f"尝试次数过多，请在 {max(1, int(blocked_until - now))} 秒后重试。")
+        elif submitted:
+            username_ok = hmac.compare_digest(
+                username.strip().encode("utf-8"), PUBLIC_USERNAME.encode("utf-8")
+            )
+            password_ok = verify_public_password(password, PUBLIC_PASSWORD_HASH)
+            if username_ok and password_ok:
+                st.session_state[PUBLIC_AUTH_SESSION_KEY] = fingerprint
+                st.session_state.pop(PUBLIC_AUTH_FAILURES_KEY, None)
+                st.session_state.pop(PUBLIC_AUTH_COOLDOWN_KEY, None)
+                st.rerun()
+            failures = int(st.session_state.get(PUBLIC_AUTH_FAILURES_KEY) or 0) + 1
+            if failures >= 5:
+                st.session_state[PUBLIC_AUTH_FAILURES_KEY] = 0
+                st.session_state[PUBLIC_AUTH_COOLDOWN_KEY] = now + 60.0
+                st.error("用户名或密码不正确。为防止反复尝试，登录已暂停 60 秒。")
+            else:
+                st.session_state[PUBLIC_AUTH_FAILURES_KEY] = failures
+                st.error("用户名或密码不正确。")
+        st.markdown(
+            '<div class="public-login-security">密码只以 PBKDF2 哈希形式保存在服务器；'
+            '验证通过前不会请求事件接口或调用模型。</div>',
+            unsafe_allow_html=True,
+        )
+    st.stop()
+
+
 def _normalized_public_ip(value: object) -> str | None:
     """Return one usable visitor address, never a proxy/local placeholder."""
     try:
@@ -351,6 +504,8 @@ def render_primary_navigation(active: str) -> None:
             require_ui_role("reviewer", "operator", "admin")
         raise ValueError(f"Unknown primary navigation key: {active}")
 
+    require_public_login()
+
     links = "".join(
         (
             '<a class="radar-primary-link{} public-primary-link" href="{}" target="_self"{}>'
@@ -388,6 +543,9 @@ def render_primary_navigation(active: str) -> None:
         )
         if UI_ROLE == "public":
             st.markdown(brand + navigation_markup, unsafe_allow_html=True)
+            if st.button("安全退出", key="public_access_logout", use_container_width=True):
+                st.session_state.pop(PUBLIC_AUTH_SESSION_KEY, None)
+                st.rerun()
         else:
             st.markdown(
                 brand

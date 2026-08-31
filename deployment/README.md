@@ -139,6 +139,28 @@ remain immutable and rollbackable. The public Web unit reads only
 non-secret values. It never loads `/etc/finance-radar.env` and explicitly
 removes `FINANCE_RADAR_ADMIN_TOKEN` from its process environment.
 
+The public reader is also fail-closed behind one shared access credential.
+Its username and PBKDF2 password verifier live separately in the root-only
+`/etc/finance-radar-public-auth.env`; plaintext passwords must never be written
+to the repository or either environment file. Provision or rotate the
+credential on the server, then restart only the public Web service:
+
+```bash
+sudo -i
+umask 077
+cd /opt/finance-radar/current
+/opt/finance-radar/venv/bin/python scripts/generate_public_web_password_hash.py \
+  --username radar-admin > /etc/finance-radar-public-auth.env
+chown root:root /etc/finance-radar-public-auth.env
+chmod 0600 /etc/finance-radar-public-auth.env
+systemctl restart finance-radar-web
+```
+
+Use a unique password of at least 12 characters. The illustrative string
+`Admin123456` is intentionally rejected. A replacement-host restore does not
+carry this credential and keeps the public page closed until a new verifier is
+provisioned.
+
 `finance-radar-overview-snapshot.service` computes the expensive public
 overview outside the API process and atomically publishes
 `shared/data/overview_snapshot_v1.json`. Its timer refreshes after each

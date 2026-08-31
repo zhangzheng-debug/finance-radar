@@ -110,6 +110,20 @@ def test_public_navigation_does_not_call_stale_data_realtime() -> None:
     assert "实时" not in home["description"]
 
 
+def test_public_auth_configuration_fails_closed_without_both_values(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "PUBLIC_USERNAME", "")
+    monkeypatch.setattr(web_common, "PUBLIC_PASSWORD_HASH", "")
+    assert web_common.public_auth_configured() is False
+    monkeypatch.setattr(web_common, "PUBLIC_USERNAME", "radar-admin")
+    assert web_common.public_auth_configured() is False
+    monkeypatch.setattr(
+        web_common,
+        "PUBLIC_PASSWORD_HASH",
+        "pbkdf2_sha256$600000$c2FsdHNhbHRzYWx0c2FsdA$ZGlnZXN0",
+    )
+    assert web_common.public_auth_configured() is True
+
+
 def test_v3_runtime_tokens_are_single_source_and_styles_consume_them() -> None:
     assert "--fr-text-2: #b5c3d1" in DESIGN_TOKENS_V3
     assert "--fr-muted: #8ea1b4" in DESIGN_TOKENS_V3

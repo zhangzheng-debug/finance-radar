@@ -1,7 +1,7 @@
 # Finance Radar latest public-reader UI preview
 
-This preview is a standalone UI concept based on the post-PR #38 public reader
-direction on `main` (`8ec7600`).
+This preview is a standalone UI concept based on the final 2026.08.31.3
+production line after PR #58 on `main` (`76caae3`).
 
 Open `finance-radar-ui-concept.html` directly in a browser to review the visual
 direction. The page uses local sample data only, so it does not require the
@@ -26,11 +26,18 @@ are complete.
 - Adds UI space for the new public capabilities: citation posture, Qwen risk
   semantics, DeepSeek source interpretation, event-linked asset context, and
   post-publication market reaction windows.
+- Adds a restrained login screen and safe logout affordance that match the
+  public reader visual language.
+- Aligns the model block with the production-approved Qwen hybrid semantic
+  fields: polarity, materiality, and adverse strength.
 - Removes internal Worker, backup, database and reviewer-progress language from
   the public surface.
 - Keeps trading and account language out of the interface.
 
 ## Scope
 
-This is a UI preview only. It does not change production Streamlit pages,
-FastAPI routes, deployment files, dependency locks, or data contracts.
+The HTML file remains a local sample-data preview. This branch also adds a
+server-side, fail-closed login gate to the production Streamlit public reader.
+Credentials are configured as a username plus PBKDF2 verifier in a root-only
+server file; no plaintext or default password is committed. FastAPI routes,
+dependency locks, model artifacts, and data contracts are unchanged.
