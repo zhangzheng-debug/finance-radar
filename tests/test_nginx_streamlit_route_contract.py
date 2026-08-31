@@ -6,6 +6,14 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 
 
+def test_public_streamlit_declares_its_chinese_content_language() -> None:
+    source = (ROOT / "deployment/systemd/nginx-radar-direct.conf").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'add_header Content-Language "zh-CN" always;' in source
+
+
 def test_only_public_nested_streamlit_routes_are_canonicalized() -> None:
     for relative in (
         "deployment/systemd/nginx-radar-direct.conf",
