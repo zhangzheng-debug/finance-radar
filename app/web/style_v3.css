@@ -1682,6 +1682,102 @@ code,
 .replay-step-output strong { color: var(--fr-amber); }
 .replay-step-output span { color: var(--fr-muted); }
 
+.fr-public-reader-workspace-label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: .6rem 0 0;
+    padding: .55rem 0;
+    border-top: 1px solid var(--fr-border-strong);
+    color: var(--fr-text-dim);
+    font-size: .72rem;
+}
+
+.fr-public-reader-workspace-label span,
+.fr-public-reader-workspace-label strong {
+    font-weight: 700;
+    letter-spacing: .035em;
+}
+
+.fr-public-reader-workspace-label strong { color: var(--fr-cyan); }
+
+[data-testid="stMarkdownContainer"]:has(> .fr-public-reader-feed-panel),
+[data-testid="stMarkdownContainer"]:has(> .fr-public-reader-detail-panel) {
+    display: none;
+}
+
+[data-testid="stHorizontalBlock"]:has(.fr-public-reader-feed-panel) {
+    align-items: flex-start;
+}
+
+[data-testid="stColumn"]:has(.fr-public-reader-feed-panel),
+[data-testid="stColumn"]:has(.fr-public-reader-detail-panel) {
+    min-width: 0;
+}
+
+[data-testid="stColumn"]:has(.fr-public-reader-feed-panel) { order: 1; }
+[data-testid="stColumn"]:has(.fr-public-reader-detail-panel) { order: 2; }
+
+[data-testid="stColumn"]:has(.fr-public-reader-feed-panel) .public-feed-heading {
+    padding-top: 0;
+}
+
+[data-testid="stColumn"]:has(.fr-public-reader-feed-panel) .feed-list {
+    overflow: hidden;
+    border: 1px solid var(--fr-border);
+    border-radius: var(--fr-radius-m);
+}
+
+[data-testid="stColumn"]:has(.fr-public-reader-feed-panel) .public-feed-row {
+    grid-template-columns: 68px 16px minmax(0, 1fr);
+    gap: 8px;
+    padding: 12px 10px;
+}
+
+[data-testid="stColumn"]:has(.fr-public-reader-feed-panel) .feed-open {
+    display: none;
+}
+
+.public-feed-row.is-selected,
+.public-feed-row[aria-current="true"] {
+    background: var(--fr-raised);
+    box-shadow: inset 3px 0 0 var(--fr-cyan);
+}
+
+[data-testid="stColumn"]:has(.fr-public-reader-detail-panel) {
+    position: sticky;
+    top: calc(var(--fr-streamlit-header-height) + .7rem);
+}
+
+[data-testid="stColumn"]:has(.fr-public-reader-detail-panel)
+> [data-testid="stVerticalBlock"] {
+    gap: .65rem;
+    padding: clamp(.9rem, 1.8vw, 1.25rem);
+    border: 1px solid var(--fr-border);
+    border-radius: var(--fr-radius-m);
+    background: color-mix(in srgb, var(--fr-panel) 92%, var(--fr-raised));
+    box-shadow: 0 20px 48px rgba(0, 0, 0, .22);
+}
+
+[data-testid="stColumn"]:has(.fr-public-reader-detail-panel) .event-answer > h2 {
+    font-size: clamp(1.25rem, 2.25vw, 1.75rem) !important;
+    line-height: 1.25 !important;
+}
+
+[data-testid="stColumn"]:has(.fr-public-reader-detail-panel) .event-answer-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(12rem, .85fr);
+    gap: .75rem;
+    border-top: 0;
+}
+
+[data-testid="stColumn"]:has(.fr-public-reader-detail-panel) .event-answer-grid article {
+    padding: .85rem;
+    border: 1px solid var(--fr-border);
+    border-radius: var(--fr-radius-m);
+    background: rgba(5, 9, 15, .42);
+}
+
 .fr-event-detail {
     display: grid;
     grid-template-columns: minmax(0, 1.65fr) minmax(16rem, .85fr);
@@ -1739,6 +1835,20 @@ code,
     .fr-event-detail { grid-template-columns: 1fr; }
     .fr-event-detail-header { grid-column: auto; }
     .public-reader-header p { display: none; }
+    .fr-public-reader-workspace-label { display: none; }
+    [data-testid="stHorizontalBlock"]:has(.fr-public-reader-feed-panel) {
+        flex-wrap: wrap;
+    }
+    [data-testid="stHorizontalBlock"]:has(.fr-public-reader-feed-panel)
+    > [data-testid="stColumn"] {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+    }
+    [data-testid="stColumn"]:has(.fr-public-reader-detail-panel) {
+        order: 1;
+        position: static;
+    }
+    [data-testid="stColumn"]:has(.fr-public-reader-feed-panel) { order: 2; }
 }
 
 @media (max-width: 620px) {
@@ -1846,6 +1956,9 @@ code,
     .feed-type { display: block; margin: 3px 0 0; }
     .queue-card-horizontal { grid-template-columns: 1fr; gap: .65rem; }
     .event-answer-grid { grid-template-columns: 1fr; }
+    [data-testid="stColumn"]:has(.fr-public-reader-detail-panel) .event-answer-grid {
+        grid-template-columns: 1fr;
+    }
     .event-time-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .event-time-cell:last-child { grid-column: 1 / -1; }
     .flow-bar {

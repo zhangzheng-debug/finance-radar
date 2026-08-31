@@ -104,3 +104,23 @@ def test_future_public_states_have_namespaced_responsive_style_slots() -> None:
     assert "@keyframes fr-loading-sheen" in style
     assert ".fr-filter-panel { grid-template-columns: 1fr;" in style
     assert ".fr-event-detail { grid-template-columns: 1fr; }" in style
+
+
+def test_public_master_detail_reader_is_scoped_and_collapses_detail_first() -> None:
+    style = STYLE.read_text(encoding="utf-8")
+
+    assert ".fr-public-reader-workspace-label" in style
+    assert '[data-testid="stHorizontalBlock"]:has(.fr-public-reader-feed-panel)' in style
+    assert '[data-testid="stColumn"]:has(.fr-public-reader-detail-panel)' in style
+    assert "position: sticky;" in style
+    assert ".public-feed-row.is-selected" in style
+    assert 'public-feed-row[aria-current="true"]' in style
+    assert ".fr-public-reader-workspace-label { display: none; }" in style
+    assert "flex-wrap: wrap;" in style
+    assert "order: 1;" in style
+    assert "order: 2;" in style
+    assert re.search(
+        r'@media \(max-width: 620px\).*?\.event-answer-grid\s*\{[^}]*grid-template-columns:\s*1fr',
+        style,
+        re.S,
+    )

@@ -130,6 +130,36 @@ def test_public_event_feed_row_marks_session_changes_without_internal_details() 
     assert "is-changed" not in row
 
 
+def test_public_event_feed_marks_only_the_current_event_as_selected() -> None:
+    selected = event_feed_row(
+        {
+            "event_id": "event-a",
+            "status": "candidate",
+            "event_family": "company_governance",
+            "company_name": "Selected Example",
+            "display_headline": "Selected event headline",
+        },
+        public=True,
+        selected_event_id="event-a",
+    )
+    ordinary = event_feed_row(
+        {
+            "event_id": "event-b",
+            "status": "candidate",
+            "event_family": "company_governance",
+            "company_name": "Ordinary Example",
+            "display_headline": "Ordinary event headline",
+        },
+        public=True,
+        selected_event_id="event-a",
+    )
+
+    assert 'class="feed-row public-feed-row is-selected"' in selected
+    assert 'aria-current="true"' in selected
+    assert "is-selected" not in ordinary
+    assert "aria-current" not in ordinary
+
+
 def test_public_flow_shortcuts_do_not_expose_reviewer_workflow_labels() -> None:
     markup = flow_shortcuts_markup(
         {"verified": 5, "candidate": 4, "weak": 2, "rejected": 1},
