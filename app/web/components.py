@@ -1316,6 +1316,7 @@ def event_feed_row(
     flow: str = "全部事件",
     public: bool = False,
     link_context: dict[str, Any] | None = None,
+    selected_event_id: str = "",
 ) -> str:
     """Return one safe, compact Situation Room event row."""
     canonical_status = str(item.get("status") or "candidate").lower()
@@ -1377,7 +1378,14 @@ def event_feed_row(
         else ""
     )
     event_type_markup = "" if public else f'<span class="feed-type">{escape(event_type)}</span>'
+    selected = bool(
+        public
+        and selected_event_id
+        and str(item.get("event_id") or "") == selected_event_id
+    )
     row_class = "feed-row public-feed-row" if public else "feed-row"
+    if selected:
+        row_class += " is-selected"
     open_label = "查看 ›" if public else "当前页预览 ›"
     aria_label = (
         f"在当前页面查看 {headline}" if public else f"在当前页面预览事件 {subject}"
@@ -1435,7 +1443,8 @@ def event_feed_row(
     )
     return (
         f'<a id="{event_anchor_id(item.get("event_id"))}" class="{row_class}" href="{preview_url}" target="_self" '
-        f'aria-label="{escape(str(aria_label), quote=True)}">'
+        f'aria-label="{escape(str(aria_label), quote=True)}"'
+        f'{" aria-current=\"true\"" if selected else ""}>'
         '<div class="feed-time"><span class="feed-time-label">最后更新</span>'
         f'<time>{escape(timestamp)}</time></div>'
         f'<div class="feed-signal status-{escape(status_key)}" aria-hidden="true">{escape(status_glyph)}</div>'
@@ -1466,10 +1475,11 @@ def render_event_feed(
     flow: str = "全部事件",
     public: bool = False,
     link_context: dict[str, Any] | None = None,
+    selected_event_id: str = "",
 ) -> None:
     st.markdown(
         f'<div class="feed-list">'
-        f'{"".join(event_feed_row(item, flow=flow, public=public, link_context=link_context) for item in items)}'
+        f'{"".join(event_feed_row(item, flow=flow, public=public, link_context=link_context, selected_event_id=selected_event_id) for item in items)}'
         '</div>',
         unsafe_allow_html=True,
     )

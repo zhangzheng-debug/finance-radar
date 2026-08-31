@@ -263,6 +263,14 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "本次浏览会话首次查看" not in "\n".join(str(item.value) for item in page.caption)
     assert "核对清单" not in rendered
     assert "改变判断的情形" not in rendered
+    assert "fr-public-reader-workspace-label" in rendered
+    assert "fr-public-reader-feed-panel" in rendered
+    assert "fr-public-reader-detail-panel" in rendered
+    assert 'class="feed-row public-feed-row is-selected"' in rendered
+    assert 'aria-current="true"' in rendered
+    assert rendered.index('<div class="fr-public-reader-detail-panel"') < rendered.index(
+        '<div class="fr-public-reader-feed-panel"'
+    )
 
 
 @pytest.mark.parametrize(
