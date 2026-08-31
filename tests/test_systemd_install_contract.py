@@ -521,6 +521,7 @@ def test_public_web_uses_a_fixed_minimal_environment_without_admin_token() -> No
     web = WEB_UNIT.read_text(encoding="utf-8")
     installer = INSTALLER.read_text(encoding="utf-8")
     assert "EnvironmentFile=/etc/finance-radar-public.env" in web
+    assert "EnvironmentFile=-/etc/finance-radar-public-auth.env" in web
     assert "EnvironmentFile=/etc/finance-radar.env" not in web
     assert "User=finance-radar-web" in web
     assert "Group=finance-radar-web" in web
@@ -539,6 +540,8 @@ def test_public_web_uses_a_fixed_minimal_environment_without_admin_token() -> No
     ):
         assert protected_path in web
     assert "install -m 0600 -o finance-radar-web -g finance-radar-web /dev/null /etc/finance-radar-public.env" in installer
+    assert "install -m 0600 -o root -g root /dev/null" in installer
+    assert "/etc/finance-radar-public-auth.env" in installer
     assert "ensure_public_web_principal" in installer
     assert "grant_public_web_runtime_access" in installer
     assert "assert_private_runtime_import_boundary" in installer
@@ -645,6 +648,8 @@ def test_scoped_internal_uis_are_manual_loopback_only_and_mutually_exclusive() -
 def test_restore_recreates_public_environment_and_never_enables_admin() -> None:
     source = ACTIVATOR.read_text(encoding="utf-8")
     assert "install -m 0600 -o finance-radar-web -g finance-radar-web /dev/null /etc/finance-radar-public.env" in source
+    assert "install -m 0600 -o root -g root /dev/null" in source
+    assert "/etc/finance-radar-public-auth.env" in source
     assert "ensure_public_web_principal" in source
     assert "grant_public_web_runtime_access" in source
     assert "assert_private_runtime_import_boundary" in source

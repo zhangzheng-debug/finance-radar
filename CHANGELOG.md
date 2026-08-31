@@ -5,6 +5,21 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.08.31.5
+
+- Adopt Wuyongjia's submitted light, editorial public-reader design as the
+  production UI while retaining the existing overview, event, evidence, Qwen,
+  DeepSeek and market-data contracts unchanged.
+- Keep the event stream mounted during selection, update the selected event in
+  the same browser document and give the desktop stream and dossier independent
+  scrolling. Mobile readers retain one continuous page without horizontal
+  overflow.
+- Add a fail-closed server-verified public login with credential rotation,
+  cooldown and logout support. Credentials remain outside the repository in a
+  root-only systemd environment file and are preserved across code releases.
+- Organize each dossier into source, market, model and replay tabs only when the
+  corresponding real payload exists; no fixture or synthetic content is added.
+
 ## 2026.08.30.2
 
 - Promote the best current Qwen2.5-1.5B v3 LoRA plus narrow deterministic
