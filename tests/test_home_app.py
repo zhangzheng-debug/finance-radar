@@ -14,6 +14,13 @@ ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "app" / "web" / "Home.py"
 
 
+@pytest.fixture(autouse=True)
+def _authenticated_public_reader(monkeypatch) -> None:
+    """Keep feature tests focused on the already-authenticated reader surface."""
+
+    monkeypatch.setattr(web_common, "require_public_login", lambda: None)
+
+
 def _overview() -> dict[str, Any]:
     return {
         "demo_mode": "RECENT_CAPTURE",
@@ -268,8 +275,10 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "fr-public-reader-detail-panel" in rendered
     assert 'class="feed-row public-feed-row is-selected"' in rendered
     assert 'aria-current="true"' in rendered
-    assert rendered.index('<div class="fr-public-reader-detail-panel"') < rendered.index(
-        '<div class="fr-public-reader-feed-panel"'
+    # Keep the feed mounted before the potentially slower dossier request so
+    # selecting an event cannot blank the whole workspace.
+    assert rendered.index('<div class="fr-public-reader-feed-panel"') < rendered.index(
+        '<div class="fr-public-reader-detail-panel"'
     )
 
 

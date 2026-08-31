@@ -30,6 +30,7 @@ MANAGED_UNIT_PATHS=(
 MANAGED_CONFIG_PATHS=(
     /etc/finance-radar.env
     /etc/finance-radar-public.env
+    /etc/finance-radar-public-auth.env
     /etc/finance-radar-reviewer-principals.json
 )
 MANAGED_RUNTIME_UNITS=(
@@ -348,6 +349,11 @@ printf '%s\n' \
     'FINANCE_RADAR_UI_ROLE=public' \
     'FINANCE_RADAR_SHOW_DEBUG=0' \
     > /etc/finance-radar-public.env
+# Public access credentials are deliberately not carried inside migration
+# archives. A recovered host remains fail-closed until the owner provisions a
+# fresh root-only verifier and restarts finance-radar-web.
+install -m 0600 -o root -g root /dev/null \
+    /etc/finance-radar-public-auth.env
 
 python3 -m venv "$BASE/venv"
 "$BASE/venv/bin/python" -m pip install --upgrade pip
@@ -481,6 +487,7 @@ assert_public_web_identity_and_boundary() {
         [ "$protect_proc" = invisible ] && [ "$proc_subset" = pid ] || return 1
     runuser -u finance-radar-web -- test -r /etc/finance-radar-public.env || return 1
     if runuser -u finance-radar-web -- test -r /etc/finance-radar.env || \
+       runuser -u finance-radar-web -- test -r /etc/finance-radar-public-auth.env || \
        runuser -u finance-radar-web -- test -r "$RELEASE/.env" || \
        runuser -u finance-radar-web -- test -r "$BASE/shared/data/finance_radar.sqlite3" || \
        runuser -u finance-radar-web -- test -r "$BASE/shared/reports"; then

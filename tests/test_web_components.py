@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from app.web.components import (
     EVENT_KEYBOARD_JS,
+    PUBLIC_EVENT_SELECTION_JS,
     SAVED_FLOW_HTML,
     SAVED_FLOW_JS,
     adjacent_event_id,
@@ -35,6 +36,16 @@ from app.web.components import (
     saved_public_flow_payload,
     source_option_label,
 )
+
+
+def test_public_event_selection_keeps_document_and_updates_deep_link() -> None:
+    assert "event.preventDefault()" in PUBLIC_EVENT_SELECTION_JS
+    assert "window.history.replaceState" in PUBLIC_EVENT_SELECTION_JS
+    assert "setTriggerValue('selected_event_id', eventId)" in PUBLIC_EVENT_SELECTION_JS
+    assert "window.location.assign" not in PUBLIC_EVENT_SELECTION_JS
+    assert "window.location.href =" not in PUBLIC_EVENT_SELECTION_JS
+    assert "detailScroller.scrollTo" in PUBLIC_EVENT_SELECTION_JS
+    assert "detailColumn.scrollIntoView" in PUBLIC_EVENT_SELECTION_JS
 
 
 def test_event_feed_row_is_compact_linked_and_html_safe() -> None:

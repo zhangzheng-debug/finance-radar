@@ -360,6 +360,69 @@ _event_preview_focus_component = st.components.v2.component(
 )
 
 
+PUBLIC_EVENT_SELECTION_JS = """
+export default function(component) {
+  const { setTriggerValue } = component;
+  const selector = 'a.public-feed-row[data-event-id]';
+
+  const selectRow = (row) => {
+    const eventId = String(row?.getAttribute('data-event-id') || '');
+    if (!eventId) return;
+    document.querySelectorAll(selector).forEach((candidate) => {
+      const selected = candidate === row;
+      candidate.classList.toggle('is-selected', selected);
+      candidate.setAttribute('aria-selected', selected ? 'true' : 'false');
+      if (selected) candidate.setAttribute('aria-current', 'true');
+      else candidate.removeAttribute('aria-current');
+    });
+    const href = row.getAttribute('href');
+    if (href) {
+      const url = new URL(href, window.location.href);
+      window.history.replaceState({}, '', url.toString());
+    }
+    const detailColumn = document.querySelector('[data-testid="stColumn"]:has(.fr-public-reader-detail-panel)');
+    const detailScroller = detailColumn?.querySelector(':scope > [data-testid="stVerticalBlock"]');
+    const compact = window.matchMedia?.('(max-width: 980px)')?.matches;
+    if (compact && detailColumn) {
+      const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+      detailColumn.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
+    } else if (detailScroller) {
+      detailScroller.scrollTo({ top: 0, behavior: 'auto' });
+    }
+    setTriggerValue('selected_event_id', eventId);
+  };
+
+  const clickHandler = (event) => {
+    const row = event.target?.closest?.(selector);
+    if (!row) return;
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    selectRow(row);
+  };
+  const keyHandler = (event) => {
+    if (event.key !== ' ') return;
+    const row = event.target?.closest?.(selector);
+    if (!row) return;
+    event.preventDefault();
+    selectRow(row);
+  };
+
+  document.addEventListener('click', clickHandler, true);
+  document.addEventListener('keydown', keyHandler, true);
+  return () => {
+    document.removeEventListener('click', clickHandler, true);
+    document.removeEventListener('keydown', keyHandler, true);
+  };
+}
+""".strip()
+
+
+_public_event_selection_component = st.components.v2.component(
+    "finance_radar_public_event_selection",
+    js=PUBLIC_EVENT_SELECTION_JS,
+)
+
+
 EVENT_FEED_FOCUS_JS = """
 export default function() {
   let frame = 0;
@@ -1443,7 +1506,9 @@ def event_feed_row(
     )
     return (
         f'<a id="{event_anchor_id(item.get("event_id"))}" class="{row_class}" href="{preview_url}" target="_self" '
+        f'data-event-id="{escape(str(item.get("event_id") or ""), quote=True)}" '
         f'aria-label="{escape(str(aria_label), quote=True)}"'
+        f' aria-selected="{"true" if selected else "false"}"'
         f'{" aria-current=\"true\"" if selected else ""}>'
         '<div class="feed-time"><span class="feed-time-label">最后更新</span>'
         f'<time>{escape(timestamp)}</time></div>'
@@ -1476,13 +1541,35 @@ def render_event_feed(
     public: bool = False,
     link_context: dict[str, Any] | None = None,
     selected_event_id: str = "",
-) -> None:
+) -> str:
     st.markdown(
         f'<div class="feed-list">'
         f'{"".join(event_feed_row(item, flow=flow, public=public, link_context=link_context, selected_event_id=selected_event_id) for item in items)}'
         '</div>',
         unsafe_allow_html=True,
     )
+    if not public:
+        return ""
+    global _public_event_selection_component
+    mount_args = {
+        "key": "public-event-selection",
+        "data": {"selected_id": selected_event_id},
+        "height": 0,
+        "width": "stretch",
+        "on_selected_event_id_change": lambda: None,
+    }
+    try:
+        result = _public_event_selection_component(**mount_args)
+    except ValueError as exc:
+        if "is not registered" not in str(exc):
+            raise
+        _public_event_selection_component = st.components.v2.component(
+            "finance_radar_public_event_selection",
+            js=PUBLIC_EVENT_SELECTION_JS,
+        )
+        result = _public_event_selection_component(**mount_args)
+    selected = " ".join(str(getattr(result, "selected_event_id", "") or "").split())[:160]
+    return selected
 
 
 def evidence_route_markup(event_status: dict[str, Any], review_queue: int) -> str:
