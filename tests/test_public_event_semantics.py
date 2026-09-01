@@ -1243,11 +1243,11 @@ def test_priority_queue_full_does_not_leave_orphan_pending_and_can_retry(
         allow_priority = True
         retried = client.post(endpoint, headers=headers, json=body)
         assert retried.status_code == 200
-        assert retried.json()["data"]["state"] == "RETRY_WAIT"
+        assert retried.json()["data"]["state"] == "QUEUED"
 
     current = operations.capture_interpretation_runs("semantic-event", limit=1)[0]
     assert current["status"] == "PENDING"
-    assert current["attempts"] == 1
+    assert current["attempts"] == 0
     assert operations.get_state(
         "capture_interpretation_public_priority_v1", {}
     )["items"][0]["interpretation_id"] == current["interpretation_id"]
@@ -1269,14 +1269,32 @@ def test_public_deepseek_failed_exact_request_has_bounded_requeue(
         assert client.post(endpoint, headers=headers, json=body).status_code == 200
         run = operations.capture_interpretation_runs("semantic-event", limit=1)[0]
         run_id = str(run["interpretation_id"])
-        for request_no in range(1, 6):
-            operations.fail_capture_interpretation(run_id, "terminal")
+        for request_no in range(1, 5):
+            claim = operations.claim_capture_interpretation(
+                provider="deepseek",
+                daily_request_cap=500,
+                daily_cny_cap=5.0,
+                reserve_cny=0.02,
+                interpretation_id=run_id,
+                public_priority=True,
+                max_attempts=4,
+            )
+            assert claim["claimed"] is True
+            operations.fail_claimed_capture_interpretation(
+                run_id,
+                str(claim["attempt_id"]),
+                str(claim["lease_token"]),
+                error="terminal",
+                error_class="PROVIDER_ERROR",
+                retryable=False,
+                max_attempts=4,
+            )
             response = client.post(endpoint, headers=headers, json=body)
             assert response.status_code == 200
             current = operations.capture_interpretation_runs(
                 "semantic-event", limit=1
             )[0]
-            if request_no <= 4:
+            if request_no < 4:
                 assert response.json()["data"]["state"] == "RETRY_WAIT"
                 assert current["status"] == "PENDING"
                 assert current["attempts"] == request_no

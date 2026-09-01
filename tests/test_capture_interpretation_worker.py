@@ -114,6 +114,33 @@ def test_worker_overlaps_only_a_bounded_number_of_independent_receipts(
     assert 2 <= peak <= 3
 
 
+def test_public_priority_lane_reaches_the_budget_claim_as_public(monkeypatch, tmp_path) -> None:
+    received = []
+
+    def fake_run(args):
+        received.append(bool(args.public_request))
+        return RUN_COMPLETED
+
+    monkeypatch.setattr(worker, "run_single", fake_run)
+    assert worker.process_pending_item(
+        {
+            "event_id": "event-public",
+            "observation_id": "obs-public",
+            "scheduler_lane": "public_priority",
+        },
+        tmp_path / "capture.env",
+    ) == "COMPLETED"
+    assert worker.process_pending_item(
+        {
+            "event_id": "event-background",
+            "observation_id": "obs-background",
+            "scheduler_lane": "persisted_pending",
+        },
+        tmp_path / "capture.env",
+    ) == "COMPLETED"
+    assert received == [True, False]
+
+
 def test_persisted_pending_reader_selects_only_ready_current_generation() -> None:
     class FakeOperations:
         def capture_interpretation_pending_runs(self, **kwargs):
@@ -291,6 +318,106 @@ def test_persisted_pending_is_bound_to_current_capture_and_stale_rows_fail() -> 
     ]
 
 
+def test_public_stale_input_is_atomically_replaced_before_provider_work(tmp_path) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    event_v1 = {
+        "event_id": "event-public-refresh",
+        "current_version": 1,
+        "event_family": "macro_policy",
+        "event_type": "sanctions",
+    }
+    event_v2 = {**event_v1, "current_version": 2}
+    capture = {
+        "observation_id": "obs-public-refresh",
+        "source_name": "OpenNews",
+        "source_type": "aggregated_discovery",
+        "authority_tier": "P2_experimental",
+        "title": "Current retained source text.",
+        "summary": "Current retained source text.",
+        "semantic_content_sha256": "a" * 64,
+        "capture_receipt_sha256": "b" * 64,
+        "latest_revision_no": 1,
+    }
+    old_input = worker.normalized_capture_input(event_v1, capture)
+    current_input = worker.normalized_capture_input(event_v2, capture)
+    assert old_input["input_sha256"] != current_input["input_sha256"]
+    old_id, inserted = operations.enqueue_capture_interpretation(
+        str(event_v1["event_id"]),
+        str(capture["observation_id"]),
+        old_input,
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        provider="deepseek",
+        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+        external_call=True,
+    )
+    assert inserted is True
+    assert operations.enqueue_capture_interpretation_priority(
+        old_id,
+        event_id=str(event_v1["event_id"]),
+        observation_id=str(capture["observation_id"]),
+        capture_receipt_sha256=str(old_input["capture_receipt_sha256"]),
+        input_sha256=str(old_input["input_sha256"]),
+    ) is True
+
+    class CurrentLedger:
+        def capture_interpretation_eligibility(self, event_id, *, observation_id=None):
+            return {
+                "eligible": True,
+                "reason_code": "NO_EVENT_EVIDENCE",
+                "bucket": "P2_CAPTURE_ONLY",
+            }
+
+        def capture_interpretation_context(self, event_id, observation_id):
+            return {"event": event_v2, "capture": capture}
+
+    rows = operations.capture_interpretation_priority_runs(
+        provider="deepseek",
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+        limit=1,
+    )
+    prepared, rejected = prepare_persisted_pending_requests(
+        CurrentLedger(),
+        operations,
+        rows,
+        limit=1,
+        public_priority=True,
+    )
+
+    assert rejected == 1
+    assert len(prepared) == 1
+    assert prepared[0]["interpretation_id"] != old_id
+    assert prepared[0]["scheduler_lane"] == "public_priority"
+    runs = operations.capture_interpretation_runs("event-public-refresh", limit=10)
+    old = next(row for row in runs if row["interpretation_id"] == old_id)
+    replacement = next(
+        row for row in runs if row["interpretation_id"] == prepared[0]["interpretation_id"]
+    )
+    assert old["status"] == "FAILED"
+    assert old["error"] == "CAPTURE_INTERPRETATION_STALE_INPUT"
+    assert replacement["status"] == "PENDING"
+    assert replacement["input_sha256"] == current_input["input_sha256"]
+    selected = operations.capture_interpretation_priority_runs(
+        provider="deepseek",
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+        limit=1,
+    )
+    assert [row["interpretation_id"] for row in selected] == [
+        prepared[0]["interpretation_id"]
+    ]
+    with operations.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM capture_interpretation_attempts"
+        ).fetchone()[0] == 0
+
+
 def test_worker_executes_persisted_request_before_inventory_scan_work(
     monkeypatch,
     tmp_path,
@@ -376,7 +503,7 @@ def test_worker_executes_persisted_request_before_inventory_scan_work(
     monkeypatch.setattr(
         worker,
         "prepare_persisted_pending_requests",
-        lambda ledger_repository, operations_repository, rows, *, limit: (
+        lambda ledger_repository, operations_repository, rows, *, limit, **_kwargs: (
             [priority_item] if rows else [],
             0,
         ),
@@ -574,7 +701,7 @@ def test_priority_arriving_during_background_wave_gets_next_slot(
         lambda repository, *, limit: [dict(item) for item in background],
     )
 
-    def prepare(ledger_repository, operations_repository, rows, *, limit):
+    def prepare(ledger_repository, operations_repository, rows, *, limit, **_kwargs):
         if rows and rows[0].get("interpretation_id") == "public-new":
             return ([dict(public)], 0)
         return ([dict(item) for item in background[:limit]], 0)

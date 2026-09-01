@@ -424,6 +424,189 @@ def test_qwen_priority_queue_is_exact_idempotent_and_bounded(tmp_path: Path) -> 
     ) is None
 
 
+def test_qwen_public_request_claims_before_available_automatic_retry(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    model_version = Provider.model_version
+    observed_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    auto_hash = hashlib.sha256(b"auto-retry").hexdigest()
+    public_hash = hashlib.sha256(b"public-view").hexdigest()
+
+    operations.set_qwen_risk_activity(
+        "auto-retry", 1, auto_hash, model_version, "RUNNING", now=observed_at
+    )
+    automatic = operations.schedule_qwen_risk_retry(
+        "auto-retry",
+        1,
+        auto_hash,
+        model_version,
+        error_code="MODEL_TIMEOUT",
+        now=observed_at,
+    )
+    ready_at = datetime.fromisoformat(str(automatic["retry_after"]))
+    operations.enqueue_qwen_risk_priority(
+        "public-view", 1, public_hash, model_version, now=ready_at
+    )
+
+    claimed = operations.claim_qwen_risk_priority(model_version, now=ready_at)
+    assert claimed is not None
+    assert claimed["event_id"] == "public-view"
+    assert claimed["queue_class"] == "PUBLIC_EVENT_VIEW"
+
+
+def test_qwen_public_requests_keep_fifo_order(tmp_path: Path) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    model_version = Provider.model_version
+    observed_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    for offset, event_id in enumerate(("public-first", "public-second")):
+        operations.enqueue_qwen_risk_priority(
+            event_id,
+            1,
+            hashlib.sha256(event_id.encode()).hexdigest(),
+            model_version,
+            now=observed_at + timedelta(seconds=offset),
+        )
+
+    first = operations.claim_qwen_risk_priority(
+        model_version, now=observed_at + timedelta(seconds=2)
+    )
+    second = operations.claim_qwen_risk_priority(
+        model_version, now=observed_at + timedelta(seconds=2)
+    )
+    assert first is not None and first["event_id"] == "public-first"
+    assert second is not None and second["event_id"] == "public-second"
+
+
+def test_qwen_promoted_retry_joins_the_end_of_public_fifo(tmp_path: Path) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    model_version = Provider.model_version
+    observed_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    retry_hash = hashlib.sha256(b"promoted-retry").hexdigest()
+    public_hash = hashlib.sha256(b"public-already-waiting").hexdigest()
+    operations.set_qwen_risk_activity(
+        "promoted-retry",
+        1,
+        retry_hash,
+        model_version,
+        "RUNNING",
+        now=observed_at,
+    )
+    retry = operations.schedule_qwen_risk_retry(
+        "promoted-retry",
+        1,
+        retry_hash,
+        model_version,
+        error_code="MODEL_TIMEOUT",
+        now=observed_at,
+    )
+    ready_at = datetime.fromisoformat(str(retry["retry_after"]))
+    operations.enqueue_qwen_risk_priority(
+        "public-already-waiting", 1, public_hash, model_version, now=ready_at
+    )
+    promoted = operations.enqueue_qwen_risk_priority(
+        "promoted-retry",
+        1,
+        retry_hash,
+        model_version,
+        now=ready_at + timedelta(seconds=1),
+    )
+
+    assert promoted["state"] == "QUEUED"
+    assert promoted["queue_class"] == "PUBLIC_EVENT_VIEW"
+    first = operations.claim_qwen_risk_priority(
+        model_version, now=ready_at + timedelta(seconds=1)
+    )
+    second = operations.claim_qwen_risk_priority(
+        model_version, now=ready_at + timedelta(seconds=1)
+    )
+    assert first is not None and first["event_id"] == "public-already-waiting"
+    assert second is not None and second["event_id"] == "promoted-retry"
+
+
+def test_qwen_public_request_evicts_oldest_auto_retry_when_queue_is_full(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    model_version = Provider.model_version
+    observed_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    public_hash = hashlib.sha256(b"public-after-full").hexdigest()
+    for index in range(128):
+        event_id = f"auto-{index:03d}"
+        auto_hash = hashlib.sha256(event_id.encode()).hexdigest()
+        queued_at = observed_at + timedelta(milliseconds=index)
+        operations.set_qwen_risk_activity(
+            event_id, 1, auto_hash, model_version, "RUNNING", now=queued_at
+        )
+        retry = operations.schedule_qwen_risk_retry(
+            event_id,
+            1,
+            auto_hash,
+            model_version,
+            error_code="MODEL_TIMEOUT",
+            now=queued_at,
+            max_items=128,
+        )
+        assert retry["requeued"] is True
+
+    accepted = operations.enqueue_qwen_risk_priority(
+        "public-after-full",
+        1,
+        public_hash,
+        model_version,
+        now=observed_at + timedelta(seconds=1),
+        max_items=128,
+    )
+    queue = operations.get_state("qwen_risk_priority_queue_v1", {"items": []})
+
+    assert accepted["enqueued"] is True
+    assert len(queue["items"]) == 128
+    assert "auto-000" not in {item["event_id"] for item in queue["items"]}
+    assert queue["items"][-1]["event_id"] == "public-after-full"
+    assert queue["items"][-1]["queue_class"] == "PUBLIC_EVENT_VIEW"
+    claimed = operations.claim_qwen_risk_priority(
+        model_version, now=observed_at + timedelta(seconds=16)
+    )
+    assert claimed is not None and claimed["event_id"] == "public-after-full"
+
+
+def test_qwen_legacy_retry_marker_does_not_precede_legacy_public_item(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    model_version = Provider.model_version
+    observed_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    operations.set_state(
+        "qwen_risk_priority_queue_v1",
+        {
+            "items": [
+                {
+                    "event_id": "legacy-auto",
+                    "event_version": 1,
+                    "input_sha256": hashlib.sha256(b"legacy-auto").hexdigest(),
+                    "model_version": model_version,
+                    "requested_at": observed_at.isoformat(),
+                    "available_at": observed_at.isoformat(),
+                    "retry_attempt": 1,
+                },
+                {
+                    "event_id": "legacy-public",
+                    "event_version": 1,
+                    "input_sha256": hashlib.sha256(b"legacy-public").hexdigest(),
+                    "model_version": model_version,
+                    "requested_at": observed_at.isoformat(),
+                    "available_at": observed_at.isoformat(),
+                },
+            ]
+        },
+    )
+
+    claimed = operations.claim_qwen_risk_priority(model_version, now=observed_at)
+    assert claimed is not None
+    assert claimed["event_id"] == "legacy-public"
+    assert claimed["queue_class"] == "PUBLIC_EVENT_VIEW"
+
+
 def test_qwen_stale_running_expires_and_can_be_requeued(tmp_path: Path) -> None:
     operations = OperationsRepository(tmp_path / "operations.sqlite3")
     model_version = Provider.model_version
@@ -545,6 +728,46 @@ def test_qwen_worker_processes_one_priority_before_recent_and_marks_ready(
     )
     assert activity is not None
     assert activity["state"] == "READY"
+
+
+def test_qwen_worker_loads_and_runs_public_priority_before_fair_inventory(
+    tmp_path: Path,
+) -> None:
+    order: list[str] = []
+
+    class OrderingLedger(Ledger):
+        def shadow_batch(self, **kwargs):
+            if kwargs.get("event_ids"):
+                order.append("priority-load")
+            else:
+                order.append("fair-load")
+            return super().shadow_batch(**kwargs)
+
+    class OrderingProvider(Provider):
+        def assess(self, detail, evidence):
+            order.append(f"assess:{detail['event']['event_id']}")
+            return super().assess(detail, evidence)
+
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    provider = OrderingProvider()
+    operations.enqueue_qwen_risk_priority(
+        "event-1",
+        1,
+        hashlib.sha256(b"event-1").hexdigest(),
+        provider.model_version,
+    )
+
+    result = run_qwen_risk_batch(
+        OrderingLedger(),
+        operations,
+        provider,
+        scan_limit=4,
+        run_limit=2,
+        concurrency=1,
+    )
+
+    assert result["priority_claimed"] == 1
+    assert order[:3] == ["priority-load", "assess:event-1", "fair-load"]
 
 
 def test_qwen_worker_failure_does_not_block_other_inputs_and_defers_retry(

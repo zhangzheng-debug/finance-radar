@@ -120,6 +120,9 @@ def process_pending_item(item: dict[str, str], env_file: Path) -> str:
                 event_id=item["event_id"],
                 observation_id=item["observation_id"],
                 env_file=env_file,
+                public_request=(
+                    str(item.get("scheduler_lane") or "") == "public_priority"
+                ),
             )
         )
         return classify_run_code(code)
@@ -218,6 +221,7 @@ def prepare_persisted_pending_requests(
     rows: list[dict[str, Any]],
     *,
     limit: int,
+    public_priority: bool = False,
 ) -> tuple[list[dict[str, str]], int]:
     """Bind queued rows to current ledger inputs and reject stale work once."""
 
@@ -256,11 +260,41 @@ def prepare_persisted_pending_requests(
             or str(normalized.get("input_sha256") or "")
             != str(row.get("input_sha256") or "")
         ):
-            operations.fail_capture_interpretation(
-                interpretation_id,
-                "CAPTURE_INTERPRETATION_STALE_INPUT",
-            )
+            replacement: dict[str, Any] = {}
+            if public_priority:
+                replacement = operations.replace_stale_capture_interpretation_priority(
+                    interpretation_id,
+                    event_id=event_id,
+                    observation_id=observation_id,
+                    input_payload=normalized,
+                    contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+                    prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+                    prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+                    provider="deepseek",
+                    model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+                    max_attempts=MAX_ATTEMPTS,
+                )
+            if not replacement.get("replaced"):
+                operations.fail_capture_interpretation(
+                    interpretation_id,
+                    "CAPTURE_INTERPRETATION_STALE_INPUT",
+                )
             stale_rejected += 1
+            if replacement.get("queued"):
+                prepared.append(
+                    {
+                        "interpretation_id": str(
+                            replacement.get("interpretation_id") or ""
+                        ),
+                        "event_id": event_id,
+                        "observation_id": observation_id,
+                        "capture_receipt_sha256": str(
+                            normalized.get("capture_receipt_sha256") or ""
+                        ),
+                        "bucket": str(eligibility.get("bucket") or ""),
+                        "scheduler_lane": "public_priority",
+                    }
+                )
             continue
         prepared.append(
             {
@@ -271,7 +305,9 @@ def prepare_persisted_pending_requests(
                     row.get("capture_receipt_sha256") or ""
                 ),
                 "bucket": str(eligibility.get("bucket") or ""),
-                "scheduler_lane": "persisted_pending",
+                "scheduler_lane": (
+                    "public_priority" if public_priority else "persisted_pending"
+                ),
             }
         )
     return prepared, stale_rejected
@@ -305,6 +341,7 @@ def run(args: argparse.Namespace) -> int:
             operations,
             priority_rows,
             limit=1,
+            public_priority=True,
         )
         priority_stale_rejected += rejected
         if not prepared:
@@ -382,6 +419,7 @@ def run(args: argparse.Namespace) -> int:
             operations,
             priority_rows,
             limit=1,
+            public_priority=True,
         )
         priority_stale_rejected += rejected
         if not prepared:
