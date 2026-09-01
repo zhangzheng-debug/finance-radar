@@ -3,7 +3,7 @@ Description=Run bounded Finance Radar Qwen semantic risk worker
 
 [Timer]
 OnBootSec=3min
-OnUnitInactiveSec=60s
+OnUnitInactiveSec=10s
 RandomizedDelaySec=5s
 AccuracySec=5s
 Persistent=true

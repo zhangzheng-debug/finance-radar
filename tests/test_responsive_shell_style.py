@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / ".streamlit" / "config.toml"
 STYLE = ROOT / "app" / "web" / "style_v3.css"
+PUBLIC_STYLE = ROOT / "app" / "web" / "public_reader_v4.css"
 TOKENS = ROOT / "app" / "web" / "design_tokens_v3.css"
 
 
@@ -124,3 +125,69 @@ def test_public_master_detail_reader_is_scoped_and_collapses_detail_first() -> N
         style,
         re.S,
     )
+
+
+def test_public_reader_v4_is_visual_only_and_keeps_deepseek_detail_slots() -> None:
+    common = (ROOT / "app" / "web" / "common.py").read_text(encoding="utf-8")
+    home = (ROOT / "app" / "web" / "Home.py").read_text(encoding="utf-8")
+    public_style = PUBLIC_STYLE.read_text(encoding="utf-8")
+
+    assert "PUBLIC_READER_V4" in common
+    assert 'if UI_ROLE == "public":' in common
+    assert "require_public_login" not in common
+    assert "FINANCE_RADAR_PUBLIC_PASSWORD" not in common
+    assert not (ROOT / "app" / "web" / "public_auth.py").exists()
+    assert "render_capture_explanation_fragment" in home
+    assert "preview_capture_explanation" in home
+    assert ".capture-ai-result" in public_style
+    assert "@media (max-width: 980px)" in public_style
+    assert "@media (max-width: 560px)" in public_style
+
+
+def test_public_reader_v4_keeps_feed_left_and_collapses_detail_first() -> None:
+    public_style = PUBLIC_STYLE.read_text(encoding="utf-8")
+
+    assert re.search(
+        r'\[data-testid="stColumn"\]:has\(\.fr-public-reader-feed-panel\)\s*\{'
+        r'[^}]*order:\s*1\s*!important;',
+        public_style,
+        re.S,
+    )
+    assert re.search(
+        r'\[data-testid="stColumn"\]:has\(\.fr-public-reader-detail-panel\)\s*\{'
+        r'[^}]*order:\s*2\s*!important;',
+        public_style,
+        re.S,
+    )
+    responsive = public_style.split("@media (max-width: 980px)", maxsplit=1)[1]
+    assert re.search(
+        r'\[data-testid="stColumn"\]:has\(\.fr-public-reader-detail-panel\)\s*\{'
+        r'\s*order:\s*1\s*!important;',
+        responsive,
+    )
+    assert re.search(
+        r'\[data-testid="stColumn"\]:has\(\.fr-public-reader-feed-panel\)\s*\{'
+        r'\s*order:\s*2\s*!important;',
+        responsive,
+    )
+
+
+def test_public_reader_model_progress_is_compact_and_motion_safe() -> None:
+    public_style = PUBLIC_STYLE.read_text(encoding="utf-8")
+
+    for selector in (
+        ".model-status-card",
+        ".model-status-card.is-deepseek",
+        ".model-status-card.is-qwen",
+        ".model-status-copy",
+        ".model-status-skeleton",
+        ".model-status-skeleton-line",
+    ):
+        assert selector in public_style
+    assert "@keyframes fr-model-status-sheen" in public_style
+    assert "animation: fr-model-status-sheen 1.35s ease-in-out infinite;" in public_style
+    reduced_motion = public_style.split(
+        "@media (prefers-reduced-motion: reduce)", maxsplit=1
+    )[1]
+    assert ".model-status-skeleton-line" in reduced_motion
+    assert "animation: none !important;" in reduced_motion

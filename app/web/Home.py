@@ -67,7 +67,9 @@ PUBLIC_SORTS = {
 }
 PUBLIC_EVENT_SEEN_STATE_KEY = "public_event_seen_v1"
 CAPTURE_EXPLANATION_CACHE_STATE_KEY = "public_capture_explanation_v1"
-CAPTURE_EXPLANATION_MAX_POLLS = 15
+CAPTURE_EXPLANATION_FAST_POLLS = 15
+CAPTURE_EXPLANATION_SLOW_POLL_SECONDS = 15
+QWEN_SIGNAL_CACHE_STATE_KEY = "public_qwen_signal_v1"
 
 
 def bounded_int(value: object, default: int, *, minimum: int, maximum: int) -> int:
@@ -113,7 +115,7 @@ def public_capture_url(sources: list[dict[str, object]]) -> str | None:
 
 
 def render_capture_explanation_payload(payload: dict[str, object]) -> None:
-    """Render completed AI assistance without duplicating the source text."""
+    """Render the cache-only DeepSeek lifecycle without blocking the dossier."""
 
     if not payload.get("display"):
         return
@@ -125,8 +127,8 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
         st.markdown(
             '<section class="capture-ai-result" aria-label="AI 解读">'
             '<div class="capture-ai-boundary-head">'
-            '<span>AI 阅读辅助</span>'
-            f'<strong>{escape(str(interpretation.get("boundary_zh") or "AI仅解释来源文本，不参与事件评级或价格判断。"))}</strong>'
+            '<span>DeepSeek 阅读辅助</span>'
+            '<strong>仅解释来源文本</strong>'
             '</div>'
             f'<p>{escape(str(interpretation.get("one_line_zh") or ""))}</p>'
             '</section>',
@@ -139,10 +141,95 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
                 if not isinstance(claim, dict):
                     continue
                 st.markdown(f"- {escape(str(claim.get('text_zh') or ''))}")
+        return
+
+    if state in {
+        "CHECKING",
+        "PENDING",
+        "STATUS_UNAVAILABLE",
+        "ELIGIBLE_NOT_QUEUED",
+        "QUEUED",
+        "RUNNING",
+        "RETRY_WAIT",
+        "SUPERSEDED",
+    }:
+        st.markdown(
+            '<section class="model-status-card is-deepseek" role="status" aria-live="polite">'
+            '<div class="model-status-head"><strong>DeepSeek 阅读辅助</strong><small>生成中</small></div>'
+            '<p class="model-status-copy">因为该事件当前没有关联证据，系统启动 AI 阅读解释。</p>'
+            '<div class="model-status-skeleton" aria-hidden="true">'
+            '<span class="model-status-skeleton-line"></span>'
+            '<span class="model-status-skeleton-line"></span>'
+            '</div></section>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    if state == "FAILED_TERMINAL":
+        st.markdown(
+            '<section class="model-status-card is-deepseek">'
+            '<div class="model-status-head"><strong>来源文本</strong></div>'
+            '<p class="model-status-copy">来源内容已保留，可直接阅读。</p>'
+            '</section>',
+            unsafe_allow_html=True,
+        )
+
+
+def public_qwen_signal_row_markup(public_copy: dict[str, object]) -> str:
+    """Return a compact public Qwen row using only known semantic axes."""
+
+    if not (public_copy.get("risk_route") and public_copy.get("risk_label")):
+        return ""
+    metrics = (
+        ("方向", str(public_copy.get("risk_polarity_label") or "")),
+        ("重大性", str(public_copy.get("risk_materiality_label") or "")),
+        ("风险强度", str(public_copy.get("risk_strength_label") or "")),
+    )
+    qwen_metrics = "".join(
+        '<span class="qwen-signal-metric">'
+        f'<small>{escape(label)}</small><strong>{escape(value)}</strong></span>'
+        for label, value in metrics
+        if value
+    )
+    if not qwen_metrics:
+        return ""
+    basis = " ".join(str(public_copy.get("risk_basis_label") or "").split())
+    return (
+        '<div class="research-signal-row qwen-signal-row"'
+        + (f' title="{escape(basis)}"' if basis else "")
+        + '><span>千问研判</span><div class="qwen-signal-metrics">'
+        + qwen_metrics
+        + '</div><small class="qwen-slot-state">自动研判</small></div>'
+    )
+
+
+def public_qwen_signal_markup(public_copy: dict[str, object]) -> str:
+    row = public_qwen_signal_row_markup(public_copy)
+    if not row:
+        return ""
+    return (
+        '<section class="market-reaction research-signals qwen-signal-card" aria-label="千问研判">'
+        '<div class="market-reaction-head"><span>研究信号</span></div>'
+        + row
+        + "</section>"
+    )
+
+
+def public_qwen_copy(semantic_assessment: object) -> dict[str, object]:
+    semantic = semantic_assessment if isinstance(semantic_assessment, dict) else None
+    risk = public_event_risk_assessment({"semantic_assessment": semantic})
+    return {
+        "risk_route": risk["route"],
+        "risk_label": risk["label"],
+        "risk_polarity_label": risk["polarity_label"],
+        "risk_materiality_label": risk["materiality_label"],
+        "risk_strength_label": risk["strength_label"],
+        "risk_basis_label": risk["basis_label"],
+    }
 
 
 def public_research_signal_markup(
-    detail: dict[str, object], public_copy: dict[str, object]
+    detail: dict[str, object], public_copy: dict[str, object], *, include_qwen: bool = True
 ) -> str:
     """Render the stable Qwen slot and available market observations compactly."""
 
@@ -212,26 +299,10 @@ def public_research_signal_markup(
         }
 
     signal_rows: list[str] = []
-    qwen_ready = bool(public_copy.get("risk_route") and public_copy.get("risk_label"))
-    basis = " ".join(str(public_copy.get("risk_basis_label") or "").split())
-    if qwen_ready:
-        qwen_values = (
-            str(public_copy.get("risk_polarity_label") or ""),
-            str(public_copy.get("risk_materiality_label") or ""),
-            str(public_copy.get("risk_strength_label") or ""),
-        )
-        qwen_metrics = "".join(
-            '<span class="qwen-signal-metric">'
-            f'<small>{escape(label)}</small><strong>{escape(value)}</strong></span>'
-            for label, value in zip(("方向", "重大性", "风险强度"), qwen_values, strict=True)
-        )
-        signal_rows.append(
-            '<div class="research-signal-row qwen-signal-row"'
-            + (f' title="{escape(basis)}"' if basis else "")
-            + '><span>千问研判</span><div class="qwen-signal-metrics">'
-            + qwen_metrics
-            + '</div><small class="qwen-slot-state">自动研判</small></div>'
-        )
+    if include_qwen:
+        qwen_row = public_qwen_signal_row_markup(public_copy)
+        if qwen_row:
+            signal_rows.append(qwen_row)
 
     if normalized:
         # Select one shared window so values are comparable. Coverage wins;
@@ -338,59 +409,118 @@ def render_capture_explanation_fragment(
     previous_payload = (
         previous_payload if isinstance(previous_payload, dict) else {}
     )
-    if (
-        int(previous.get("version") or -1) == event_version
-        and str(previous_payload.get("state") or "")
-        in {
-            "READY",
-            "FAILED_TERMINAL",
-            "SUPERSEDED",
-            "NOT_APPLICABLE",
-            "NO_CAPTURE_TEXT",
-            "REFETCH_PRIMARY_SOURCE",
-            "CLIENT_POLL_PAUSED",
-        }
-    ):
-        render_capture_explanation_payload(previous_payload)
-        return
+    if int(previous.get("version") or -1) != event_version:
+        previous = {}
+        previous_payload = {}
+    now = datetime.now(timezone.utc)
+    next_check_at = str(previous.get("next_check_at") or "")
+    if next_check_at:
+        try:
+            next_check = datetime.fromisoformat(next_check_at.replace("Z", "+00:00"))
+        except ValueError:
+            next_check = now
+        if next_check > now:
+            render_capture_explanation_payload(previous_payload or initial_payload)
+            return
     try:
         payload = api_request(
             f"/api/v1/events/{event_path_id}/capture-explanation",
             timeout_seconds=3,
         )
     except Exception:
-        payload = dict(initial_payload)
-        payload["display"] = bool(initial_payload.get("display"))
-        payload["state"] = "STATUS_UNAVAILABLE"
-        payload.setdefault("item", None)
+        if previous_payload:
+            payload = dict(previous_payload)
+        else:
+            payload = dict(initial_payload)
+            payload["display"] = bool(initial_payload.get("display"))
+            payload["state"] = "STATUS_UNAVAILABLE"
+            payload.setdefault("item", None)
     polls = int(previous.get("polls") or 0) + 1
     state = str(payload.get("state") or "")
-    terminal = state in {
+    settled = state in {
         "READY",
         "FAILED_TERMINAL",
-        "SUPERSEDED",
         "NOT_APPLICABLE",
         "NO_CAPTURE_TEXT",
         "REFETCH_PRIMARY_SOURCE",
     }
-    if terminal or polls >= CAPTURE_EXPLANATION_MAX_POLLS:
-        if not terminal:
-            payload = dict(payload)
-            payload["state"] = "CLIENT_POLL_PAUSED"
-        cache[event_id] = {
-            "version": event_version,
-            "polls": polls,
-            "payload": payload,
-        }
-        st.session_state[CAPTURE_EXPLANATION_CACHE_STATE_KEY] = cache
-    else:
-        cache[event_id] = {
-            "version": event_version,
-            "polls": polls,
-            "payload": payload,
-        }
-        st.session_state[CAPTURE_EXPLANATION_CACHE_STATE_KEY] = cache
+    cache[event_id] = {
+        "version": event_version,
+        "polls": polls,
+        "payload": payload,
+        "next_check_at": (
+            (now + timedelta(seconds=CAPTURE_EXPLANATION_SLOW_POLL_SECONDS)).isoformat()
+            if settled or polls >= CAPTURE_EXPLANATION_FAST_POLLS
+            else None
+        ),
+    }
+    st.session_state[CAPTURE_EXPLANATION_CACHE_STATE_KEY] = cache
     render_capture_explanation_payload(payload)
+
+
+@st.fragment(run_every="10s")
+def render_qwen_signal_fragment(
+    event_path_id: str,
+    event_id: str,
+    event_version: int,
+    initial_assessment: object,
+) -> None:
+    """Refresh the current, public-approved Qwen result without reloading the page."""
+
+    initial_markup = public_qwen_signal_markup(public_qwen_copy(initial_assessment))
+    cache = st.session_state.get(QWEN_SIGNAL_CACHE_STATE_KEY, {})
+    cache = cache if isinstance(cache, dict) else {}
+    previous = cache.get(event_id)
+    previous = previous if isinstance(previous, dict) else {}
+    if int(previous.get("version") or -1) != event_version:
+        previous = {}
+    previous_state = str(previous.get("state") or "")
+    if initial_markup and not previous:
+        st.markdown(initial_markup, unsafe_allow_html=True)
+        cache[event_id] = {
+            "version": event_version,
+            "state": "READY",
+            "assessment": initial_assessment,
+        }
+        st.session_state[QWEN_SIGNAL_CACHE_STATE_KEY] = cache
+        return
+    try:
+        payload = api_request(
+            f"/api/v1/events/{event_path_id}/semantic-assessment",
+            timeout_seconds=3,
+        )
+    except Exception:
+        if previous_state == "READY":
+            markup = public_qwen_signal_markup(
+                public_qwen_copy(previous.get("assessment"))
+            )
+            if markup:
+                st.markdown(markup, unsafe_allow_html=True)
+            return
+        payload = {"state": "PROCESSING", "assessment": None}
+    state = str(payload.get("state") or "PROCESSING")
+    assessment = payload.get("assessment")
+    cache[event_id] = {
+        "version": event_version,
+        "state": state,
+        "assessment": assessment,
+    }
+    st.session_state[QWEN_SIGNAL_CACHE_STATE_KEY] = cache
+    if state == "READY":
+        markup = public_qwen_signal_markup(public_qwen_copy(assessment))
+        if markup:
+            st.markdown(markup, unsafe_allow_html=True)
+        return
+    if state == "PROCESSING":
+        st.markdown(
+            '<section class="model-status-card is-qwen" role="status" aria-live="polite">'
+            '<div class="model-status-head"><strong>千问研判</strong><small>生成中</small></div>'
+            '<p class="model-status-copy">事件方向与强弱正在生成。</p>'
+            '<div class="model-status-skeleton" aria-hidden="true">'
+            '<span class="model-status-skeleton-line"></span>'
+            '</div></section>',
+            unsafe_allow_html=True,
+        )
 
 
 def public_evidence_sort_key(item: dict[str, object]) -> tuple[int, int, float, str]:
@@ -527,7 +657,7 @@ def public_time_markup(event: dict[str, object], detail: dict[str, object]) -> s
         '</section>'
     )
 
-st.set_page_config(page_title="态势总览 · Finance Radar", page_icon="◎", layout="wide")
+st.set_page_config(page_title="风险雷达 · Finance Radar", page_icon="◎", layout="wide")
 install_style()
 render_primary_navigation("home")
 
@@ -939,6 +1069,12 @@ finally:
     feed_loading.empty()
 
 preview_event_id = str(st.query_params.get("preview_event_id") or "")
+if UI_ROLE != "admin" and not preview_event_id and live_feed:
+    # Keep the first useful dossier visible on initial load without changing the
+    # URL. Event links still use the existing server-rendered navigation path,
+    # so the DeepSeek capture explanation follows the selected event contract.
+    preview_event_id = str(live_feed[0].get("event_id") or "")
+
 
 def render_selected_event_preview() -> None:
     if preview_event_id:
@@ -1252,8 +1388,15 @@ def render_selected_event_preview() -> None:
                         public_time_markup(preview_event, preview_detail),
                         unsafe_allow_html=True,
                     )
+                    if preview_load_error is None:
+                        render_qwen_signal_fragment(
+                            preview_event_path_id,
+                            preview_event_id,
+                            int(preview_event.get("current_version") or 0),
+                            copy_input.get("semantic_assessment"),
+                        )
                     research_signal_markup = public_research_signal_markup(
-                        preview_detail, public_copy
+                        preview_detail, public_copy, include_qwen=False
                     )
                     if research_signal_markup:
                         st.markdown(research_signal_markup, unsafe_allow_html=True)
@@ -1325,41 +1468,12 @@ def render_selected_event_preview() -> None:
                     and preview_capture_explanation.get("display") is True
                 ):
                     event_version = int(preview_event.get("current_version") or 0)
-                    explanation_cache = st.session_state.get(
-                        CAPTURE_EXPLANATION_CACHE_STATE_KEY,
-                        {},
+                    render_capture_explanation_fragment(
+                        preview_event_path_id,
+                        preview_event_id,
+                        event_version,
+                        preview_capture_explanation,
                     )
-                    explanation_cache = (
-                        explanation_cache if isinstance(explanation_cache, dict) else {}
-                    )
-                    cached_explanation = explanation_cache.get(preview_event_id)
-                    cached_explanation = (
-                        cached_explanation if isinstance(cached_explanation, dict) else {}
-                    )
-                    if int(cached_explanation.get("version") or -1) == event_version:
-                        cached_payload = cached_explanation.get("payload")
-                        cached_payload = (
-                            cached_payload if isinstance(cached_payload, dict) else {}
-                        )
-                    else:
-                        cached_payload = {}
-                    if str(cached_payload.get("state") or "") in {
-                        "READY",
-                        "FAILED_TERMINAL",
-                        "SUPERSEDED",
-                        "NOT_APPLICABLE",
-                        "NO_CAPTURE_TEXT",
-                        "REFETCH_PRIMARY_SOURCE",
-                        "CLIENT_POLL_PAUSED",
-                    }:
-                        render_capture_explanation_payload(cached_payload)
-                    else:
-                        render_capture_explanation_fragment(
-                            preview_event_path_id,
-                            preview_event_id,
-                            event_version,
-                            preview_capture_explanation,
-                        )
                 if UI_ROLE == "admin":
                     render_next_action_prompt(
                         next_action_guidance(preview_event, preview_evidence, preview_model)

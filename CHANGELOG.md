@@ -5,6 +5,16 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.09.01.1
+
+- Restore the teammate's compact, login-free DeepSeek reader UI while keeping
+  interpretation cache-only, read-only and limited to events without evidence.
+- Keep DeepSeek progress alive after the initial fast polling window and show
+  completed reading assistance without blocking the rest of the event detail.
+- Expose only current, approved Qwen semantic results through a narrow public
+  projection, refresh stale results asynchronously and shorten the worker
+  timer interval without allowing concurrent model runs.
+
 ## 2026.08.30.2
 
 - Promote the best current Qwen2.5-1.5B v3 LoRA plus narrow deterministic

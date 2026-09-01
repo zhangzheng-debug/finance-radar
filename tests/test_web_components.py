@@ -494,6 +494,57 @@ def test_public_risk_assessment_handles_missing_and_shadow_outputs_honestly() ->
     assert ai_consensus["current"] is True
 
 
+def test_public_qwen_keeps_clear_polarity_when_secondary_axes_are_unclear() -> None:
+    partial = public_event_risk_assessment(
+        {
+            "semantic_assessment": {
+                "polarity": "ADVERSE",
+                "materiality": "UNCLEAR",
+                "adverse_strength": "UNCLEAR",
+                "semantic_priority": "UNDECIDABLE",
+                "assessment_scope": "SOURCE_CONDITIONAL",
+                "publication_state": "PUBLIC_APPROVED",
+                "training_basis": "DUAL_REVIEW_AI_CONSENSUS",
+                "automatic": True,
+                "shadow": False,
+                "no_trading": True,
+                "confirms_event_fact": False,
+                "current": True,
+            }
+        }
+    )
+
+    assert partial["route"] == "ABSTAIN"
+    assert partial["label"] == "负面"
+    assert partial["polarity_label"] == "负面"
+    assert partial["materiality_label"] == ""
+    assert partial["strength_label"] == ""
+    assert partial["current"] is True
+    assert all("UNCLEAR" not in str(value) for value in partial.values())
+
+    polarity_unclear = public_event_risk_assessment(
+        {
+            "semantic_assessment": {
+                "polarity": "UNCLEAR",
+                "materiality": "MATERIAL_ADVERSE",
+                "adverse_strength": "UNCLEAR",
+                "semantic_priority": "UNDECIDABLE",
+                "assessment_scope": "SOURCE_CONDITIONAL",
+                "publication_state": "PUBLIC_APPROVED",
+                "training_basis": "DUAL_REVIEW_AI_CONSENSUS",
+                "automatic": True,
+                "shadow": False,
+                "no_trading": True,
+                "confirms_event_fact": False,
+                "current": True,
+            }
+        }
+    )
+
+    assert polarity_unclear["label"] == ""
+    assert polarity_unclear["current"] is False
+
+
 def test_public_risk_assessment_hides_internal_rules_fallback_and_unknown_source() -> None:
     evidence_gate = public_event_risk_assessment(
         {
