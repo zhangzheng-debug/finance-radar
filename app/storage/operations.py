@@ -21,12 +21,22 @@ FORMAL_MUTATION_STATES = {
     "RECOVERY_CONFLICT",
 }
 QWEN_RISK_PUBLICATION_STATE_KEY = "qwen_risk_publication_v1"
+QWEN_RISK_PRIORITY_QUEUE_STATE_KEY = "qwen_risk_priority_queue_v1"
+QWEN_RISK_ACTIVITY_STATE_KEY = "qwen_risk_activity_v1"
+QWEN_RISK_PRIORITY_MAX_ITEMS = 128
+QWEN_RISK_ACTIVITY_MAX_ITEMS = 256
+QWEN_RISK_PRIORITY_TTL_SECONDS = 15 * 60
+QWEN_RISK_RUNNING_STALE_SECONDS = 3 * 60
+QWEN_RISK_AUTO_RETRY_MAX_ATTEMPTS = 3
 QWEN_RISK_PUBLICATION_STATES = {
     "CANDIDATE",
     "SHADOW_ACCEPTED",
     "PUBLIC_APPROVED",
     "REVOKED",
 }
+QWEN_RISK_ACTIVITY_STATES = {"QUEUED", "RUNNING", "FAILED", "READY"}
+CAPTURE_INTERPRETATION_PRIORITY_STATE_KEY = "capture_interpretation_public_priority_v1"
+CAPTURE_INTERPRETATION_PRIORITY_MAX_ITEMS = 128
 
 
 def utc_now() -> str:
@@ -48,6 +58,16 @@ def _safe_json(value: Any, default: Any) -> Any:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return default
+
+
+def _utc_datetime(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class OperationsRepository:
@@ -662,6 +682,10 @@ class OperationsRepository:
     def latest_qwen_risk_runs_for_versions(
         self,
         event_versions: dict[str, int],
+        *,
+        model_version: str | None = None,
+        contract_version: str | None = None,
+        prompt_version: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Return current-version Qwen semantic runs without replacing routers.
 
@@ -682,6 +706,26 @@ class OperationsRepository:
         if not requested:
             return {}
 
+        exact_model = (
+            str(model_version or "").strip() if model_version is not None else None
+        )
+        exact_contract = (
+            str(contract_version or "").strip()
+            if contract_version is not None
+            else None
+        )
+        exact_prompt = (
+            str(prompt_version or "").strip()
+            if prompt_version is not None
+            else None
+        )
+        if any(
+            value == ""
+            for value in (exact_model, exact_contract, exact_prompt)
+            if value is not None
+        ):
+            return {}
+
         selected: dict[str, dict[str, Any]] = {}
         requested_items = list(requested.items())
         with closing(self.connect()) as connection:
@@ -691,6 +735,29 @@ class OperationsRepository:
                 params: list[Any] = []
                 for event_id, event_version in chunk:
                     params.extend((event_id, event_version))
+                candidate_filters = [
+                    "candidate.event_id=requested.event_id",
+                    "candidate.event_version=requested.event_version",
+                    "candidate.model_version LIKE 'qwen-risk-%'",
+                    "json_extract(candidate.output_json,'$.model_task')="
+                    "'QWEN_RISK_SEMANTICS'",
+                ]
+                if exact_model is not None:
+                    candidate_filters.append("candidate.model_version=?")
+                    params.append(exact_model)
+                if exact_contract is not None:
+                    candidate_filters.append(
+                        "json_extract(candidate.output_json,'$.contract_version')=?"
+                    )
+                    params.append(exact_contract)
+                if exact_prompt is not None:
+                    candidate_filters.append(
+                        "json_extract(candidate.output_json,'$.prompt_version')=?"
+                    )
+                    params.append(exact_prompt)
+                candidate_where = "\n                                AND ".join(
+                    candidate_filters
+                )
                 rows = connection.execute(
                     f"""WITH requested(event_id,event_version) AS (
                             VALUES {values}
@@ -699,12 +766,10 @@ class OperationsRepository:
                         FROM requested
                         JOIN model_runs
                           ON model_runs.run_id = (
-                              SELECT candidate.run_id
-                              FROM model_runs AS candidate
-                              WHERE candidate.event_id=requested.event_id
-                                AND candidate.event_version=requested.event_version
-                                AND candidate.model_version LIKE 'qwen-risk-%'
-                              ORDER BY candidate.created_at DESC,candidate.run_id DESC
+                               SELECT candidate.run_id
+                               FROM model_runs AS candidate
+                               WHERE {candidate_where}
+                               ORDER BY candidate.created_at DESC,candidate.run_id DESC
                               LIMIT 1
                           )""",
                     params,
@@ -788,6 +853,622 @@ class OperationsRepository:
         }
 
     @staticmethod
+    def _qwen_risk_identity(
+        event_id: str,
+        event_version: int,
+        input_sha256: str,
+        model_version: str,
+    ) -> dict[str, Any]:
+        normalized_event_id = str(event_id or "").strip()
+        normalized_model = str(model_version or "").strip()
+        normalized_input = str(input_sha256 or "").strip().casefold()
+        try:
+            normalized_version = int(event_version)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Qwen activity requires a positive event version") from exc
+        if not normalized_event_id or normalized_version <= 0:
+            raise ValueError("Qwen activity requires an event identity")
+        if not normalized_model.startswith("qwen-risk-"):
+            raise ValueError("Qwen activity requires a pinned model version")
+        if len(normalized_input) != 64 or any(
+            character not in "0123456789abcdef" for character in normalized_input
+        ):
+            raise ValueError("Qwen activity requires an input SHA-256")
+        identity = {
+            "event_id": normalized_event_id,
+            "event_version": normalized_version,
+            "input_sha256": normalized_input,
+            "model_version": normalized_model,
+        }
+        identity["identity_key"] = _stable_sha256(identity)
+        return identity
+
+    @staticmethod
+    def _runtime_state_value(
+        connection: sqlite3.Connection,
+        key: str,
+        default: Any,
+    ) -> Any:
+        row = connection.execute(
+            "SELECT value_json FROM runtime_state WHERE key=?", (key,)
+        ).fetchone()
+        return _safe_json(row["value_json"], default) if row else default
+
+    @staticmethod
+    def _write_runtime_state_value(
+        connection: sqlite3.Connection,
+        key: str,
+        value: Any,
+        *,
+        updated_at: str,
+    ) -> None:
+        connection.execute(
+            """INSERT INTO runtime_state(key,value_json,updated_at) VALUES (?,?,?)
+               ON CONFLICT(key) DO UPDATE
+               SET value_json=excluded.value_json,updated_at=excluded.updated_at""",
+            (key, _stable_json(value), updated_at),
+        )
+
+    @classmethod
+    def _set_qwen_risk_activity_in_connection(
+        cls,
+        connection: sqlite3.Connection,
+        identity: dict[str, Any],
+        state: str,
+        *,
+        observed_at: datetime,
+        error_code: str | None = None,
+        retryable: bool = True,
+    ) -> dict[str, Any]:
+        normalized_state = str(state or "").strip().upper()
+        if normalized_state not in QWEN_RISK_ACTIVITY_STATES:
+            raise ValueError(f"unsupported Qwen activity state: {state}")
+        observed_at = observed_at.astimezone(timezone.utc)
+        observed_iso = observed_at.isoformat()
+        raw = cls._runtime_state_value(
+            connection, QWEN_RISK_ACTIVITY_STATE_KEY, {"items": []}
+        )
+        raw_items = raw.get("items") if isinstance(raw, dict) else []
+        items = [item for item in (raw_items or []) if isinstance(item, dict)]
+        previous = next(
+            (
+                item
+                for item in items
+                if str(item.get("identity_key") or "") == identity["identity_key"]
+            ),
+            {},
+        )
+        try:
+            previous_attempts = max(0, int(previous.get("attempts") or 0))
+        except (TypeError, ValueError):
+            previous_attempts = 0
+        item = {
+            **identity,
+            "state": normalized_state,
+            "updated_at": observed_iso,
+            "attempts": previous_attempts,
+        }
+        previous_state = str(previous.get("state") or "").upper()
+        if normalized_state == "QUEUED":
+            item["queued_at"] = (
+                previous.get("queued_at") if previous_state == "QUEUED" else observed_iso
+            ) or observed_iso
+        elif normalized_state == "RUNNING":
+            if previous.get("queued_at"):
+                item["queued_at"] = previous["queued_at"]
+            item["started_at"] = (
+                previous.get("started_at") if previous_state == "RUNNING" else observed_iso
+            ) or observed_iso
+            item["heartbeat_at"] = observed_iso
+        elif normalized_state == "FAILED":
+            if previous.get("queued_at"):
+                item["queued_at"] = previous["queued_at"]
+            if previous.get("started_at"):
+                item["started_at"] = previous["started_at"]
+            if previous.get("heartbeat_at"):
+                item["heartbeat_at"] = previous["heartbeat_at"]
+            attempts = item["attempts"] + 1
+            item.update(
+                {
+                    "attempts": attempts,
+                    "finished_at": observed_iso,
+                    "error_code": str(error_code or "QWEN_RISK_FAILED")[:120],
+                }
+            )
+            if retryable:
+                retry_seconds = min(5 * 60, 15 * (2 ** min(attempts - 1, 5)))
+                item["retry_after"] = (
+                    observed_at + timedelta(seconds=retry_seconds)
+                ).isoformat()
+        elif normalized_state == "READY":
+            if previous.get("queued_at"):
+                item["queued_at"] = previous["queued_at"]
+            if previous.get("started_at"):
+                item["started_at"] = previous["started_at"]
+            if previous.get("heartbeat_at"):
+                item["heartbeat_at"] = previous["heartbeat_at"]
+            item.update({"finished_at": observed_iso, "error_code": None})
+        retained = [
+            candidate
+            for candidate in items
+            if str(candidate.get("identity_key") or "") != identity["identity_key"]
+        ]
+        retained.append(item)
+        retained.sort(key=lambda value: str(value.get("updated_at") or ""), reverse=True)
+        payload = {
+            "items": retained[:QWEN_RISK_ACTIVITY_MAX_ITEMS],
+            "updated_at": observed_iso,
+        }
+        cls._write_runtime_state_value(
+            connection,
+            QWEN_RISK_ACTIVITY_STATE_KEY,
+            payload,
+            updated_at=observed_iso,
+        )
+        return item
+
+    def set_qwen_risk_activity(
+        self,
+        event_id: str,
+        event_version: int,
+        input_sha256: str,
+        model_version: str,
+        state: str,
+        *,
+        error_code: str | None = None,
+        now: datetime | None = None,
+        retryable: bool = True,
+    ) -> dict[str, Any]:
+        """Persist one bounded, input-exact Qwen lifecycle transition."""
+
+        identity = self._qwen_risk_identity(
+            event_id, event_version, input_sha256, model_version
+        )
+        observed_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            item = self._set_qwen_risk_activity_in_connection(
+                connection,
+                identity,
+                state,
+                observed_at=observed_at,
+                error_code=error_code,
+                retryable=retryable,
+            )
+            connection.commit()
+        return item
+
+    def schedule_qwen_risk_retry(
+        self,
+        event_id: str,
+        event_version: int,
+        input_sha256: str,
+        model_version: str,
+        *,
+        error_code: str,
+        now: datetime | None = None,
+        max_attempts: int = QWEN_RISK_AUTO_RETRY_MAX_ATTEMPTS,
+        max_items: int = QWEN_RISK_PRIORITY_MAX_ITEMS,
+    ) -> dict[str, Any]:
+        """Persist a bounded delayed retry without requiring another public POST."""
+
+        identity = self._qwen_risk_identity(
+            event_id, event_version, input_sha256, model_version
+        )
+        observed_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        observed_iso = observed_at.isoformat()
+        attempt_limit = max(0, min(int(max_attempts), 10))
+        capacity = max(1, min(int(max_items), QWEN_RISK_PRIORITY_MAX_ITEMS))
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            activity_raw = self._runtime_state_value(
+                connection, QWEN_RISK_ACTIVITY_STATE_KEY, {"items": []}
+            )
+            activity_items = (
+                activity_raw.get("items") if isinstance(activity_raw, dict) else []
+            )
+            previous = next(
+                (
+                    item
+                    for item in (activity_items or [])
+                    if isinstance(item, dict)
+                    and str(item.get("identity_key") or "")
+                    == identity["identity_key"]
+                ),
+                {},
+            )
+            try:
+                previous_attempts = max(0, int(previous.get("attempts") or 0))
+            except (TypeError, ValueError):
+                previous_attempts = 0
+
+            queue_raw = self._runtime_state_value(
+                connection, QWEN_RISK_PRIORITY_QUEUE_STATE_KEY, {"items": []}
+            )
+            queue_items = (
+                queue_raw.get("items") if isinstance(queue_raw, dict) else []
+            )
+            retained: list[dict[str, Any]] = []
+            existing_index: int | None = None
+            for candidate in queue_items or []:
+                if not isinstance(candidate, dict):
+                    continue
+                requested_at = _utc_datetime(candidate.get("requested_at"))
+                if requested_at is None or (
+                    observed_at - requested_at
+                ).total_seconds() > QWEN_RISK_PRIORITY_TTL_SECONDS:
+                    continue
+                try:
+                    candidate_identity = self._qwen_risk_identity(
+                        candidate.get("event_id"),
+                        candidate.get("event_version"),
+                        candidate.get("input_sha256"),
+                        candidate.get("model_version"),
+                    )
+                except ValueError:
+                    continue
+                retained.append({**candidate, **candidate_identity})
+                if candidate_identity["identity_key"] == identity["identity_key"]:
+                    existing_index = len(retained) - 1
+
+            can_enqueue = existing_index is not None or len(retained) < capacity
+            retryable = previous_attempts < attempt_limit and can_enqueue
+            activity = self._set_qwen_risk_activity_in_connection(
+                connection,
+                identity,
+                "FAILED",
+                observed_at=observed_at,
+                error_code=error_code,
+                retryable=retryable,
+            )
+            retry_after = _utc_datetime(activity.get("retry_after"))
+            if retryable and retry_after is not None:
+                queued = {
+                    **identity,
+                    "requested_at": observed_iso,
+                    "available_at": retry_after.isoformat(),
+                    "retry_attempt": int(activity.get("attempts") or 0),
+                }
+                if existing_index is None:
+                    retained.append(queued)
+                else:
+                    retained[existing_index] = queued
+                self._write_runtime_state_value(
+                    connection,
+                    QWEN_RISK_PRIORITY_QUEUE_STATE_KEY,
+                    {"items": retained, "updated_at": observed_iso},
+                    updated_at=observed_iso,
+                )
+            else:
+                if existing_index is not None:
+                    retained.pop(existing_index)
+                if existing_index is not None or len(retained) != len(
+                    queue_items or []
+                ):
+                    self._write_runtime_state_value(
+                        connection,
+                        QWEN_RISK_PRIORITY_QUEUE_STATE_KEY,
+                        {"items": retained, "updated_at": observed_iso},
+                        updated_at=observed_iso,
+                    )
+            connection.commit()
+        return {**activity, "requeued": retryable}
+
+    def qwen_risk_activity(
+        self,
+        event_id: str,
+        event_version: int,
+        input_sha256: str,
+        model_version: str,
+        *,
+        now: datetime | None = None,
+        running_stale_seconds: int = QWEN_RISK_RUNNING_STALE_SECONDS,
+    ) -> dict[str, Any] | None:
+        """Read an exact activity and fail closed when its heartbeat is stale."""
+
+        identity = self._qwen_risk_identity(
+            event_id, event_version, input_sha256, model_version
+        )
+        raw = self.get_state(QWEN_RISK_ACTIVITY_STATE_KEY, {"items": []})
+        items = raw.get("items") if isinstance(raw, dict) else []
+        item = next(
+            (
+                dict(candidate)
+                for candidate in (items or [])
+                if isinstance(candidate, dict)
+                and str(candidate.get("identity_key") or "") == identity["identity_key"]
+            ),
+            None,
+        )
+        if item is None:
+            return None
+        observed_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        state = str(item.get("state") or "").upper()
+        if state == "RUNNING":
+            heartbeat = _utc_datetime(item.get("heartbeat_at"))
+            if heartbeat is None or (
+                observed_at - heartbeat
+            ).total_seconds() > max(1, int(running_stale_seconds)):
+                item.update(
+                    {
+                        "state": "FAILED",
+                        "stale": True,
+                        "error_code": "STALE_HEARTBEAT",
+                    }
+                )
+        elif state == "QUEUED":
+            queued_at = _utc_datetime(item.get("queued_at"))
+            if queued_at is None or (
+                observed_at - queued_at
+            ).total_seconds() > QWEN_RISK_PRIORITY_TTL_SECONDS:
+                item.update(
+                    {
+                        "state": "FAILED",
+                        "stale": True,
+                        "error_code": "PRIORITY_EXPIRED",
+                    }
+                )
+        elif state == "FAILED":
+            retry_after = _utc_datetime(item.get("retry_after"))
+            if retry_after is not None and retry_after <= observed_at:
+                queue = self.get_state(
+                    QWEN_RISK_PRIORITY_QUEUE_STATE_KEY, {"items": []}
+                )
+                queued_items = queue.get("items") if isinstance(queue, dict) else []
+                queued = next(
+                    (
+                        candidate
+                        for candidate in (queued_items or [])
+                        if isinstance(candidate, dict)
+                        and str(candidate.get("identity_key") or "")
+                        == identity["identity_key"]
+                        and (
+                            requested_at := _utc_datetime(
+                                candidate.get("requested_at")
+                            )
+                        )
+                        is not None
+                        and (observed_at - requested_at).total_seconds()
+                        <= QWEN_RISK_PRIORITY_TTL_SECONDS
+                        and (_utc_datetime(candidate.get("available_at")) or observed_at)
+                        <= observed_at
+                    ),
+                    None,
+                )
+                if queued is not None:
+                    item.update(
+                        {
+                            "state": "QUEUED",
+                            "queued_at": queued.get("requested_at"),
+                        }
+                    )
+        return item
+
+    def enqueue_qwen_risk_priority(
+        self,
+        event_id: str,
+        event_version: int,
+        input_sha256: str,
+        model_version: str,
+        *,
+        now: datetime | None = None,
+        max_items: int = QWEN_RISK_PRIORITY_MAX_ITEMS,
+    ) -> dict[str, Any]:
+        """Idempotently append one immutable input to the bounded priority lane."""
+
+        identity = self._qwen_risk_identity(
+            event_id, event_version, input_sha256, model_version
+        )
+        observed_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        observed_iso = observed_at.isoformat()
+        capacity = max(1, min(int(max_items), QWEN_RISK_PRIORITY_MAX_ITEMS))
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            raw = self._runtime_state_value(
+                connection, QWEN_RISK_PRIORITY_QUEUE_STATE_KEY, {"items": []}
+            )
+            raw_items = raw.get("items") if isinstance(raw, dict) else []
+            items: list[dict[str, Any]] = []
+            for candidate in raw_items or []:
+                if not isinstance(candidate, dict):
+                    continue
+                requested_at = _utc_datetime(candidate.get("requested_at"))
+                if requested_at is None or (
+                    observed_at - requested_at
+                ).total_seconds() > QWEN_RISK_PRIORITY_TTL_SECONDS:
+                    continue
+                try:
+                    candidate_identity = self._qwen_risk_identity(
+                        candidate.get("event_id"),
+                        candidate.get("event_version"),
+                        candidate.get("input_sha256"),
+                        candidate.get("model_version"),
+                    )
+                except ValueError:
+                    continue
+                items.append({**candidate, **candidate_identity})
+            existing = next(
+                (
+                    item
+                    for item in items
+                    if str(item.get("identity_key") or "") == identity["identity_key"]
+                ),
+                None,
+            )
+            activities = self._runtime_state_value(
+                connection, QWEN_RISK_ACTIVITY_STATE_KEY, {"items": []}
+            )
+            activity_items = activities.get("items") if isinstance(activities, dict) else []
+            activity = next(
+                (
+                    dict(item)
+                    for item in (activity_items or [])
+                    if isinstance(item, dict)
+                    and str(item.get("identity_key") or "") == identity["identity_key"]
+                ),
+                None,
+            )
+            if activity is not None:
+                state = str(activity.get("state") or "").upper()
+                retry_after = _utc_datetime(activity.get("retry_after"))
+                if state == "RUNNING":
+                    heartbeat = _utc_datetime(activity.get("heartbeat_at"))
+                    if heartbeat is None or (
+                        observed_at - heartbeat
+                    ).total_seconds() > QWEN_RISK_RUNNING_STALE_SECONDS:
+                        self._set_qwen_risk_activity_in_connection(
+                            connection,
+                            identity,
+                            "FAILED",
+                            observed_at=observed_at,
+                            error_code="STALE_HEARTBEAT",
+                        )
+                        state = "FAILED"
+                        retry_after = None
+                elif state == "QUEUED":
+                    queued_at = _utc_datetime(activity.get("queued_at"))
+                    if queued_at is None or (
+                        observed_at - queued_at
+                    ).total_seconds() > QWEN_RISK_PRIORITY_TTL_SECONDS:
+                        self._set_qwen_risk_activity_in_connection(
+                            connection,
+                            identity,
+                            "FAILED",
+                            observed_at=observed_at,
+                            error_code="PRIORITY_EXPIRED",
+                        )
+                        state = "FAILED"
+                        retry_after = None
+                if state in {"RUNNING", "READY"} or (
+                    state == "FAILED" and retry_after is not None and retry_after > observed_at
+                ):
+                    connection.commit()
+                    return {**activity, "enqueued": False}
+            if existing is not None:
+                activity = self._set_qwen_risk_activity_in_connection(
+                    connection,
+                    identity,
+                    "QUEUED",
+                    observed_at=observed_at,
+                )
+                connection.commit()
+                return {**existing, **activity, "enqueued": False}
+            if len(items) >= capacity:
+                connection.commit()
+                return {
+                    **identity,
+                    "state": "FAILED",
+                    "error_code": "PRIORITY_QUEUE_FULL",
+                    "enqueued": False,
+                }
+            queued = {
+                **identity,
+                "requested_at": observed_iso,
+                "available_at": observed_iso,
+            }
+            items.append(queued)
+            self._write_runtime_state_value(
+                connection,
+                QWEN_RISK_PRIORITY_QUEUE_STATE_KEY,
+                {"items": items, "updated_at": observed_iso},
+                updated_at=observed_iso,
+            )
+            activity = self._set_qwen_risk_activity_in_connection(
+                connection,
+                identity,
+                "QUEUED",
+                observed_at=observed_at,
+            )
+            connection.commit()
+        return {**activity, "enqueued": True}
+
+    def claim_qwen_risk_priority(
+        self,
+        model_version: str,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Atomically claim at most one non-expired priority input."""
+
+        normalized_model = str(model_version or "").strip()
+        observed_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        observed_iso = observed_at.isoformat()
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            raw = self._runtime_state_value(
+                connection, QWEN_RISK_PRIORITY_QUEUE_STATE_KEY, {"items": []}
+            )
+            raw_items = raw.get("items") if isinstance(raw, dict) else []
+            retained: list[dict[str, Any]] = []
+            claimed: dict[str, Any] | None = None
+            for candidate in raw_items or []:
+                if not isinstance(candidate, dict):
+                    continue
+                requested_at = _utc_datetime(candidate.get("requested_at"))
+                expired = requested_at is None or (
+                    observed_at - requested_at
+                ).total_seconds() > QWEN_RISK_PRIORITY_TTL_SECONDS
+                if expired:
+                    try:
+                        identity = self._qwen_risk_identity(
+                            candidate.get("event_id"),
+                            candidate.get("event_version"),
+                            candidate.get("input_sha256"),
+                            candidate.get("model_version"),
+                        )
+                    except ValueError:
+                        continue
+                    self._set_qwen_risk_activity_in_connection(
+                        connection,
+                        identity,
+                        "FAILED",
+                        observed_at=observed_at,
+                        error_code="PRIORITY_EXPIRED",
+                    )
+                    continue
+                try:
+                    identity = self._qwen_risk_identity(
+                        candidate.get("event_id"),
+                        candidate.get("event_version"),
+                        candidate.get("input_sha256"),
+                        candidate.get("model_version"),
+                    )
+                except ValueError:
+                    continue
+                normalized_candidate = {**candidate, **identity}
+                available_at = _utc_datetime(candidate.get("available_at"))
+                if (
+                    claimed is None
+                    and identity["model_version"] == normalized_model
+                    and (available_at is None or available_at <= observed_at)
+                ):
+                    claimed = normalized_candidate
+                    continue
+                retained.append(normalized_candidate)
+            self._write_runtime_state_value(
+                connection,
+                QWEN_RISK_PRIORITY_QUEUE_STATE_KEY,
+                {"items": retained, "updated_at": observed_iso},
+                updated_at=observed_iso,
+            )
+            if claimed is not None:
+                identity = self._qwen_risk_identity(
+                    claimed["event_id"],
+                    claimed["event_version"],
+                    claimed["input_sha256"],
+                    claimed["model_version"],
+                )
+                activity = self._set_qwen_risk_activity_in_connection(
+                    connection,
+                    identity,
+                    "RUNNING",
+                    observed_at=observed_at,
+                )
+                claimed = {**claimed, **activity}
+            connection.commit()
+        return claimed
+
+    @staticmethod
     def _capture_interpretation_idempotency_key(
         event_id: str,
         observation_id: str,
@@ -826,8 +1507,16 @@ class OperationsRepository:
         provider: str,
         model_snapshot: str,
         external_call: bool,
+        requeue_terminal: bool = False,
+        max_attempts: int = 4,
     ) -> tuple[str, bool]:
-        """Create one bounded interpretation job per immutable capture/config."""
+        """Create one bounded interpretation job per immutable capture/config.
+
+        An explicit public request may reopen the exact same failed identity,
+        but each reopen consumes one attempt.  This avoids a permanent
+        ``INSERT OR IGNORE`` tombstone without creating an unbounded paid retry
+        loop.
+        """
 
         idempotency_key = self._capture_interpretation_idempotency_key(
             event_id,
@@ -869,8 +1558,261 @@ class OperationsRepository:
                     now,
                 ),
             )
+            accepted = bool(cursor.rowcount)
+            if not accepted and requeue_terminal:
+                attempt_limit = max(1, min(int(max_attempts), 20))
+                cursor = connection.execute(
+                    """UPDATE capture_interpretation_runs
+                       SET status='PENDING',attempts=attempts+1,available_at=?,
+                           lease_token=NULL,lease_expires_at=NULL,claimed_at=NULL,
+                           output_json='{}',guardrails_json='{}',usage_json='{}',
+                           latency_ms=NULL,updated_at=?,error=NULL
+                       WHERE interpretation_id=? AND status='FAILED' AND attempts<?""",
+                    (now, now, interpretation_id, attempt_limit),
+                )
+                accepted = bool(cursor.rowcount)
             connection.commit()
-        return interpretation_id, bool(cursor.rowcount)
+        return interpretation_id, accepted
+
+    def enqueue_capture_interpretation_priority(
+        self,
+        interpretation_id: str,
+        *,
+        event_id: str,
+        observation_id: str,
+        capture_receipt_sha256: str,
+        input_sha256: str,
+        max_items: int = CAPTURE_INTERPRETATION_PRIORITY_MAX_ITEMS,
+    ) -> bool:
+        """Persist one exact public request ahead of background inventory."""
+
+        capacity = max(1, min(int(max_items), CAPTURE_INTERPRETATION_PRIORITY_MAX_ITEMS))
+        now = utc_now()
+        item = {
+            "interpretation_id": str(interpretation_id),
+            "event_id": str(event_id),
+            "observation_id": str(observation_id),
+            "capture_receipt_sha256": str(capture_receipt_sha256),
+            "input_sha256": str(input_sha256),
+            "queued_at": now,
+        }
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            raw = self._runtime_state_value(
+                connection,
+                CAPTURE_INTERPRETATION_PRIORITY_STATE_KEY,
+                {"items": []},
+            )
+            raw_items = raw.get("items") if isinstance(raw, dict) else []
+            items = [candidate for candidate in (raw_items or []) if isinstance(candidate, dict)]
+            existing_ids = [
+                str(candidate.get("interpretation_id") or "") for candidate in items
+            ]
+            live_ids: set[str] = set()
+            if existing_ids:
+                live_ids = {
+                    str(row["interpretation_id"])
+                    for row in connection.execute(
+                        """SELECT interpretation_id FROM capture_interpretation_runs
+                           WHERE interpretation_id IN (SELECT value FROM json_each(?))
+                             AND status NOT IN ('COMPLETED','FAILED')""",
+                        (json.dumps(existing_ids),),
+                    )
+                }
+            items = [
+                candidate
+                for candidate in items
+                if str(candidate.get("interpretation_id") or "") in live_ids
+                and str(candidate.get("interpretation_id") or "") != str(interpretation_id)
+            ]
+            if len(items) >= capacity:
+                connection.rollback()
+                return False
+            items.append(item)
+            self._write_runtime_state_value(
+                connection,
+                CAPTURE_INTERPRETATION_PRIORITY_STATE_KEY,
+                {"items": items, "updated_at": now},
+                updated_at=now,
+            )
+            connection.commit()
+        return True
+
+    def capture_interpretation_priority_runs(
+        self,
+        *,
+        provider: str,
+        contract_version: str,
+        prompt_version: str,
+        prompt_sha256: str,
+        model_snapshot: str,
+        available_before: str | None = None,
+        max_attempts: int = 4,
+        limit: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Return ready public jobs in durable FIFO order and prune stale entries."""
+
+        ready_at = str(available_before or utc_now())
+        attempt_limit = max(1, min(int(max_attempts), 20))
+        bounded_limit = max(1, min(int(limit), CAPTURE_INTERPRETATION_PRIORITY_MAX_ITEMS))
+        now = utc_now()
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            raw = self._runtime_state_value(
+                connection,
+                CAPTURE_INTERPRETATION_PRIORITY_STATE_KEY,
+                {"items": []},
+            )
+            raw_items = raw.get("items") if isinstance(raw, dict) else []
+            items = [candidate for candidate in (raw_items or []) if isinstance(candidate, dict)]
+            ids = [str(item.get("interpretation_id") or "") for item in items]
+            ids = [value for value in ids if value]
+            rows = []
+            if ids:
+                rows = [
+                    dict(row)
+                    for row in connection.execute(
+                        """SELECT * FROM capture_interpretation_runs
+                           WHERE interpretation_id IN (SELECT value FROM json_each(?))""",
+                        (json.dumps(ids),),
+                    )
+                ]
+            by_id = {str(row["interpretation_id"]): row for row in rows}
+            retained: list[dict[str, Any]] = []
+            selected: list[dict[str, Any]] = []
+            for item in items:
+                row = by_id.get(str(item.get("interpretation_id") or ""))
+                if row is None:
+                    continue
+                exact = (
+                    str(row.get("event_id") or "") == str(item.get("event_id") or "")
+                    and str(row.get("observation_id") or "") == str(item.get("observation_id") or "")
+                    and str(row.get("capture_receipt_sha256") or "")
+                    == str(item.get("capture_receipt_sha256") or "")
+                    and str(row.get("input_sha256") or "") == str(item.get("input_sha256") or "")
+                    and str(row.get("provider") or "") == provider
+                    and str(row.get("contract_version") or "") == contract_version
+                    and str(row.get("prompt_version") or "") == prompt_version
+                    and str(row.get("prompt_sha256") or "") == prompt_sha256
+                    and str(row.get("model_snapshot") or "") == model_snapshot
+                )
+                status = str(row.get("status") or "")
+                if not exact or status in {"COMPLETED", "FAILED"}:
+                    continue
+                retained.append(item)
+                if (
+                    len(selected) < bounded_limit
+                    and status in {"PENDING", "BUDGET_BLOCKED"}
+                    and str(row.get("available_at") or "") <= ready_at
+                    and int(row.get("attempts") or 0) < attempt_limit
+                ):
+                    selected.append(row)
+            if retained != items:
+                self._write_runtime_state_value(
+                    connection,
+                    CAPTURE_INTERPRETATION_PRIORITY_STATE_KEY,
+                    {"items": retained, "updated_at": now},
+                    updated_at=now,
+                )
+            connection.commit()
+        for row in selected:
+            row["output"] = _safe_json(row.pop("output_json"), {})
+            row["guardrails"] = _safe_json(row.pop("guardrails_json"), {})
+            row["usage"] = _safe_json(row.pop("usage_json"), {})
+        return selected
+
+    def capture_interpretation_pending_runs(
+        self,
+        *,
+        provider: str,
+        contract_version: str,
+        prompt_version: str,
+        prompt_sha256: str,
+        model_snapshot: str,
+        available_before: str | None = None,
+        max_attempts: int = 4,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Load executable jobs directly, without a terminal-run window.
+
+        Filtering happens in SQLite before ``LIMIT`` so a large terminal
+        history cannot hide a durable public on-demand request.
+        """
+
+        ready_at = str(available_before or utc_now())
+        attempts = max(1, min(int(max_attempts), 20))
+        bounded_limit = max(1, min(int(limit), 2_000))
+        with closing(self.connect()) as connection:
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    """SELECT * FROM capture_interpretation_runs
+                       WHERE provider=? AND contract_version=? AND prompt_version=?
+                         AND prompt_sha256=? AND model_snapshot=?
+                         AND external_call=1
+                         AND status IN ('PENDING','BUDGET_BLOCKED')
+                         AND (available_at='' OR available_at<=?)
+                         AND attempts<?
+                       ORDER BY available_at,created_at,interpretation_id
+                       LIMIT ?""",
+                    (
+                        provider,
+                        contract_version,
+                        prompt_version,
+                        prompt_sha256,
+                        model_snapshot,
+                        ready_at,
+                        attempts,
+                        bounded_limit,
+                    ),
+                )
+            ]
+        for row in rows:
+            row["output"] = _safe_json(row.pop("output_json"), {})
+            row["guardrails"] = _safe_json(row.pop("guardrails_json"), {})
+            row["usage"] = _safe_json(row.pop("usage_json"), {})
+        return rows
+
+    def capture_interpretation_active_keys(
+        self,
+        *,
+        provider: str,
+        contract_version: str,
+        prompt_version: str,
+        prompt_sha256: str,
+        model_snapshot: str,
+        active_at: str | None = None,
+    ) -> set[tuple[str, str]]:
+        """Return current nonterminal receipts, including deferred budget work."""
+
+        observed_at = str(active_at or utc_now())
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                """SELECT event_id,capture_receipt_sha256
+                   FROM capture_interpretation_runs
+                   WHERE provider=? AND contract_version=? AND prompt_version=?
+                     AND prompt_sha256=? AND model_snapshot=?
+                     AND external_call=1
+                     AND (
+                       status IN ('PENDING','BUDGET_BLOCKED')
+                       OR (
+                         status='RUNNING' AND lease_expires_at IS NOT NULL
+                         AND lease_expires_at>?
+                       )
+                     )""",
+                (
+                    provider,
+                    contract_version,
+                    prompt_version,
+                    prompt_sha256,
+                    model_snapshot,
+                    observed_at,
+                ),
+            ).fetchall()
+        return {
+            (str(row["event_id"]), str(row["capture_receipt_sha256"]))
+            for row in rows
+        }
 
     def complete_capture_interpretation(
         self,
@@ -1036,15 +1978,53 @@ class OperationsRepository:
                 (provider, day_start, day_end),
             ).fetchall()
             usage = self._capture_attempt_usage_rows(list(attempt_rows))
-            if daily_request_cap > 0 and usage["requests"] >= int(daily_request_cap):
+
+            def defer_for_budget(reason: str) -> dict[str, Any]:
+                if interpretation_id:
+                    blocked = connection.execute(
+                        """SELECT interpretation_id
+                           FROM capture_interpretation_runs
+                           WHERE interpretation_id=? AND provider=? AND external_call=1
+                             AND status IN ('PENDING','BUDGET_BLOCKED')
+                             AND attempts<?""",
+                        (interpretation_id, provider, max_attempts),
+                    ).fetchone()
+                else:
+                    blocked = connection.execute(
+                        """SELECT interpretation_id
+                           FROM capture_interpretation_runs
+                           WHERE provider=? AND external_call=1
+                             AND status IN ('PENDING','BUDGET_BLOCKED')
+                             AND (available_at='' OR available_at<=?) AND attempts<?
+                           ORDER BY created_at,interpretation_id LIMIT 1""",
+                        (provider, now, max_attempts),
+                    ).fetchone()
+                blocked_id = str(blocked["interpretation_id"]) if blocked else None
+                if blocked_id:
+                    connection.execute(
+                        """UPDATE capture_interpretation_runs
+                           SET status='BUDGET_BLOCKED',available_at=?,updated_at=?,error=?,
+                               lease_token=NULL,lease_expires_at=NULL,claimed_at=NULL
+                           WHERE interpretation_id=?
+                             AND status IN ('PENDING','BUDGET_BLOCKED')""",
+                        (day_end, now, reason, blocked_id),
+                    )
                 connection.commit()
-                return {"claimed": False, "reason": "DAILY_REQUEST_CAP_REACHED", "usage": {"date_utc": day, **usage}}
+                return {
+                    "claimed": False,
+                    "reason": reason,
+                    "interpretation_id": blocked_id,
+                    "available_at": day_end,
+                    "usage": {"date_utc": day, **usage},
+                }
+
+            if daily_request_cap > 0 and usage["requests"] >= int(daily_request_cap):
+                return defer_for_budget("DAILY_REQUEST_CAP_REACHED")
             if (
                 daily_cny_cap > 0
                 and usage["chargeable_cny"] + float(reserve_cny) > float(daily_cny_cap)
             ):
-                connection.commit()
-                return {"claimed": False, "reason": "DAILY_CNY_CAP_REACHED", "usage": {"date_utc": day, **usage}}
+                return defer_for_budget("DAILY_CNY_CAP_REACHED")
 
             params: list[Any] = [provider, now, max_attempts]
             exact = ""
@@ -1374,6 +2354,7 @@ class OperationsRepository:
         capture_receipt_sha256s: list[str],
         *,
         generation_priority: tuple[tuple[str, str, str, str], ...] = (),
+        input_sha256_by_receipt: dict[str, str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Return the preferred completed run for each requested capture.
 
@@ -1437,6 +2418,18 @@ class OperationsRepository:
                     -int(row.get("external_call") or 0),
                 )
             )
+        exact_inputs = {
+            str(receipt): str(input_sha256)
+            for receipt, input_sha256 in (input_sha256_by_receipt or {}).items()
+            if str(receipt) and str(input_sha256)
+        }
+        if exact_inputs:
+            rows = [
+                row
+                for row in rows
+                if str(row.get("input_sha256") or "")
+                == exact_inputs.get(str(row.get("capture_receipt_sha256") or ""))
+            ]
         selected: dict[str, dict[str, Any]] = {}
         for row in rows:
             receipt = str(row.get("capture_receipt_sha256") or "")
@@ -1447,6 +2440,49 @@ class OperationsRepository:
             row["usage"] = _safe_json(row.pop("usage_json"), {})
             selected[receipt] = row
         return selected
+
+    def latest_capture_interpretation_exact(
+        self,
+        *,
+        event_id: str,
+        observation_id: str,
+        capture_receipt_sha256: str,
+        input_sha256: str,
+        contract_version: str,
+        prompt_version: str,
+        prompt_sha256: str,
+        provider: str,
+        model_snapshot: str,
+    ) -> dict[str, Any] | None:
+        """Return only the newest row for one immutable current input."""
+
+        with closing(self.connect()) as connection:
+            sqlite_row = connection.execute(
+                """SELECT * FROM capture_interpretation_runs
+                   WHERE event_id=? AND observation_id=?
+                     AND capture_receipt_sha256=? AND input_sha256=?
+                     AND contract_version=? AND prompt_version=? AND prompt_sha256=?
+                     AND provider=? AND model_snapshot=?
+                   ORDER BY updated_at DESC,interpretation_id DESC LIMIT 1""",
+                (
+                    event_id,
+                    observation_id,
+                    capture_receipt_sha256,
+                    input_sha256,
+                    contract_version,
+                    prompt_version,
+                    prompt_sha256,
+                    provider,
+                    model_snapshot,
+                ),
+            ).fetchone()
+        if sqlite_row is None:
+            return None
+        row = dict(sqlite_row)
+        row["output"] = _safe_json(row.pop("output_json"), {})
+        row["guardrails"] = _safe_json(row.pop("guardrails_json"), {})
+        row["usage"] = _safe_json(row.pop("usage_json"), {})
+        return row
 
     def latest_capture_interpretation_run(
         self,

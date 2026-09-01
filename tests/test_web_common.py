@@ -362,6 +362,88 @@ def test_public_api_rejects_writes_before_network_access(monkeypatch) -> None:
         api_request("/api/v1/demo/mode/LIVE", method="POST")
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/events/e1/semantic-assessment/request",
+        "/api/v1/events/e1/capture-explanation/request",
+    ],
+)
+def test_public_api_allows_only_exact_model_request_paths(monkeypatch, path: str) -> None:
+    captured: list[object] = []
+
+    def fake_urlopen(request: object, *, timeout: int) -> _JsonResponse:
+        captured.append(request)
+        return _JsonResponse()
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "PUBLIC_MODEL_REQUEST_TOKEN", "a" * 64)
+    monkeypatch.setattr(web_common, "ADMIN_TOKEN", "must-not-leave-process")
+    monkeypatch.setattr(web_common, "_open_public_model_request", fake_urlopen)
+
+    assert api_request(
+        path,
+        method="POST",
+        json_body={"event_version": 1, "request_source": "PUBLIC_EVENT_VIEW"},
+    ) == {"ok": True}
+    assert len(captured) == 1
+    request = captured[0]
+    assert request.get_header("X-public-model-request-token") == "a" * 64
+    assert request.get_header("X-admin-token") is None
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/events/e1/semantic-assessment/request/extra",
+        "/api/v1/events/e1/capture-explanation/request/extra",
+        "/api/v1/events/e1/other/request",
+    ],
+)
+def test_public_api_rejects_model_request_near_misses(monkeypatch, path: str) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "PUBLIC_MODEL_REQUEST_TOKEN", "m" * 64)
+    monkeypatch.setattr(
+        web_common.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("near-miss write reached the network"),
+    )
+    with pytest.raises(ApiError, match="只允许只读请求"):
+        api_request(path, method="POST")
+
+
+def test_public_model_request_rejects_non_hex_token_before_network(monkeypatch) -> None:
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "PUBLIC_MODEL_REQUEST_TOKEN", "z" * 64)
+    monkeypatch.setattr(
+        web_common,
+        "_open_public_model_request",
+        lambda *_args, **_kwargs: pytest.fail("invalid credential reached network"),
+    )
+    with pytest.raises(ApiError, match="未配置"):
+        api_request("/api/v1/events/e1/semantic-assessment/request", method="POST")
+
+
+def test_public_model_request_uses_fixed_origin_and_redirects_are_disabled(monkeypatch) -> None:
+    captured: list[object] = []
+
+    def fake_open(request: object, *, timeout: int) -> _JsonResponse:
+        captured.append(request)
+        return _JsonResponse()
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "API_URL", "http://127.0.0.1:18000")
+    monkeypatch.setattr(web_common, "PUBLIC_MODEL_REQUEST_TOKEN", "b" * 64)
+    monkeypatch.setattr(web_common, "_open_public_model_request", fake_open)
+    api_request("/api/v1/events/e1/capture-explanation/request", method="POST")
+    assert captured[0].full_url == (
+        "http://127.0.0.1:18000/api/v1/events/e1/capture-explanation/request"
+    )
+    assert web_common._RejectRedirectHandler().redirect_request(
+        captured[0], None, 302, "Found", {}, "https://attacker.invalid/collect"
+    ) is None
+
+
 def test_public_transport_errors_do_not_expose_internal_target(monkeypatch) -> None:
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(web_common, "API_URL", "http://private-api:18000")

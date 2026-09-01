@@ -240,8 +240,8 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "信息依据" not in rendered
     assert "影响路径" not in rendered
     assert "原文支持" in rendered
-    assert "千问研判" in rendered
-    assert "事件方向与强弱正在生成" in rendered
+    assert "千问研判" not in rendered
+    assert "事件方向与强弱正在生成" not in rendered
     assert "模型接口已预留" not in rendered
     assert "做空重大性" not in rendered
     assert "<article><span>模型研判</span>" not in rendered
@@ -407,7 +407,7 @@ def test_public_detail_shows_only_available_market_reaction(monkeypatch) -> None
     assert "-3.12%" not in rendered
 
 
-def test_public_detail_keeps_market_empty_and_refreshes_qwen_slot(monkeypatch) -> None:
+def test_public_detail_does_not_invent_qwen_progress_without_server_state(monkeypatch) -> None:
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(web_common, "api_request", _fake_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10)
@@ -418,11 +418,90 @@ def test_public_detail_keeps_market_empty_and_refreshes_qwen_slot(monkeypatch) -
     assert not page.exception
     assert "消息发布后的市场变化" not in rendered
     assert 'class="market-reaction research-signals"' not in rendered
-    assert "千问研判" in rendered
-    assert "事件方向与强弱正在生成" in rendered
+    assert "千问研判" not in rendered
+    assert "事件方向与强弱正在生成" not in rendered
     assert "模型接口已预留" not in rendered
     assert "PENDING" not in rendered
     assert "MISSED" not in rendered
+
+
+def test_public_detail_shows_qwen_progress_only_for_server_running_state(monkeypatch) -> None:
+    def running_qwen_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        parsed = urllib.parse.urlsplit(path)
+        if parsed.path == "/api/v1/events/event-a/semantic-assessment/request":
+            assert kwargs.get("method") == "POST"
+            return {"state": "QUEUED", "assessment": None}
+        if parsed.path == "/api/v1/events/event-a/semantic-assessment":
+            return {
+                "state": "RUNNING",
+                "assessment": None,
+                "cache_only": True,
+                "requestable": False,
+            }
+        return _fake_api(path, **kwargs)
+
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", running_qwen_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "千问研判" in rendered
+    assert "研判中" in rendered
+    assert "模型正在处理当前事件" in rendered
+
+
+def test_public_detail_submits_deepseek_request_from_lightweight_dossier(monkeypatch) -> None:
+    requests: list[dict[str, Any]] = []
+
+    def deepseek_request_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        parsed = urllib.parse.urlsplit(path)
+        if parsed.path == "/api/v1/events/event-a/dossier":
+            detail = _fake_api("/api/v1/events/event-a")
+            detail["event"] = {**detail["event"], "current_version": 1}
+            return {
+                "detail": detail,
+                "evidence": {"items": []},
+                "capture_explanation": {
+                    "display": True,
+                    "reason_code": "NO_EVENT_EVIDENCE",
+                    "state": "ELIGIBLE_REQUESTABLE",
+                    "generation_path": "BACKGROUND_CACHE_ONLY",
+                },
+            }
+        if parsed.path == "/api/v1/events/event-a/capture-explanation/request":
+            requests.append(dict(kwargs))
+            return {
+                "display": True,
+                "state": "QUEUED",
+                "item": None,
+                "source": None,
+            }
+        if parsed.path == "/api/v1/events/event-a/capture-explanation":
+            return {
+                "display": True,
+                "state": "QUEUED",
+                "item": None,
+                "source": None,
+            }
+        return _fake_api(path, **kwargs)
+
+    web_common.clear_api_get_cache()
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", deepseek_request_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+
+    assert not page.exception
+    assert len(requests) == 1
+    assert requests[0]["method"] == "POST"
+    assert requests[0]["json_body"] == {
+        "event_version": 1,
+        "request_source": "PUBLIC_EVENT_VIEW",
+    }
 
 
 def test_public_detail_shows_price_context_before_return_exists(monkeypatch) -> None:
@@ -868,6 +947,7 @@ def test_public_event_feed_failure_never_substitutes_overview_events(monkeypatch
             raise web_common.ApiError("API unavailable")
         return _fake_api(path, **kwargs)
 
+    web_common.clear_api_get_cache()
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(web_common, "api_request", failing_feed_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10).run()

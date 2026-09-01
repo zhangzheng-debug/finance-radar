@@ -17,6 +17,7 @@ Slice=finance-radar.slice
 EnvironmentFile=/etc/finance-radar-public.env
 Environment=FINANCE_RADAR_UI_ROLE=public
 Environment=FINANCE_RADAR_SHOW_DEBUG=0
+LoadCredential=public_model_request_token:/etc/finance-radar/public-model-request-token
 UnsetEnvironment=FINANCE_RADAR_ADMIN_TOKEN
 ExecStart=/opt/finance-radar/venv/bin/python -B -m streamlit run app/web/Home.py --server.address 127.0.0.1 --server.port 18501 --server.baseUrlPath radar --server.headless true --browser.gatherUsageStats false
 Restart=on-failure

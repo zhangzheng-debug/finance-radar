@@ -25,6 +25,12 @@ MANAGED_UNIT_PATHS=(
     /etc/systemd/system/finance-radar-backup.service
     /etc/systemd/system/finance-radar-backup.timer
     /etc/systemd/system/finance-radar-evidence-llm.service
+    /etc/systemd/system/radarqwen.slice
+    /etc/systemd/system/finance-radar-qwen-risk-model.service
+    /etc/systemd/system/finance-radar-qwen-risk-worker.service
+    /etc/systemd/system/finance-radar-qwen-risk-worker.timer
+    /etc/systemd/system/finance-radar-capture-interpretation.service
+    /etc/systemd/system/finance-radar-capture-interpretation.timer
     /usr/local/libexec/finance-radar/run_backup_quiesced.sh
 )
 MANAGED_CONFIG_PATHS=(
@@ -39,6 +45,11 @@ MANAGED_RUNTIME_UNITS=(
     finance-radar-overview-snapshot.service
     finance-radar-market.timer
     finance-radar-market.service
+    finance-radar-capture-interpretation.timer
+    finance-radar-capture-interpretation.service
+    finance-radar-qwen-risk-worker.timer
+    finance-radar-qwen-risk-worker.service
+    finance-radar-qwen-risk-model.service
     finance-radar-evidence-llm.service
     finance-radar-worker.service
     finance-radar-admin.service
@@ -56,9 +67,50 @@ MANAGED_ENABLEMENT_UNITS=(
     finance-radar-worker.service
     finance-radar-backup.timer
     finance-radar-evidence-llm.service
+    finance-radar-capture-interpretation.timer
+    finance-radar-qwen-risk-worker.timer
+    finance-radar-qwen-risk-model.service
 )
 BASE_MOVED=0
 MARKET_RUNTIME_AVAILABLE=0
+PUBLIC_MODEL_REQUEST_CREDENTIAL=/etc/finance-radar/public-model-request-token
+PUBLIC_MODEL_REQUEST_CREDENTIAL_CREATED=0
+
+validate_public_model_request_credential() {
+    local metadata owner_id group_id mode token
+    [ -f "$PUBLIC_MODEL_REQUEST_CREDENTIAL" ] && \
+        [ ! -L "$PUBLIC_MODEL_REQUEST_CREDENTIAL" ] || return 1
+    [ "$(readlink -f -- "$PUBLIC_MODEL_REQUEST_CREDENTIAL")" = \
+        "$PUBLIC_MODEL_REQUEST_CREDENTIAL" ] || return 1
+    metadata="$(stat -c '%u:%g:%a' -- "$PUBLIC_MODEL_REQUEST_CREDENTIAL")" || return 1
+    IFS=: read -r owner_id group_id mode <<< "$metadata"
+    [ "$owner_id" = 0 ] && [ "$group_id" = 0 ] && [ "$mode" = 600 ] || return 1
+    token="$(cat -- "$PUBLIC_MODEL_REQUEST_CREDENTIAL")" || return 1
+    [[ "$token" =~ ^[0-9A-Fa-f]{64}$ ]]
+}
+
+ensure_public_model_request_credential() {
+    local pending
+    install -d -m 0700 -o root -g root /etc/finance-radar || return
+    if [ -e "$PUBLIC_MODEL_REQUEST_CREDENTIAL" ] || \
+       [ -L "$PUBLIC_MODEL_REQUEST_CREDENTIAL" ]; then
+        validate_public_model_request_credential || {
+            printf 'existing public model request credential must be root:root 0600 and exactly 64 hexadecimal characters\n' >&2
+            return 1
+        }
+        return 0
+    fi
+    pending="$(mktemp /etc/finance-radar/.public-model-request-token.XXXXXX)" || return
+    chown root:root "$pending" || { rm -f -- "$pending"; return 1; }
+    chmod 0600 "$pending" || { rm -f -- "$pending"; return 1; }
+    openssl rand -hex 32 > "$pending" || { rm -f -- "$pending"; return 1; }
+    mv -f -- "$pending" "$PUBLIC_MODEL_REQUEST_CREDENTIAL" || {
+        rm -f -- "$pending"
+        return 1
+    }
+    PUBLIC_MODEL_REQUEST_CREDENTIAL_CREATED=1
+    validate_public_model_request_credential
+}
 
 [ "$(id -u)" -eq 0 ] || { printf 'run as root\n' >&2; exit 2; }
 [[ "$EXPECTED_RELEASE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$ ]] || {
@@ -84,7 +136,15 @@ for path in "${MANAGED_UNIT_PATHS[@]}" "${MANAGED_CONFIG_PATHS[@]}"; do
         exit 4
     fi
 done
-for command in find getent python3 runuser tar sha256sum systemctl curl; do
+if [ -e "$PUBLIC_MODEL_REQUEST_CREDENTIAL" ] || \
+   [ -L "$PUBLIC_MODEL_REQUEST_CREDENTIAL" ]; then
+    validate_public_model_request_credential || {
+        printf 'existing public model request credential failed preflight\n' >&2
+        exit 4
+    }
+fi
+for command in find getent python3 runuser tar sha256sum systemctl curl \
+    openssl mktemp stat readlink; do
     command -v "$command" >/dev/null || { printf 'missing prerequisite: %s\n' "$command" >&2; exit 5; }
 done
 
@@ -170,6 +230,10 @@ rollback() {
     if [ "$BASE_MOVED" -eq 1 ]; then
         rm -f -- "${MANAGED_UNIT_PATHS[@]}" "${MANAGED_CONFIG_PATHS[@]}"
         systemctl daemon-reload || true
+    fi
+    if [ "$PUBLIC_MODEL_REQUEST_CREDENTIAL_CREATED" -eq 1 ]; then
+        rm -f -- "$PUBLIC_MODEL_REQUEST_CREDENTIAL"
+        PUBLIC_MODEL_REQUEST_CREDENTIAL_CREATED=0
     fi
     if [ -d "$BASE" ] || [ -L "$BASE" ]; then
         mv "$BASE" "$FAILED_BASE" || true
@@ -329,6 +393,7 @@ fi
 if ! grep -q '^FINANCE_RADAR_OPERATOR_TOKEN=' /etc/finance-radar.env; then
     printf 'FINANCE_RADAR_OPERATOR_TOKEN=%s\n' "$(openssl rand -hex 32)" >> /etc/finance-radar.env
 fi
+ensure_public_model_request_credential
 # Reviewer identities are not carried in migration archives.  Restore leaves
 # human-label submission fail-closed until distinct principals are provisioned
 # again through the documented owner-authorized process.
@@ -340,6 +405,20 @@ if grep -q '^FINANCE_RADAR_WEB_URL=' /etc/finance-radar.env; then
 else
     printf 'FINANCE_RADAR_WEB_URL=%s\n' "$PUBLIC_WEB_URL" >> /etc/finance-radar.env
 fi
+# Migration archives intentionally do not carry the DeepSeek credential or the
+# Qwen risk bundle.  Keep the restored API honest: it must not accept model
+# requests until an operator provisions those dependencies and explicitly
+# re-enables the corresponding capability.
+for assignment in \
+    FINANCE_RADAR_CAPTURE_LLM_ENABLED=0 \
+    FINANCE_RADAR_QWEN_RISK_ENABLED=0; do
+    name="${assignment%%=*}"
+    if grep -q "^${name}=" /etc/finance-radar.env; then
+        sed -i "s#^${name}=.*#${assignment}#" /etc/finance-radar.env
+    else
+        printf '%s\n' "$assignment" >> /etc/finance-radar.env
+    fi
+done
 # Recreate rather than copy/filter the minimal public environment. This keeps
 # every administrator, Telegram and provider secret out of the public process.
 install -m 0600 -o finance-radar-web -g finance-radar-web /dev/null /etc/finance-radar-public.env
@@ -434,7 +513,13 @@ for unit in \
     finance-radar-operator.service \
     finance-radar-worker.service \
     finance-radar-backup.service \
-    finance-radar-backup.timer; do
+    finance-radar-backup.timer \
+    radarqwen.slice \
+    finance-radar-qwen-risk-model.service \
+    finance-radar-qwen-risk-worker.service \
+    finance-radar-qwen-risk-worker.timer \
+    finance-radar-capture-interpretation.service \
+    finance-radar-capture-interpretation.timer; do
     install_versioned_unit "$unit"
 done
 if { [ -f "$BASE/current/deployment/systemd/finance-radar-market.service" ] || \
@@ -502,6 +587,22 @@ if [ -f /etc/systemd/system/finance-radar-worker.service.d/telegram-send.conf ] 
         /etc/systemd/system/finance-radar-worker.service.d/telegram-send.conf
 fi
 systemctl daemon-reload
+# Both model dependency sets are deliberately omitted from migration archives.
+# Install their versioned units for a later controlled activation, but never
+# leave timers enabled against missing credentials or model artifacts.
+systemctl disable --now \
+    finance-radar-capture-interpretation.timer \
+    finance-radar-qwen-risk-worker.timer \
+    finance-radar-qwen-risk-model.service || true
+if systemctl is-active --quiet finance-radar-capture-interpretation.timer || \
+   systemctl is-enabled --quiet finance-radar-capture-interpretation.timer || \
+   systemctl is-active --quiet finance-radar-qwen-risk-worker.timer || \
+   systemctl is-enabled --quiet finance-radar-qwen-risk-worker.timer || \
+   systemctl is-active --quiet finance-radar-qwen-risk-model.service || \
+   systemctl is-enabled --quiet finance-radar-qwen-risk-model.service; then
+    printf 'model workers must remain disabled until restore dependencies are reprovisioned\n' >&2
+    exit 6
+fi
 # This model is advisory-only.  A disaster restore must never silently start a
 # 560-MiB workload beside the public UI and collector.  A deliberate operator
 # can later use install_local_evidence_model.sh --activate after its resource
@@ -544,5 +645,5 @@ assert_public_web_identity_and_boundary || {
 }
 
 trap - ERR
-printf 'activation=PASS\nrelease=%s\npublic_web=%s\nlocal_evidence_model=disabled_after_restore\nnginx_tls=pending\n' \
+printf 'activation=PASS\nrelease=%s\npublic_web=%s\nlocal_evidence_model=disabled_after_restore\ndeepseek=disabled_restore_policy\nqwen=disabled_missing_bundle\nnginx_tls=pending\n' \
     "$EXPECTED_RELEASE" "$PUBLIC_WEB_URL"

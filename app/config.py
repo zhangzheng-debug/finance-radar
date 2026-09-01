@@ -10,6 +10,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _scoped_text_credential(filename: str, env_name: str) -> str | None:
+    """Read one small systemd credential, with an env fallback for local tests."""
+
+    raw = os.getenv(env_name, "").strip()
+    credential_directory = os.getenv("CREDENTIALS_DIRECTORY", "").strip()
+    credential_path = (
+        Path(credential_directory) / filename if credential_directory else None
+    )
+    credential_present = bool(credential_path and credential_path.is_file())
+    if raw and credential_present:
+        raise ValueError(f"{env_name} must use either environment or systemd credential")
+    if credential_present and credential_path is not None:
+        if credential_path.stat().st_size > 512:
+            raise ValueError(f"systemd credential {filename} exceeds 512 bytes")
+        raw = credential_path.read_text(encoding="utf-8").strip()
+    return raw or None
+
+
 def _env_flag(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -95,6 +113,7 @@ class Settings:
     reviewer_token: str | None = None
     reviewer_principals: tuple[tuple[str, str, str], ...] = ()
     operator_token: str | None = None
+    public_model_request_token: str | None = None
     api_base_url: str = "http://127.0.0.1:8000"
     web_base_url: str = "http://127.0.0.1:8501"
     api_rate_limit_per_minute: int = 180
@@ -139,6 +158,7 @@ class Settings:
             ("admin", self.admin_token),
             ("shared_reviewer", self.reviewer_token),
             ("operator", self.operator_token),
+            ("public_model_request", self.public_model_request_token),
         ):
             normalized = str(token or "").strip()
             if not normalized:
@@ -201,6 +221,12 @@ class Settings:
             reviewer_token=os.getenv("FINANCE_RADAR_REVIEWER_TOKEN") or None,
             reviewer_principals=_reviewer_principals_from_env(),
             operator_token=os.getenv("FINANCE_RADAR_OPERATOR_TOKEN") or None,
+            public_model_request_token=(
+                _scoped_text_credential(
+                    "public_model_request_token",
+                    "FINANCE_RADAR_PUBLIC_MODEL_REQUEST_TOKEN",
+                )
+            ),
             api_base_url=os.getenv("FINANCE_RADAR_API_URL", "http://127.0.0.1:8000").rstrip("/"),
             web_base_url=os.getenv("FINANCE_RADAR_WEB_URL", "http://127.0.0.1:8501").rstrip("/"),
             api_rate_limit_per_minute=max(

@@ -36,27 +36,59 @@ def main() -> int:
         max_tokens=settings.qwen_risk_max_tokens,
     )
     operations = OperationsRepository(settings.operations_db)
-    result = run_qwen_risk_batch(
-        LedgerRepository(settings.ledger_db),
-        operations,
-        provider,
-        scan_limit=args.scan_limit,
-        run_limit=args.limit,
-        concurrency=args.concurrency,
-    )
+    started_at = datetime.now(timezone.utc).isoformat()
+    runtime_base = {
+        "started_at": started_at,
+        "model_version": provider.model_version,
+        "concurrency": max(1, min(int(args.concurrency), 4)),
+        "shadow": True,
+        "no_trading": True,
+    }
     operations.set_state(
         "qwen_risk_worker_runtime_v1",
         {
+            **runtime_base,
+            "status": "RUNNING",
+            "updated_at": started_at,
+            "heartbeat_at": started_at,
+        },
+    )
+    try:
+        result = run_qwen_risk_batch(
+            LedgerRepository(settings.ledger_db),
+            operations,
+            provider,
+            scan_limit=args.scan_limit,
+            run_limit=args.limit,
+            concurrency=args.concurrency,
+        )
+    except Exception as exc:
+        failed_at = datetime.now(timezone.utc).isoformat()
+        operations.set_state(
+            "qwen_risk_worker_runtime_v1",
+            {
+                **runtime_base,
+                "status": "FAILED",
+                "updated_at": failed_at,
+                "finished_at": failed_at,
+                "error_code": type(exc).__name__[:120],
+            },
+        )
+        raise
+    finished_at = datetime.now(timezone.utc).isoformat()
+    operations.set_state(
+        "qwen_risk_worker_runtime_v1",
+        {
+            **runtime_base,
             "status": "COMPLETED" if not result["errors"] else "PARTIAL",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "model_version": provider.model_version,
+            "updated_at": finished_at,
+            "finished_at": finished_at,
             "attempted": result.get("attempted", 0),
             "recorded": result.get("recorded", 0),
             "input_insufficient": result.get("input_insufficient", 0),
+            "priority_claimed": result.get("priority_claimed", 0),
+            "retry_deferred": result.get("retry_deferred", 0),
             "errors": len(result.get("errors") or []),
-            "concurrency": result.get("concurrency", 1),
-            "shadow": True,
-            "no_trading": True,
         },
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))

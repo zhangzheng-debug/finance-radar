@@ -624,7 +624,7 @@ class ProductLayerTests(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
         self.assertEqual(blocked.status_code, 429)
-        self.assertEqual(list(application.state.rate_buckets), ["198.51.100.20"])
+        self.assertEqual(list(application.state.rate_buckets), ["api:198.51.100.20"])
 
     def test_trusted_proxy_uses_only_a_valid_x_real_ip(self) -> None:
         settings = replace(

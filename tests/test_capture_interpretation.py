@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -470,7 +471,7 @@ def _enqueue_external(operations: OperationsRepository, suffix: str) -> str:
 def test_external_interpretation_claim_is_atomic_budgeted_and_lease_owned(tmp_path: Path) -> None:
     operations = OperationsRepository(tmp_path / "operations.sqlite3")
     first = _enqueue_external(operations, "alpha")
-    _enqueue_external(operations, "beta")
+    second = _enqueue_external(operations, "beta")
 
     claim = operations.claim_capture_interpretation(
         provider="deepseek",
@@ -487,6 +488,36 @@ def test_external_interpretation_claim_is_atomic_budgeted_and_lease_owned(tmp_pa
         reserve_cny=0.02,
     )
     assert blocked["reason"] == "DAILY_REQUEST_CAP_REACHED"
+    assert blocked["interpretation_id"] == second
+    retry_at = datetime.fromisoformat(str(blocked["available_at"]))
+    assert retry_at > datetime.now(timezone.utc)
+    assert (retry_at.hour, retry_at.minute, retry_at.second) == (0, 0, 0)
+    second_run = next(
+        row
+        for row in operations.capture_interpretation_runs(limit=20)
+        if row["interpretation_id"] == second
+    )
+    assert second_run["status"] == "BUDGET_BLOCKED"
+    assert second_run["available_at"] == blocked["available_at"]
+    assert second_run["error"] == "DAILY_REQUEST_CAP_REACHED"
+    assert operations.capture_interpretation_pending_runs(
+        provider="deepseek",
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        model_snapshot="deepseek-v4-flash",
+        available_before=datetime.now(timezone.utc).isoformat(),
+    ) == []
+    assert operations.capture_interpretation_active_keys(
+        provider="deepseek",
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        model_snapshot="deepseek-v4-flash",
+    ) == {
+        ("FR-LIVE-alpha", "a" * 64),
+        ("FR-LIVE-beta", "b" * 64),
+    }
     assert operations.capture_interpretation_daily_usage("deepseek")["requests"] == 1
 
     with pytest.raises(ValueError, match="token mismatch"):
@@ -498,6 +529,220 @@ def test_external_interpretation_claim_is_atomic_budgeted_and_lease_owned(tmp_pa
             error_class="TEST",
             retryable=False,
         )
+
+
+def test_external_interpretation_cny_cap_defers_to_next_utc_day(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    first = _enqueue_external(operations, "cny-alpha")
+    second = _enqueue_external(operations, "cny-beta")
+    claim = operations.claim_capture_interpretation(
+        provider="deepseek",
+        daily_request_cap=0,
+        daily_cny_cap=0.0,
+        reserve_cny=0.02,
+        interpretation_id=first,
+    )
+    assert claim["claimed"] is True
+    operations.fail_claimed_capture_interpretation(
+        first,
+        str(claim["attempt_id"]),
+        str(claim["lease_token"]),
+        error="terminal",
+        error_class="TEST",
+        retryable=False,
+    )
+
+    blocked = operations.claim_capture_interpretation(
+        provider="deepseek",
+        daily_request_cap=0,
+        daily_cny_cap=0.02,
+        reserve_cny=0.02,
+        interpretation_id=second,
+    )
+
+    assert blocked["reason"] == "DAILY_CNY_CAP_REACHED"
+    assert blocked["interpretation_id"] == second
+    second_run = next(
+        row
+        for row in operations.capture_interpretation_runs(limit=20)
+        if row["interpretation_id"] == second
+    )
+    assert second_run["status"] == "BUDGET_BLOCKED"
+    assert second_run["available_at"] == blocked["available_at"]
+
+
+def test_failed_exact_input_can_be_explicitly_requeued_only_within_bound(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    run_id = _enqueue_external(operations, "bounded-retry")
+    original = next(
+        row
+        for row in operations.capture_interpretation_runs(limit=10)
+        if row["interpretation_id"] == run_id
+    )
+    operations.fail_capture_interpretation(run_id, "terminal")
+
+    payload = {
+        "capture_receipt_sha256": original["capture_receipt_sha256"],
+        "semantic_content_sha256": original["semantic_content_sha256"],
+        "input_sha256": original["input_sha256"],
+    }
+    for expected_attempt in (1, 2):
+        same_id, accepted = operations.enqueue_capture_interpretation(
+            "FR-LIVE-bounded-retry",
+            "obs-bounded-retry",
+            payload,
+            contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+            prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+            prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+            provider="deepseek",
+            model_snapshot="deepseek-v4-flash",
+            external_call=True,
+            requeue_terminal=True,
+            max_attempts=2,
+        )
+        assert same_id == run_id
+        assert accepted is True
+        row = operations.latest_capture_interpretation_exact(
+            event_id="FR-LIVE-bounded-retry",
+            observation_id="obs-bounded-retry",
+            capture_receipt_sha256=str(original["capture_receipt_sha256"]),
+            input_sha256=str(original["input_sha256"]),
+            contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+            prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+            prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+            provider="deepseek",
+            model_snapshot="deepseek-v4-flash",
+        )
+        assert row and row["attempts"] == expected_attempt
+        operations.fail_capture_interpretation(run_id, "terminal")
+
+    _, accepted = operations.enqueue_capture_interpretation(
+        "FR-LIVE-bounded-retry",
+        "obs-bounded-retry",
+        payload,
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        provider="deepseek",
+        model_snapshot="deepseek-v4-flash",
+        external_call=True,
+        requeue_terminal=True,
+        max_attempts=2,
+    )
+    assert accepted is False
+
+
+def test_public_priority_is_exact_durable_and_not_starved_by_old_pending(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    for index in range(24):
+        _enqueue_external(operations, f"old-{index:02d}")
+    priority_id = _enqueue_external(operations, "new-public")
+    priority_row = next(
+        row
+        for row in operations.capture_interpretation_runs(limit=100)
+        if row["interpretation_id"] == priority_id
+    )
+    assert operations.enqueue_capture_interpretation_priority(
+        priority_id,
+        event_id="FR-LIVE-new-public",
+        observation_id="obs-new-public",
+        capture_receipt_sha256=str(priority_row["capture_receipt_sha256"]),
+        input_sha256=str(priority_row["input_sha256"]),
+    ) is True
+
+    selected = operations.capture_interpretation_priority_runs(
+        provider="deepseek",
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        model_snapshot="deepseek-v4-flash",
+        limit=1,
+    )
+    assert [row["interpretation_id"] for row in selected] == [priority_id]
+
+    operations.fail_capture_interpretation(priority_id, "terminal")
+    assert operations.capture_interpretation_priority_runs(
+        provider="deepseek",
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        model_snapshot="deepseek-v4-flash",
+        limit=1,
+    ) == []
+
+
+def test_event_version_or_capture_change_creates_a_new_exact_identity(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    event_v1 = _event(event_id="FR-LIVE-exact-input", current_version=1)
+    capture_a = _capture(
+        observation_id="obs-a",
+        capture_receipt_sha256="a" * 64,
+    )
+    normalized_v1 = normalized_capture_input(event_v1, capture_a)
+    first, first_inserted = operations.enqueue_capture_interpretation(
+        str(event_v1["event_id"]),
+        "obs-a",
+        normalized_v1,
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        provider="deepseek",
+        model_snapshot="deepseek-v4-flash",
+        external_call=True,
+    )
+    operations.fail_capture_interpretation(first, "old terminal")
+
+    event_v2 = {**event_v1, "current_version": 2}
+    normalized_v2 = normalized_capture_input(event_v2, capture_a)
+    second, second_inserted = operations.enqueue_capture_interpretation(
+        str(event_v2["event_id"]),
+        "obs-a",
+        normalized_v2,
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        provider="deepseek",
+        model_snapshot="deepseek-v4-flash",
+        external_call=True,
+    )
+    capture_b = _capture(
+        observation_id="obs-b",
+        capture_receipt_sha256="b" * 64,
+    )
+    normalized_b = normalized_capture_input(event_v2, capture_b)
+    third, third_inserted = operations.enqueue_capture_interpretation(
+        str(event_v2["event_id"]),
+        "obs-b",
+        normalized_b,
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        provider="deepseek",
+        model_snapshot="deepseek-v4-flash",
+        external_call=True,
+    )
+
+    assert first_inserted and second_inserted and third_inserted
+    assert len({first, second, third}) == 3
+    assert operations.latest_capture_interpretation_exact(
+        event_id=str(event_v2["event_id"]),
+        observation_id="obs-a",
+        capture_receipt_sha256="a" * 64,
+        input_sha256=str(normalized_v2["input_sha256"]),
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        provider="deepseek",
+        model_snapshot="deepseek-v4-flash",
+    )["interpretation_id"] == second
 
 
 def test_external_interpretation_zero_caps_mean_unlimited_but_usage_is_recorded(

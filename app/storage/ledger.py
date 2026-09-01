@@ -186,66 +186,6 @@ current_source_content AS (
 """.strip()
 
 
-_CAPTURE_INTERPRETATION_CANDIDATE_CTES = """
-live_interpretation_capture AS (
-    SELECT eo.event_id,r.observation_id,r.source_id,r.external_id,
-           r.source_published_at,r.local_received_at,r.title,r.summary,
-           r.canonical_url,r.content_sha256,r.raw_json,
-           r.observation_status,r.latest_revision_no,r.latest_revision_kind,
-           r.latest_revision_at,
-           s.authority_tier,
-           CASE WHEN x.observation_id IS NOT NULL
-                     AND (
-                       LOWER(COALESCE(x.last_error,'')) LIKE '%exceeds safe capture limit%'
-                       OR LOWER(COALESCE(x.last_error,'')) LIKE '%exceeded safe capture limit%'
-                     )
-                THEN 1 ELSE 0 END AS oversized_sec_capture
-    FROM event_observations eo
-    JOIN latest_source_content r ON r.observation_id=eo.observation_id
-    JOIN sources s ON s.source_id=r.source_id
-    LEFT JOIN sec_filing_enrichments x ON x.observation_id=r.observation_id
-    WHERE r.observation_status!='deleted'
-),
-interpretation_event_bucket AS (
-    SELECT ce.event_id,ce.current_version,
-           CASE
-             WHEN MAX(CASE WHEN c.oversized_sec_capture=1
-                                  AND TRIM(COALESCE(c.canonical_url,''))!=''
-                            THEN 1 ELSE 0 END)=1
-               THEN 'SEC_OVERSIZE_REFETCH_READY'
-             WHEN MAX(CASE WHEN TRIM(COALESCE(c.canonical_url,''))!=''
-                                  AND (
-                                    UPPER(c.authority_tier) IN ('P0','P1')
-                                    OR UPPER(c.authority_tier) GLOB 'P0_*'
-                                    OR UPPER(c.authority_tier) GLOB 'P1_*'
-                                  )
-                            THEN 1 ELSE 0 END)=1
-               THEN 'OFFICIAL_REFETCH_READY'
-             WHEN MAX(CASE WHEN TRIM(COALESCE(c.canonical_url,''))!=''
-                            THEN 1 ELSE 0 END)=1
-               THEN 'P2_CAPTURE_ONLY'
-             ELSE 'NO_URL_RAW_ONLY'
-           END AS bucket
-    FROM canonical_events ce
-    JOIN live_interpretation_capture c ON c.event_id=ce.event_id
-    WHERE NOT EXISTS (
-      SELECT 1 FROM event_evidence ee WHERE ee.event_id=ce.event_id
-    )
-    GROUP BY ce.event_id,ce.current_version
-),
-eligible_interpretation_capture AS (
-    SELECT b.bucket,b.current_version,c.*
-    FROM interpretation_event_bucket b
-    JOIN live_interpretation_capture c ON c.event_id=b.event_id
-    WHERE b.bucket IN ('NO_URL_RAW_ONLY','P2_CAPTURE_ONLY')
-      AND (
-        TRIM(COALESCE(c.title,''))!=''
-        OR TRIM(COALESCE(c.summary,''))!=''
-      )
-)
-""".strip()
-
-
 _DUAL_HUMAN_RECEIPT_MATCH_SQL = """
 json_valid(current_version.facts_json)
 AND json_extract(
@@ -707,6 +647,119 @@ AND LOWER(json_extract(
     ))=LOWER(ro.content_sha256)
 AND ro.observation_status!='deleted'
 AND sec_slot.event_id IS NOT NULL
+""".strip()
+
+
+_CAPTURE_INTERPRETATION_CANDIDATE_CTES = f"""
+{_CURRENT_SOURCE_CONTENT_CTES},
+{_SEC_CURRENT_SUPPORTED_FACT_SLOT_CTE},
+live_interpretation_capture AS (
+    SELECT eo.event_id,r.observation_id,r.source_id,r.external_id,
+           r.source_published_at,r.local_received_at,r.title,r.summary,
+           r.canonical_url,r.content_sha256,r.raw_json,
+           r.observation_status,r.latest_revision_no,r.latest_revision_kind,
+           r.latest_revision_at,
+           s.authority_tier,
+           CASE WHEN x.observation_id IS NOT NULL
+                     AND (
+                       LOWER(COALESCE(x.last_error,'')) LIKE '%exceeds safe capture limit%'
+                       OR LOWER(COALESCE(x.last_error,'')) LIKE '%exceeded safe capture limit%'
+                     )
+                THEN 1 ELSE 0 END AS oversized_sec_capture
+    FROM event_observations eo
+    JOIN latest_source_content r ON r.observation_id=eo.observation_id
+    JOIN sources s ON s.source_id=r.source_id
+    LEFT JOIN sec_filing_enrichments x ON x.observation_id=r.observation_id
+    WHERE r.observation_status!='deleted'
+),
+reader_eligible_interpretation_event AS (
+    SELECT DISTINCT ev.event_id
+    FROM event_evidence ev
+    JOIN (SELECT DISTINCT event_id FROM live_interpretation_capture) target
+      ON target.event_id=ev.event_id
+    JOIN canonical_events ce ON ce.event_id=ev.event_id
+    JOIN event_evidence_relations rel
+      ON rel.event_id=ev.event_id
+     AND rel.evidence_id=ev.evidence_id
+     AND rel.event_version=ce.current_version
+    JOIN current_source_content ro ON ro.observation_id=ev.observation_id
+    JOIN sources src ON src.source_id=ro.source_id
+    JOIN event_versions current_version
+      ON current_version.event_id=ce.event_id
+     AND current_version.version=ce.current_version
+    LEFT JOIN sec_current_supported_fact_slots sec_slot
+      ON sec_slot.event_id=ce.event_id
+     AND sec_slot.version=ce.current_version
+    WHERE public_source_url_ok(ev.evidence_url)=1
+      AND LENGTH(TRIM(COALESCE(ev.evidence_passage,'')))>=40
+      AND (
+        (
+          ev.evidence_status IN (
+            'machine_extracted_unreviewed','candidate_passage',
+            'confirmed_primary','accepted_manual_primary_evidence',
+            'accepted_light_primary_evidence'
+          )
+          AND rel.relation_status IN ('SCOPED_MATCH','HUMAN_CONFIRMED')
+          AND {_SEC_CURRENT_FACT_SLOT_MATCH_SQL}
+          AND rel.contract_version='event-admission-v3'
+          AND rel.evidence_fingerprint=json_extract(
+                current_version.facts_json,'$.evidence_fingerprint'
+              )
+        ) OR (
+          ev.evidence_status='accepted_dual_human_primary_evidence'
+          AND rel.relation_status='HUMAN_CONFIRMED'
+          AND {_DUAL_HUMAN_RECEIPT_MATCH_SQL}
+        )
+      )
+      AND rel.subject_match=1
+      AND rel.event_claim_supported=1
+      AND rel.date_coherent=1
+      AND {_CURRENT_EVIDENCE_PASSAGE_MATCH_SQL}
+      AND (
+        UPPER(src.authority_tier) IN ('P0','P1')
+        OR UPPER(src.authority_tier) GLOB 'P0_*'
+        OR UPPER(src.authority_tier) GLOB 'P1_*'
+      )
+),
+interpretation_event_bucket AS (
+    SELECT ce.event_id,ce.current_version,
+           CASE
+             WHEN MAX(CASE WHEN c.oversized_sec_capture=1
+                                  AND TRIM(COALESCE(c.canonical_url,''))!=''
+                            THEN 1 ELSE 0 END)=1
+               THEN 'SEC_OVERSIZE_REFETCH_READY'
+             WHEN MAX(CASE WHEN TRIM(COALESCE(c.canonical_url,''))!=''
+                                  AND (
+                                    UPPER(c.authority_tier) IN ('P0','P1')
+                                    OR UPPER(c.authority_tier) GLOB 'P0_*'
+                                    OR UPPER(c.authority_tier) GLOB 'P1_*'
+                                  )
+                            THEN 1 ELSE 0 END)=1
+               THEN 'OFFICIAL_REFETCH_READY'
+             WHEN MAX(CASE WHEN TRIM(COALESCE(c.canonical_url,''))!=''
+                            THEN 1 ELSE 0 END)=1
+               THEN 'P2_CAPTURE_ONLY'
+             ELSE 'NO_URL_RAW_ONLY'
+           END AS bucket
+    FROM canonical_events ce
+    JOIN live_interpretation_capture c ON c.event_id=ce.event_id
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM reader_eligible_interpretation_event reader_evidence
+      WHERE reader_evidence.event_id=ce.event_id
+    )
+    GROUP BY ce.event_id,ce.current_version
+),
+eligible_interpretation_capture AS (
+    SELECT b.bucket,b.current_version,c.*
+    FROM interpretation_event_bucket b
+    JOIN live_interpretation_capture c ON c.event_id=b.event_id
+    WHERE b.bucket IN ('NO_URL_RAW_ONLY','P2_CAPTURE_ONLY')
+      AND (
+        TRIM(COALESCE(c.title,''))!=''
+        OR TRIM(COALESCE(c.summary,''))!=''
+      )
+)
 """.strip()
 
 
@@ -1592,8 +1645,10 @@ class LedgerRepository:
         External AI is intentionally narrower than public event visibility. An
         event remains browsable regardless of this result, but an explanation
         may be generated or displayed only while the canonical event has no
-        evidence rows at all and a current non-deleted raw/P2 capture contains
-        text.  A current official URL wins over AI and is routed to refetch.
+        current reader-eligible evidence and a current non-deleted raw/P2
+        capture contains text. Historical, stale, or otherwise non-citable
+        evidence rows do not suppress a reading aid. A current official URL
+        still wins over AI and is routed to refetch.
         """
 
         with closing(self.connect()) as connection:
@@ -1614,14 +1669,25 @@ class LedgerRepository:
                 "reason_code": "EVENT_NOT_FOUND",
                 "current_event_version": None,
                 "evidence_count": evidence_count,
+                "reader_eligible_evidence_count": 0,
                 "eligible_observation_ids": [],
             }
 
         event_version = int(event_row["current_version"] or 0)
-        if evidence_count > 0:
+        reader_eligible_evidence_count = (
+            sum(
+                1
+                for evidence in self.event_evidence(event_id)
+                if int(evidence.get("reader_eligible") or 0) == 1
+            )
+            if evidence_count > 0
+            else 0
+        )
+        if reader_eligible_evidence_count > 0:
             return {
                 "current_event_version": event_version,
                 "evidence_count": evidence_count,
+                "reader_eligible_evidence_count": reader_eligible_evidence_count,
                 "capture_count": None,
                 "eligible_observation_ids": [],
                 "display": False,
@@ -1649,6 +1715,7 @@ class LedgerRepository:
         base = {
             "current_event_version": event_version,
             "evidence_count": evidence_count,
+            "reader_eligible_evidence_count": reader_eligible_evidence_count,
             "capture_count": len(captures),
             "eligible_observation_ids": [],
         }
@@ -1702,7 +1769,11 @@ class LedgerRepository:
             **base,
             "display": True,
             "eligible": True,
-            "reason_code": "NO_EVENT_EVIDENCE",
+            "reason_code": (
+                "NO_READER_ELIGIBLE_EVIDENCE"
+                if evidence_count > 0
+                else "NO_EVENT_EVIDENCE"
+            ),
             "bucket": bucket,
             "eligible_observation_ids": eligible_ids,
         }

@@ -5,6 +5,25 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.09.01.2
+
+- Replace the public model placeholders with authenticated, idempotent and
+  bounded on-demand queues. A selected event is shown as queued or running only
+  when the matching current event version has a persisted task or a live worker
+  lease; stale leases and storage failures no longer masquerade as processing.
+- Let the Qwen worker prioritize the event currently being read while retaining
+  its recent/fair background scan, exact input/model identity, retry backoff and
+  publication gates. Completed semantics remain read-only and cannot change
+  facts, evidence, ranking, pricing or trading behavior.
+- Let the DeepSeek worker consume already-persisted requests before its inventory
+  scan, revalidate current capture eligibility before each paid call and keep
+  failures terminal for the same generation. Public requests have a dedicated
+  loopback credential, a separate rate bucket and finite daily cost/request caps.
+- Separate public request authorization from background executor intent during
+  deployment. DeepSeek and Qwen can each be explicitly preserved, enabled or
+  disabled; an enabled chain is accepted only when its dependencies, active
+  service and reboot-persistent timer are all verified, including on rollback.
+
 ## 2026.09.01.1
 
 - Restore the teammate's compact, login-free DeepSeek reader UI while keeping

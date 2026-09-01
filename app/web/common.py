@@ -24,6 +24,63 @@ API_URL = os.getenv("FINANCE_RADAR_API_URL", "http://127.0.0.1:8000").rstrip("/"
 ADMIN_TOKEN = os.getenv("FINANCE_RADAR_ADMIN_TOKEN")
 REVIEWER_TOKEN = os.getenv("FINANCE_RADAR_REVIEWER_TOKEN")
 OPERATOR_TOKEN = os.getenv("FINANCE_RADAR_OPERATOR_TOKEN")
+
+
+def _public_model_request_token() -> str | None:
+    raw = os.getenv("FINANCE_RADAR_PUBLIC_MODEL_REQUEST_TOKEN", "").strip()
+    credential_directory = os.getenv("CREDENTIALS_DIRECTORY", "").strip()
+    credential_path = (
+        Path(credential_directory) / "public_model_request_token"
+        if credential_directory
+        else None
+    )
+    if credential_path is not None and credential_path.is_file():
+        if raw or credential_path.stat().st_size > 512:
+            return None
+        raw = credential_path.read_text(encoding="utf-8").strip()
+    return raw if re.fullmatch(r"[0-9A-Fa-f]{64}", raw) else None
+
+
+class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Keep the public model credential on the configured API origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
+def _public_model_request_url(path: str) -> str:
+    base = urllib.parse.urlsplit(API_URL)
+    if (
+        base.scheme not in {"http", "https"}
+        or not base.netloc
+        or base.username is not None
+        or base.password is not None
+        or base.path not in {"", "/"}
+        or base.query
+        or base.fragment
+    ):
+        raise ApiError("后台研判接口配置无效")
+    parsed_path = urllib.parse.urlsplit(path)
+    if (
+        not path.startswith("/")
+        or parsed_path.scheme
+        or parsed_path.netloc
+        or parsed_path.query
+        or parsed_path.fragment
+    ):
+        raise ApiError("后台研判接口路径无效")
+    return urllib.parse.urlunsplit((base.scheme, base.netloc, parsed_path.path, "", ""))
+
+
+def _open_public_model_request(
+    request: urllib.request.Request, *, timeout: int
+):
+    return urllib.request.build_opener(_RejectRedirectHandler()).open(
+        request, timeout=timeout
+    )
+
+
+PUBLIC_MODEL_REQUEST_TOKEN = _public_model_request_token()
 SHOW_DEBUG = os.getenv("FINANCE_RADAR_SHOW_DEBUG") == "1"
 UI_ROLES = frozenset({"public", "reviewer", "operator", "admin"})
 _configured_ui_role = os.getenv("FINANCE_RADAR_UI_ROLE", "public").strip().lower()
@@ -419,7 +476,14 @@ def api_request(
     if not 1 <= int(timeout_seconds) <= 20:
         raise ValueError("timeout_seconds must be between 1 and 20")
     normalized_method = method.upper()
+    public_model_request = False
     if normalized_method not in {"GET", "HEAD"}:
+        public_model_request = normalized_method == "POST" and bool(
+            re.fullmatch(
+                r"/api/v1/events/[^/]+/(?:semantic-assessment|capture-explanation)/request",
+                path,
+            )
+        )
         reviewer_write = bool(
             re.fullmatch(r"/api/v1/events/[^/]+/human-override", path)
             or re.fullmatch(r"/api/v1/adjudication/samples/[^/]+/reviews", path)
@@ -430,7 +494,8 @@ def api_request(
             or re.fullmatch(r"/api/v1/demo/mode/[^/]+", path)
         )
         allowed = (
-            UI_ROLE == "admin"
+            public_model_request
+            or UI_ROLE == "admin"
             or (UI_ROLE == "reviewer" and reviewer_write)
             or (UI_ROLE == "operator" and operator_write)
         )
@@ -441,6 +506,11 @@ def api_request(
                 else "当前界面角色不允许此写入请求"
             )
     headers = {"Accept": "application/json"}
+    if public_model_request:
+        normalized_request_token = str(PUBLIC_MODEL_REQUEST_TOKEN or "").strip()
+        if not re.fullmatch(r"[0-9A-Fa-f]{64}", normalized_request_token):
+            raise ApiError("后台研判请求未配置")
+        headers["X-Public-Model-Request-Token"] = normalized_request_token
     public_visitor_ip = public_visitor_ip_for_api()
     if public_visitor_ip is not None:
         headers["X-Real-IP"] = public_visitor_ip
@@ -461,11 +531,19 @@ def api_request(
     if json_body is not None:
         body = json.dumps(json_body, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    request_url = (
+        _public_model_request_url(path) if public_model_request else f"{API_URL}{path}"
+    )
     request = urllib.request.Request(
-        f"{API_URL}{path}", method=normalized_method, headers=headers, data=body
+        request_url, method=normalized_method, headers=headers, data=body
     )
     try:
-        with urllib.request.urlopen(request, timeout=int(timeout_seconds)) as response:
+        response_context = (
+            _open_public_model_request(request, timeout=int(timeout_seconds))
+            if public_model_request
+            else urllib.request.urlopen(request, timeout=int(timeout_seconds))
+        )
+        with response_context as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise ApiError(f"API {exc.code}") from exc

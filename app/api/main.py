@@ -571,6 +571,15 @@ class CaptureInterpretationRunRequest(BaseModel):
     mode: Literal["DETERMINISTIC"] = "DETERMINISTIC"
 
 
+class PublicModelRequest(BaseModel):
+    """Narrow public request; the server recomputes every model/input detail."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_version: int = Field(ge=1)
+    request_source: Literal["PUBLIC_EVENT_VIEW"] = "PUBLIC_EVENT_VIEW"
+
+
 class AdjudicationReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -839,9 +848,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def trace_middleware(request: Request, call_next: Callable[..., Any]):
         request.state.trace_id = request.headers.get("X-Trace-Id") or uuid.uuid4().hex
         limit = settings.api_rate_limit_per_minute
+        model_request_path = bool(
+            request.method.upper() == "POST"
+            and request.url.path.startswith("/api/v1/events/")
+            and request.url.path.endswith(
+                ("/semantic-assessment/request", "/capture-explanation/request")
+            )
+        )
+        if model_request_path:
+            limit = min(limit, 6) if limit > 0 else 6
         rate_remaining: int | None = None
         if limit > 0 and request.url.path.startswith("/api/"):
             key = _rate_limit_client_key(request, settings.api_trusted_proxy_hosts)
+            key = f"{'model' if model_request_path else 'api'}:{key}"
             now = time.monotonic()
             with rate_lock:
                 # Opportunistically retire the oldest expired keys.  The hard
@@ -1040,6 +1059,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(
                 403,
                 {"code": "OPERATOR_TOKEN_REQUIRED", "message": "valid X-Operator-Token required"},
+            )
+
+    def require_public_model_request(
+        request: Request,
+        x_public_model_request_token: str | None = Header(default=None),
+    ) -> None:
+        """Accept bounded model requests only from the local public Web process."""
+
+        expected = str(settings.public_model_request_token or "").strip()
+        if len(expected) < 32:
+            raise HTTPException(
+                503,
+                {
+                    "code": "PUBLIC_MODEL_REQUESTS_DISABLED",
+                    "message": "public model requests are not configured",
+                },
+            )
+        peer = str(request.client.host if request.client is not None else "").strip()
+        try:
+            loopback_peer = ipaddress.ip_address(peer).is_loopback
+        except ValueError:
+            loopback_peer = False
+        if not loopback_peer:
+            raise HTTPException(
+                403,
+                {
+                    "code": "LOOPBACK_REQUIRED",
+                    "message": "public model requests require a loopback peer",
+                },
+            )
+        supplied = str(x_public_model_request_token or "").strip()
+        if not supplied or not secrets.compare_digest(supplied, expected):
+            raise HTTPException(
+                403,
+                {
+                    "code": "PUBLIC_MODEL_REQUEST_TOKEN_REQUIRED",
+                    "message": "valid public model request token required",
+                },
             )
 
     def public_backup_status(value: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1355,6 +1412,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def current_qwen_runs(
         events: list[dict[str, Any]],
+        *,
+        strict: bool = False,
     ) -> dict[str, dict[str, Any]]:
         event_versions: dict[str, int] = {}
         for event in events:
@@ -1369,7 +1428,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             publication = operations.qwen_risk_publication()
             if publication.get("public_approved") is not True:
                 return {}
-            candidates = operations.latest_qwen_risk_runs_for_versions(event_versions)
+            candidates = operations.latest_qwen_risk_runs_for_versions(
+                event_versions,
+                model_version=str(publication.get("model_version") or ""),
+                contract_version=str(publication.get("contract_version") or ""),
+                prompt_version=str(publication.get("prompt_version") or ""),
+            )
             inputs = ledger.shadow_batch(
                 limit=max(1, len(event_versions)),
                 order="event_id",
@@ -1423,6 +1487,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
             return selected
         except (OSError, sqlite3.Error) as exc:
+            if strict:
+                raise
             LOGGER.warning("public Qwen semantic assessment unavailable: %s", exc)
             return {}
 
@@ -1824,6 +1890,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             str(capture.get("capture_receipt_sha256") or "")
             for capture in visible_captures
         ]
+        normalized_by_receipt = {
+            str(capture.get("capture_receipt_sha256") or ""): normalized_capture_input(
+                event, capture
+            )
+            for capture in visible_captures
+            if str(capture.get("capture_receipt_sha256") or "")
+        }
         persisted_runs = operations.latest_capture_interpretations(
             str(event.get("event_id") or ""),
             receipts,
@@ -1841,6 +1914,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     DEEPSEEK_CHEAP_TEXT_MODEL,
                 ),
             ),
+            input_sha256_by_receipt={
+                receipt: str(normalized.get("input_sha256") or "")
+                for receipt, normalized in normalized_by_receipt.items()
+            },
         )
         items: list[dict[str, Any]] = []
         for capture in visible_captures:
@@ -1925,7 +2002,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         *,
         event_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Project the cache-only public state of zero-evidence AI explanation."""
+        """Project the read-only public state of the DeepSeek explanation task."""
 
         event_data = event_data or event_or_404(
             event_id,
@@ -1938,7 +2015,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "display": bool(eligibility.get("display")),
             "reason_code": eligibility.get("reason_code"),
             "state": "NOT_APPLICABLE",
-            "generation_path": "BACKGROUND_CACHE_ONLY",
+            "generation_path": "BACKGROUND_ON_DEMAND",
             "item": None,
             "source": None,
             "attempts": 0,
@@ -1946,7 +2023,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "updated_at": None,
             "next_retry_at": None,
             "boundary": {
-                "enabled_only_when_event_has_zero_evidence": True,
+                "enabled_only_when_no_reader_eligible_evidence": True,
                 "captured_text_is_not_evidence": True,
                 "does_not_confirm_event_truth": True,
                 "canonical_mutation_allowed": False,
@@ -1955,6 +2032,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "no_trading": True,
             },
         }
+        if not settings.capture_llm_enabled:
+            result.update(
+                {
+                    "display": False,
+                    "state": "UNAVAILABLE",
+                    "generation_path": "DISABLED",
+                }
+            )
+            return result
         if not eligibility.get("eligible"):
             result["state"] = {
                 "REFETCH_PRIMARY_SOURCE": "REFETCH_PRIMARY_SOURCE",
@@ -1994,38 +2080,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             result["item"] = items[0]
             return result
 
-        receipts = {
-            str(item.get("capture_receipt_sha256") or "")
-            for item in captures
-            if str(item.get("capture_receipt_sha256") or "")
-        }
-        latest_run = next(
-            (
-                run
-                for run in operations.capture_interpretation_runs(event_id, limit=200)
-                if str(run.get("capture_receipt_sha256") or "") in receipts
-                and str(run.get("provider") or "") == "deepseek"
-                and str(run.get("contract_version") or "")
-                == CAPTURE_INTERPRETATION_CONTRACT
-                and str(run.get("prompt_version") or "")
-                == CAPTURE_INTERPRETATION_PROMPT_VERSION
-                and str(run.get("prompt_sha256") or "")
-                == CAPTURE_INTERPRETATION_PROMPT_SHA256
-                and str(run.get("model_snapshot") or "")
-                == DEEPSEEK_CHEAP_TEXT_MODEL
-            ),
-            None,
-        )
-        selected_receipt = str((latest_run or {}).get("capture_receipt_sha256") or "")
-        selected_capture = next(
-            (
-                capture
-                for capture in captures
-                if str(capture.get("capture_receipt_sha256") or "")
-                == selected_receipt
-            ),
-            captures[0] if captures else None,
-        )
+        exact_runs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        unqueued_capture: dict[str, Any] | None = None
+        for capture in captures:
+            normalized = normalized_capture_input(event, capture)
+            run = operations.latest_capture_interpretation_exact(
+                event_id=event_id,
+                observation_id=str(capture.get("observation_id") or ""),
+                capture_receipt_sha256=str(normalized.get("capture_receipt_sha256") or ""),
+                input_sha256=str(normalized.get("input_sha256") or ""),
+                contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+                prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+                prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+                provider="deepseek",
+                model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+            )
+            if run is not None:
+                exact_runs.append((run, capture))
+            elif unqueued_capture is None:
+                unqueued_capture = capture
+        if unqueued_capture is not None:
+            latest_run, selected_capture = None, unqueued_capture
+        else:
+            latest_run, selected_capture = (
+                max(
+                    exact_runs,
+                    key=lambda pair: (
+                        str(pair[0].get("updated_at") or ""),
+                        str(pair[0].get("interpretation_id") or ""),
+                    ),
+                )
+                if exact_runs
+                else (None, captures[0] if captures else None)
+            )
         if selected_capture is not None:
             result["source"] = public_captured_source(selected_capture)
         if latest_run is None:
@@ -2037,7 +2124,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result["updated_at"] = latest_run.get("updated_at")
         run_status = str((latest_run or {}).get("status") or "")
         if run_status == "RUNNING":
-            result["state"] = "RUNNING"
+            lease_raw = str(latest_run.get("lease_expires_at") or "").strip()
+            try:
+                lease_expires = datetime.fromisoformat(lease_raw.replace("Z", "+00:00"))
+                if lease_expires.tzinfo is None:
+                    lease_expires = lease_expires.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                lease_expires = None
+            if lease_expires is None or lease_expires <= datetime.now(timezone.utc):
+                # A crashed worker must never leave the public page claiming
+                # that DeepSeek is still processing. The next worker claim
+                # will atomically recover the expired lease.
+                result["state"] = "RETRY_WAIT"
+                result["next_retry_at"] = lease_raw or None
+            else:
+                result["state"] = "RUNNING"
         elif run_status == "FAILED":
             result["state"] = "FAILED_TERMINAL"
         elif run_status in {"BUDGET_BLOCKED"} or (
@@ -2056,17 +2157,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return result
 
     def public_qwen_semantic_status(event_id: str) -> dict[str, Any]:
-        """Return a cache-only public lifecycle for the current Qwen assessment.
+        """Project only a current result or an exact, persisted Qwen activity."""
 
-        Public readers need to distinguish a current result from work that can
-        still be completed, but must not receive worker errors, model hashes or
-        unpublished shadow output.  This read never invokes or enqueues a model.
-        """
-
-        processing = {
-            "state": "PROCESSING",
+        unavailable = {
+            "state": "UNAVAILABLE",
             "assessment": None,
             "cache_only": True,
+            "requestable": False,
         }
         try:
             event_data = event_or_404(
@@ -2075,7 +2172,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 require_public_semantics=True,
             )
             event = dict(event_data.get("event") or {})
-            current = current_qwen_runs([event])
+            current = current_qwen_runs([event], strict=True)
             assessment = project_public_qwen_semantics(
                 current.get(str(event.get("event_id") or "")),
                 current_version=int(event.get("current_version") or 0),
@@ -2085,11 +2182,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "state": "READY",
                     "assessment": assessment,
                     "cache_only": True,
+                    "requestable": False,
                 }
 
             publication = operations.qwen_risk_publication()
-            if publication.get("public_approved") is not True:
-                return processing
+            if (
+                not settings.qwen_risk_enabled
+                or publication.get("public_approved") is not True
+            ):
+                return unavailable
             inputs = ledger.shadow_batch(
                 limit=1,
                 order="event_id",
@@ -2101,6 +2202,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "state": "NOT_APPLICABLE",
                     "assessment": None,
                     "cache_only": True,
+                    "requestable": False,
                 }
             candidate = inputs[0] if isinstance(inputs[0], dict) else {}
             contract = build_qwen_risk_input_contract(
@@ -2113,13 +2215,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "state": "NOT_APPLICABLE",
                     "assessment": None,
                     "cache_only": True,
+                    "requestable": False,
                 }
-            return processing
+            event_version = int(event.get("current_version") or 0)
+            input_sha256 = str(contract.get("input_sha256") or "")
+            model_version = str(publication.get("model_version") or "")
+            activity = operations.qwen_risk_activity(
+                event_id,
+                event_version,
+                input_sha256,
+                model_version,
+            )
+            if activity is None:
+                return {
+                    "state": "NOT_REQUESTED",
+                    "assessment": None,
+                    "cache_only": True,
+                    "requestable": True,
+                }
+            state = str(activity.get("state") or "").upper()
+            public_retry_after = activity.get("retry_after")
+            if state == "FAILED":
+                try:
+                    retry_at = datetime.fromisoformat(
+                        str(public_retry_after or "").replace("Z", "+00:00")
+                    )
+                    if retry_at.tzinfo is None:
+                        retry_at = retry_at.replace(tzinfo=timezone.utc)
+                except (TypeError, ValueError):
+                    retry_at = None
+                if retry_at is not None and retry_at > datetime.now(timezone.utc):
+                    state = "RETRY_WAIT"
+                else:
+                    # An expired/malformed retry timestamp without a live queue
+                    # item is a real failed state, not evidence of future work.
+                    public_retry_after = None
+            elif state not in {"QUEUED", "RUNNING", "FAILED"}:
+                state = "UNAVAILABLE"
+            return {
+                "state": state,
+                "assessment": None,
+                "cache_only": True,
+                "requestable": state in {"FAILED", "UNAVAILABLE"},
+                "queued_at": activity.get("queued_at"),
+                "started_at": activity.get("started_at"),
+                "heartbeat_at": activity.get("heartbeat_at"),
+                "updated_at": activity.get("updated_at"),
+                "retry_after": public_retry_after,
+                "attempts": max(0, int(activity.get("attempts") or 0)),
+            }
         except HTTPException:
             raise
         except Exception as exc:
             LOGGER.warning("public Qwen semantic status unavailable: %s", exc)
-            return processing
+            return unavailable
 
     @application.get("/")
     def root(request: Request):
@@ -2487,7 +2636,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         the same event/evidence/source rows repeatedly.  A later revision then
         bundled optional source and AI cache reads back into this critical
         path.  Keep the evidence-backed core bounded here; capture explanation
-        is a separate cache-only endpoint and can never delay the event body.
+        is a separate read-only lifecycle endpoint and can never delay the event body.
         """
 
         def read_dossier() -> dict[str, Any]:
@@ -2526,11 +2675,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "display": bool(explanation_eligibility.get("display")),
                     "reason_code": explanation_eligibility.get("reason_code"),
                     "state": (
-                        "CHECKING"
+                        "ELIGIBLE_REQUESTABLE"
                         if explanation_eligibility.get("eligible")
                         else "NOT_APPLICABLE"
                     ),
-                    "generation_path": "BACKGROUND_CACHE_ONLY",
+                    "generation_path": "BACKGROUND_ON_DEMAND",
                 },
                 "contract": {
                     "public_projection": True,
@@ -2696,8 +2845,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "advisory_only": True,
                     "canonical_mutation_allowed": False,
                     "used_as_model_feature": False,
-                    "public_requests_are_cache_only": True,
-                    "enabled_only_when_event_has_zero_evidence": True,
+                    "public_reads_are_cache_only": True,
+                    "public_requests_enqueue_background_only": True,
+                    "enabled_only_when_no_reader_eligible_evidence": True,
                     "no_trading": True,
                 },
             },
@@ -2710,6 +2860,206 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/v1/events/{event_id}/semantic-assessment")
     def event_semantic_assessment(request: Request, event_id: str):
         return envelope(request, public_qwen_semantic_status(event_id))
+
+    @application.post(
+        "/api/v1/events/{event_id}/semantic-assessment/request",
+        dependencies=[Depends(require_public_model_request)],
+    )
+    def request_event_semantic_assessment(
+        request: Request,
+        event_id: str,
+        payload: PublicModelRequest,
+    ):
+        event_data = event_or_404(
+            event_id,
+            require_reader_ready=False,
+            require_public_semantics=True,
+        )
+        event = dict(event_data.get("event") or {})
+        current_version = int(event.get("current_version") or 0)
+        if payload.event_version != current_version:
+            raise HTTPException(
+                409,
+                {
+                    "code": "STALE_EVENT_VERSION",
+                    "message": "event version changed before the model request was accepted",
+                },
+            )
+        current = public_qwen_semantic_status(event_id)
+        if not settings.qwen_risk_enabled:
+            return envelope(request, current)
+        if str(current.get("state") or "") in {
+            "READY",
+            "QUEUED",
+            "RUNNING",
+            "NOT_APPLICABLE",
+        }:
+            return envelope(request, current)
+        publication = operations.qwen_risk_publication()
+        if publication.get("public_approved") is not True:
+            return envelope(request, current)
+        inputs = ledger.shadow_batch(
+            limit=1,
+            order="event_id",
+            event_ids=[event_id],
+            semantic_events_only=True,
+        )
+        if not inputs:
+            return envelope(request, public_qwen_semantic_status(event_id))
+        candidate = inputs[0] if isinstance(inputs[0], dict) else {}
+        contract = build_qwen_risk_input_contract(
+            candidate.get("detail") or {},
+            candidate.get("evidence") or [],
+            model_version=str(publication.get("model_version") or ""),
+        )
+        if contract.get("input_sufficient") is not True:
+            return envelope(request, public_qwen_semantic_status(event_id))
+        enqueued = operations.enqueue_qwen_risk_priority(
+            event_id,
+            current_version,
+            str(contract.get("input_sha256") or ""),
+            str(publication.get("model_version") or ""),
+        )
+        if str(enqueued.get("error_code") or "") == "PRIORITY_QUEUE_FULL":
+            raise HTTPException(
+                429,
+                {
+                    "code": "QWEN_PRIORITY_QUEUE_FULL",
+                    "message": "Qwen priority queue is at its bounded capacity",
+                },
+            )
+        return envelope(request, public_qwen_semantic_status(event_id))
+
+    @application.post(
+        "/api/v1/events/{event_id}/capture-explanation/request",
+        dependencies=[Depends(require_public_model_request)],
+    )
+    def request_event_capture_explanation(
+        request: Request,
+        event_id: str,
+        payload: PublicModelRequest,
+    ):
+        event_data = event_or_404(
+            event_id,
+            require_reader_ready=False,
+            require_public_semantics=True,
+        )
+        event = dict(event_data.get("event") or {})
+        current_version = int(event.get("current_version") or 0)
+        if payload.event_version != current_version:
+            raise HTTPException(
+                409,
+                {
+                    "code": "STALE_EVENT_VERSION",
+                    "message": "event version changed before the model request was accepted",
+                },
+            )
+        current = public_capture_explanation(event_id, event_data=event_data)
+        if str(current.get("state") or "") not in {
+            "ELIGIBLE_NOT_QUEUED",
+            "FAILED_TERMINAL",
+            "QUEUED",
+            "RETRY_WAIT",
+        }:
+            return envelope(request, current)
+        # Re-read the ledger after the initial projection. The POST is accepted
+        # only for the current event version and exact current capture input.
+        event_data = event_or_404(
+            event_id,
+            require_reader_ready=False,
+            require_public_semantics=True,
+        )
+        event = dict(event_data.get("event") or {})
+        current_version = int(event.get("current_version") or 0)
+        if payload.event_version != current_version:
+            raise HTTPException(409, {"code": "STALE_EVENT_VERSION"})
+        eligibility = ledger.capture_interpretation_eligibility(event_id)
+        eligible_ids = set(eligibility.get("eligible_observation_ids") or [])
+        eligible_captures = [
+            item
+            for item in ledger.captured_sources(event_id)
+            if item.get("observation_status") != "deleted"
+            and str(item.get("observation_id") or "") in eligible_ids
+        ]
+        capture = None
+        promotion_capture = None
+        failed_capture = None
+        for candidate in eligible_captures:
+            candidate_normalized = normalized_capture_input(event, candidate)
+            candidate_run = operations.latest_capture_interpretation_exact(
+                event_id=event_id,
+                observation_id=str(candidate.get("observation_id") or ""),
+                capture_receipt_sha256=str(
+                    candidate_normalized.get("capture_receipt_sha256") or ""
+                ),
+                input_sha256=str(candidate_normalized.get("input_sha256") or ""),
+                contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+                prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+                prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+                provider="deepseek",
+                model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+            )
+            if candidate_run is None:
+                capture = candidate
+                break
+            if failed_capture is None and str(candidate_run.get("status") or "") == "FAILED":
+                failed_capture = candidate
+            if (
+                promotion_capture is None
+                and str(candidate_run.get("status") or "")
+                in {"PENDING", "BUDGET_BLOCKED"}
+            ):
+                promotion_capture = candidate
+        if capture is None:
+            capture = promotion_capture or failed_capture
+        if capture is None:
+            return envelope(request, public_capture_explanation(event_id, event_data=event_data))
+        normalized = normalized_capture_input(event, capture)
+        interpretation_id, accepted = operations.enqueue_capture_interpretation(
+            event_id,
+            str(capture.get("observation_id") or ""),
+            normalized,
+            contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+            prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+            prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+            provider="deepseek",
+            model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+            external_call=True,
+            requeue_terminal=True,
+        )
+        exact_run = operations.latest_capture_interpretation_exact(
+            event_id=event_id,
+            observation_id=str(capture.get("observation_id") or ""),
+            capture_receipt_sha256=str(normalized.get("capture_receipt_sha256") or ""),
+            input_sha256=str(normalized.get("input_sha256") or ""),
+            contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+            prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+            prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+            provider="deepseek",
+            model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+        )
+        if accepted or str((exact_run or {}).get("status") or "") in {
+            "PENDING",
+            "BUDGET_BLOCKED",
+        }:
+            prioritized = operations.enqueue_capture_interpretation_priority(
+                interpretation_id,
+                event_id=event_id,
+                observation_id=str(capture.get("observation_id") or ""),
+                capture_receipt_sha256=str(normalized.get("capture_receipt_sha256") or ""),
+                input_sha256=str(normalized.get("input_sha256") or ""),
+            )
+            if not prioritized:
+                if accepted:
+                    operations.fail_capture_interpretation(
+                        interpretation_id,
+                        "PUBLIC_PRIORITY_QUEUE_FULL",
+                    )
+                raise HTTPException(
+                    429,
+                    {"code": "DEEPSEEK_PRIORITY_QUEUE_FULL"},
+                )
+        return envelope(request, public_capture_explanation(event_id, event_data=event_data))
 
     @application.post(
         "/api/v1/events/{event_id}/sources/{observation_id}/interpret",
