@@ -31,6 +31,9 @@ UI_ROLE = _configured_ui_role if _configured_ui_role in UI_ROLES else "public"
 DEEP_LINK_STATE_KEY = "_finance_radar_deep_link"
 DESIGN_TOKENS_V3 = Path(__file__).with_name("design_tokens_v3.css").read_text(encoding="utf-8")
 STYLE_V3 = Path(__file__).with_name("style_v3.css").read_text(encoding="utf-8")
+PUBLIC_READER_V4 = Path(__file__).with_name("public_reader_v4.css").read_text(
+    encoding="utf-8"
+)
 
 
 @dataclass(frozen=True)
@@ -886,6 +889,8 @@ def install_style() -> None:
     st.markdown(f"<style>{ACCESSIBILITY_CSS}</style>", unsafe_allow_html=True)
     st.markdown(f"<style>{DESIGN_TOKENS_V3}</style>", unsafe_allow_html=True)
     st.markdown(f"<style>{STYLE_V3}</style>", unsafe_allow_html=True)
+    if UI_ROLE == "public":
+        st.markdown(f"<style>{PUBLIC_READER_V4}</style>", unsafe_allow_html=True)
     _install_accessibility_contract()
 
 

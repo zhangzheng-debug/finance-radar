@@ -527,7 +527,7 @@ def public_time_markup(event: dict[str, object], detail: dict[str, object]) -> s
         '</section>'
     )
 
-st.set_page_config(page_title="态势总览 · Finance Radar", page_icon="◎", layout="wide")
+st.set_page_config(page_title="风险雷达 · Finance Radar", page_icon="◎", layout="wide")
 install_style()
 render_primary_navigation("home")
 
@@ -939,6 +939,12 @@ finally:
     feed_loading.empty()
 
 preview_event_id = str(st.query_params.get("preview_event_id") or "")
+if UI_ROLE != "admin" and not preview_event_id and live_feed:
+    # Keep the first useful dossier visible on initial load without changing the
+    # URL. Event links still use the existing server-rendered navigation path,
+    # so the DeepSeek capture explanation follows the selected event contract.
+    preview_event_id = str(live_feed[0].get("event_id") or "")
+
 
 def render_selected_event_preview() -> None:
     if preview_event_id:
