@@ -117,11 +117,15 @@ def public_capture_url(sources: list[dict[str, object]]) -> str | None:
     return preferred_public_source_url(sources)
 
 
-def render_capture_explanation_payload(payload: dict[str, object]) -> None:
+def render_capture_explanation_payload(
+    payload: dict[str, object],
+    *,
+    retry_key: str | None = None,
+) -> bool:
     """Render the persisted DeepSeek lifecycle without blocking the dossier."""
 
     if not payload.get("display"):
-        return
+        return False
 
     state = str(payload.get("state") or "CHECKING")
     interpretation = payload.get("item")
@@ -144,7 +148,7 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
                 if not isinstance(claim, dict):
                     continue
                 st.markdown(f"- {escape(str(claim.get('text_zh') or ''))}")
-        return
+        return False
 
     if state == "RUNNING":
         st.markdown(
@@ -157,7 +161,7 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
             '</div></section>',
             unsafe_allow_html=True,
         )
-        return
+        return False
 
     if state == "QUEUED":
         st.markdown(
@@ -167,6 +171,38 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
             '</section>',
             unsafe_allow_html=True,
         )
+        return False
+
+    if state == "RETRY_WAIT":
+        st.markdown(
+            '<section class="model-status-card is-deepseek" role="status">'
+            '<div class="model-status-head"><strong>DeepSeek 阅读辅助</strong>'
+            '<small>自动续排</small></div>'
+            '<p class="model-status-copy">后台继续生成。</p>'
+            '</section>',
+            unsafe_allow_html=True,
+        )
+        return False
+
+    if state == "FAILED_TERMINAL":
+        st.markdown(
+            '<section class="model-status-card is-deepseek" role="status">'
+            '<div class="model-status-head"><strong>DeepSeek 阅读辅助</strong>'
+            '<small>生成中断</small></div>'
+            '</section>',
+            unsafe_allow_html=True,
+        )
+        return bool(
+            retry_key
+            and st.button(
+                "重新生成",
+                key=retry_key,
+                type="secondary",
+                use_container_width=False,
+            )
+        )
+
+    return False
 
 
 def public_qwen_signal_row_markup(public_copy: dict[str, object]) -> str:
@@ -454,6 +490,37 @@ def request_public_model_once(
     return response
 
 
+def retry_public_capture_explanation(
+    event_path_id: str,
+    event_id: str,
+    event_version: int,
+) -> dict[str, object]:
+    """Submit an explicit terminal retry through the existing bounded API."""
+
+    try:
+        requested = api_request(
+            f"/api/v1/events/{event_path_id}/capture-explanation/request",
+            method="POST",
+            json_body={
+                "event_version": event_version,
+                "request_source": "PUBLIC_EVENT_VIEW",
+            },
+            timeout_seconds=3,
+        )
+    except Exception:
+        return {}
+    response = requested if isinstance(requested, dict) else {}
+    request_cache = st.session_state.get(MODEL_REQUEST_STATE_KEY, {})
+    request_cache = request_cache if isinstance(request_cache, dict) else {}
+    request_cache[f"capture-explanation:{event_id}:{event_version}"] = {
+        "attempts": 0,
+        "last_attempt_at": datetime.now(timezone.utc).isoformat(),
+        "response": response,
+    }
+    st.session_state[MODEL_REQUEST_STATE_KEY] = request_cache
+    return dict(response)
+
+
 @st.fragment(run_every="2s")
 def render_capture_explanation_fragment(
     event_path_id: str,
@@ -474,13 +541,32 @@ def render_capture_explanation_fragment(
         previous_payload = {}
     now = datetime.now(timezone.utc)
     next_check_at = str(previous.get("next_check_at") or "")
+    retry_key = f"capture-explanation-retry:{event_id}:{event_version}"
     if next_check_at:
         try:
             next_check = datetime.fromisoformat(next_check_at.replace("Z", "+00:00"))
         except ValueError:
             next_check = now
         if next_check > now:
-            render_capture_explanation_payload(previous_payload or initial_payload)
+            retry_requested = render_capture_explanation_payload(
+                previous_payload or initial_payload,
+                retry_key=retry_key,
+            )
+            if retry_requested:
+                retried = retry_public_capture_explanation(
+                    event_path_id,
+                    event_id,
+                    event_version,
+                )
+                if retried:
+                    cache[event_id] = {
+                        "version": event_version,
+                        "polls": 0,
+                        "payload": retried,
+                        "next_check_at": None,
+                    }
+                    st.session_state[CAPTURE_EXPLANATION_CACHE_STATE_KEY] = cache
+                    st.rerun(scope="fragment")
             return
     try:
         payload = api_request(
@@ -522,7 +608,25 @@ def render_capture_explanation_fragment(
         ),
     }
     st.session_state[CAPTURE_EXPLANATION_CACHE_STATE_KEY] = cache
-    render_capture_explanation_payload(payload)
+    retry_requested = render_capture_explanation_payload(
+        payload,
+        retry_key=retry_key,
+    )
+    if retry_requested:
+        retried = retry_public_capture_explanation(
+            event_path_id,
+            event_id,
+            event_version,
+        )
+        if retried:
+            cache[event_id] = {
+                "version": event_version,
+                "polls": 0,
+                "payload": retried,
+                "next_check_at": None,
+            }
+            st.session_state[CAPTURE_EXPLANATION_CACHE_STATE_KEY] = cache
+            st.rerun(scope="fragment")
 
 
 @st.fragment(run_every="10s")

@@ -67,6 +67,8 @@ def load_local_env(path: Path) -> None:
 
 
 RESERVED_CNY_PER_REQUEST = 0.02
+PUBLIC_DAILY_REQUEST_RESERVE = 100
+PUBLIC_DAILY_CNY_RESERVE = 1.0
 MAX_ATTEMPTS = 4
 RUN_COMPLETED = 0
 RUN_CACHED = 3
@@ -173,6 +175,9 @@ def run(args: argparse.Namespace) -> int:
         lease_seconds=max(60, int(settings.capture_llm_timeout_seconds) + 30),
         max_attempts=MAX_ATTEMPTS,
         interpretation_id=run_id,
+        public_priority=bool(getattr(args, "public_request", False)),
+        public_request_reserve=PUBLIC_DAILY_REQUEST_RESERVE,
+        public_cny_reserve=PUBLIC_DAILY_CNY_RESERVE,
     )
     if not claim.get("claimed"):
         reason = str(claim.get("reason") or "CLAIM_REJECTED")

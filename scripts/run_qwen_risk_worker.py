@@ -20,8 +20,8 @@ from app.storage import LedgerRepository, OperationsRepository
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--limit", type=int, default=20)
-    parser.add_argument("--scan-limit", type=int, default=100)
+    parser.add_argument("--limit", type=int, default=4)
+    parser.add_argument("--scan-limit", type=int, default=64)
     parser.add_argument("--concurrency", type=int, default=1)
     args = parser.parse_args()
     settings = Settings.from_env()

@@ -5,6 +5,21 @@ Releases use the same version prefixed by `v`.
 
 ## Unreleased
 
+## 2026.09.01.3
+
+- Restore Qwen execution as a bounded, continuously rearmed worker cycle. Public
+  event requests use a real FIFO lane ahead of automatic retries and background
+  scans; each call is capped at 30 seconds and deployment now rejects an active
+  timer that has no next scheduled run.
+- Refresh stale DeepSeek public requests against the current captured input
+  without calling the provider for the superseded generation. Reserve 100 daily
+  requests and 1 CNY of the existing hard cap for reader-triggered work, while
+  preserving provider retry backoff and the overall 500 request / 5 CNY ceiling.
+- Keep the event dossier usable while model work proceeds, and expose compact,
+  truthful queued, running, automatic-retry and interrupted states. A terminal
+  DeepSeek generation can be explicitly requeued through the existing bounded
+  endpoint; no model output changes facts, evidence, ranking, prices or trading.
+
 ## 2026.09.01.2
 
 - Replace the public model placeholders with authenticated, idempotent and

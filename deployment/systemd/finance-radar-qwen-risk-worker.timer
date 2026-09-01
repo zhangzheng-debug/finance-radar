@@ -3,9 +3,11 @@ Description=Run bounded Finance Radar Qwen semantic risk worker
 
 [Timer]
 OnBootSec=3min
-OnUnitInactiveSec=10s
-RandomizedDelaySec=5s
-AccuracySec=5s
+# A wall-clock schedule keeps firing even when the oneshot worker exits non-zero.
+# OnUnitInactiveSec leaves a failed service in an elapsed timer with no NEXT.
+OnCalendar=*-*-* *:*:00/15
+RandomizedDelaySec=2s
+AccuracySec=1s
 Persistent=true
 Unit=finance-radar-qwen-risk-worker.service
 

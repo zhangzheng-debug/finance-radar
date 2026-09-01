@@ -28,6 +28,8 @@ QWEN_RISK_ACTIVITY_MAX_ITEMS = 256
 QWEN_RISK_PRIORITY_TTL_SECONDS = 15 * 60
 QWEN_RISK_RUNNING_STALE_SECONDS = 3 * 60
 QWEN_RISK_AUTO_RETRY_MAX_ATTEMPTS = 3
+QWEN_RISK_QUEUE_CLASS_PUBLIC = "PUBLIC_EVENT_VIEW"
+QWEN_RISK_QUEUE_CLASS_AUTO_RETRY = "AUTO_RETRY"
 QWEN_RISK_PUBLICATION_STATES = {
     "CANDIDATE",
     "SHADOW_ACCEPTED",
@@ -884,6 +886,27 @@ class OperationsRepository:
         return identity
 
     @staticmethod
+    def _qwen_risk_queue_class(item: dict[str, Any]) -> str:
+        """Classify current and pre-classification queue records safely.
+
+        Public API requests historically had no ``retry_attempt`` field while
+        automatic retries always did. Preserve that distinction during a
+        rolling upgrade so a retry backlog cannot stay ahead of a public view.
+        """
+
+        explicit = str(item.get("queue_class") or "").strip().upper()
+        if explicit in {
+            QWEN_RISK_QUEUE_CLASS_PUBLIC,
+            QWEN_RISK_QUEUE_CLASS_AUTO_RETRY,
+        }:
+            return explicit
+        return (
+            QWEN_RISK_QUEUE_CLASS_AUTO_RETRY
+            if "retry_attempt" in item
+            else QWEN_RISK_QUEUE_CLASS_PUBLIC
+        )
+
+    @staticmethod
     def _runtime_state_value(
         connection: sqlite3.Connection,
         key: str,
@@ -1107,7 +1130,13 @@ class OperationsRepository:
                     )
                 except ValueError:
                     continue
-                retained.append({**candidate, **candidate_identity})
+                retained.append(
+                    {
+                        **candidate,
+                        **candidate_identity,
+                        "queue_class": self._qwen_risk_queue_class(candidate),
+                    }
+                )
                 if candidate_identity["identity_key"] == identity["identity_key"]:
                     existing_index = len(retained) - 1
 
@@ -1128,6 +1157,7 @@ class OperationsRepository:
                     "requested_at": observed_iso,
                     "available_at": retry_after.isoformat(),
                     "retry_attempt": int(activity.get("attempts") or 0),
+                    "queue_class": QWEN_RISK_QUEUE_CLASS_AUTO_RETRY,
                 }
                 if existing_index is None:
                     retained.append(queued)
@@ -1286,7 +1316,13 @@ class OperationsRepository:
                     )
                 except ValueError:
                     continue
-                items.append({**candidate, **candidate_identity})
+                items.append(
+                    {
+                        **candidate,
+                        **candidate_identity,
+                        "queue_class": self._qwen_risk_queue_class(candidate),
+                    }
+                )
             existing = next(
                 (
                     item
@@ -1345,6 +1381,25 @@ class OperationsRepository:
                     connection.commit()
                     return {**activity, "enqueued": False}
             if existing is not None:
+                if self._qwen_risk_queue_class(existing) != QWEN_RISK_QUEUE_CLASS_PUBLIC:
+                    existing = {
+                        **existing,
+                        "queue_class": QWEN_RISK_QUEUE_CLASS_PUBLIC,
+                        "requested_at": observed_iso,
+                    }
+                    items = [
+                        item
+                        for item in items
+                        if str(item.get("identity_key") or "")
+                        != identity["identity_key"]
+                    ]
+                    items.append(existing)
+                    self._write_runtime_state_value(
+                        connection,
+                        QWEN_RISK_PRIORITY_QUEUE_STATE_KEY,
+                        {"items": items, "updated_at": observed_iso},
+                        updated_at=observed_iso,
+                    )
                 activity = self._set_qwen_risk_activity_in_connection(
                     connection,
                     identity,
@@ -1354,17 +1409,29 @@ class OperationsRepository:
                 connection.commit()
                 return {**existing, **activity, "enqueued": False}
             if len(items) >= capacity:
-                connection.commit()
-                return {
-                    **identity,
-                    "state": "FAILED",
-                    "error_code": "PRIORITY_QUEUE_FULL",
-                    "enqueued": False,
-                }
+                oldest_auto_index = next(
+                    (
+                        index
+                        for index, item in enumerate(items)
+                        if self._qwen_risk_queue_class(item)
+                        == QWEN_RISK_QUEUE_CLASS_AUTO_RETRY
+                    ),
+                    None,
+                )
+                if oldest_auto_index is None:
+                    connection.commit()
+                    return {
+                        **identity,
+                        "state": "FAILED",
+                        "error_code": "PRIORITY_QUEUE_FULL",
+                        "enqueued": False,
+                    }
+                items.pop(oldest_auto_index)
             queued = {
                 **identity,
                 "requested_at": observed_iso,
                 "available_at": observed_iso,
+                "queue_class": QWEN_RISK_QUEUE_CLASS_PUBLIC,
             }
             items.append(queued)
             self._write_runtime_state_value(
@@ -1400,7 +1467,6 @@ class OperationsRepository:
             )
             raw_items = raw.get("items") if isinstance(raw, dict) else []
             retained: list[dict[str, Any]] = []
-            claimed: dict[str, Any] | None = None
             for candidate in raw_items or []:
                 if not isinstance(candidate, dict):
                     continue
@@ -1435,16 +1501,35 @@ class OperationsRepository:
                     )
                 except ValueError:
                     continue
-                normalized_candidate = {**candidate, **identity}
-                available_at = _utc_datetime(candidate.get("available_at"))
-                if (
-                    claimed is None
-                    and identity["model_version"] == normalized_model
-                    and (available_at is None or available_at <= observed_at)
-                ):
-                    claimed = normalized_candidate
-                    continue
-                retained.append(normalized_candidate)
+                retained.append(
+                    {
+                        **candidate,
+                        **identity,
+                        "queue_class": self._qwen_risk_queue_class(candidate),
+                    }
+                )
+            claimable_indexes = [
+                index
+                for index, candidate in enumerate(retained)
+                if str(candidate.get("model_version") or "") == normalized_model
+                and (
+                    (available_at := _utc_datetime(candidate.get("available_at")))
+                    is None
+                    or available_at <= observed_at
+                )
+            ]
+            claimed_index = next(
+                (
+                    index
+                    for index in claimable_indexes
+                    if self._qwen_risk_queue_class(retained[index])
+                    == QWEN_RISK_QUEUE_CLASS_PUBLIC
+                ),
+                claimable_indexes[0] if claimable_indexes else None,
+            )
+            claimed = (
+                retained.pop(claimed_index) if claimed_index is not None else None
+            )
             self._write_runtime_state_value(
                 connection,
                 QWEN_RISK_PRIORITY_QUEUE_STATE_KEY,
@@ -1512,10 +1597,10 @@ class OperationsRepository:
     ) -> tuple[str, bool]:
         """Create one bounded interpretation job per immutable capture/config.
 
-        An explicit public request may reopen the exact same failed identity,
-        but each reopen consumes one attempt.  This avoids a permanent
-        ``INSERT OR IGNORE`` tombstone without creating an unbounded paid retry
-        loop.
+        An explicit public request may reopen the exact same failed identity
+        without consuming a provider attempt. Attempts are consumed only when
+        a worker actually claims a provider lease; the existing attempt limit
+        still prevents reopening a row whose paid-call budget is exhausted.
         """
 
         idempotency_key = self._capture_interpretation_idempotency_key(
@@ -1563,7 +1648,7 @@ class OperationsRepository:
                 attempt_limit = max(1, min(int(max_attempts), 20))
                 cursor = connection.execute(
                     """UPDATE capture_interpretation_runs
-                       SET status='PENDING',attempts=attempts+1,available_at=?,
+                       SET status='PENDING',available_at=?,
                            lease_token=NULL,lease_expires_at=NULL,claimed_at=NULL,
                            output_json='{}',guardrails_json='{}',usage_json='{}',
                            latency_ms=NULL,updated_at=?,error=NULL
@@ -1638,6 +1723,164 @@ class OperationsRepository:
             connection.commit()
         return True
 
+    def replace_stale_capture_interpretation_priority(
+        self,
+        stale_interpretation_id: str,
+        *,
+        event_id: str,
+        observation_id: str,
+        input_payload: dict[str, Any],
+        contract_version: str,
+        prompt_version: str,
+        prompt_sha256: str,
+        provider: str,
+        model_snapshot: str,
+        max_attempts: int = 4,
+    ) -> dict[str, Any]:
+        """Atomically supersede one stale public job with its current input.
+
+        The stale identity is retained as a terminal audit row and never
+        becomes claimable again.  Only an identity already present in the
+        bounded public-priority queue can use this path; background inventory
+        keeps the existing fail-terminal behavior.
+        """
+
+        stale_id = str(stale_interpretation_id)
+        attempt_limit = max(1, min(int(max_attempts), 20))
+        replacement_id = self._capture_interpretation_idempotency_key(
+            event_id,
+            observation_id,
+            input_payload,
+            contract_version=contract_version,
+            prompt_version=prompt_version,
+            prompt_sha256=prompt_sha256,
+            provider=provider,
+            model_snapshot=model_snapshot,
+        )
+        now = utc_now()
+        with closing(self.connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            raw = self._runtime_state_value(
+                connection,
+                CAPTURE_INTERPRETATION_PRIORITY_STATE_KEY,
+                {"items": []},
+            )
+            raw_items = raw.get("items") if isinstance(raw, dict) else []
+            items = [item for item in (raw_items or []) if isinstance(item, dict)]
+            stale_indexes = [
+                index
+                for index, item in enumerate(items)
+                if str(item.get("interpretation_id") or "") == stale_id
+            ]
+            if not stale_indexes:
+                connection.rollback()
+                return {"replaced": False, "reason": "NOT_PUBLIC_PRIORITY"}
+            stale = connection.execute(
+                """SELECT event_id,observation_id,status FROM capture_interpretation_runs
+                   WHERE interpretation_id=?""",
+                (stale_id,),
+            ).fetchone()
+            if (
+                stale is None
+                or str(stale["event_id"]) != str(event_id)
+                or str(stale["observation_id"]) != str(observation_id)
+                or str(stale["status"]) not in {"PENDING", "BUDGET_BLOCKED"}
+            ):
+                connection.rollback()
+                return {"replaced": False, "reason": "STALE_IDENTITY_NOT_REPLACEABLE"}
+
+            connection.execute(
+                """UPDATE capture_interpretation_runs
+                   SET status='FAILED',available_at=?,lease_token=NULL,
+                       lease_expires_at=NULL,claimed_at=NULL,updated_at=?,error=?
+                   WHERE interpretation_id=? AND status IN ('PENDING','BUDGET_BLOCKED')""",
+                (now, now, "CAPTURE_INTERPRETATION_STALE_INPUT", stale_id),
+            )
+            connection.execute(
+                """INSERT OR IGNORE INTO capture_interpretation_runs(
+                       interpretation_id,event_id,observation_id,capture_receipt_sha256,
+                       semantic_content_sha256,input_sha256,contract_version,prompt_version,
+                       prompt_sha256,provider,model_snapshot,status,output_json,guardrails_json,
+                       usage_json,latency_ms,external_call,canonical_mutation_allowed,no_trading,
+                       idempotency_key,created_at,updated_at,error
+                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,'PENDING','{}','{}','{}',NULL,1,0,1,?,?,?,NULL)""",
+                (
+                    replacement_id,
+                    event_id,
+                    observation_id,
+                    str(input_payload["capture_receipt_sha256"]),
+                    str(input_payload["semantic_content_sha256"]),
+                    str(input_payload["input_sha256"]),
+                    contract_version,
+                    prompt_version,
+                    prompt_sha256,
+                    provider,
+                    model_snapshot,
+                    replacement_id,
+                    now,
+                    now,
+                ),
+            )
+            replacement = connection.execute(
+                """SELECT status,attempts FROM capture_interpretation_runs
+                   WHERE interpretation_id=?""",
+                (replacement_id,),
+            ).fetchone()
+            if (
+                replacement is not None
+                and str(replacement["status"]) == "FAILED"
+                and int(replacement["attempts"] or 0) < attempt_limit
+            ):
+                connection.execute(
+                    """UPDATE capture_interpretation_runs
+                       SET status='PENDING',available_at=?,
+                           lease_token=NULL,lease_expires_at=NULL,claimed_at=NULL,
+                           output_json='{}',guardrails_json='{}',usage_json='{}',
+                           latency_ms=NULL,updated_at=?,error=NULL
+                       WHERE interpretation_id=? AND status='FAILED' AND attempts<?""",
+                    (now, now, replacement_id, attempt_limit),
+                )
+                replacement = connection.execute(
+                    """SELECT status,attempts FROM capture_interpretation_runs
+                       WHERE interpretation_id=?""",
+                    (replacement_id,),
+                ).fetchone()
+
+            replacement_status = str(replacement["status"]) if replacement else ""
+            retained = [
+                item
+                for item in items
+                if str(item.get("interpretation_id") or "")
+                not in {stale_id, replacement_id}
+            ]
+            queued = replacement_status in {"PENDING", "BUDGET_BLOCKED", "RUNNING"}
+            if queued:
+                replacement_item = {
+                    "interpretation_id": replacement_id,
+                    "event_id": str(event_id),
+                    "observation_id": str(observation_id),
+                    "capture_receipt_sha256": str(
+                        input_payload["capture_receipt_sha256"]
+                    ),
+                    "input_sha256": str(input_payload["input_sha256"]),
+                    "queued_at": str(items[stale_indexes[0]].get("queued_at") or now),
+                    "refreshed_at": now,
+                }
+                retained.insert(min(stale_indexes[0], len(retained)), replacement_item)
+            self._write_runtime_state_value(
+                connection,
+                CAPTURE_INTERPRETATION_PRIORITY_STATE_KEY,
+                {"items": retained, "updated_at": now},
+                updated_at=now,
+            )
+            connection.commit()
+        return {
+            "replaced": True,
+            "interpretation_id": replacement_id,
+            "status": replacement_status,
+            "queued": queued,
+        }
+
     def capture_interpretation_priority_runs(
         self,
         *,
@@ -1700,10 +1943,18 @@ class OperationsRepository:
                 if not exact or status in {"COMPLETED", "FAILED"}:
                     continue
                 retained.append(item)
+                public_budget_promotion = (
+                    status == "BUDGET_BLOCKED"
+                    and str(row.get("error") or "")
+                    in {"DAILY_REQUEST_CAP_REACHED", "DAILY_CNY_CAP_REACHED"}
+                )
                 if (
                     len(selected) < bounded_limit
                     and status in {"PENDING", "BUDGET_BLOCKED"}
-                    and str(row.get("available_at") or "") <= ready_at
+                    and (
+                        str(row.get("available_at") or "") <= ready_at
+                        or public_budget_promotion
+                    )
                     and int(row.get("attempts") or 0) < attempt_limit
                 ):
                     selected.append(row)
@@ -1928,6 +2179,9 @@ class OperationsRepository:
         lease_seconds: int = 180,
         max_attempts: int = 4,
         interpretation_id: str | None = None,
+        public_priority: bool = False,
+        public_request_reserve: int = 0,
+        public_cny_reserve: float = 0.0,
     ) -> dict[str, Any]:
         """Atomically account for usage and lease one external interpretation job.
 
@@ -1980,6 +2234,7 @@ class OperationsRepository:
             usage = self._capture_attempt_usage_rows(list(attempt_rows))
 
             def defer_for_budget(reason: str) -> dict[str, Any]:
+                persisted_reason = f"PUBLIC_{reason}" if public_priority else reason
                 if interpretation_id:
                     blocked = connection.execute(
                         """SELECT interpretation_id
@@ -2007,7 +2262,7 @@ class OperationsRepository:
                                lease_token=NULL,lease_expires_at=NULL,claimed_at=NULL
                            WHERE interpretation_id=?
                              AND status IN ('PENDING','BUDGET_BLOCKED')""",
-                        (day_end, now, reason, blocked_id),
+                        (day_end, now, persisted_reason, blocked_id),
                     )
                 connection.commit()
                 return {
@@ -2018,11 +2273,22 @@ class OperationsRepository:
                     "usage": {"date_utc": day, **usage},
                 }
 
-            if daily_request_cap > 0 and usage["requests"] >= int(daily_request_cap):
+            request_cap = int(daily_request_cap)
+            cny_cap = float(daily_cny_cap)
+            if not public_priority:
+                if request_cap > 0:
+                    request_cap = max(0, request_cap - max(0, int(public_request_reserve)))
+                if cny_cap > 0:
+                    cny_cap = max(0.0, cny_cap - max(0.0, float(public_cny_reserve)))
+
+            request_limit_reached = daily_request_cap > 0 and (
+                usage["requests"] >= request_cap
+            )
+            if request_limit_reached:
                 return defer_for_budget("DAILY_REQUEST_CAP_REACHED")
             if (
                 daily_cny_cap > 0
-                and usage["chargeable_cny"] + float(reserve_cny) > float(daily_cny_cap)
+                and usage["chargeable_cny"] + float(reserve_cny) > cny_cap + 1e-9
             ):
                 return defer_for_budget("DAILY_CNY_CAP_REACHED")
 
@@ -2031,11 +2297,20 @@ class OperationsRepository:
             if interpretation_id:
                 exact = " AND interpretation_id=?"
                 params.append(interpretation_id)
+            availability = " AND (available_at='' OR available_at<=?)"
+            if interpretation_id and public_priority:
+                availability = (
+                    " AND ((available_at='' OR available_at<=?)"
+                    " OR (status='BUDGET_BLOCKED' AND error IN"
+                    " ('DAILY_REQUEST_CAP_REACHED','DAILY_CNY_CAP_REACHED')))"
+                )
             row = connection.execute(
                 """SELECT * FROM capture_interpretation_runs
                    WHERE provider=? AND external_call=1
                      AND status IN ('PENDING','BUDGET_BLOCKED')
-                     AND (available_at='' OR available_at<=?) AND attempts<?"""
+                     """
+                + availability
+                + " AND attempts<?"
                 + exact
                 + " ORDER BY created_at,interpretation_id LIMIT 1",
                 params,

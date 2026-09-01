@@ -504,6 +504,100 @@ def test_public_detail_submits_deepseek_request_from_lightweight_dossier(monkeyp
     }
 
 
+def test_public_detail_renders_deepseek_failure_compactly_with_explicit_retry(
+    monkeypatch,
+) -> None:
+    requests: list[dict[str, Any]] = []
+
+    def failed_deepseek_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        parsed = urllib.parse.urlsplit(path)
+        failed = {
+            "display": True,
+            "reason_code": "NO_EVENT_EVIDENCE",
+            "state": "FAILED_TERMINAL",
+            "item": None,
+            "source": None,
+            "attempts": 2,
+        }
+        if parsed.path == "/api/v1/events/event-a/dossier":
+            detail = _fake_api("/api/v1/events/event-a")
+            detail["event"] = {**detail["event"], "current_version": 1}
+            return {
+                "detail": detail,
+                "evidence": {"items": []},
+                "capture_explanation": failed,
+            }
+        if parsed.path == "/api/v1/events/event-a/capture-explanation":
+            return failed
+        if parsed.path == "/api/v1/events/event-a/capture-explanation/request":
+            requests.append(dict(kwargs))
+            return {**failed, "state": "QUEUED", "attempts": 3}
+        return _fake_api(path, **kwargs)
+
+    web_common.clear_api_get_cache()
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", failed_deepseek_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "DeepSeek 阅读辅助" in rendered
+    assert "生成中断" in rendered
+    assert "CAPTURE_INTERPRETATION" not in rendered
+    retry = next(button for button in page.button if button.label == "重新生成")
+    retry.click().run()
+    assert len(requests) == 1
+    assert requests[0]["method"] == "POST"
+    assert requests[0]["json_body"] == {
+        "event_version": 1,
+        "request_source": "PUBLIC_EVENT_VIEW",
+    }
+
+
+def test_public_detail_renders_deepseek_retry_wait_without_internal_error(
+    monkeypatch,
+) -> None:
+    def retry_wait_api(path: str, **kwargs: Any) -> dict[str, Any]:
+        parsed = urllib.parse.urlsplit(path)
+        waiting = {
+            "display": True,
+            "reason_code": "NO_EVENT_EVIDENCE",
+            "state": "RETRY_WAIT",
+            "item": None,
+            "source": None,
+            "attempts": 1,
+            "next_retry_at": "2026-09-02T00:00:00+00:00",
+        }
+        if parsed.path == "/api/v1/events/event-a/dossier":
+            detail = _fake_api("/api/v1/events/event-a")
+            detail["event"] = {**detail["event"], "current_version": 1}
+            return {
+                "detail": detail,
+                "evidence": {"items": []},
+                "capture_explanation": waiting,
+            }
+        if parsed.path == "/api/v1/events/event-a/capture-explanation":
+            return waiting
+        return _fake_api(path, **kwargs)
+
+    web_common.clear_api_get_cache()
+    monkeypatch.setattr(web_common, "UI_ROLE", "public")
+    monkeypatch.setattr(web_common, "api_request", retry_wait_api)
+    page = AppTest.from_file(str(PAGE), default_timeout=10)
+    page.query_params["preview_event_id"] = "event-a"
+    page.run()
+    rendered = "\n".join(str(item.value) for item in page.markdown)
+
+    assert not page.exception
+    assert "DeepSeek 阅读辅助" in rendered
+    assert "自动续排" in rendered
+    assert "后台继续生成" in rendered
+    assert "CAPTURE_INTERPRETATION" not in rendered
+    assert not any(button.label == "重新生成" for button in page.button)
+
+
 def test_public_detail_shows_price_context_before_return_exists(monkeypatch) -> None:
     def market_api(path: str, **kwargs: Any) -> dict[str, Any]:
         data = _fake_api(path, **kwargs)

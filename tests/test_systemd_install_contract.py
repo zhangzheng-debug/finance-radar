@@ -317,13 +317,33 @@ def test_market_observation_runs_as_a_bounded_independent_timer() -> None:
     assert "finance-radar-market.service" in backup_wrapper
 
 
-def test_qwen_worker_rechecks_the_backlog_without_parallel_model_contention() -> None:
+def test_qwen_worker_is_bounded_and_timer_retains_next_after_worker_failure() -> None:
     service = QWEN_WORKER_UNIT.read_text(encoding="utf-8")
     timer = QWEN_WORKER_TIMER.read_text(encoding="utf-8")
+    installer = INSTALLER.read_text(encoding="utf-8")
+    worker_script = (
+        Path(__file__).parents[1] / "scripts" / "run_qwen_risk_worker.py"
+    ).read_text(encoding="utf-8")
 
-    assert "--limit 20 --scan-limit 200 --concurrency 1" in service
-    assert "OnUnitInactiveSec=10s" in timer
+    assert "--limit 4 --scan-limit 64 --concurrency 1" in service
+    assert "FINANCE_RADAR_QWEN_RISK_TIMEOUT_SECONDS=30" in service
+    assert "TimeoutStartSec=150s" in service
+    assert 'parser.add_argument("--limit", type=int, default=4)' in worker_script
+    assert 'parser.add_argument("--scan-limit", type=int, default=64)' in worker_script
+    assert "OnCalendar=*-*-* *:*:00/15" in timer
+    assert "\nOnUnitInactiveSec=" not in timer
     assert "Persistent=true" in timer
+    assert "assert_qwen_risk_timer_scheduled()" in installer
+    timer_assertion = installer.split(
+        "assert_qwen_risk_timer_scheduled() {", 1
+    )[1].split("restore_qwen_risk_runtime() {", 1)[0]
+    assert "NextElapseUSecRealtime" in timer_assertion
+    assert "for attempt in $(seq 1 10); do" in timer_assertion
+    assert 'if [ -n "$next_realtime" ] && [ "$next_realtime" != n/a ]' in timer_assertion
+    restore = installer.split("restore_qwen_risk_runtime() {", 1)[1].split(
+        "qwen_risk_bundle_ready() {", 1
+    )[0]
+    assert "assert_qwen_risk_timer_scheduled || return 1" in restore
 
 
 def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() -> None:
@@ -410,8 +430,8 @@ def test_qwen_runtime_uses_one_cpu_bound_lane_and_restarts_after_unit_refresh() 
 
     assert "--parallel 1" in model
     assert "--parallel 2" not in model
-    assert "FINANCE_RADAR_QWEN_RISK_TIMEOUT_SECONDS=120" in worker
-    assert "--limit 20 --scan-limit 200 --concurrency 1" in worker
+    assert "FINANCE_RADAR_QWEN_RISK_TIMEOUT_SECONDS=30" in worker
+    assert "--limit 4 --scan-limit 64 --concurrency 1" in worker
     restore = installer.split("restore_qwen_risk_runtime() {", 1)[1].split(
         "qwen_risk_bundle_ready() {", 1
     )[0]

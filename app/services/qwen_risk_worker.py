@@ -261,7 +261,70 @@ def run_qwen_risk_batch(
     scan_limit = max(2, min(int(scan_limit), 200))
     run_limit = max(1, min(int(run_limit), 100))
     concurrency = max(1, min(int(concurrency), 4))
-    selected, selection = _fair_batch(ledger, operations, scan_limit=scan_limit)
+    counters: Counter[str] = Counter()
+    errors: list[str] = []
+    priority_lane_available = True
+
+    def claim_priority_candidate() -> QwenCandidate | None:
+        nonlocal priority_lane_available
+        while priority_lane_available:
+            try:
+                claim = operations.claim_qwen_risk_priority(provider.model_version)
+            except Exception as exc:
+                priority_lane_available = False
+                counters["errors"] += 1
+                errors.append(f"priority:{_error_code(exc)}")
+                return None
+            if claim is None:
+                return None
+            counters["priority_claimed"] += 1
+            try:
+                priority_candidate, priority_status = _prepare_priority_candidate(
+                    ledger, operations, provider, claim
+                )
+            except Exception as exc:
+                priority_candidate = None
+                priority_status = _error_code(exc)
+            if priority_candidate is not None:
+                return priority_candidate
+            event_id = str(claim.get("event_id") or "")
+            if priority_status == "ALREADY_CURRENT":
+                counters["already_current"] += 1
+            elif priority_status == "QWEN_RISK_INPUT_INSUFFICIENT":
+                counters["input_insufficient"] += 1
+            elif priority_status:
+                counters["errors"] += 1
+                errors.append(f"{event_id}:{priority_status}")
+        return None
+
+    # Public interaction is a real execution lane, not a visual placeholder.
+    # Claim, load and finish one public request before the recent/fair inventory
+    # queries can delay it. Later slots recheck the same durable lane after each
+    # model completion.
+    first_priority = claim_priority_candidate()
+    first_priority_identity: QwenIdentity | None = None
+    if first_priority is not None:
+        first_priority_identity = first_priority[:4]
+        counters["attempted"] += 1
+        _persist_outcome(
+            operations,
+            counters,
+            errors,
+            _assess_candidate(provider, operations, first_priority),
+        )
+
+    if counters["attempted"] < run_limit:
+        selected, selection = _fair_batch(
+            ledger, operations, scan_limit=scan_limit
+        )
+    else:
+        selected = []
+        selection = {
+            "recent_loaded": 0,
+            "fair_loaded": 0,
+            "fair_after_event_id": None,
+            "fair_limit": 0,
+        }
     versions: dict[str, int] = {}
     for _lane, item in selected:
         event = _event(item)
@@ -279,8 +342,6 @@ def run_qwen_risk_batch(
         prompt_version=QWEN_RISK_PROMPT_VERSION,
     )
 
-    counters: Counter[str] = Counter()
-    errors: list[str] = []
     seen: set[str] = set()
     fair_examined = 0
     last_fair_event_id: str | None = None
@@ -350,9 +411,10 @@ def run_qwen_risk_batch(
             errors.append(f"{event_id}:{_error_code(exc)}")
 
     background_used: set[int] = set()
-    scheduled_identities: set[QwenIdentity] = set()
+    scheduled_identities: set[QwenIdentity] = (
+        {first_priority_identity} if first_priority_identity is not None else set()
+    )
     fair_scheduled = 0
-    priority_lane_available = True
 
     def take_background(*, fair_only: bool = False) -> QwenCandidate | None:
         nonlocal fair_scheduled
@@ -385,60 +447,24 @@ def run_qwen_risk_batch(
         return None
 
     def next_candidate(*, reserve_fair: bool = False) -> QwenCandidate | None:
-        nonlocal priority_lane_available
+        # After the initial public request has already gone first, retain one
+        # final fair slot so a continuously busy UI cannot freeze the durable
+        # background cursor forever.
         if reserve_fair:
             fair_candidate = take_background(fair_only=True)
             if fair_candidate is not None:
                 return fair_candidate
-        while priority_lane_available:
-            try:
-                claim = operations.claim_qwen_risk_priority(provider.model_version)
-            except Exception as exc:
-                priority_lane_available = False
-                counters["errors"] += 1
-                errors.append(f"priority:{_error_code(exc)}")
-                break
-            if claim is None:
-                break
-            counters["priority_claimed"] += 1
-            try:
-                priority_candidate, priority_status = _prepare_priority_candidate(
-                    ledger, operations, provider, claim
-                )
-            except Exception as exc:
-                priority_candidate = None
-                priority_status = _error_code(exc)
+        while True:
+            priority_candidate = claim_priority_candidate()
             if priority_candidate is not None:
                 if priority_candidate[:4] in scheduled_identities:
                     counters["deduplicated"] += 1
                     continue
                 return priority_candidate
-            event_id = str(claim.get("event_id") or "")
-            if priority_status == "ALREADY_CURRENT":
-                counters["already_current"] += 1
-            elif priority_status == "QWEN_RISK_INPUT_INSUFFICIENT":
-                counters["input_insufficient"] += 1
-            elif priority_status:
-                counters["errors"] += 1
-                errors.append(f"{event_id}:{priority_status}")
+            break
         return take_background()
 
     pending: dict[Future[QwenOutcome], QwenIdentity] = {}
-
-    # Start one item synchronously.  A claimed public request therefore reaches
-    # the provider before speculative fair work, while later slots still retain
-    # bounded parallelism and are replenished completion-by-completion.
-    first_candidate = next_candidate()
-    if first_candidate is not None:
-        first_identity = first_candidate[:4]
-        scheduled_identities.add(first_identity)
-        counters["attempted"] += 1
-        _persist_outcome(
-            operations,
-            counters,
-            errors,
-            _assess_candidate(provider, operations, first_candidate),
-        )
 
     with ThreadPoolExecutor(
         max_workers=concurrency,

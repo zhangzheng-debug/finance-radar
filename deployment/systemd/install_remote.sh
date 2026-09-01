@@ -2228,6 +2228,22 @@ assert_qwen_risk_worker_quiescent() {
     return 1
 }
 
+assert_qwen_risk_timer_scheduled() {
+    local timer=finance-radar-qwen-risk-worker.timer next_realtime attempt
+    for attempt in $(seq 1 10); do
+        next_realtime="$(systemctl show "$timer" \
+            --property=NextElapseUSecRealtime --value 2>/dev/null)" || return 1
+        if [ -n "$next_realtime" ] && [ "$next_realtime" != n/a ]; then
+            printf 'qwen_risk_timer_next=%s wait_seconds=%s\n' \
+                "$next_realtime" "$((attempt - 1))"
+            return 0
+        fi
+        sleep 1
+    done
+    printf 'Qwen risk timer is active but has no next realtime elapse\n' >&2
+    return 1
+}
+
 restore_qwen_risk_runtime() {
     local timer=finance-radar-qwen-risk-worker.timer
     if [ "$QWEN_EXECUTOR_SHOULD_RUN" -eq 1 ]; then
@@ -2243,6 +2259,7 @@ restore_qwen_risk_runtime() {
         systemctl enable --now "$timer" || return 1
         systemctl is-enabled --quiet "$timer" || return 1
         systemctl is-active --quiet finance-radar-qwen-risk-model.service "$timer" || return 1
+        assert_qwen_risk_timer_scheduled || return 1
         printf 'qwen_risk_timer=ACTIVE_ENABLED public_gate=%s\n' \
             "$QWEN_REQUEST_GATE"
     else
@@ -2393,6 +2410,7 @@ assert_model_request_runtime_alignment() {
         systemctl is-active --quiet finance-radar-qwen-risk-model.service \
             finance-radar-qwen-risk-worker.timer || return 1
         systemctl is-enabled --quiet finance-radar-qwen-risk-worker.timer || return 1
+        assert_qwen_risk_timer_scheduled || return 1
     else
         ! systemctl is-active --quiet finance-radar-qwen-risk-worker.timer || return 1
         ! systemctl is-enabled --quiet finance-radar-qwen-risk-worker.timer || return 1
