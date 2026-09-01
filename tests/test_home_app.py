@@ -195,6 +195,8 @@ def test_situation_room_prioritizes_event_feed_and_human_queue(monkeypatch) -> N
     assert "运行状态" not in rendered
     assert 'target="_self"' in rendered
     assert 'target="_blank"' not in rendered
+    assert "事件详情" in rendered
+    assert 'class="feed-row public-feed-row is-selected"' in rendered
 
 
 def test_public_legacy_state_url_cannot_hide_the_event_inventory(monkeypatch) -> None:
@@ -834,7 +836,6 @@ def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatc
     monkeypatch.setattr(web_common, "api_request", excluded_capture_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10)
     page.query_params["preview_flow"] = "已排除"
-    page.query_params["preview_event_id"] = "event-a"
     page.run()
     rendered = "\n".join(str(item.value) for item in page.markdown)
 
@@ -855,6 +856,7 @@ def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatc
     assert "已排除" not in rendered
     assert rendered.count("A provider discovery summary, not a verified policy action.") == 1
     assert any(link.label == "查看原始来源" for link in page.get("link_button"))
+    assert page.query_params.get("preview_event_id") is None
 
 
 def test_public_event_feed_failure_never_substitutes_overview_events(monkeypatch) -> None:

@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / ".streamlit" / "config.toml"
 STYLE = ROOT / "app" / "web" / "style_v3.css"
+PUBLIC_STYLE = ROOT / "app" / "web" / "public_reader_v4.css"
 TOKENS = ROOT / "app" / "web" / "design_tokens_v3.css"
 
 
@@ -124,3 +125,20 @@ def test_public_master_detail_reader_is_scoped_and_collapses_detail_first() -> N
         style,
         re.S,
     )
+
+
+def test_public_reader_v4_is_visual_only_and_keeps_deepseek_detail_slots() -> None:
+    common = (ROOT / "app" / "web" / "common.py").read_text(encoding="utf-8")
+    home = (ROOT / "app" / "web" / "Home.py").read_text(encoding="utf-8")
+    public_style = PUBLIC_STYLE.read_text(encoding="utf-8")
+
+    assert "PUBLIC_READER_V4" in common
+    assert 'if UI_ROLE == "public":' in common
+    assert "require_public_login" not in common
+    assert "FINANCE_RADAR_PUBLIC_PASSWORD" not in common
+    assert not (ROOT / "app" / "web" / "public_auth.py").exists()
+    assert "render_capture_explanation_fragment" in home
+    assert "preview_capture_explanation" in home
+    assert ".capture-ai-result" in public_style
+    assert "@media (max-width: 980px)" in public_style
+    assert "@media (max-width: 560px)" in public_style
