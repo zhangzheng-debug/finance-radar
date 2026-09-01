@@ -240,7 +240,8 @@ def test_home_event_link_opens_inline_preview_before_full_workbench(monkeypatch)
     assert "信息依据" not in rendered
     assert "影响路径" not in rendered
     assert "原文支持" in rendered
-    assert "千问研判" not in rendered
+    assert "千问研判" in rendered
+    assert "事件方向与强弱正在生成" in rendered
     assert "模型接口已预留" not in rendered
     assert "做空重大性" not in rendered
     assert "<article><span>模型研判</span>" not in rendered
@@ -406,7 +407,7 @@ def test_public_detail_shows_only_available_market_reaction(monkeypatch) -> None
     assert "-3.12%" not in rendered
 
 
-def test_public_detail_hides_empty_market_reaction_and_empty_qwen_slot(monkeypatch) -> None:
+def test_public_detail_keeps_market_empty_and_refreshes_qwen_slot(monkeypatch) -> None:
     monkeypatch.setattr(web_common, "UI_ROLE", "public")
     monkeypatch.setattr(web_common, "api_request", _fake_api)
     page = AppTest.from_file(str(PAGE), default_timeout=10)
@@ -417,7 +418,8 @@ def test_public_detail_hides_empty_market_reaction_and_empty_qwen_slot(monkeypat
     assert not page.exception
     assert "消息发布后的市场变化" not in rendered
     assert 'class="market-reaction research-signals"' not in rendered
-    assert "千问研判" not in rendered
+    assert "千问研判" in rendered
+    assert "事件方向与强弱正在生成" in rendered
     assert "模型接口已预留" not in rendered
     assert "PENDING" not in rendered
     assert "MISSED" not in rendered
@@ -846,7 +848,8 @@ def test_excluded_preview_distinguishes_capture_from_citable_evidence(monkeypatc
     assert "A provider discovery summary, not a verified policy action." in rendered
     assert "1 条来源记录" not in rendered
     assert "AI 解读" in rendered
-    assert "AI仅解释来源文本，不参与事件评级或价格判断。" in rendered
+    assert "DeepSeek 阅读辅助" in rendered
+    assert "仅解释来源文本" in rendered
     assert "原文：Markets await central-bank minutes" not in rendered
     assert "Markets await central-bank minutes while gold rises" in rendered
     assert rendered.count("Markets await central-bank minutes while gold rises") == 1

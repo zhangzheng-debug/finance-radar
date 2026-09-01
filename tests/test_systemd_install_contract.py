@@ -61,6 +61,12 @@ QWEN_WORKER_UNIT = (
     / "systemd"
     / "finance-radar-qwen-risk-worker.service"
 )
+QWEN_WORKER_TIMER = (
+    Path(__file__).parents[1]
+    / "deployment"
+    / "systemd"
+    / "finance-radar-qwen-risk-worker.timer"
+)
 RECEIPT_VALIDATOR = Path(__file__).parents[1] / "deployment" / "systemd" / "verify_backup_receipt.py"
 CODE_ONLY_VALIDATOR = (
     Path(__file__).parents[1]
@@ -299,6 +305,15 @@ def test_market_observation_runs_as_a_bounded_independent_timer() -> None:
     assert "finance-radar-market.timer" in installer
     assert "finance-radar-market.timer" in backup_wrapper
     assert "finance-radar-market.service" in backup_wrapper
+
+
+def test_qwen_worker_rechecks_the_backlog_without_parallel_model_contention() -> None:
+    service = QWEN_WORKER_UNIT.read_text(encoding="utf-8")
+    timer = QWEN_WORKER_TIMER.read_text(encoding="utf-8")
+
+    assert "--limit 20 --scan-limit 200 --concurrency 1" in service
+    assert "OnUnitInactiveSec=10s" in timer
+    assert "Persistent=true" in timer
 
 
 def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() -> None:

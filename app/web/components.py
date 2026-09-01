@@ -994,7 +994,10 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
     Historical router gates remain available to operator tooling, but their
     workflow labels (rule gate, keyword fallback, automatic abstention) are not
     reader-facing financial semantics.  A missing approved Qwen result is
-    therefore shown as unavailable, never replaced by an internal route.
+    therefore shown as unavailable, never replaced by an internal route.  A
+    current, approved result with a clear polarity remains useful even when a
+    secondary axis is ``UNCLEAR``; those unknown secondary labels are omitted
+    instead of suppressing the whole assessment.
     """
 
     semantic = item.get("semantic_assessment")
@@ -1018,11 +1021,9 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
             polarity in QWEN_POLARITY_LABELS
             and materiality in QWEN_MATERIALITY_LABELS
             and strength in QWEN_STRENGTH_LABELS
-            and priority in {"PRIORITY_REVIEW", "ROUTINE"}
+            and priority in {"PRIORITY_REVIEW", "ROUTINE", "UNDECIDABLE"}
             and scope in {"EVIDENCE_SUPPORTED", "SOURCE_CONDITIONAL"}
             and polarity != "UNCLEAR"
-            and materiality != "UNCLEAR"
-            and strength != "UNCLEAR"
         ):
             conditional = scope == "SOURCE_CONDITIONAL"
             return {
@@ -1035,6 +1036,7 @@ def public_event_risk_assessment(item: dict[str, Any]) -> dict[str, Any]:
                 + (
                     " · 强度" + QWEN_STRENGTH_LABELS[strength]
                     if polarity in {"ADVERSE", "MIXED"}
+                    and QWEN_STRENGTH_LABELS[strength]
                     else ""
                 ),
                 "polarity_label": QWEN_POLARITY_LABELS[polarity],

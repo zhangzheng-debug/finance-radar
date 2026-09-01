@@ -796,6 +796,220 @@ def test_qwen_publication_is_closed_until_approved_and_current_input_matches(
         assert invalidated is None
 
 
+def _approve_qwen_publication(
+    operations: OperationsRepository,
+    *,
+    adapter_sha256: str,
+) -> str:
+    model_version = "qwen-risk-" + adapter_sha256[:16]
+    operations.set_state(
+        "qwen_risk_publication_v1",
+        {
+            "state": "PUBLIC_APPROVED",
+            "model_version": model_version,
+            "adapter_sha256": adapter_sha256,
+            "contract_version": QWEN_RISK_CONTRACT_VERSION,
+            "prompt_version": QWEN_RISK_PROMPT_VERSION,
+            "approval_receipt_sha256": "b" * 64,
+            "approved_at": "2026-08-25T01:00:00+00:00",
+        },
+    )
+    return model_version
+
+
+def _record_current_qwen_assessment(
+    ledger: LedgerRepository,
+    operations: OperationsRepository,
+    *,
+    model_version: str,
+    adapter_sha256: str,
+) -> None:
+    item = ledger.shadow_batch(event_ids=["semantic-event"], order="event_id")[0]
+    contract = build_qwen_risk_input_contract(
+        item["detail"], item["evidence"], model_version=model_version
+    )
+    operations.record_model_run(
+        "semantic-event",
+        {
+            **contract,
+            "model_task": "QWEN_RISK_SEMANTICS",
+            "adapter_sha256": adapter_sha256,
+            "event_version": 1,
+            "event_status": "candidate",
+            "polarity": "ADVERSE",
+            "materiality": "MATERIAL_ADVERSE",
+            "adverse_strength": "HIGH",
+            "semantic_priority": "PRIORITY_REVIEW",
+            "training_basis": "DUAL_REVIEW_AI_CONSENSUS",
+            "label": "PRIORITY_REVIEW",
+            "confidence": 0.0,
+            "confidence_applicable": False,
+            "latency_ms": 1.0,
+            "shadow": True,
+            "no_trading": True,
+        },
+    )
+
+
+def _semantic_assessment_payload(client: TestClient) -> dict:
+    response = client.get("/api/v1/events/semantic-event/semantic-assessment")
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert set(payload) == {"state", "assessment", "cache_only"}
+    assert payload["state"] in {"READY", "PROCESSING", "NOT_APPLICABLE"}
+    assert payload["cache_only"] is True
+    serialized = json.dumps(payload, ensure_ascii=False)
+    for private_marker in (
+        "input_sha256",
+        "source_identity_sha256",
+        "evidence_identity_sha256",
+        "evidence_context_sha256",
+        "adapter_sha256",
+        "approval_receipt_sha256",
+        "error",
+        "traceback",
+        "STALE",
+        "UNPROCESSED",
+        "INPUT_INSUFFICIENT",
+    ):
+        assert private_marker not in serialized
+    return payload
+
+
+def test_semantic_assessment_endpoint_returns_only_current_public_qwen_result(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    ledger = LedgerRepository(ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    adapter = "a" * 64
+    model_version = _approve_qwen_publication(
+        operations,
+        adapter_sha256=adapter,
+    )
+    _record_current_qwen_assessment(
+        ledger,
+        operations,
+        model_version=model_version,
+        adapter_sha256=adapter,
+    )
+
+    with TestClient(create_app(settings)) as client:
+        payload = _semantic_assessment_payload(client)
+
+    assert payload["state"] == "READY"
+    assessment = payload["assessment"]
+    assert assessment is not None
+    assert assessment["polarity"] == "ADVERSE"
+    assert assessment["materiality"] == "MATERIAL_ADVERSE"
+    assert assessment["adverse_strength"] == "HIGH"
+    assert assessment["semantic_priority"] == "PRIORITY_REVIEW"
+    assert assessment["publication_state"] == "PUBLIC_APPROVED"
+    assert assessment["current"] is True
+
+    # A changed source invalidates the completed input immediately, but the
+    # public endpoint must collapse that internal stale condition into the
+    # same non-alarming PROCESSING state used while the worker catches up.
+    with sqlite3.connect(ledger_path) as connection:
+        connection.execute(
+            "UPDATE raw_observations SET title='Revised source title',content_sha256=? "
+            "WHERE observation_id='semantic-observation'",
+            ("2" * 64,),
+        )
+        connection.commit()
+    with TestClient(create_app(settings)) as client:
+        invalidated = _semantic_assessment_payload(client)
+    assert invalidated == {
+        "state": "PROCESSING",
+        "assessment": None,
+        "cache_only": True,
+    }
+
+
+def test_semantic_assessment_endpoint_is_cache_only_while_qwen_is_unprocessed(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    _approve_qwen_publication(operations, adapter_sha256="a" * 64)
+    with sqlite3.connect(settings.operations_db) as connection:
+        before = connection.execute("SELECT COUNT(*) FROM model_runs").fetchone()[0]
+
+    with TestClient(create_app(settings)) as client:
+        first = _semantic_assessment_payload(client)
+        second = _semantic_assessment_payload(client)
+
+    assert first == second == {
+        "state": "PROCESSING",
+        "assessment": None,
+        "cache_only": True,
+    }
+    with sqlite3.connect(settings.operations_db) as connection:
+        after = connection.execute("SELECT COUNT(*) FROM model_runs").fetchone()[0]
+    assert after == before == 0
+
+
+def test_semantic_assessment_endpoint_marks_empty_input_not_applicable(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    _approve_qwen_publication(operations, adapter_sha256="a" * 64)
+    with sqlite3.connect(ledger_path) as connection:
+        connection.execute(
+            "UPDATE raw_observations SET title='',summary='' "
+            "WHERE observation_id='semantic-observation'"
+        )
+        connection.commit()
+
+    with TestClient(create_app(settings)) as client:
+        payload = _semantic_assessment_payload(client)
+
+    assert payload == {
+        "state": "NOT_APPLICABLE",
+        "assessment": None,
+        "cache_only": True,
+    }
+    with sqlite3.connect(settings.operations_db) as connection:
+        count = connection.execute("SELECT COUNT(*) FROM model_runs").fetchone()[0]
+    assert count == 0
+
+
+def test_semantic_assessment_endpoint_hides_model_store_errors(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    _approve_qwen_publication(operations, adapter_sha256="a" * 64)
+
+    def unavailable_model_store(*_args, **_kwargs):
+        raise sqlite3.OperationalError("SECRET_INTERNAL_DATABASE_PATH is locked")
+
+    monkeypatch.setattr(
+        OperationsRepository,
+        "latest_qwen_risk_runs_for_versions",
+        unavailable_model_store,
+    )
+    with TestClient(create_app(settings)) as client:
+        payload = _semantic_assessment_payload(client)
+
+    assert payload == {
+        "state": "PROCESSING",
+        "assessment": None,
+        "cache_only": True,
+    }
+    assert "SECRET_INTERNAL_DATABASE_PATH" not in json.dumps(payload)
+
+
 def test_capture_explanation_exposes_real_queue_retry_and_terminal_states(
     tmp_path: Path,
 ) -> None:

@@ -2055,6 +2055,72 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             result["state"] = "ELIGIBLE_NOT_QUEUED"
         return result
 
+    def public_qwen_semantic_status(event_id: str) -> dict[str, Any]:
+        """Return a cache-only public lifecycle for the current Qwen assessment.
+
+        Public readers need to distinguish a current result from work that can
+        still be completed, but must not receive worker errors, model hashes or
+        unpublished shadow output.  This read never invokes or enqueues a model.
+        """
+
+        processing = {
+            "state": "PROCESSING",
+            "assessment": None,
+            "cache_only": True,
+        }
+        try:
+            event_data = event_or_404(
+                event_id,
+                require_reader_ready=False,
+                require_public_semantics=True,
+            )
+            event = dict(event_data.get("event") or {})
+            current = current_qwen_runs([event])
+            assessment = project_public_qwen_semantics(
+                current.get(str(event.get("event_id") or "")),
+                current_version=int(event.get("current_version") or 0),
+            )
+            if assessment is not None:
+                return {
+                    "state": "READY",
+                    "assessment": assessment,
+                    "cache_only": True,
+                }
+
+            publication = operations.qwen_risk_publication()
+            if publication.get("public_approved") is not True:
+                return processing
+            inputs = ledger.shadow_batch(
+                limit=1,
+                order="event_id",
+                event_ids=[event_id],
+                semantic_events_only=True,
+            )
+            if not inputs:
+                return {
+                    "state": "NOT_APPLICABLE",
+                    "assessment": None,
+                    "cache_only": True,
+                }
+            candidate = inputs[0] if isinstance(inputs[0], dict) else {}
+            contract = build_qwen_risk_input_contract(
+                candidate.get("detail") or {},
+                candidate.get("evidence") or [],
+                model_version=str(publication.get("model_version") or ""),
+            )
+            if contract.get("input_sufficient") is not True:
+                return {
+                    "state": "NOT_APPLICABLE",
+                    "assessment": None,
+                    "cache_only": True,
+                }
+            return processing
+        except HTTPException:
+            raise
+        except Exception as exc:
+            LOGGER.warning("public Qwen semantic status unavailable: %s", exc)
+            return processing
+
     @application.get("/")
     def root(request: Request):
         return envelope(
@@ -2640,6 +2706,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/v1/events/{event_id}/capture-explanation")
     def event_capture_explanation(request: Request, event_id: str):
         return envelope(request, public_capture_explanation(event_id))
+
+    @application.get("/api/v1/events/{event_id}/semantic-assessment")
+    def event_semantic_assessment(request: Request, event_id: str):
+        return envelope(request, public_qwen_semantic_status(event_id))
 
     @application.post(
         "/api/v1/events/{event_id}/sources/{observation_id}/interpret",

@@ -229,9 +229,9 @@ html, body, [class*="css"] {
 [data-testid="stColumn"]:has(.fr-public-reader-feed-panel),
 [data-testid="stColumn"]:has(.fr-public-reader-detail-panel) {
     min-width: 0 !important;
-    order: initial !important;
 }
 [data-testid="stColumn"]:has(.fr-public-reader-feed-panel) {
+    order: 1 !important;
     position: sticky;
     top: calc(var(--fr-streamlit-header-height) + .7rem);
     max-height: calc(100dvh - var(--fr-streamlit-header-height) - 1.4rem);
@@ -245,6 +245,7 @@ html, body, [class*="css"] {
     padding-right: 5px;
 }
 [data-testid="stColumn"]:has(.fr-public-reader-detail-panel) {
+    order: 2 !important;
     position: sticky !important;
     top: calc(var(--fr-streamlit-header-height) + .7rem) !important;
     max-height: calc(100dvh - var(--fr-streamlit-header-height) - 1.4rem) !important;
@@ -417,6 +418,60 @@ html, body, [class*="css"] {
 .market-reaction-inline-item strong.positive { color: var(--fr-green) !important; }
 .capture-ai-result { border-left: 2px solid var(--fr-cyan) !important; }
 .capture-ai-boundary-head strong { color: var(--fr-amber) !important; }
+.model-status-card {
+    --fr-model-status-accent: var(--fr-cyan);
+    display: grid;
+    gap: 9px;
+    margin: 10px 0;
+    padding: 13px 14px;
+    overflow: hidden;
+    color: var(--fr-text) !important;
+    background: color-mix(in srgb, var(--fr-raised) 82%, var(--fr-panel)) !important;
+    border: 1px solid color-mix(in srgb, var(--fr-model-status-accent) 24%, var(--fr-border)) !important;
+    border-left: 2px solid var(--fr-model-status-accent) !important;
+    border-radius: var(--fr-radius-m) !important;
+    box-shadow: none !important;
+}
+.model-status-card.is-deepseek { --fr-model-status-accent: var(--fr-cyan); }
+.model-status-card.is-qwen { --fr-model-status-accent: var(--fr-purple); }
+.model-status-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--fr-text) !important;
+    font-size: 12px !important;
+    font-weight: 650 !important;
+}
+.model-status-head small,
+.model-status-copy {
+    margin: 0 !important;
+    color: var(--fr-muted) !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    line-height: 1.55 !important;
+}
+.model-status-skeleton {
+    display: grid;
+    gap: 7px;
+    width: min(100%, 34rem);
+}
+.model-status-skeleton-line {
+    width: 100%;
+    height: 7px;
+    border-radius: 999px;
+    background:
+        linear-gradient(
+            100deg,
+            color-mix(in srgb, var(--fr-model-status-accent) 8%, var(--fr-border)) 20%,
+            color-mix(in srgb, var(--fr-model-status-accent) 22%, var(--fr-panel)) 42%,
+            color-mix(in srgb, var(--fr-model-status-accent) 8%, var(--fr-border)) 64%
+        );
+    background-size: 220% 100%;
+    animation: fr-model-status-sheen 1.35s ease-in-out infinite;
+}
+.model-status-skeleton-line:nth-child(2) { width: 78%; }
+.model-status-skeleton-line:nth-child(3) { width: 56%; }
 .return-filter-link {
     color: var(--fr-text) !important;
     background: linear-gradient(180deg, #fff, var(--fr-raised)) !important;
@@ -466,8 +521,9 @@ html, body, [class*="css"] {
     [data-testid="stColumn"]:has(.fr-public-reader-detail-panel) {
         position: static !important;
         max-height: none !important;
-        order: initial !important;
     }
+    [data-testid="stColumn"]:has(.fr-public-reader-detail-panel) { order: 1 !important; }
+    [data-testid="stColumn"]:has(.fr-public-reader-feed-panel) { order: 2 !important; }
     [data-testid="stColumn"]:has(.fr-public-reader-feed-panel) > [data-testid="stVerticalBlock"],
     [data-testid="stColumn"]:has(.fr-public-reader-detail-panel) > [data-testid="stVerticalBlock"] {
         max-height: none !important;
@@ -499,10 +555,19 @@ html, body, [class*="css"] {
     [data-baseweb="tab"] { min-height: 44px !important; }
 }
 
+@keyframes fr-model-status-sheen {
+    0% { background-position: 100% 0; }
+    100% { background-position: -120% 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
         animation-duration: .01ms !important;
         transition-duration: .01ms !important;
         scroll-behavior: auto !important;
+    }
+    .model-status-skeleton-line {
+        animation: none !important;
+        background-position: 0 0 !important;
     }
 }
