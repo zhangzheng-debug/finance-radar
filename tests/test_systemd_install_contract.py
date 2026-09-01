@@ -389,7 +389,11 @@ def test_qwen_runtime_uses_one_cpu_bound_lane_and_restarts_after_unit_refresh() 
 def test_direct_nginx_denies_framing_including_release_marker() -> None:
     source = (INSTALLER.parent / "nginx-radar-direct.conf").read_text(encoding="utf-8")
     assert source.count("Content-Security-Policy \"frame-ancestors 'none'\" always;") == 2
-    assert source.count('X-Frame-Options "DENY" always;') == 2
+    # Server default, release marker, static public API entry and proxied JSON
+    # API responses all deny
+    # framing; location-level headers must repeat the protection because Nginx
+    # stops inheriting add_header directives once a location defines its own.
+    assert source.count('X-Frame-Options "DENY" always;') == 4
     release_block = source.split("location = /radar/release.json {", 1)[1].split("}", 1)[0]
     assert "frame-ancestors 'none'" in release_block
     assert 'X-Frame-Options "DENY"' in release_block
@@ -806,8 +810,22 @@ def test_in_place_installer_rolls_back_services_and_edge_on_any_cutover_failure(
     assert "/radar/release.json" in (Path(__file__).parents[1] / "deployment" / "systemd" / "nginx-radar-direct.conf").read_text(encoding="utf-8")
     assert "nginx -t" in source
     assert "--resolve \"$PUBLIC_EDGE_HOST:$PUBLIC_EDGE_PORT:127.0.0.1\"" in source
-    for denied_path in (
+    for allowed_path in (
         "/finance-radar-api/",
+        "/finance-radar-api/api/v1/live",
+        "/finance-radar-api/api/v1/overview",
+        "/finance-radar-api/api/v1/events?limit=1",
+        "/finance-radar-api/api/v1/events/facets",
+    ):
+        assert allowed_path in source
+    assert "assert_edge_status /finance-radar-api/api/v1/events 403 POST" in source
+    for denied_path in (
+        "/finance-radar-api/openapi.json",
+        "/finance-radar-api/docs",
+        "/finance-radar-api/api/v1/health",
+        "/finance-radar-api/api/v1/health/deep",
+        "/finance-radar-api/api/v1/model/status",
+        "/finance-radar-api/api/v1/events/example/trace",
         "/radar-admin/",
         "/radar-review/",
         "/radar-ops/",
@@ -964,6 +982,8 @@ def test_installer_recognizes_only_audited_static_or_direct_predecessor_vhosts_b
     assert "proxy_pass http://127.0.0.1:18501;" in source
     assert r"Event_Intelligence\\|Operations_and_Model\\|Adjudication_Studio" in source
     assert r"location[[:space:]]+\\^~[[:space:]]+/finance-radar-api/" in source
+    assert "RETIRABLE_VHOST_KIND=direct-streamlit-public-read" in source
+    assert "proxy_pass_request_headers off;" in source
     assert r"location[[:space:]]+\\^~[[:space:]]+/radar-admin/" in source
     assert "assert_candidate_vhost_owns_public_edge" in source
     assert "expected exactly one active Nginx vhost" in source

@@ -15,6 +15,8 @@ SHARED="$BASE/shared"
 RELEASE_RECORDS="$RELEASE/release-records"
 PUBLIC_STATUS_DIR=/var/www/finance-radar-terminal
 PUBLIC_RELEASE_MARKER="$PUBLIC_STATUS_DIR/release.json"
+PUBLIC_API_DIR=/var/www/finance-radar-public-api
+PUBLIC_API_INDEX="$PUBLIC_API_DIR/index.html"
 LEGACY_STATIC_NGINX=/etc/nginx/conf.d/finance-radar-aws.conf
 LEGACY_STATIC_INDEX="$PUBLIC_STATUS_DIR/index.html"
 LEGACY_STATIC_RETIRE_DIR=/etc/nginx/finance-radar-retired
@@ -1197,6 +1199,7 @@ ROLLBACK_PATHS=(
     /etc/letsencrypt/renewal-hooks/deploy/finance-radar-reload-nginx.sh
     "$LEGACY_STATIC_INDEX"
     "$PUBLIC_RELEASE_MARKER"
+    "$PUBLIC_API_INDEX"
     "$LEGACY_BACKUP_RETENTION_DROPIN"
     "${LEGACY_MANAGED_PROPERTY_DROPINS[@]}"
 )
@@ -1340,6 +1343,28 @@ classify_retirable_finance_radar_vhost() {
         RETIRABLE_VHOST_KIND=direct-streamlit
         return 0
     fi
+    # The bounded public-read successor keeps FastAPI on loopback and exposes
+    # only a credential-stripped GET allowlist. Recognize that exact shape so a
+    # later release can replace it without broadening the retirement matcher.
+    if grep -Eq "^[[:space:]]*listen[[:space:]]+$PUBLIC_EDGE_PORT[[:space:]]+ssl;" "$LEGACY_STATIC_NGINX" && \
+       grep -Eq "^[[:space:]]*location[[:space:]]*=[[:space:]]*/radar[[:space:]]*\\{" "$LEGACY_STATIC_NGINX" && \
+       grep -Eq "return[[:space:]]+301[[:space:]]+/radar/;" "$LEGACY_STATIC_NGINX" && \
+       grep -Fq 'proxy_pass http://127.0.0.1:18501;' "$LEGACY_STATIC_NGINX" && \
+       grep -Eq "location[[:space:]]*=[[:space:]]*/finance-radar-api/[[:space:]]*\\{" "$LEGACY_STATIC_NGINX" && \
+       grep -Fq 'root /var/www;' "$LEGACY_STATIC_NGINX" && \
+       grep -Fq 'try_files /finance-radar-public-api/index.html =404;' "$LEGACY_STATIC_NGINX" && \
+       grep -Fq 'location ~ ^/finance-radar-api/api/v1/' "$LEGACY_STATIC_NGINX" && \
+       grep -Fq 'proxy_pass http://127.0.0.1:18000;' "$LEGACY_STATIC_NGINX" && \
+       grep -Fq 'proxy_pass_request_headers off;' "$LEGACY_STATIC_NGINX" && \
+       grep -Fq 'proxy_set_header X-Admin-Token "";' "$LEGACY_STATIC_NGINX" && \
+       grep -Fq 'proxy_set_header X-Reviewer-Token "";' "$LEGACY_STATIC_NGINX" && \
+       grep -Fq 'proxy_set_header X-Operator-Token "";' "$LEGACY_STATIC_NGINX" && \
+       grep -Eq "^[[:space:]]*location[[:space:]]+/finance-radar-api/[[:space:]]*\\{" "$LEGACY_STATIC_NGINX" && \
+       grep -Eq "Event_Intelligence\\|Operations_and_Model\\|Adjudication_Studio" "$LEGACY_STATIC_NGINX" && \
+       ! grep -Eq "(^|[[:space:]])root[[:space:]]+$PUBLIC_STATUS_DIR;|$PUBLIC_STATUS_DIR/index[.]html" "$LEGACY_STATIC_NGINX"; then
+        RETIRABLE_VHOST_KIND=direct-streamlit-public-read
+        return 0
+    fi
     printf 'refusing to retire an unrecognized Finance Radar Nginx vhost: %s\n' \
         "$LEGACY_STATIC_NGINX" >&2
     return 1
@@ -1394,6 +1419,34 @@ assert_candidate_vhost_owns_public_edge() {
             "$PUBLIC_EDGE_HOST" "$matches" >&2
         return 1
     }
+}
+
+install_public_api_entry() {
+    local source="$RELEASE/deployment/public-api/index.html"
+    local temporary="$PUBLIC_API_DIR/.index.html.$$.tmp"
+    [ -f "$source" ] && [ ! -L "$source" ] || {
+        printf 'public API entry asset is missing or unsafe: %s\n' "$source" >&2
+        return 1
+    }
+    if grep -Eiq \
+        'fetch[[:space:]]*\(|XMLHttpRequest|WebSocket|sendBeacon|localStorage|sessionStorage|document[.]cookie|<form[^>]*(action|method)[[:space:]]*=' \
+        "$source"; then
+        printf 'public API entry asset contains a network or persistence primitive\n' >&2
+        return 1
+    fi
+    if [ -e "$PUBLIC_API_DIR" ] || [ -L "$PUBLIC_API_DIR" ]; then
+        [ -d "$PUBLIC_API_DIR" ] && [ ! -L "$PUBLIC_API_DIR" ] || {
+            printf 'public API asset directory is unsafe: %s\n' "$PUBLIC_API_DIR" >&2
+            return 1
+        }
+    fi
+    install -d -m 0755 -o root -g root "$PUBLIC_API_DIR" || return 1
+    [ ! -L "$PUBLIC_API_INDEX" ] || {
+        printf 'public API entry target must not be a symlink: %s\n' "$PUBLIC_API_INDEX" >&2
+        return 1
+    }
+    install -m 0644 -o root -g root "$source" "$temporary" || return 1
+    mv -f -- "$temporary" "$PUBLIC_API_INDEX" || return 1
 }
 
 write_public_release_marker() {
@@ -2431,7 +2484,8 @@ DIRECT_ENDPOINT_TEMPLATE="$RELEASE/deployment/systemd/nginx-radar-direct.conf"
 DIRECT_ENDPOINT_CANDIDATE="/tmp/finance-radar-nginx-$RELEASE_ID.conf"
 DIRECT_ENDPOINT_INSTALLER="$RELEASE/deployment/systemd/install_direct_endpoint.sh"
 DIRECT_ENDPOINT_HOOK="$RELEASE/deployment/systemd/certbot-reload-nginx.sh"
-for required_file in "$DIRECT_ENDPOINT_TEMPLATE" "$DIRECT_ENDPOINT_INSTALLER" "$DIRECT_ENDPOINT_HOOK"; do
+PUBLIC_API_ASSET="$RELEASE/deployment/public-api/index.html"
+for required_file in "$DIRECT_ENDPOINT_TEMPLATE" "$DIRECT_ENDPOINT_INSTALLER" "$DIRECT_ENDPOINT_HOOK" "$PUBLIC_API_ASSET"; do
     [ -f "$required_file" ] || abort_cutover "required edge deployment file missing: $required_file" 4
 done
 sed \
@@ -2448,6 +2502,8 @@ CANDIDATE_SERVER_NAME="$(awk '$1 == "server_name" { sub(/;$/, "", $2); print $2;
 if ! grep -Eq "^[[:space:]]*listen[[:space:]]+$PUBLIC_EDGE_PORT[[:space:]]+ssl;" "$DIRECT_ENDPOINT_CANDIDATE"; then
     abort_cutover "public Web port does not match the versioned Nginx candidate" 4
 fi
+install_public_api_entry || \
+    abort_cutover "public API entry asset could not be installed safely" 4
 
 if [ "$DEPLOY_MODE" = full ]; then
     if [ ! -x "$BASE/venv/bin/python" ]; then
@@ -2790,8 +2846,10 @@ assert_public_web_identity_and_boundary() {
 assert_edge_status() {
     local path="$1"
     local expected="$2"
+    local method=${3:-GET}
     local status
     if ! status=$(curl --noproxy '*' --silent --show-error --output /dev/null --write-out '%{http_code}' \
+        --request "$method" \
         --max-time 20 --resolve "$PUBLIC_EDGE_HOST:$PUBLIC_EDGE_PORT:127.0.0.1" \
         "$PUBLIC_EDGE_ORIGIN$path"); then
         return 1
@@ -2843,8 +2901,24 @@ assert_candidate_vhost_owns_public_edge || \
     abort_cutover 'candidate Nginx vhost does not exclusively own the public edge' 6
 assert_public_release_marker ACTIVATING || \
     abort_cutover 'public edge does not serve the activating release state' 6
-for denied_path in \
+for allowed_path in \
     /finance-radar-api/ \
+    /finance-radar-api/api/v1/live \
+    /finance-radar-api/api/v1/overview \
+    '/finance-radar-api/api/v1/events?limit=1' \
+    /finance-radar-api/api/v1/events/facets; do
+    assert_edge_status "$allowed_path" 200 || \
+        abort_cutover "public read API check failed for $allowed_path" 6
+done
+assert_edge_status /finance-radar-api/api/v1/events 403 POST || \
+    abort_cutover 'public read API accepted a non-GET request' 6
+for denied_path in \
+    /finance-radar-api/openapi.json \
+    /finance-radar-api/docs \
+    /finance-radar-api/api/v1/health \
+    /finance-radar-api/api/v1/health/deep \
+    /finance-radar-api/api/v1/model/status \
+    /finance-radar-api/api/v1/events/example/trace \
     /radar/offhost-status.json \
     /radar-admin/ \
     /radar-review/ \

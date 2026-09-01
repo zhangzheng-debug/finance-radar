@@ -266,12 +266,23 @@ outcome, order, position, balance or trading endpoint is involved.
 Primary public endpoint is deployment-specific and must be passed explicitly as
 `https://YOUR_DOMAIN[:PORT]/radar/`; it is not a repository constant.
 
-The public edge returns `404` for `/finance-radar-api/`,
-`/radar/offhost-status.json`, the internal page slugs, `/radar-review/`,
-`/radar-ops/` and `/radar-admin/`. FastAPI remains available only at
-`http://127.0.0.1:18000` on the server. Off-host verification receipts stay on
-the operator workstation under `D:\FinanceRadarBackups`; the public edge never
-serves their timestamps, hashes, release identifiers or ledger counts.
+The systemd/Nginx production edge serves a static entry at
+`/finance-radar-api/` and proxies only the reader-safe GET contract below it:
+`live`, `overview`, events, event facets, and the event detail, dossier,
+knowledge, evidence, sources, source-interpretations and capture-explanation
+resources. The entry page's API Key and model controls are browser-only: the
+page has no form action, network request or browser persistence, and clears the
+key on confirmation or navigation. Nginx disables inherited request headers
+and explicitly clears Authorization, Cookie, API-key and internal-role token
+headers before proxying to `127.0.0.1:18000`.
+
+Every non-GET request to an allowed API path is denied. OpenAPI/docs, health
+and deep-health, model/role status, mutations and every route outside the
+explicit allowlist return `404` or `403`. `/radar/offhost-status.json`, the
+internal page slugs, `/radar-review/`, `/radar-ops/` and `/radar-admin/` remain
+closed. Off-host verification receipts stay on the operator workstation under
+`D:\FinanceRadarBackups`; the public edge never serves their timestamps,
+hashes, release identifiers or ledger counts.
 
 The three internal UIs are manual, non-enabled, mutually conflicting systemd
 services. They load only their scoped token (Admin is the explicit full-access

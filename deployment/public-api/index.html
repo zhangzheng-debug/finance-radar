@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Finance Radar API</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #071019;
+      --panel: #0b1723;
+      --line: #1d3446;
+      --text: #edf7ff;
+      --muted: #8ea6b8;
+      --accent: #1bd2c8;
+      --accent-2: #38a5ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at 20% 10%, rgba(56, 165, 255, .13), transparent 34rem),
+        radial-gradient(circle at 85% 85%, rgba(27, 210, 200, .1), transparent 32rem),
+        var(--bg);
+      color: var(--text);
+      font: 16px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(100%, 520px);
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: color-mix(in srgb, var(--panel) 94%, transparent);
+      box-shadow: 0 28px 80px rgba(0, 0, 0, .34);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 0 0 30px; font-size: clamp(30px, 7vw, 44px); line-height: 1.05; }
+    form { display: grid; gap: 20px; }
+    label { display: grid; gap: 8px; color: var(--muted); font-size: 14px; font-weight: 650; }
+    input, select, button {
+      width: 100%;
+      min-height: 50px;
+      border-radius: 12px;
+      font: inherit;
+    }
+    input, select {
+      border: 1px solid var(--line);
+      padding: 0 14px;
+      background: #08131d;
+      color: var(--text);
+      outline: none;
+    }
+    input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(27, 210, 200, .12); }
+    button {
+      border: 0;
+      margin-top: 4px;
+      color: #031014;
+      background: linear-gradient(115deg, var(--accent), var(--accent-2));
+      font-weight: 800;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.08); }
+    button:active { transform: translateY(1px); }
+    #custom-field[hidden] { display: none; }
+    #status { min-height: 24px; margin: 0; color: var(--accent); font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Finance Radar</p>
+    <h1>API</h1>
+    <form id="api-form" autocomplete="off" novalidate>
+      <label>
+        API Key
+        <input id="api-key" type="password" autocomplete="new-password" spellcheck="false"
+               data-lpignore="true" required aria-describedby="status">
+      </label>
+      <label>
+        Model
+        <select id="model">
+          <option value="deepseek-chat">deepseek-chat</option>
+          <option value="deepseek-reasoner">deepseek-reasoner</option>
+          <option value="qwen-plus">qwen-plus</option>
+          <option value="qwen-turbo">qwen-turbo</option>
+          <option value="qwen-max">qwen-max</option>
+          <option value="custom">custom</option>
+        </select>
+      </label>
+      <label id="custom-field" hidden>
+        Custom Model
+        <input id="custom-model" type="text" autocomplete="off" spellcheck="false">
+      </label>
+      <button type="submit">确认</button>
+      <p id="status" role="status" aria-live="polite"></p>
+    </form>
+  </main>
+  <script>
+    (() => {
+      "use strict";
+      const form = document.getElementById("api-form");
+      const keyInput = document.getElementById("api-key");
+      const modelInput = document.getElementById("model");
+      const customField = document.getElementById("custom-field");
+      const customInput = document.getElementById("custom-model");
+      const status = document.getElementById("status");
+
+      modelInput.addEventListener("change", () => {
+        const custom = modelInput.value === "custom";
+        customField.hidden = !custom;
+        customInput.required = custom;
+        if (!custom) customInput.value = "";
+        status.textContent = "";
+      });
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const model = modelInput.value === "custom" ? customInput.value.trim() : modelInput.value;
+        if (!keyInput.value.trim() || !model) {
+          status.textContent = "请完整填写 API Key 和 Model";
+          return;
+        }
+        keyInput.value = "";
+        customInput.value = "";
+        status.textContent = `${model} 已确认`;
+      });
+
+      window.addEventListener("pagehide", () => {
+        keyInput.value = "";
+        customInput.value = "";
+      });
+    })();
+  </script>
+</body>
+</html>

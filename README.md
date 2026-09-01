@@ -20,12 +20,12 @@ Finance Radar 不是交易终端，也不是自动事实裁判。系统收集并
 
 | 层 | 面向谁 | 内容 | 暴露方式 |
 |---|---|---|---|
-| Public | 普通用户与演示观众 | 态势总览、证据演示、方法与边界 | 公网只读 Streamlit |
+| Public | 普通用户与演示观众 | 态势总览、证据演示、方法与边界 | 公网只读 Streamlit + GET 白名单 API |
 | Reviewer | 人工复核者 | 事件证据、人工判断、双人盲审 | 仅服务器回环，独立令牌与按需 SSH 隧道 |
 | Operator | 运维者 | 来源、Worker、备份、Shadow 模型与运行诊断 | 仅服务器回环，独立令牌与按需 SSH 隧道 |
 | Admin | 开发者与紧急管理员 | Reviewer 与 Operator 的全权超集 | 仅服务器回环，独立全权令牌与按需 SSH 隧道 |
 
-公网 Nginx 不暴露 API、管理页面或内部路径。Reviewer、Operator 和 Admin 使用不同入口与 API 能力合同；它们仍是回环、按需启动的轻量角色层，不冒充完整账户系统。
+公网 Nginx 只代理事件阅读所需的 GET 白名单；OpenAPI、健康深检、模型状态、写接口、管理页面及内部路径继续关闭。所有公网请求在转发前会剥离 Authorization、Cookie 和三种内部角色令牌。Reviewer、Operator 和 Admin 使用不同入口与 API 能力合同；它们仍是回环、按需启动的轻量角色层，不冒充完整账户系统。
 
 ## 关键安全边界
 
@@ -94,7 +94,7 @@ CI 还会检查编译、测试、秘密模式、交易写路由和部署 Shell �
 
 主部署形态是 AWS 上的 systemd + Nginx：API、Public Web、外置总览快照发布器、三种按需内部 UI、Worker、备份和可选 Evidence LLM 分离运行，并由 systemd slice 约束总内存与任务数。`/overview` 使用五分钟原子数据快照，聚合过程不占用 API 解释器。Docker Compose + Caddy 仅是可移植备选形态。
 
-公网入口不写死在仓库中；部署时必须显式传入 `https://YOUR_DOMAIN[:PORT]/radar/`，当前实际域名与运行状态以部署后现场验收记录为准。
+公网入口不写死在仓库中；部署时必须显式传入 `https://YOUR_DOMAIN[:PORT]/radar/`，当前实际域名与运行状态以部署后现场验收记录为准。同一站点的 `/finance-radar-api/` 是静态 API 入口页；其 API Key 与模型选择仅在当前页面内交互，不提交、不持久化。可调用面严格限制为 `live`、`overview`、事件列表/分类以及单事件详情、档案、知识、证据、来源、来源解读和捕获解释的 GET 请求。
 
 安装、回滚、备份、迁移和恢复流程见 [deployment/README.md](deployment/README.md) 与 [docs/SERVER_MIGRATION_HANDOFF.md](docs/SERVER_MIGRATION_HANDOFF.md)。原新加坡 Finance Radar 实例已经退出产品拓扑，历史报告中的新加坡地址仅作历史证据。
 

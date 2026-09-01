@@ -38,10 +38,14 @@ def test_archived_prototype_is_frozen_and_cannot_transition_to_production_data()
     assert "ArchivedPrototypeHandler" in dev_server
 
 
-def test_production_edge_remains_the_streamlit_only_public_surface() -> None:
+def test_production_edge_adds_only_a_bounded_read_api_to_streamlit() -> None:
     nginx = PRODUCTION_NGINX.read_text(encoding="utf-8")
 
     assert "proxy_pass http://127.0.0.1:18501" in nginx
-    assert "location ^~ /finance-radar-api/" in nginx
+    assert "location = /finance-radar-api/" in nginx
+    assert "location ~ ^/finance-radar-api/api/v1/" in nginx
+    assert "proxy_pass_request_headers off" in nginx
+    assert "limit_except GET { deny all; }" in nginx
+    assert "location /finance-radar-api/" in nginx
     assert "location ^~ /radar-admin/" in nginx
     assert nginx.count("return 404;") >= 4
