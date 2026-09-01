@@ -142,11 +142,7 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
 
 
 def public_research_signal_markup(
-    detail: dict[str, object],
-    public_copy: dict[str, object],
-    *,
-    include_qwen: bool = True,
-    include_market: bool = True,
+    detail: dict[str, object], public_copy: dict[str, object]
 ) -> str:
     """Render the stable Qwen slot and available market observations compactly."""
 
@@ -218,7 +214,7 @@ def public_research_signal_markup(
     signal_rows: list[str] = []
     qwen_ready = bool(public_copy.get("risk_route") and public_copy.get("risk_label"))
     basis = " ".join(str(public_copy.get("risk_basis_label") or "").split())
-    if include_qwen and qwen_ready:
+    if qwen_ready:
         qwen_values = (
             str(public_copy.get("risk_polarity_label") or ""),
             str(public_copy.get("risk_materiality_label") or ""),
@@ -237,7 +233,7 @@ def public_research_signal_markup(
             + '</div><small class="qwen-slot-state">自动研判</small></div>'
         )
 
-    if include_market and normalized:
+    if normalized:
         # Select one shared window so values are comparable. Coverage wins;
         # among equally covered windows the public research order is 30m, 2h,
         # 1d, then the remaining available horizons.
@@ -287,7 +283,7 @@ def public_research_signal_markup(
             + "".join(values)
             + '</div></div>'
         )
-    if include_market and prices:
+    if prices:
         values: list[str] = []
         for symbol, item in sorted(
             prices.items(),
@@ -531,7 +527,7 @@ def public_time_markup(event: dict[str, object], detail: dict[str, object]) -> s
         '</section>'
     )
 
-st.set_page_config(page_title="风险雷达 · Finance Radar", page_icon="◎", layout="wide")
+st.set_page_config(page_title="态势总览 · Finance Radar", page_icon="◎", layout="wide")
 install_style()
 render_primary_navigation("home")
 
@@ -944,15 +940,11 @@ finally:
 
 preview_event_id = str(st.query_params.get("preview_event_id") or "")
 
-def render_selected_event_preview(selected_event_id: str | None = None) -> None:
-    global preview_event_id
-    if selected_event_id is not None:
-        preview_event_id = selected_event_id
+def render_selected_event_preview() -> None:
     if preview_event_id:
         preview_event_path_id = quote(preview_event_id, safe="")
         st.markdown('<div id="event-preview" class="event-preview-focus"></div>', unsafe_allow_html=True)
-        if UI_ROLE == "admin":
-            focus_event_preview(preview_event_id)
+        focus_event_preview(preview_event_id)
         preview_loading = st.empty()
         preview_loading.markdown(
             '<section class="fr-loading-state fr-loading-compact" role="status" aria-live="polite">'
@@ -1256,113 +1248,19 @@ def render_selected_event_preview(selected_event_id: str | None = None) -> None:
                         '</section>',
                         unsafe_allow_html=True,
                     )
-                    market_signal_markup = public_research_signal_markup(
-                        preview_detail,
-                        public_copy,
-                        include_qwen=False,
+                    st.markdown(
+                        public_time_markup(preview_event, preview_detail),
+                        unsafe_allow_html=True,
                     )
-                    qwen_signal_markup = public_research_signal_markup(
-                        preview_detail,
-                        public_copy,
-                        include_market=False,
+                    research_signal_markup = public_research_signal_markup(
+                        preview_detail, public_copy
                     )
-                    capture_ai_visible = (
-                        preview_capture_explanation.get("display") is True
-                    )
-                    tab_labels = ["来源"]
-                    if market_signal_markup:
-                        tab_labels.append("行情")
-                    if qwen_signal_markup or capture_ai_visible:
-                        tab_labels.append("模型")
-                    tab_labels.append("回放")
-                    tab_handles = dict(zip(tab_labels, st.tabs(tab_labels), strict=True))
-
-                    with tab_handles["来源"]:
-                        source_url = public_source_url(preview_evidence)
-                        capture_url = public_capture_url(preview_sources)
-                        original_url = source_url or capture_url
-                        if original_url:
-                            st.link_button(
-                                "查看原始来源",
-                                original_url,
-                                width="stretch",
-                            )
-
-                    if market_signal_markup:
-                        with tab_handles["行情"]:
-                            st.markdown(
-                                market_signal_markup,
-                                unsafe_allow_html=True,
-                            )
-
-                    if qwen_signal_markup or capture_ai_visible:
-                        with tab_handles["模型"]:
-                            if qwen_signal_markup:
-                                st.markdown(
-                                    qwen_signal_markup,
-                                    unsafe_allow_html=True,
-                                )
-                            if capture_ai_visible:
-                                event_version = int(
-                                    preview_event.get("current_version") or 0
-                                )
-                                explanation_cache = st.session_state.get(
-                                    CAPTURE_EXPLANATION_CACHE_STATE_KEY,
-                                    {},
-                                )
-                                explanation_cache = (
-                                    explanation_cache
-                                    if isinstance(explanation_cache, dict)
-                                    else {}
-                                )
-                                cached_explanation = explanation_cache.get(
-                                    preview_event_id
-                                )
-                                cached_explanation = (
-                                    cached_explanation
-                                    if isinstance(cached_explanation, dict)
-                                    else {}
-                                )
-                                if int(
-                                    cached_explanation.get("version") or -1
-                                ) == event_version:
-                                    cached_payload = cached_explanation.get("payload")
-                                    cached_payload = (
-                                        cached_payload
-                                        if isinstance(cached_payload, dict)
-                                        else {}
-                                    )
-                                else:
-                                    cached_payload = {}
-                                if str(cached_payload.get("state") or "") in {
-                                    "READY",
-                                    "FAILED_TERMINAL",
-                                    "SUPERSEDED",
-                                    "NOT_APPLICABLE",
-                                    "NO_CAPTURE_TEXT",
-                                    "REFETCH_PRIMARY_SOURCE",
-                                    "CLIENT_POLL_PAUSED",
-                                }:
-                                    render_capture_explanation_payload(cached_payload)
-                                else:
-                                    render_capture_explanation_fragment(
-                                        preview_event_path_id,
-                                        preview_event_id,
-                                        event_version,
-                                        preview_capture_explanation,
-                                    )
-
-                    with tab_handles["回放"]:
-                        time_markup = public_time_markup(
-                            preview_event,
-                            preview_detail,
-                        )
-                        if time_markup:
-                            st.markdown(time_markup, unsafe_allow_html=True)
-                        if previous_snapshot is not None and changes_since_view:
-                            st.markdown("**自上次查看后的变化**")
-                            for change in changes_since_view:
-                                st.markdown(f"- {escape(change)}")
+                    if research_signal_markup:
+                        st.markdown(research_signal_markup, unsafe_allow_html=True)
+                    if previous_snapshot is not None and changes_since_view:
+                        st.markdown("**自上次查看后的变化**")
+                        for change in changes_since_view:
+                            st.markdown(f"- {escape(change)}")
                 if preview_evidence and UI_ROLE == "admin":
                     top_evidence = preview_evidence[0]
                     top_passage = (
@@ -1422,6 +1320,46 @@ def render_selected_event_preview(selected_event_id: str | None = None) -> None:
                     st.warning(
                         "采集来源记录暂时无法读取；这不表示原始输入为空，也不改变事件状态。"
                     )
+                if (
+                    UI_ROLE != "admin"
+                    and preview_capture_explanation.get("display") is True
+                ):
+                    event_version = int(preview_event.get("current_version") or 0)
+                    explanation_cache = st.session_state.get(
+                        CAPTURE_EXPLANATION_CACHE_STATE_KEY,
+                        {},
+                    )
+                    explanation_cache = (
+                        explanation_cache if isinstance(explanation_cache, dict) else {}
+                    )
+                    cached_explanation = explanation_cache.get(preview_event_id)
+                    cached_explanation = (
+                        cached_explanation if isinstance(cached_explanation, dict) else {}
+                    )
+                    if int(cached_explanation.get("version") or -1) == event_version:
+                        cached_payload = cached_explanation.get("payload")
+                        cached_payload = (
+                            cached_payload if isinstance(cached_payload, dict) else {}
+                        )
+                    else:
+                        cached_payload = {}
+                    if str(cached_payload.get("state") or "") in {
+                        "READY",
+                        "FAILED_TERMINAL",
+                        "SUPERSEDED",
+                        "NOT_APPLICABLE",
+                        "NO_CAPTURE_TEXT",
+                        "REFETCH_PRIMARY_SOURCE",
+                        "CLIENT_POLL_PAUSED",
+                    }:
+                        render_capture_explanation_payload(cached_payload)
+                    else:
+                        render_capture_explanation_fragment(
+                            preview_event_path_id,
+                            preview_event_id,
+                            event_version,
+                            preview_capture_explanation,
+                        )
                 if UI_ROLE == "admin":
                     render_next_action_prompt(
                         next_action_guidance(preview_event, preview_evidence, preview_model)
@@ -1440,7 +1378,23 @@ def render_selected_event_preview(selected_event_id: str | None = None) -> None:
                         }
                         st.switch_page(page_targets["Event_Intelligence"])
                 else:
-                    close_col = st.container()
+                    method_col, close_col = st.columns([1.25, 1], gap="small")
+                    source_url = public_source_url(preview_evidence)
+                    capture_url = public_capture_url(preview_sources)
+                    if source_url:
+                        method_col.link_button(
+                            "查看原始来源",
+                            source_url,
+                            width="stretch",
+                        )
+                    elif capture_url:
+                        method_col.link_button(
+                            "查看原始来源",
+                            capture_url,
+                            width="stretch",
+                        )
+                    else:
+                        method_col.empty()
                 if UI_ROLE == "admin":
                     if close_col.button(
                         "收起当前页预览",
@@ -1461,8 +1415,7 @@ def render_selected_event_preview(selected_event_id: str | None = None) -> None:
 
 
 
-def render_public_event_feed_panel() -> str:
-    selected_event_id = ""
+def render_public_event_feed_panel() -> None:
     if feed_error is not None:
         st.markdown('<div id="live-events"></div>', unsafe_allow_html=True)
         section_header("事件", "读取失败")
@@ -1528,7 +1481,7 @@ def render_public_event_feed_panel() -> str:
                 "preview_page_size": public_page_size,
                 "preview_page": public_page,
             }
-            selected_event_id = render_event_feed(
+            render_event_feed(
                 live_feed,
                 flow=active_flow,
                 public=True,
@@ -1544,35 +1497,29 @@ def render_public_event_feed_panel() -> str:
                 unsafe_allow_html=True,
             )
         st.markdown(pagination_markup.format(placement="fr-pagination-bottom"), unsafe_allow_html=True)
-    return selected_event_id
 
 
 if UI_ROLE != "admin":
-    if not preview_event_id and live_feed:
-        preview_event_id = str(live_feed[0].get("event_id") or "")
     if preview_event_id:
         st.markdown(
             '<div class="fr-public-reader-workspace-label"><span>事件流</span><strong>当前事件</strong></div>',
             unsafe_allow_html=True,
         )
-        # The submitted UI keeps the event stream mounted while only the selected
-        # detail changes. Render feed first so a slow dossier never blanks the page.
-        public_feed_col, public_detail_col = st.columns([0.98, 1.5], gap="large")
-        with public_feed_col:
-            st.markdown(
-                '<div class="fr-public-reader-feed-panel" aria-hidden="true"></div>',
-                unsafe_allow_html=True,
-            )
-            selected_event_id = render_public_event_feed_panel()
-        if selected_event_id:
-            preview_event_id = selected_event_id
-            st.query_params["preview_event_id"] = selected_event_id
+        # Keep the selected dossier first in DOM/focus order. CSS places the feed
+        # on the left at desktop widths and preserves dossier-first reading on mobile.
+        public_detail_col, public_feed_col = st.columns([1.45, 0.95], gap="large")
         with public_detail_col:
             st.markdown(
                 '<div class="fr-public-reader-detail-panel" aria-hidden="true"></div>',
                 unsafe_allow_html=True,
             )
-            render_selected_event_preview(preview_event_id)
+            render_selected_event_preview()
+        with public_feed_col:
+            st.markdown(
+                '<div class="fr-public-reader-feed-panel" aria-hidden="true"></div>',
+                unsafe_allow_html=True,
+            )
+            render_public_event_feed_panel()
     else:
         render_public_event_feed_panel()
 else:

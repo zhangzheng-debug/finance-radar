@@ -1169,7 +1169,6 @@ ROLLBACK_SERVICE_UNITS=(
 ROLLBACK_PATHS=(
     /etc/finance-radar.env
     /etc/finance-radar-public.env
-    /etc/finance-radar-public-auth.env
     /etc/finance-radar-reviewer-principals.json
     /etc/systemd/system/finance-radar-api.service
     /etc/systemd/system/finance-radar-overview-snapshot.service
@@ -2567,22 +2566,6 @@ printf '%s\n' \
     'FINANCE_RADAR_SHOW_DEBUG=0' \
     > /etc/finance-radar-public.env
 
-# Public login credentials live in a separate root-only file so release
-# installation can recreate the non-secret public environment without copying
-# or exposing authentication material. Preserve an existing credential across
-# in-place releases; a first install stays fail-closed until the owner provisions
-# the two documented variables.
-if [ ! -e /etc/finance-radar-public-auth.env ] && \
-   [ ! -L /etc/finance-radar-public-auth.env ]; then
-    install -m 0600 -o root -g root /dev/null \
-        /etc/finance-radar-public-auth.env
-fi
-[ -f /etc/finance-radar-public-auth.env ] && \
-    [ ! -L /etc/finance-radar-public-auth.env ] || \
-    abort_cutover 'public Web auth environment must be a regular file' 4
-chown root:root /etc/finance-radar-public-auth.env
-chmod 0600 /etc/finance-radar-public-auth.env
-
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-api.service" /etc/systemd/system/
 install -m 0644 "$RELEASE/deployment/systemd/finance-radar-overview-snapshot.service" \
     /etc/systemd/system/
@@ -2790,7 +2773,6 @@ assert_public_web_identity_and_boundary() {
     fi
     runuser -u finance-radar-web -- test -r /etc/finance-radar-public.env || return 1
     if runuser -u finance-radar-web -- test -r /etc/finance-radar.env || \
-       runuser -u finance-radar-web -- test -r /etc/finance-radar-public-auth.env || \
        runuser -u finance-radar-web -- test -r "$RELEASE/.env" || \
        runuser -u finance-radar-web -- test -r "$SHARED/data/finance_radar.sqlite3" || \
        runuser -u finance-radar-web -- test -r "$SHARED/reports"; then

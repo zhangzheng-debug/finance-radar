@@ -9,23 +9,6 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / ".streamlit" / "config.toml"
 STYLE = ROOT / "app" / "web" / "style_v3.css"
 TOKENS = ROOT / "app" / "web" / "design_tokens_v3.css"
-PUBLIC_STYLE = ROOT / "app" / "web" / "public_reader_v4.css"
-
-
-def test_wuyongjia_public_reader_has_independent_desktop_scroll_and_mobile_flow() -> None:
-    style = PUBLIC_STYLE.read_text(encoding="utf-8")
-
-    assert "--fr-canvas: #f6f7f3;" in style
-    assert "--fr-cyan: #007f79;" in style
-    assert 'background: linear-gradient(180deg, #fff, #f0f3ed)' in style
-    assert '[data-testid="stColumn"]:has(.fr-public-reader-detail-panel)' in style
-    assert "max-height: calc(100dvh" in style
-    assert "overflow-y: auto !important;" in style
-    assert "overscroll-behavior: contain !important;" in style
-    assert "scrollbar-gutter: stable !important;" in style
-    assert "@media (max-width: 980px)" in style
-    assert "overflow: visible !important;" in style
-    assert "@media (prefers-reduced-motion: reduce)" in style
 
 
 def test_streamlit_native_page_navigation_is_disabled_before_first_paint() -> None:

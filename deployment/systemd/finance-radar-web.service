@@ -15,7 +15,6 @@ Group=finance-radar-web
 WorkingDirectory=/opt/finance-radar/current
 Slice=finance-radar.slice
 EnvironmentFile=/etc/finance-radar-public.env
-EnvironmentFile=-/etc/finance-radar-public-auth.env
 Environment=FINANCE_RADAR_UI_ROLE=public
 Environment=FINANCE_RADAR_SHOW_DEBUG=0
 UnsetEnvironment=FINANCE_RADAR_ADMIN_TOKEN

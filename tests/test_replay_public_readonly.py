@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from streamlit.testing.v1 import AppTest
 
 import app.web.common as web_common
@@ -15,11 +14,6 @@ import app.web.common as web_common
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "app" / "web" / "pages" / "2_Replay_Lab.py"
 CASES = ROOT / "replay" / "cases" / "cases.json"
-
-
-@pytest.fixture(autouse=True)
-def _authenticated_public_reader(monkeypatch) -> None:
-    monkeypatch.setattr(web_common, "require_public_login", lambda: None)
 
 
 def _page_tree() -> ast.Module:
