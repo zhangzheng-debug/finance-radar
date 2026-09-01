@@ -12,6 +12,7 @@ BACKUP_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-ra
 BACKUP_QUIESCE_WRAPPER = Path(__file__).parents[1] / "deployment" / "systemd" / "run_backup_quiesced.sh"
 WORKER_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-worker.service"
 WORKER_SEND_OVERRIDE = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-worker-send.conf"
+API_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-api.service"
 WEB_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-web.service"
 ADMIN_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-admin.service"
 REVIEWER_UNIT = Path(__file__).parents[1] / "deployment" / "systemd" / "finance-radar-reviewer.service"
@@ -190,7 +191,16 @@ def test_code_only_mode_skips_expensive_recovery_and_dependency_work_fail_closed
     accepted_marker = source.index('write_public_release_marker ACCEPTED', activation_receipt)
     assert activating_marker < activation_receipt < accepted_marker
     assert source.index("require_postcutover_verified_backup ||", activating_marker) < accepted_marker
-    assert source.index("restore_capture_interpretation_runtime", activation_receipt) < accepted_marker
+    capture_restore = source.index(
+        "if ! restore_capture_interpretation_runtime; then", activating_marker
+    )
+    qwen_restore = source.index(
+        "if ! restore_qwen_risk_runtime; then", capture_restore
+    )
+    runtime_alignment = source.index(
+        "assert_model_request_runtime_alignment ||", qwen_restore
+    )
+    assert capture_restore < qwen_restore < runtime_alignment < activation_receipt
     assert '"activation_state": activation_state' in source
     assert '"candidate_release_id": candidate_release_id' in source
     assert '"release_id": accepted_release_id or None' in source
@@ -356,7 +366,7 @@ def test_capture_interpretation_unit_does_not_treat_dev_null_as_an_env_file() ->
     assert '"$mode" = 600' in installer
     assert "DeepSeek LoadCredential source validation failed" in installer
     assert "OnBootSec=2min" in timer
-    assert "OnUnitActiveSec=60s" in timer
+    assert "OnUnitInactiveSec=10s" in timer
     assert "RandomizedDelaySec=5s" in timer
     assert "AccuracySec=5s" in timer
 
@@ -384,6 +394,14 @@ def test_deploy_quiesces_capture_interpretation_and_restores_only_timer_state() 
     assert "did not become quiescent within 480 seconds" in source
     assert "never kills or restarts it" in source
 
+    restore = source.split("restore_capture_interpretation_runtime() {", 1)[1].split(
+        "assert_qwen_risk_worker_quiescent() {", 1
+    )[0]
+    assert 'if [ "$CAPTURE_EXECUTOR_SHOULD_RUN" -eq 1 ]; then' in restore
+    assert 'systemctl enable --now "$timer"' in restore
+    assert 'systemctl is-enabled --quiet "$timer"' in restore
+    assert 'systemctl disable --now "$timer"' in restore
+
 
 def test_qwen_runtime_uses_one_cpu_bound_lane_and_restarts_after_unit_refresh() -> None:
     installer = INSTALLER.read_text(encoding="utf-8")
@@ -395,10 +413,13 @@ def test_qwen_runtime_uses_one_cpu_bound_lane_and_restarts_after_unit_refresh() 
     assert "FINANCE_RADAR_QWEN_RISK_TIMEOUT_SECONDS=120" in worker
     assert "--limit 20 --scan-limit 200 --concurrency 1" in worker
     restore = installer.split("restore_qwen_risk_runtime() {", 1)[1].split(
-        "preserve_failed_predeploy_backup_hold() {", 1
+        "qwen_risk_bundle_ready() {", 1
     )[0]
     assert "systemctl restart finance-radar-qwen-risk-model.service" in restore
     assert "systemctl start finance-radar-qwen-risk-model.service" not in restore
+    assert 'if [ "$QWEN_EXECUTOR_SHOULD_RUN" -eq 1 ]; then' in restore
+    assert 'systemctl enable --now "$timer"' in restore
+    assert 'systemctl is-enabled --quiet "$timer"' in restore
 
 
 def test_direct_nginx_denies_framing_including_release_marker() -> None:
@@ -711,8 +732,31 @@ def test_restore_uses_current_systemd_units_and_never_auto_starts_the_local_llm(
     assert "systemctl disable --now finance-radar-evidence-llm.service || true" in source
     assert "systemctl enable --now finance-radar-evidence-llm.service" not in source
     assert "local_evidence_model=disabled_after_restore" in source
+    for unit in (
+        "radarqwen.slice",
+        "finance-radar-qwen-risk-model.service",
+        "finance-radar-qwen-risk-worker.service",
+        "finance-radar-qwen-risk-worker.timer",
+        "finance-radar-capture-interpretation.service",
+        "finance-radar-capture-interpretation.timer",
+    ):
+        assert unit in source
+    assert "FINANCE_RADAR_CAPTURE_LLM_ENABLED=0" in source
+    assert "FINANCE_RADAR_QWEN_RISK_ENABLED=0" in source
+    assert "deepseek=disabled_restore_policy" in source
+    assert "qwen=disabled_missing_bundle" in source
+    assert "model workers must remain disabled until restore dependencies are reprovisioned" in source
     assert "run_backup_quiesced.sh" in source
     assert "/usr/local/libexec/finance-radar/run_backup_quiesced.sh" in source
+
+    migration = (ACTIVATOR.parent / "create_migration_backup.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "MODEL_RUNTIME_RESTORE_POLICY.txt" in migration
+    assert "deepseek=disabled_restore_policy" in migration
+    assert "qwen=disabled_missing_bundle" in migration
+    assert "finance-radar-capture-interpretation.timer" in migration
+    assert "finance-radar-qwen-risk-worker.timer" in migration
 
 
 def test_restore_accepts_historic_archives_without_a_slice_or_optional_llm_unit() -> None:
@@ -1047,3 +1091,115 @@ def test_installer_stops_and_disables_the_advisory_llm_before_starting_the_worke
         "systemctl start finance-radar-worker"
     )
     assert "advisory evidence LLM must remain stopped and disabled after deployment" in source
+
+
+def test_public_model_request_credential_and_paid_worker_caps_are_versioned() -> None:
+    installer = INSTALLER.read_text(encoding="utf-8")
+    activator = ACTIVATOR.read_text(encoding="utf-8")
+    api_unit = API_UNIT.read_text(encoding="utf-8")
+    web_unit = WEB_UNIT.read_text(encoding="utf-8")
+    capture_unit = CAPTURE_INTERPRETATION_UNIT.read_text(encoding="utf-8")
+    credential = "/etc/finance-radar/public-model-request-token"
+    load = f"LoadCredential=public_model_request_token:{credential}"
+
+    assert load in api_unit
+    assert load in web_unit
+    assert "FINANCE_RADAR_PUBLIC_MODEL_REQUEST_TOKEN" not in api_unit
+    assert "FINANCE_RADAR_PUBLIC_MODEL_REQUEST_TOKEN" not in web_unit
+    assert "FINANCE_RADAR_PUBLIC_MODEL_REQUEST_TOKEN" not in installer
+    assert "install -d -m 0700 -o root -g root /etc/finance-radar" in installer
+    assert "validate_public_model_request_credential()" in installer
+    assert "[0-9A-Fa-f]{64}" in installer
+    assert "stat -c '%u:%g:%a'" in installer
+    assert credential in installer.split("ROLLBACK_PATHS=(", 1)[1].split("\n)", 1)[0]
+    assert "openssl rand -hex 32" in installer
+    assert "parent_mode=0700" in installer
+    assert "existing public model request credential failed preflight before quiesce" in installer
+    assert installer.index(
+        "existing public model request credential failed preflight before quiesce"
+    ) < installer.index("SERVICES_TOUCHED=1")
+    assert "validate_public_model_request_credential()" in activator
+    assert "PUBLIC_MODEL_REQUEST_CREDENTIAL_CREATED=0" in activator
+    assert 'if [ -e "$PUBLIC_MODEL_REQUEST_CREDENTIAL" ]' in activator
+    assert 'rm -f -- "$PUBLIC_MODEL_REQUEST_CREDENTIAL"' in activator
+    assert "openssl rand -hex 32" in activator
+    assert "openssl mktemp stat readlink" in activator
+
+    assert "prepare_model_request_runtime_gates()" in installer
+    assert "assert_model_request_runtime_alignment()" in installer
+    assert "FINANCE_RADAR_CAPTURE_LLM_ENABLED" in installer
+    assert "FINANCE_RADAR_QWEN_RISK_ENABLED" in installer
+    gate_prepare = installer.index("prepare_model_request_runtime_gates ||")
+    api_restart = installer.index("systemctl restart finance-radar-api finance-radar-web")
+    runtime_restore = installer.index("if ! restore_capture_interpretation_runtime; then")
+    alignment = installer.index("assert_model_request_runtime_alignment ||")
+    assert gate_prepare < api_restart < runtime_restore < alignment
+
+    assert (
+        "CAPTURE_REQUEST_ACTIVATION=${FINANCE_RADAR_CAPTURE_REQUEST_ACTIVATION:-preserve}"
+        in installer
+    )
+    assert (
+        "QWEN_REQUEST_ACTIVATION=${FINANCE_RADAR_QWEN_REQUEST_ACTIVATION:-preserve}"
+        in installer
+    )
+    prepare = installer.split("prepare_model_request_runtime_gates() {", 1)[1].split(
+        "assert_model_request_runtime_alignment() {", 1
+    )[0]
+    assert "PREVIOUS_CAPTURE_REQUEST_GATE" in prepare
+    assert "PREVIOUS_QWEN_REQUEST_GATE" in prepare
+    assert 'CAPTURE_REQUEST_GATE="$PREVIOUS_CAPTURE_REQUEST_GATE"' in prepare
+    assert 'QWEN_REQUEST_GATE="$PREVIOUS_QWEN_REQUEST_GATE"' in prepare
+    assert "CAPTURE_EXECUTOR_SHOULD_RUN" in prepare
+    assert "QWEN_EXECUTOR_SHOULD_RUN" in prepare
+    assert "enable) CAPTURE_REQUEST_GATE=1; CAPTURE_EXECUTOR_SHOULD_RUN=1" in prepare
+    assert "disable) CAPTURE_REQUEST_GATE=0; CAPTURE_EXECUTOR_SHOULD_RUN=0" in prepare
+    assert "enable) QWEN_REQUEST_GATE=1; QWEN_EXECUTOR_SHOULD_RUN=1" in prepare
+    assert "disable) QWEN_REQUEST_GATE=0; QWEN_EXECUTOR_SHOULD_RUN=0" in prepare
+    assert "capture public request gate is enabled without a restorable executor" in prepare
+    assert "Qwen public request gate is enabled without a restorable executor" in prepare
+    assert "cannot explicitly enable DeepSeek requests without a validated credential" in installer
+    assert "cannot explicitly enable Qwen requests without the accepted model bundle" in installer
+
+    align = installer.split("assert_model_request_runtime_alignment() {", 1)[1].split(
+        "preserve_failed_predeploy_backup_hold() {", 1
+    )[0]
+    assert "systemctl is-active --quiet finance-radar-capture-interpretation.timer" in align
+    assert "systemctl is-enabled --quiet finance-radar-capture-interpretation.timer" in align
+    assert "systemctl is-active --quiet finance-radar-qwen-risk-model.service" in align
+    assert "systemctl is-enabled --quiet finance-radar-qwen-risk-worker.timer" in align
+
+    rollback = installer.split("rollback() {", 1)[1].split("abort_cutover() {", 1)[0]
+    assert "freeze_model_request_runtime_for_rollback" in rollback
+    freeze = installer.split("freeze_model_request_runtime_for_rollback() {", 1)[1].split(
+        "rollback() {", 1
+    )[0]
+    timer_stop = freeze.index('systemctl stop "$timer" || return 1')
+    capture_quiescent = freeze.index("assert_capture_interpretation_quiescent")
+    qwen_quiescent = freeze.index("assert_qwen_risk_worker_quiescent")
+    model_stop = freeze.index("systemctl stop finance-radar-qwen-risk-model.service")
+    assert timer_stop < capture_quiescent < qwen_quiescent < model_stop
+    assert '! systemctl is-active --quiet "$timer" || return 1' in freeze
+    rollback_model_freeze = installer.index(
+        "if ! freeze_model_request_runtime_for_rollback; then",
+        installer.index("rollback() {"),
+    )
+    assert "activation_state=ROLLBACK_BLOCKED" in rollback
+    assert "refusing cross-version restore" in rollback
+    assert "record_rollback_blocked model_request_runtime_freeze_failed" in rollback
+    assert "ROLLBACK_BLOCKED.txt" in installer
+    receipt_revoke = rollback.index('rm -f -- "$RELEASE_RECORDS/ACTIVATION.txt"')
+    freeze_attempt = rollback.index("if ! freeze_model_request_runtime_for_rollback; then")
+    assert receipt_revoke < freeze_attempt
+    rollback_symlink_restore = installer.index(
+        'ln -sfn "$PREVIOUS_RELEASE" "$BASE/current"', rollback_model_freeze
+    )
+    rollback_env_restore = installer.index(
+        'for path in "${ROLLBACK_PATHS[@]}"', rollback_model_freeze
+    )
+    assert rollback_model_freeze < rollback_symlink_restore < rollback_env_restore
+
+    assert "Environment=FINANCE_RADAR_CAPTURE_LLM_DAILY_CNY_CAP=5.0" in capture_unit
+    assert "Environment=FINANCE_RADAR_CAPTURE_LLM_DAILY_REQUEST_CAP=500" in capture_unit
+    assert "Environment=FINANCE_RADAR_CAPTURE_LLM_DAILY_CNY_CAP=0" not in capture_unit
+    assert "Environment=FINANCE_RADAR_CAPTURE_LLM_DAILY_REQUEST_CAP=0" not in capture_unit

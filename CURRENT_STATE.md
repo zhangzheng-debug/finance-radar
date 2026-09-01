@@ -1,5 +1,26 @@
 # Finance Radar current state
 
+## 2026-09-01 `2026.09.01.2` 模型按需处理改为真实生命周期
+
+Public 打开事件详情时，只向回环 FastAPI 提交一次与当前事件版本绑定的幂等请求；页面轮询仍为
+只读。千问使用 `event_id + event_version + input_sha256 + model_version` 作为精确身份，先处理当前
+阅读事件，再继续最近事件与公平扫描。只有 worker 已原子领取且心跳新鲜时才显示“研判中”；真实
+排队显示“已排队”，结果落库后才显示方向、重大性与强弱，存储故障和过期心跳不再伪装成处理状态。
+
+DeepSeek 仍仅用于当前没有 reader-eligible 可引用证据、但保留了可读来源文本的边界事件。已持久化
+的按需任务优先于库存扫描；调用前重新核对事件版本、来源收据和输入哈希。worker 租约过期会立刻
+退出“运行中”，同一代失败保持终态，不用旧输出补位。Public Web 与 API 之间使用独立的 root-only
+systemd credential，模型请求单独限流；生产 DeepSeek 日上限固定为 5 CNY / 500 次，避免浏览触发
+无界付费调用。
+
+标准部署把公开请求授权与后台执行器意图分开保存，并允许分别通过
+`FINANCE_RADAR_CAPTURE_REQUEST_ACTIVATION` 和 `FINANCE_RADAR_QWEN_REQUEST_ACTIVATION`
+显式选择 `preserve`、`enable` 或 `disable`。启用状态只有在依赖可用、timer 同时 active/enabled、
+千问模型服务 active 后才写入 ACCEPTED 收据；回滚会先冻结两条模型写入链，再恢复旧版本与旧状态。
+
+上述两条模型链都只生成只读研究辅助，不改变事件事实、证据状态、公开排序、价格审计或任何交易
+行为。生产是否已运行、具体 provider 错误和公网端到端结果仍须绑定本次 Release 在 AWS 现场验收。
+
 ## 2026-08-30 `2026.08.30.2` 千问 v3 混合语义研判上线
 
 项目负责人明确授权将当前效果最好的 Qwen2.5-1.5B v3 LoRA 与窄规则锚点作为生产研究语义

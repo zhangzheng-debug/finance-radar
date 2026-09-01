@@ -70,6 +70,9 @@ CAPTURE_EXPLANATION_CACHE_STATE_KEY = "public_capture_explanation_v1"
 CAPTURE_EXPLANATION_FAST_POLLS = 15
 CAPTURE_EXPLANATION_SLOW_POLL_SECONDS = 15
 QWEN_SIGNAL_CACHE_STATE_KEY = "public_qwen_signal_v1"
+MODEL_REQUEST_STATE_KEY = "public_model_request_v1"
+MODEL_REQUEST_RETRY_SECONDS = 10
+MODEL_REQUEST_MAX_ATTEMPTS = 3
 
 
 def bounded_int(value: object, default: int, *, minimum: int, maximum: int) -> int:
@@ -115,7 +118,7 @@ def public_capture_url(sources: list[dict[str, object]]) -> str | None:
 
 
 def render_capture_explanation_payload(payload: dict[str, object]) -> None:
-    """Render the cache-only DeepSeek lifecycle without blocking the dossier."""
+    """Render the persisted DeepSeek lifecycle without blocking the dossier."""
 
     if not payload.get("display"):
         return
@@ -143,20 +146,11 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
                 st.markdown(f"- {escape(str(claim.get('text_zh') or ''))}")
         return
 
-    if state in {
-        "CHECKING",
-        "PENDING",
-        "STATUS_UNAVAILABLE",
-        "ELIGIBLE_NOT_QUEUED",
-        "QUEUED",
-        "RUNNING",
-        "RETRY_WAIT",
-        "SUPERSEDED",
-    }:
+    if state == "RUNNING":
         st.markdown(
             '<section class="model-status-card is-deepseek" role="status" aria-live="polite">'
             '<div class="model-status-head"><strong>DeepSeek 阅读辅助</strong><small>生成中</small></div>'
-            '<p class="model-status-copy">因为该事件当前没有关联证据，系统启动 AI 阅读解释。</p>'
+            '<p class="model-status-copy">正在阅读来源文本。</p>'
             '<div class="model-status-skeleton" aria-hidden="true">'
             '<span class="model-status-skeleton-line"></span>'
             '<span class="model-status-skeleton-line"></span>'
@@ -165,11 +159,11 @@ def render_capture_explanation_payload(payload: dict[str, object]) -> None:
         )
         return
 
-    if state == "FAILED_TERMINAL":
+    if state == "QUEUED":
         st.markdown(
-            '<section class="model-status-card is-deepseek">'
-            '<div class="model-status-head"><strong>来源文本</strong></div>'
-            '<p class="model-status-copy">来源内容已保留，可直接阅读。</p>'
+            '<section class="model-status-card is-deepseek" role="status">'
+            '<div class="model-status-head"><strong>DeepSeek 阅读辅助</strong><small>已排队</small></div>'
+            '<p class="model-status-copy">后台处理已登记。</p>'
             '</section>',
             unsafe_allow_html=True,
         )
@@ -392,6 +386,74 @@ def public_research_signal_markup(
     )
 
 
+def request_public_model_once(
+    event_path_id: str,
+    event_id: str,
+    event_version: int,
+    kind: str,
+    initial_state: str,
+) -> dict[str, object]:
+    """Submit one idempotent request outside polling fragments."""
+
+    if kind not in {"semantic-assessment", "capture-explanation"}:
+        return {}
+    eligible_states = (
+        {"NOT_REQUESTED"}
+        if kind == "semantic-assessment"
+        else {"ELIGIBLE_NOT_QUEUED", "ELIGIBLE_REQUESTABLE"}
+    )
+    if initial_state not in eligible_states:
+        return {}
+    cache = st.session_state.get(MODEL_REQUEST_STATE_KEY, {})
+    cache = cache if isinstance(cache, dict) else {}
+    key = f"{kind}:{event_id}:{event_version}"
+    previous = cache.get(key)
+    previous = previous if isinstance(previous, dict) else {}
+    attempts = int(previous.get("attempts") or 0)
+    now = datetime.now(timezone.utc)
+    last_attempt_at = str(previous.get("last_attempt_at") or "")
+    previous_response = previous.get("response")
+    previous_response = previous_response if isinstance(previous_response, dict) else {}
+    if str(previous_response.get("state") or "") in {
+        "READY",
+        "NOT_APPLICABLE",
+    }:
+        return dict(previous_response)
+    if last_attempt_at:
+        try:
+            last_attempt = datetime.fromisoformat(last_attempt_at.replace("Z", "+00:00"))
+        except ValueError:
+            last_attempt = now - timedelta(seconds=MODEL_REQUEST_RETRY_SECONDS)
+        if (now - last_attempt).total_seconds() < MODEL_REQUEST_RETRY_SECONDS:
+            return dict(previous_response)
+    if attempts >= MODEL_REQUEST_MAX_ATTEMPTS:
+        return dict(previous_response)
+    response: dict[str, object] = {}
+    attempts += 1
+    try:
+        requested = api_request(
+            f"/api/v1/events/{event_path_id}/{kind}/request",
+            method="POST",
+            json_body={
+                "event_version": event_version,
+                "request_source": "PUBLIC_EVENT_VIEW",
+            },
+            timeout_seconds=3,
+        )
+        if isinstance(requested, dict):
+            response = requested
+    except Exception:
+        # A local request failure is not a model lifecycle state.
+        response = {}
+    cache[key] = {
+        "attempts": attempts,
+        "last_attempt_at": now.isoformat(),
+        "response": response,
+    }
+    st.session_state[MODEL_REQUEST_STATE_KEY] = cache
+    return response
+
+
 @st.fragment(run_every="2s")
 def render_capture_explanation_fragment(
     event_path_id: str,
@@ -399,16 +461,14 @@ def render_capture_explanation_fragment(
     event_version: int,
     initial_payload: dict[str, object],
 ) -> None:
-    """Poll the cache-only endpoint without inventing a local queue state."""
+    """Poll and render only server-proven DeepSeek lifecycle states."""
 
     cache = st.session_state.get(CAPTURE_EXPLANATION_CACHE_STATE_KEY, {})
     cache = cache if isinstance(cache, dict) else {}
     previous = cache.get(event_id)
     previous = previous if isinstance(previous, dict) else {}
     previous_payload = previous.get("payload")
-    previous_payload = (
-        previous_payload if isinstance(previous_payload, dict) else {}
-    )
+    previous_payload = previous_payload if isinstance(previous_payload, dict) else {}
     if int(previous.get("version") or -1) != event_version:
         previous = {}
         previous_payload = {}
@@ -428,13 +488,20 @@ def render_capture_explanation_fragment(
             timeout_seconds=3,
         )
     except Exception:
-        if previous_payload:
-            payload = dict(previous_payload)
-        else:
-            payload = dict(initial_payload)
-            payload["display"] = bool(initial_payload.get("display"))
-            payload["state"] = "STATUS_UNAVAILABLE"
-            payload.setdefault("item", None)
+        payload = dict(previous_payload or initial_payload)
+        payload["state"] = "STATUS_UNAVAILABLE"
+        payload.setdefault("item", None)
+    state = str(payload.get("state") or "")
+    if state in {"ELIGIBLE_NOT_QUEUED", "ELIGIBLE_REQUESTABLE"}:
+        requested = request_public_model_once(
+            event_path_id,
+            event_id,
+            event_version,
+            "capture-explanation",
+            state,
+        )
+        if requested:
+            payload = requested
     polls = int(previous.get("polls") or 0) + 1
     state = str(payload.get("state") or "")
     settled = state in {
@@ -465,7 +532,7 @@ def render_qwen_signal_fragment(
     event_version: int,
     initial_assessment: object,
 ) -> None:
-    """Refresh the current, public-approved Qwen result without reloading the page."""
+    """Poll and render only server-proven Qwen lifecycle states."""
 
     initial_markup = public_qwen_signal_markup(public_qwen_copy(initial_assessment))
     cache = st.session_state.get(QWEN_SIGNAL_CACHE_STATE_KEY, {})
@@ -491,15 +558,24 @@ def render_qwen_signal_fragment(
         )
     except Exception:
         if previous_state == "READY":
-            markup = public_qwen_signal_markup(
-                public_qwen_copy(previous.get("assessment"))
-            )
+            markup = public_qwen_signal_markup(public_qwen_copy(previous.get("assessment")))
             if markup:
                 st.markdown(markup, unsafe_allow_html=True)
-            return
-        payload = {"state": "PROCESSING", "assessment": None}
-    state = str(payload.get("state") or "PROCESSING")
+        return
+    state = str(payload.get("state") or "UNAVAILABLE")
     assessment = payload.get("assessment")
+    if state in {"NOT_REQUESTED", "FAILED"} and payload.get("requestable") is True:
+        requested = request_public_model_once(
+            event_path_id,
+            event_id,
+            event_version,
+            "semantic-assessment",
+            "NOT_REQUESTED",
+        )
+        if requested:
+            payload = requested
+            state = str(payload.get("state") or "UNAVAILABLE")
+            assessment = payload.get("assessment")
     cache[event_id] = {
         "version": event_version,
         "state": state,
@@ -511,14 +587,23 @@ def render_qwen_signal_fragment(
         if markup:
             st.markdown(markup, unsafe_allow_html=True)
         return
-    if state == "PROCESSING":
+    if state == "RUNNING":
         st.markdown(
             '<section class="model-status-card is-qwen" role="status" aria-live="polite">'
-            '<div class="model-status-head"><strong>千问研判</strong><small>生成中</small></div>'
-            '<p class="model-status-copy">事件方向与强弱正在生成。</p>'
+            '<div class="model-status-head"><strong>千问研判</strong><small>研判中</small></div>'
+            '<p class="model-status-copy">模型正在处理当前事件。</p>'
             '<div class="model-status-skeleton" aria-hidden="true">'
             '<span class="model-status-skeleton-line"></span>'
             '</div></section>',
+            unsafe_allow_html=True,
+        )
+        return
+    if state == "QUEUED":
+        st.markdown(
+            '<section class="model-status-card is-qwen" role="status">'
+            '<div class="model-status-head"><strong>千问研判</strong><small>已排队</small></div>'
+            '<p class="model-status-copy">后台任务已登记。</p>'
+            '</section>',
             unsafe_allow_html=True,
         )
 
@@ -1389,6 +1474,16 @@ def render_selected_event_preview() -> None:
                         unsafe_allow_html=True,
                     )
                     if preview_load_error is None:
+                        if not public_qwen_signal_markup(
+                            public_qwen_copy(copy_input.get("semantic_assessment"))
+                        ):
+                            request_public_model_once(
+                                preview_event_path_id,
+                                preview_event_id,
+                                int(preview_event.get("current_version") or 0),
+                                "semantic-assessment",
+                                "NOT_REQUESTED",
+                            )
                         render_qwen_signal_fragment(
                             preview_event_path_id,
                             preview_event_id,
@@ -1468,6 +1563,15 @@ def render_selected_event_preview() -> None:
                     and preview_capture_explanation.get("display") is True
                 ):
                     event_version = int(preview_event.get("current_version") or 0)
+                    requested_explanation = request_public_model_once(
+                        preview_event_path_id,
+                        preview_event_id,
+                        event_version,
+                        "capture-explanation",
+                        str(preview_capture_explanation.get("state") or ""),
+                    )
+                    if requested_explanation:
+                        preview_capture_explanation = requested_explanation
                     render_capture_explanation_fragment(
                         preview_event_path_id,
                         preview_event_id,

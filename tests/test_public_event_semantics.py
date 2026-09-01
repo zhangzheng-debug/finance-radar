@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -585,8 +586,11 @@ def _api_settings(root: Path, ledger_path: Path) -> Settings:
         replay_dir=ROOT / "replay" / "cases",
         demo_mode="RECENT_CAPTURE",
         admin_token="test-secret",
+        public_model_request_token="p" * 64,
         api_base_url="http://testserver",
         web_base_url="http://testserver",
+        capture_llm_enabled=True,
+        qwen_risk_enabled=True,
     )
 
 
@@ -855,8 +859,17 @@ def _semantic_assessment_payload(client: TestClient) -> dict:
     response = client.get("/api/v1/events/semantic-event/semantic-assessment")
     assert response.status_code == 200
     payload = response.json()["data"]
-    assert set(payload) == {"state", "assessment", "cache_only"}
-    assert payload["state"] in {"READY", "PROCESSING", "NOT_APPLICABLE"}
+    assert {"state", "assessment", "cache_only", "requestable"}.issubset(payload)
+    assert payload["state"] in {
+        "READY",
+        "NOT_REQUESTED",
+        "QUEUED",
+        "RUNNING",
+        "RETRY_WAIT",
+        "FAILED",
+        "NOT_APPLICABLE",
+        "UNAVAILABLE",
+    }
     assert payload["cache_only"] is True
     serialized = json.dumps(payload, ensure_ascii=False)
     for private_marker in (
@@ -910,8 +923,8 @@ def test_semantic_assessment_endpoint_returns_only_current_public_qwen_result(
     assert assessment["current"] is True
 
     # A changed source invalidates the completed input immediately, but the
-    # public endpoint must collapse that internal stale condition into the
-    # same non-alarming PROCESSING state used while the worker catches up.
+    # A changed source invalidates the old result. A read remains side-effect
+    # free and reports that no exact request exists for the new input.
     with sqlite3.connect(ledger_path) as connection:
         connection.execute(
             "UPDATE raw_observations SET title='Revised source title',content_sha256=? "
@@ -922,9 +935,10 @@ def test_semantic_assessment_endpoint_returns_only_current_public_qwen_result(
     with TestClient(create_app(settings)) as client:
         invalidated = _semantic_assessment_payload(client)
     assert invalidated == {
-        "state": "PROCESSING",
+        "state": "NOT_REQUESTED",
         "assessment": None,
         "cache_only": True,
+        "requestable": True,
     }
 
 
@@ -944,13 +958,464 @@ def test_semantic_assessment_endpoint_is_cache_only_while_qwen_is_unprocessed(
         second = _semantic_assessment_payload(client)
 
     assert first == second == {
-        "state": "PROCESSING",
+        "state": "NOT_REQUESTED",
         "assessment": None,
         "cache_only": True,
+        "requestable": True,
     }
     with sqlite3.connect(settings.operations_db) as connection:
         after = connection.execute("SELECT COUNT(*) FROM model_runs").fetchone()[0]
     assert after == before == 0
+
+
+def test_public_qwen_request_is_loopback_authenticated_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    _approve_qwen_publication(operations, adapter_sha256="a" * 64)
+    application = create_app(settings)
+    headers = {"X-Public-Model-Request-Token": "p" * 64}
+    body = {"event_version": 1, "request_source": "PUBLIC_EVENT_VIEW"}
+
+    with TestClient(application, client=("127.0.0.1", 50000)) as client:
+        before = client.get("/api/v1/events/semantic-event/semantic-assessment")
+        assert before.json()["data"]["state"] == "NOT_REQUESTED"
+        first = client.post(
+            "/api/v1/events/semantic-event/semantic-assessment/request",
+            headers=headers,
+            json=body,
+        )
+        second = client.post(
+            "/api/v1/events/semantic-event/semantic-assessment/request",
+            headers=headers,
+            json=body,
+        )
+        assert first.status_code == second.status_code == 200
+        assert first.json()["data"]["state"] == "QUEUED"
+        assert second.json()["data"]["state"] == "QUEUED"
+
+    queued = operations.get_state("qwen_risk_priority_queue_v1", {})["items"]
+    assert len(queued) == 1
+    assert queued[0]["event_id"] == "semantic-event"
+    with sqlite3.connect(settings.operations_db) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM model_runs").fetchone()[0] == 0
+
+
+def test_public_qwen_retry_state_requires_future_work_and_can_requeue(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    _approve_qwen_publication(operations, adapter_sha256="a" * 64)
+    application = create_app(settings)
+    headers = {"X-Public-Model-Request-Token": "p" * 64}
+    body = {"event_version": 1, "request_source": "PUBLIC_EVENT_VIEW"}
+    endpoint = "/api/v1/events/semantic-event/semantic-assessment"
+
+    with TestClient(application, client=("127.0.0.1", 50000)) as client:
+        assert client.post(f"{endpoint}/request", headers=headers, json=body).status_code == 200
+        queued = operations.get_state("qwen_risk_priority_queue_v1", {})["items"][0]
+        identity = (
+            str(queued["event_id"]),
+            int(queued["event_version"]),
+            str(queued["input_sha256"]),
+            str(queued["model_version"]),
+        )
+        operations.set_state("qwen_risk_priority_queue_v1", {"items": []})
+
+        operations.set_qwen_risk_activity(
+            *identity,
+            "FAILED",
+            error_code="MODEL_TIMEOUT",
+            now=datetime.now(timezone.utc),
+        )
+        waiting = client.get(endpoint).json()["data"]
+        assert waiting["state"] == "RETRY_WAIT"
+        assert waiting["requestable"] is False
+        assert waiting["retry_after"]
+
+        operations.set_qwen_risk_activity(
+            *identity,
+            "FAILED",
+            error_code="MODEL_TIMEOUT",
+            now=datetime.now(timezone.utc) - timedelta(minutes=2),
+        )
+        expired = client.get(endpoint).json()["data"]
+        assert expired["state"] == "FAILED"
+        assert expired["requestable"] is True
+        assert expired["retry_after"] is None
+
+        retried = client.post(f"{endpoint}/request", headers=headers, json=body)
+        assert retried.status_code == 200
+        assert retried.json()["data"]["state"] == "QUEUED"
+
+
+def test_public_model_request_rejects_missing_token_and_non_loopback_peer(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    body = {"event_version": 1, "request_source": "PUBLIC_EVENT_VIEW"}
+    application = create_app(settings)
+
+    with TestClient(application, client=("127.0.0.1", 50000)) as client:
+        missing = client.post(
+            "/api/v1/events/semantic-event/semantic-assessment/request",
+            json=body,
+        )
+    with TestClient(application, client=("203.0.113.9", 50000)) as client:
+        remote = client.post(
+            "/api/v1/events/semantic-event/semantic-assessment/request",
+            headers={"X-Public-Model-Request-Token": "p" * 64},
+            json=body,
+        )
+    assert missing.status_code == 403
+    assert remote.status_code == 403
+
+
+def test_disabled_model_capabilities_never_accept_or_queue_public_work(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    enabled = _api_settings(tmp_path, ledger_path)
+    settings = Settings(
+        **{
+            **enabled.__dict__,
+            "capture_llm_enabled": False,
+            "qwen_risk_enabled": False,
+        }
+    )
+    operations = OperationsRepository(settings.operations_db)
+    _approve_qwen_publication(operations, adapter_sha256="a" * 64)
+    headers = {"X-Public-Model-Request-Token": "p" * 64}
+    body = {"event_version": 1, "request_source": "PUBLIC_EVENT_VIEW"}
+
+    with TestClient(create_app(settings), client=("127.0.0.1", 50000)) as client:
+        qwen_get = client.get(
+            "/api/v1/events/semantic-event/semantic-assessment"
+        ).json()["data"]
+        qwen_post = client.post(
+            "/api/v1/events/semantic-event/semantic-assessment/request",
+            headers=headers,
+            json=body,
+        ).json()["data"]
+        deepseek_get = client.get(
+            "/api/v1/events/semantic-event/capture-explanation"
+        ).json()["data"]
+        deepseek_post = client.post(
+            "/api/v1/events/semantic-event/capture-explanation/request",
+            headers=headers,
+            json=body,
+        ).json()["data"]
+
+    assert qwen_get["state"] == qwen_post["state"] == "UNAVAILABLE"
+    assert deepseek_get["state"] == deepseek_post["state"] == "UNAVAILABLE"
+    assert operations.get_state("qwen_risk_priority_queue_v1", {"items": []})[
+        "items"
+    ] == []
+    assert operations.capture_interpretation_runs("semantic-event", limit=20) == []
+
+
+def test_public_deepseek_request_enqueues_once_without_calling_provider(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    application = create_app(settings)
+    headers = {"X-Public-Model-Request-Token": "p" * 64}
+    body = {"event_version": 1, "request_source": "PUBLIC_EVENT_VIEW"}
+
+    with TestClient(application, client=("127.0.0.1", 50000)) as client:
+        first = client.post(
+            "/api/v1/events/semantic-event/capture-explanation/request",
+            headers=headers,
+            json=body,
+        )
+        second = client.post(
+            "/api/v1/events/semantic-event/capture-explanation/request",
+            headers=headers,
+            json=body,
+        )
+        assert first.status_code == second.status_code == 200
+        assert first.json()["data"]["state"] == "QUEUED"
+        assert second.json()["data"]["state"] == "QUEUED"
+
+    runs = operations.capture_interpretation_runs("semantic-event", limit=20)
+    assert len(runs) == 1
+    assert runs[0]["status"] == "PENDING"
+    assert runs[0]["provider"] == "deepseek"
+    assert runs[0]["attempts"] == 0
+    priority = operations.get_state(
+        "capture_interpretation_public_priority_v1", {}
+    )["items"]
+    assert len(priority) == 1
+    assert priority[0]["interpretation_id"] == runs[0]["interpretation_id"]
+    assert priority[0]["input_sha256"] == runs[0]["input_sha256"]
+
+
+def test_public_deepseek_promotes_an_existing_background_pending_run(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    ledger = LedgerRepository(ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    detail = ledger.event_detail("semantic-event")
+    capture = ledger.captured_sources("semantic-event")[0]
+    normalized = normalized_capture_input(detail["event"], capture)
+    run_id, inserted = operations.enqueue_capture_interpretation(
+        "semantic-event",
+        str(capture["observation_id"]),
+        normalized,
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        provider="deepseek",
+        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+        external_call=True,
+    )
+    assert inserted is True
+    assert operations.get_state("capture_interpretation_public_priority_v1", {}) == {}
+
+    with TestClient(
+        create_app(settings), client=("127.0.0.1", 50000)
+    ) as client:
+        response = client.post(
+            "/api/v1/events/semantic-event/capture-explanation/request",
+            headers={"X-Public-Model-Request-Token": "p" * 64},
+            json={"event_version": 1, "request_source": "PUBLIC_EVENT_VIEW"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["state"] == "QUEUED"
+    priority = operations.get_state(
+        "capture_interpretation_public_priority_v1", {}
+    )["items"]
+    assert [item["interpretation_id"] for item in priority] == [run_id]
+
+
+def test_priority_queue_full_does_not_leave_orphan_pending_and_can_retry(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    allow_priority = False
+    original = OperationsRepository.enqueue_capture_interpretation_priority
+
+    def bounded(self, *args, **kwargs):
+        if not allow_priority:
+            return False
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        OperationsRepository,
+        "enqueue_capture_interpretation_priority",
+        bounded,
+    )
+    endpoint = "/api/v1/events/semantic-event/capture-explanation/request"
+    headers = {"X-Public-Model-Request-Token": "p" * 64}
+    body = {"event_version": 1, "request_source": "PUBLIC_EVENT_VIEW"}
+    operations = OperationsRepository(settings.operations_db)
+
+    with TestClient(
+        create_app(settings), client=("127.0.0.1", 50000)
+    ) as client:
+        full = client.post(endpoint, headers=headers, json=body)
+        assert full.status_code == 429
+        failed = operations.capture_interpretation_runs(
+            "semantic-event", limit=1
+        )[0]
+        assert failed["status"] == "FAILED"
+        assert failed["error"] == "PUBLIC_PRIORITY_QUEUE_FULL"
+
+        allow_priority = True
+        retried = client.post(endpoint, headers=headers, json=body)
+        assert retried.status_code == 200
+        assert retried.json()["data"]["state"] == "RETRY_WAIT"
+
+    current = operations.capture_interpretation_runs("semantic-event", limit=1)[0]
+    assert current["status"] == "PENDING"
+    assert current["attempts"] == 1
+    assert operations.get_state(
+        "capture_interpretation_public_priority_v1", {}
+    )["items"][0]["interpretation_id"] == current["interpretation_id"]
+
+
+def test_public_deepseek_failed_exact_request_has_bounded_requeue(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    application = create_app(settings)
+    headers = {"X-Public-Model-Request-Token": "p" * 64}
+    body = {"event_version": 1, "request_source": "PUBLIC_EVENT_VIEW"}
+    endpoint = "/api/v1/events/semantic-event/capture-explanation/request"
+
+    with TestClient(application, client=("127.0.0.1", 50000)) as client:
+        assert client.post(endpoint, headers=headers, json=body).status_code == 200
+        run = operations.capture_interpretation_runs("semantic-event", limit=1)[0]
+        run_id = str(run["interpretation_id"])
+        for request_no in range(1, 6):
+            operations.fail_capture_interpretation(run_id, "terminal")
+            response = client.post(endpoint, headers=headers, json=body)
+            assert response.status_code == 200
+            current = operations.capture_interpretation_runs(
+                "semantic-event", limit=1
+            )[0]
+            if request_no <= 4:
+                assert response.json()["data"]["state"] == "RETRY_WAIT"
+                assert current["status"] == "PENDING"
+                assert current["attempts"] == request_no
+            else:
+                assert response.json()["data"]["state"] == "FAILED_TERMINAL"
+                assert current["status"] == "FAILED"
+                assert current["attempts"] == 4
+
+
+def test_public_deepseek_ignores_old_completed_input_and_enqueues_current_version(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    settings = _api_settings(tmp_path, ledger_path)
+    ledger = LedgerRepository(ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    detail = ledger.event_detail("semantic-event")
+    capture = ledger.captured_sources("semantic-event")[0]
+    old_event = {**detail["event"], "current_version": 0}
+    old_normalized = normalized_capture_input(old_event, capture)
+    old_id, _ = operations.enqueue_capture_interpretation(
+        "semantic-event",
+        str(capture["observation_id"]),
+        old_normalized,
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        provider="deepseek",
+        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+        external_call=True,
+    )
+    with sqlite3.connect(settings.operations_db) as connection:
+        connection.execute(
+            "UPDATE capture_interpretation_runs SET status='COMPLETED' "
+            "WHERE interpretation_id=?",
+            (old_id,),
+        )
+        connection.commit()
+    endpoint = "/api/v1/events/semantic-event/capture-explanation"
+    request_endpoint = endpoint + "/request"
+    headers = {"X-Public-Model-Request-Token": "p" * 64}
+    body = {"event_version": 1, "request_source": "PUBLIC_EVENT_VIEW"}
+
+    with TestClient(
+        create_app(settings), client=("127.0.0.1", 50000)
+    ) as client:
+        assert client.get(endpoint).json()["data"]["state"] == "ELIGIBLE_NOT_QUEUED"
+        response = client.post(request_endpoint, headers=headers, json=body)
+        assert response.status_code == 200
+        assert response.json()["data"]["state"] == "QUEUED"
+
+    runs = operations.capture_interpretation_runs("semantic-event", limit=20)
+    assert len(runs) == 2
+    assert {str(run["input_sha256"]) for run in runs} == {
+        str(old_normalized["input_sha256"]),
+        str(normalized_capture_input(detail["event"], capture)["input_sha256"]),
+    }
+
+
+def test_public_deepseek_failure_on_one_capture_does_not_block_another(
+    tmp_path: Path,
+) -> None:
+    ledger_path = tmp_path / "ledger.sqlite3"
+    _captured_event_ledger(ledger_path)
+    with sqlite3.connect(ledger_path) as connection:
+        connection.execute(
+            """INSERT INTO raw_observations(
+                   observation_id,source_id,external_id,source_published_at,local_received_at,
+                   title,summary,canonical_url,content_sha256,raw_json,observation_status
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "semantic-observation-2",
+                "src",
+                "semantic-external-2",
+                "2026-08-23T00:00:00+00:00",
+                "2026-08-23T00:00:01+00:00",
+                "Second captured report",
+                "A distinct retained capture for the same event.",
+                "https://example.test/report-2",
+                "2" * 64,
+                "{}",
+                "captured",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO event_observations VALUES (?,?,?,?)",
+            (
+                "semantic-event",
+                "semantic-observation-2",
+                "discovery",
+                "2026-08-23T00:00:01+00:00",
+            ),
+        )
+        connection.commit()
+    settings = _api_settings(tmp_path, ledger_path)
+    ledger = LedgerRepository(ledger_path)
+    operations = OperationsRepository(settings.operations_db)
+    detail = ledger.event_detail("semantic-event")
+    captures = ledger.captured_sources("semantic-event")
+    first_capture = next(
+        capture
+        for capture in captures
+        if capture["observation_id"] == "semantic-observation"
+    )
+    first_normalized = normalized_capture_input(detail["event"], first_capture)
+    first_id, _ = operations.enqueue_capture_interpretation(
+        "semantic-event",
+        "semantic-observation",
+        first_normalized,
+        contract_version=CAPTURE_INTERPRETATION_CONTRACT,
+        prompt_version=CAPTURE_INTERPRETATION_PROMPT_VERSION,
+        prompt_sha256=CAPTURE_INTERPRETATION_PROMPT_SHA256,
+        provider="deepseek",
+        model_snapshot=DEEPSEEK_CHEAP_TEXT_MODEL,
+        external_call=True,
+    )
+    operations.fail_capture_interpretation(first_id, "first capture failed")
+    endpoint = "/api/v1/events/semantic-event/capture-explanation"
+    headers = {"X-Public-Model-Request-Token": "p" * 64}
+
+    with TestClient(
+        create_app(settings), client=("127.0.0.1", 50000)
+    ) as client:
+        assert client.get(endpoint).json()["data"]["state"] == "ELIGIBLE_NOT_QUEUED"
+        response = client.post(
+            endpoint + "/request",
+            headers=headers,
+            json={"event_version": 1, "request_source": "PUBLIC_EVENT_VIEW"},
+        )
+        assert response.status_code == 200
+
+    runs = operations.capture_interpretation_runs("semantic-event", limit=20)
+    assert len(runs) == 2
+    assert any(
+        run["observation_id"] == "semantic-observation-2"
+        and run["status"] == "PENDING"
+        for run in runs
+    )
 
 
 def test_semantic_assessment_endpoint_marks_empty_input_not_applicable(
@@ -975,6 +1440,7 @@ def test_semantic_assessment_endpoint_marks_empty_input_not_applicable(
         "state": "NOT_APPLICABLE",
         "assessment": None,
         "cache_only": True,
+        "requestable": False,
     }
     with sqlite3.connect(settings.operations_db) as connection:
         count = connection.execute("SELECT COUNT(*) FROM model_runs").fetchone()[0]
@@ -1003,9 +1469,10 @@ def test_semantic_assessment_endpoint_hides_model_store_errors(
         payload = _semantic_assessment_payload(client)
 
     assert payload == {
-        "state": "PROCESSING",
+        "state": "UNAVAILABLE",
         "assessment": None,
         "cache_only": True,
+        "requestable": False,
     }
     assert "SECRET_INTERNAL_DATABASE_PATH" not in json.dumps(payload)
 
@@ -1039,6 +1506,29 @@ def test_capture_explanation_exposes_real_queue_retry_and_terminal_states(
         queued = client.get(endpoint).json()["data"]
         assert queued["state"] == "QUEUED"
         assert queued["attempts"] == 0
+
+        with sqlite3.connect(settings.operations_db) as connection:
+            connection.execute(
+                """UPDATE capture_interpretation_runs
+                   SET status='RUNNING',attempts=1,
+                       lease_expires_at='2999-01-01T00:00:00+00:00'
+                   WHERE interpretation_id=?""",
+                (interpretation_id,),
+            )
+            connection.commit()
+        running = client.get(endpoint).json()["data"]
+        assert running["state"] == "RUNNING"
+
+        with sqlite3.connect(settings.operations_db) as connection:
+            connection.execute(
+                """UPDATE capture_interpretation_runs
+                   SET lease_expires_at='2000-01-01T00:00:00+00:00'
+                   WHERE interpretation_id=?""",
+                (interpretation_id,),
+            )
+            connection.commit()
+        expired = client.get(endpoint).json()["data"]
+        assert expired["state"] == "RETRY_WAIT"
 
         with sqlite3.connect(settings.operations_db) as connection:
             connection.execute(

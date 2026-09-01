@@ -941,6 +941,7 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
                 _settings(root, ledger_path),
                 reviewer_token="review-secret",
                 operator_token="operator-secret",
+                capture_llm_enabled=True,
             )
         )
         with TestClient(application) as client:
@@ -1064,8 +1065,9 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
             "advisory_only": True,
             "canonical_mutation_allowed": False,
             "used_as_model_feature": False,
-            "public_requests_are_cache_only": True,
-            "enabled_only_when_event_has_zero_evidence": True,
+            "public_reads_are_cache_only": True,
+            "public_requests_enqueue_background_only": True,
+            "enabled_only_when_no_reader_eligible_evidence": True,
             "no_trading": True,
         }
         assert interpretation_data["items"] == []
@@ -1074,22 +1076,20 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
         assert explanation_data["display"] is True
         assert explanation_data["reason_code"] == "NO_EVENT_EVIDENCE"
         assert explanation_data["state"] == "ELIGIBLE_NOT_QUEUED"
-        assert explanation_data["generation_path"] == "BACKGROUND_CACHE_ONLY"
+        assert explanation_data["generation_path"] == "BACKGROUND_ON_DEMAND"
         assert explanation_data["source"]["source_title"] == (
             "Markets await central-bank minutes while gold rises"
         )
         assert evidence_backed_explanation.status_code == 200
-        assert evidence_backed_explanation.json()["data"]["display"] is False
-        assert evidence_backed_explanation.json()["data"]["reason_code"] == (
-            "EVIDENCE_PRESENT"
+        noncitable_evidence_explanation = evidence_backed_explanation.json()["data"]
+        assert noncitable_evidence_explanation["display"] is True
+        assert noncitable_evidence_explanation["reason_code"] == (
+            "NO_READER_ELIGIBLE_EVIDENCE"
         )
-        assert evidence_backed_explanation.json()["data"]["item"] is None
-        assert evidence_backed_explanation.json()["data"]["source"] is None
-        assert evidence_backed_operator_call.status_code == 422
-        assert (
-            evidence_backed_operator_call.json()["error"]["message"]
-            == "EVIDENCE_PRESENT"
-        )
+        assert noncitable_evidence_explanation["item"] is None
+        assert noncitable_evidence_explanation["source"] is not None
+        assert evidence_backed_operator_call.status_code == 200
+        assert evidence_backed_operator_call.json()["data"]["created"] is False
         assert dossier.status_code == 200
         dossier_data = dossier.json()["data"]
         assert dossier_data["detail"] == detail.json()["data"]
@@ -1100,8 +1100,8 @@ def test_excluded_archive_exposes_capture_without_promoting_it_to_evidence() -> 
         assert dossier_data["capture_explanation"] == {
             "display": True,
             "reason_code": "NO_EVENT_EVIDENCE",
-            "state": "CHECKING",
-            "generation_path": "BACKGROUND_CACHE_ONLY",
+            "state": "ELIGIBLE_REQUESTABLE",
+            "generation_path": "BACKGROUND_ON_DEMAND",
         }
         assert dossier_data["contract"] == {
             "public_projection": True,

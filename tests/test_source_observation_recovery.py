@@ -259,7 +259,9 @@ def test_incremental_interpretation_inventory_matches_recovery_buckets_and_recei
         ]
 
 
-def test_capture_interpretation_eligibility_is_zero_evidence_and_refetch_first() -> None:
+def test_capture_interpretation_eligibility_uses_current_reader_evidence(
+    monkeypatch,
+) -> None:
     with tempfile.TemporaryDirectory() as directory:
         ledger_path = _seed(Path(directory))
         repository = LedgerRepository(ledger_path)
@@ -288,10 +290,26 @@ def test_capture_interpretation_eligibility_is_zero_evidence_and_refetch_first()
         connection.close()
 
         after_evidence = repository.capture_interpretation_eligibility("e-p2")
-        assert after_evidence["eligible"] is False
-        assert after_evidence["display"] is False
-        assert after_evidence["reason_code"] == "EVIDENCE_PRESENT"
+        assert after_evidence["eligible"] is True
+        assert after_evidence["display"] is True
+        assert after_evidence["reason_code"] == "NO_READER_ELIGIBLE_EVIDENCE"
         assert after_evidence["evidence_count"] == 1
+        assert after_evidence["reader_eligible_evidence_count"] == 0
+        assert "e-p2" in {
+            item["event_id"]
+            for item in repository.capture_interpretation_candidates(limit=10)
+        }
+
+        monkeypatch.setattr(
+            repository,
+            "event_evidence",
+            lambda event_id: [{"reader_eligible": 1}],
+        )
+        reader_supported = repository.capture_interpretation_eligibility("e-p2")
+        assert reader_supported["eligible"] is False
+        assert reader_supported["display"] is False
+        assert reader_supported["reason_code"] == "EVIDENCE_PRESENT"
+        assert reader_supported["reader_eligible_evidence_count"] == 1
 
 
 def test_cli_builds_manifest_records_and_hashes() -> None:

@@ -3,9 +3,12 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.models.qwen_risk_contract import (
+    QWEN_RISK_CONTRACT_VERSION,
+    QWEN_RISK_PROMPT_VERSION,
     expected_semantic_payload,
     normalize_qwen_risk_content,
 )
@@ -47,12 +50,20 @@ class Ledger:
         limit: int,
         offset: int = 0,
         order: str = "latest",
+        event_ids: list[str] | None = None,
         after_event_id: str | None = None,
         semantic_events_only: bool = False,
     ):
         assert semantic_events_only is True
         self.semantic_calls += 1
         values = list(reversed(self.items)) if order == "latest" else self.items
+        if event_ids:
+            requested = set(event_ids)
+            values = [
+                item
+                for item in values
+                if item["detail"]["event"]["event_id"] in requested
+            ]
         if after_event_id is not None:
             values = [
                 item
@@ -269,6 +280,52 @@ def test_qwen_worker_persists_without_reprocessing_current_input(tmp_path: Path)
     assert first["selection"]["next_after_event_id"] == "event-0"
 
 
+def test_latest_qwen_run_can_be_pinned_to_exact_approved_generation(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    provider = Provider()
+    approved = provider.assess(_item(1)["detail"], [])
+    approved["input_sha256"] = hashlib.sha256(b"approved").hexdigest()
+    operations.record_model_run_once("event-1", approved)
+    time.sleep(0.001)
+
+    wrong_contract = {
+        **approved,
+        "input_sha256": hashlib.sha256(b"wrong-contract").hexdigest(),
+        "contract_version": "qwen-risk-semantics-v999",
+    }
+    operations.record_model_run_once("event-1", wrong_contract)
+    time.sleep(0.001)
+    wrong_prompt = {
+        **approved,
+        "input_sha256": hashlib.sha256(b"wrong-prompt").hexdigest(),
+        "prompt_version": "qwen-risk-prompt-v999",
+    }
+    operations.record_model_run_once("event-1", wrong_prompt)
+    time.sleep(0.001)
+    wrong_model = {
+        **approved,
+        "input_sha256": hashlib.sha256(b"wrong-model").hexdigest(),
+        "model_version": "qwen-risk-" + "b" * 16,
+    }
+    operations.record_model_run_once("event-1", wrong_model)
+
+    unpinned = operations.latest_qwen_risk_runs_for_versions({"event-1": 1})
+    pinned = operations.latest_qwen_risk_runs_for_versions(
+        {"event-1": 1},
+        model_version=provider.model_version,
+        contract_version=QWEN_RISK_CONTRACT_VERSION,
+        prompt_version=QWEN_RISK_PROMPT_VERSION,
+    )
+
+    assert unpinned["event-1"]["output"]["model_version"] == wrong_model["model_version"]
+    assert pinned["event-1"]["output"]["input_sha256"] == approved["input_sha256"]
+    assert operations.latest_qwen_risk_runs_for_versions(
+        {"event-1": 1}, model_version=""
+    ) == {}
+
+
 def test_qwen_worker_keyset_queue_covers_every_semantic_event(tmp_path: Path) -> None:
     operations = OperationsRepository(tmp_path / "operations.sqlite3")
     ledger = Ledger()
@@ -295,13 +352,19 @@ def test_qwen_worker_can_use_two_bounded_model_slots(tmp_path: Path) -> None:
             self.lock = threading.Lock()
             self.active = 0
             self.maximum = 0
+            self.calls = 0
+            self.parallel_pair = threading.Barrier(2)
 
         def assess(self, detail, evidence):
             with self.lock:
+                self.calls += 1
+                call_number = self.calls
                 self.active += 1
                 self.maximum = max(self.maximum, self.active)
             try:
-                time.sleep(0.03)
+                if call_number in {2, 3}:
+                    self.parallel_pair.wait(timeout=5)
+                time.sleep(0.01)
                 return super().assess(detail, evidence)
             finally:
                 with self.lock:
@@ -320,3 +383,349 @@ def test_qwen_worker_can_use_two_bounded_model_slots(tmp_path: Path) -> None:
     assert result["recorded"] == 4
     assert result["concurrency"] == 2
     assert provider.maximum == 2
+
+
+def test_qwen_priority_queue_is_exact_idempotent_and_bounded(tmp_path: Path) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    model_version = Provider.model_version
+    first_hash = hashlib.sha256(b"event-1").hexdigest()
+    second_hash = hashlib.sha256(b"event-2").hexdigest()
+
+    first = operations.enqueue_qwen_risk_priority(
+        "event-1", 1, first_hash, model_version, max_items=1
+    )
+    duplicate = operations.enqueue_qwen_risk_priority(
+        "event-1", 1, first_hash, model_version, max_items=1
+    )
+    operations.set_state("qwen_risk_activity_v1", {"items": []})
+    recovered_duplicate = operations.enqueue_qwen_risk_priority(
+        "event-1", 1, first_hash, model_version, max_items=1
+    )
+    full = operations.enqueue_qwen_risk_priority(
+        "event-2", 1, second_hash, model_version, max_items=1
+    )
+
+    assert first["state"] == "QUEUED" and first["enqueued"] is True
+    assert duplicate["state"] == "QUEUED" and duplicate["enqueued"] is False
+    assert recovered_duplicate["state"] == "QUEUED"
+    assert recovered_duplicate["enqueued"] is False
+    assert full["state"] == "FAILED" and full["error_code"] == "PRIORITY_QUEUE_FULL"
+    assert operations.qwen_risk_activity(
+        "event-2", 1, second_hash, model_version
+    ) is None
+
+    claimed = operations.claim_qwen_risk_priority(model_version)
+    assert claimed is not None
+    assert claimed["event_id"] == "event-1"
+    assert claimed["state"] == "RUNNING"
+    assert operations.claim_qwen_risk_priority(model_version) is None
+    assert operations.qwen_risk_activity(
+        "event-1", 1, "f" * 64, model_version
+    ) is None
+
+
+def test_qwen_stale_running_expires_and_can_be_requeued(tmp_path: Path) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    model_version = Provider.model_version
+    input_sha256 = hashlib.sha256(b"event-1").hexdigest()
+    started = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    operations.enqueue_qwen_risk_priority(
+        "event-1", 1, input_sha256, model_version, now=started
+    )
+    operations.claim_qwen_risk_priority(model_version, now=started)
+
+    stale = operations.qwen_risk_activity(
+        "event-1",
+        1,
+        input_sha256,
+        model_version,
+        now=started + timedelta(seconds=181),
+    )
+    assert stale is not None
+    assert stale["state"] == "FAILED"
+    assert stale["error_code"] == "STALE_HEARTBEAT"
+
+    requeued = operations.enqueue_qwen_risk_priority(
+        "event-1",
+        1,
+        input_sha256,
+        model_version,
+        now=started + timedelta(seconds=181),
+    )
+    assert requeued["state"] == "QUEUED"
+    assert requeued["enqueued"] is True
+    assert requeued["queued_at"] == (started + timedelta(seconds=181)).isoformat()
+
+
+def test_qwen_expired_queued_input_can_be_requeued_with_a_fresh_timestamp(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    model_version = Provider.model_version
+    input_sha256 = hashlib.sha256(b"event-4").hexdigest()
+    started = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    operations.enqueue_qwen_risk_priority(
+        "event-4", 1, input_sha256, model_version, now=started
+    )
+
+    refreshed_at = started + timedelta(minutes=16)
+    refreshed = operations.enqueue_qwen_risk_priority(
+        "event-4", 1, input_sha256, model_version, now=refreshed_at
+    )
+
+    assert refreshed["state"] == "QUEUED"
+    assert refreshed["enqueued"] is True
+    assert refreshed["queued_at"] == refreshed_at.isoformat()
+
+
+def test_qwen_failed_activity_obeys_retry_window(tmp_path: Path) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    model_version = Provider.model_version
+    input_sha256 = hashlib.sha256(b"event-3").hexdigest()
+    failed_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    failed = operations.set_qwen_risk_activity(
+        "event-3",
+        1,
+        input_sha256,
+        model_version,
+        "FAILED",
+        error_code="MODEL_TIMEOUT",
+        now=failed_at,
+    )
+    assert failed["retry_after"] == (failed_at + timedelta(seconds=15)).isoformat()
+
+    deferred = operations.enqueue_qwen_risk_priority(
+        "event-3",
+        1,
+        input_sha256,
+        model_version,
+        now=failed_at + timedelta(seconds=1),
+    )
+    assert deferred["state"] == "FAILED"
+    assert deferred["enqueued"] is False
+    accepted = operations.enqueue_qwen_risk_priority(
+        "event-3",
+        1,
+        input_sha256,
+        model_version,
+        now=failed_at + timedelta(seconds=16),
+    )
+    assert accepted["state"] == "QUEUED"
+    assert accepted["enqueued"] is True
+
+
+def test_qwen_worker_processes_one_priority_before_recent_and_marks_ready(
+    tmp_path: Path,
+) -> None:
+    class RecordingProvider(Provider):
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def assess(self, detail, evidence):
+            self.calls.append(detail["event"]["event_id"])
+            return super().assess(detail, evidence)
+
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    provider = RecordingProvider()
+    input_sha256 = hashlib.sha256(b"event-1").hexdigest()
+    operations.enqueue_qwen_risk_priority(
+        "event-1", 1, input_sha256, provider.model_version
+    )
+
+    result = run_qwen_risk_batch(
+        Ledger(), operations, provider, scan_limit=4, run_limit=2, concurrency=2
+    )
+
+    assert result["priority_claimed"] == 1
+    assert result["recorded"] == 2
+    assert provider.calls[0] == "event-1"
+    assert provider.calls[1] == "event-0"
+    activity = operations.qwen_risk_activity(
+        "event-1", 1, input_sha256, provider.model_version
+    )
+    assert activity is not None
+    assert activity["state"] == "READY"
+
+
+def test_qwen_worker_failure_does_not_block_other_inputs_and_defers_retry(
+    tmp_path: Path,
+) -> None:
+    class FailingProvider(Provider):
+        def assess(self, detail, evidence):
+            if detail["event"]["event_id"] == "event-5":
+                raise TimeoutError("provider timeout details are not public")
+            return super().assess(detail, evidence)
+
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    provider = FailingProvider()
+    first = run_qwen_risk_batch(
+        Ledger(), operations, provider, scan_limit=4, run_limit=2
+    )
+
+    failed_hash = hashlib.sha256(b"event-5").hexdigest()
+    failed = operations.qwen_risk_activity(
+        "event-5", 1, failed_hash, provider.model_version
+    )
+    ready_hash = hashlib.sha256(b"event-0").hexdigest()
+    ready = operations.qwen_risk_activity(
+        "event-0", 1, ready_hash, provider.model_version
+    )
+    assert first["recorded"] == 1
+    assert first["errors"] == ["event-5:TimeoutError"]
+    assert failed is not None and failed["state"] == "FAILED"
+    assert ready is not None and ready["state"] == "READY"
+    queue = operations.get_state("qwen_risk_priority_queue_v1", {"items": []})
+    assert any(
+        item.get("event_id") == "event-5" and item.get("available_at")
+        for item in queue["items"]
+    )
+
+    second = run_qwen_risk_batch(
+        Ledger(), operations, provider, scan_limit=4, run_limit=2
+    )
+    assert second["retry_deferred"] >= 1
+    assert second["recorded"] >= 1
+
+
+def test_qwen_worker_rechecks_public_priority_after_each_completed_item(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+
+    class EnqueuingProvider(Provider):
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def assess(self, detail, evidence):
+            event_id = detail["event"]["event_id"]
+            self.calls.append(event_id)
+            if len(self.calls) == 1:
+                operations.enqueue_qwen_risk_priority(
+                    "event-1",
+                    1,
+                    hashlib.sha256(b"event-1").hexdigest(),
+                    self.model_version,
+                )
+            return super().assess(detail, evidence)
+
+    provider = EnqueuingProvider()
+    result = run_qwen_risk_batch(
+        Ledger(), operations, provider, scan_limit=4, run_limit=3, concurrency=1
+    )
+
+    assert result["recorded"] == 3
+    assert result["priority_claimed"] == 1
+    assert provider.calls[:2] == ["event-5", "event-1"]
+
+
+def test_qwen_failed_work_is_requeued_without_another_public_request(
+    tmp_path: Path,
+) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    model_version = Provider.model_version
+    input_sha256 = hashlib.sha256(b"event-retry").hexdigest()
+    identity = ("event-retry", 1, input_sha256, model_version)
+    observed_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    operations.set_qwen_risk_activity(*identity, "RUNNING", now=observed_at)
+    failed = operations.schedule_qwen_risk_retry(
+        *identity,
+        error_code="MODEL_TIMEOUT",
+        now=observed_at,
+    )
+    assert failed["state"] == "FAILED"
+    assert failed["requeued"] is True
+    assert failed["retry_after"] == (
+        observed_at + timedelta(seconds=15)
+    ).isoformat()
+    assert operations.qwen_risk_activity(
+        *identity, now=observed_at + timedelta(seconds=1)
+    )["state"] == "FAILED"
+    assert operations.qwen_risk_activity(
+        *identity, now=observed_at + timedelta(seconds=16)
+    )["state"] == "QUEUED"
+
+    claimed = operations.claim_qwen_risk_priority(
+        model_version, now=observed_at + timedelta(seconds=16)
+    )
+    assert claimed is not None
+    assert claimed["event_id"] == "event-retry"
+    assert claimed["state"] == "RUNNING"
+
+
+def test_qwen_automatic_retries_are_bounded(tmp_path: Path) -> None:
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    model_version = Provider.model_version
+    input_sha256 = hashlib.sha256(b"event-bounded-retry").hexdigest()
+    identity = ("event-bounded-retry", 1, input_sha256, model_version)
+    observed_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    terminal = None
+    for attempt in range(4):
+        operations.set_qwen_risk_activity(*identity, "RUNNING", now=observed_at)
+        terminal = operations.schedule_qwen_risk_retry(
+            *identity,
+            error_code="MODEL_TIMEOUT",
+            now=observed_at,
+        )
+        if attempt < 3:
+            assert terminal["requeued"] is True
+            retry_after = datetime.fromisoformat(terminal["retry_after"])
+            claimed = operations.claim_qwen_risk_priority(
+                model_version, now=retry_after
+            )
+            assert claimed is not None
+            observed_at = retry_after
+
+    assert terminal is not None
+    assert terminal["attempts"] == 4
+    assert terminal["requeued"] is False
+    assert "retry_after" not in terminal
+    assert operations.claim_qwen_risk_priority(
+        model_version, now=observed_at + timedelta(minutes=10)
+    ) is None
+
+
+def test_qwen_running_state_exists_only_while_provider_is_actually_invoked(
+    tmp_path: Path,
+) -> None:
+    class BlockingProvider(Provider):
+        def __init__(self) -> None:
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def assess(self, detail, evidence):
+            self.entered.set()
+            assert self.release.wait(timeout=5)
+            return super().assess(detail, evidence)
+
+    operations = OperationsRepository(tmp_path / "operations.sqlite3")
+    provider = BlockingProvider()
+    result: dict = {}
+
+    def run_worker() -> None:
+        result.update(
+            run_qwen_risk_batch(
+                Ledger(), operations, provider, scan_limit=2, run_limit=1
+            )
+        )
+
+    thread = threading.Thread(target=run_worker, daemon=True)
+    thread.start()
+    assert provider.entered.wait(timeout=5)
+    input_sha256 = hashlib.sha256(b"event-5").hexdigest()
+    running = operations.qwen_risk_activity(
+        "event-5", 1, input_sha256, provider.model_version
+    )
+    assert running is not None
+    assert running["state"] == "RUNNING"
+    assert running["heartbeat_at"]
+
+    provider.release.set()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert result["recorded"] == 1
+    ready = operations.qwen_risk_activity(
+        "event-5", 1, input_sha256, provider.model_version
+    )
+    assert ready is not None and ready["state"] == "READY"

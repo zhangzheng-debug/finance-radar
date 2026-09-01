@@ -9,6 +9,8 @@ SOURCE_ENV=${4:-/tmp/finance-radar-source.env}
 RELEASE_MANIFEST=${5:-}
 PUBLIC_WEB_URL=${6:-${FINANCE_RADAR_PUBLIC_WEB_URL:-}}
 DEPLOY_MODE=${FINANCE_RADAR_DEPLOY_MODE:-full}
+CAPTURE_REQUEST_ACTIVATION=${FINANCE_RADAR_CAPTURE_REQUEST_ACTIVATION:-preserve}
+QWEN_REQUEST_ACTIVATION=${FINANCE_RADAR_QWEN_REQUEST_ACTIVATION:-preserve}
 BASE=/opt/finance-radar
 RELEASE="$BASE/releases/$RELEASE_ID"
 SHARED="$BASE/shared"
@@ -20,6 +22,12 @@ LEGACY_STATIC_INDEX="$PUBLIC_STATUS_DIR/index.html"
 LEGACY_STATIC_RETIRE_DIR=/etc/nginx/finance-radar-retired
 INSTALLER_SOURCE="$(readlink -f -- "${BASH_SOURCE[0]}")"
 DEEPSEEK_CREDENTIAL_READY=0
+CAPTURE_REQUEST_GATE=0
+QWEN_REQUEST_GATE=0
+CAPTURE_EXECUTOR_SHOULD_RUN=0
+QWEN_EXECUTOR_SHOULD_RUN=0
+PREVIOUS_CAPTURE_REQUEST_GATE=0
+PREVIOUS_QWEN_REQUEST_GATE=0
 MANIFEST_SIDECAR=""
 
 [ "$(id -u)" -eq 0 ] || { printf 'run as root\n' >&2; exit 2; }
@@ -31,6 +39,17 @@ case "$DEPLOY_MODE" in
         exit 2
         ;;
 esac
+for activation_name in CAPTURE_REQUEST_ACTIVATION QWEN_REQUEST_ACTIVATION; do
+    activation_value="${!activation_name}"
+    case "$activation_value" in
+        preserve|enable|disable) ;;
+        *)
+            printf 'invalid %s: %s (expected preserve, enable or disable)\n' \
+                "$activation_name" "$activation_value" >&2
+            exit 2
+            ;;
+    esac
+done
 if [ "$DEPLOY_MODE" = code-only ]; then
     ACTIVE_INSTALLER="$(readlink -f -- "$BASE/current/deployment/systemd/install_remote.sh" 2>/dev/null || true)"
     [ -n "$ACTIVE_INSTALLER" ] && [ "$INSTALLER_SOURCE" = "$ACTIVE_INSTALLER" ] || {
@@ -1169,6 +1188,7 @@ ROLLBACK_SERVICE_UNITS=(
 ROLLBACK_PATHS=(
     /etc/finance-radar.env
     /etc/finance-radar-public.env
+    /etc/finance-radar/public-model-request-token
     /etc/finance-radar-reviewer-principals.json
     /etc/systemd/system/finance-radar-api.service
     /etc/systemd/system/finance-radar-overview-snapshot.service
@@ -1201,6 +1221,37 @@ ROLLBACK_PATHS=(
     "${LEGACY_MANAGED_PROPERTY_DROPINS[@]}"
 )
 
+validate_public_model_request_credential() {
+    local credential=/etc/finance-radar/public-model-request-token
+    local metadata owner_id group_id mode token
+    [ -f "$credential" ] && [ ! -L "$credential" ] || return 1
+    [ "$(readlink -f -- "$credential")" = "$credential" ] || return 1
+    metadata="$(stat -c '%u:%g:%a' -- "$credential")" || return 1
+    IFS=: read -r owner_id group_id mode <<< "$metadata"
+    [ "$owner_id" = 0 ] && [ "$group_id" = 0 ] && [ "$mode" = 600 ] || return 1
+    token="$(cat -- "$credential")" || return 1
+    [[ "$token" =~ ^[0-9A-Fa-f]{64}$ ]]
+}
+
+ensure_public_model_request_credential() {
+    local credential=/etc/finance-radar/public-model-request-token
+    local pending
+    install -d -m 0700 -o root -g root /etc/finance-radar || return
+    if [ -e "$credential" ] || [ -L "$credential" ]; then
+        validate_public_model_request_credential || {
+            printf 'existing public model request credential must be root:root 0600 and exactly 64 hexadecimal characters\n' >&2
+            return 1
+        }
+        return 0
+    fi
+    pending="$(mktemp /etc/finance-radar/.public-model-request-token.XXXXXX)" || return
+    chown root:root "$pending" || { rm -f -- "$pending"; return 1; }
+    chmod 0600 "$pending" || { rm -f -- "$pending"; return 1; }
+    openssl rand -hex 32 > "$pending" || { rm -f -- "$pending"; return 1; }
+    mv -f -- "$pending" "$credential" || { rm -f -- "$pending"; return 1; }
+    validate_public_model_request_credential
+}
+
 backup_path() {
     local path="$1"
     local target="$ROLLBACK_DIR/files${path}"
@@ -1216,8 +1267,12 @@ backup_path() {
 restore_path() {
     local path="$1"
     local source="$ROLLBACK_DIR/files${path}"
+    local parent_mode=0755
+    if [ "$(dirname "$path")" = /etc/finance-radar ]; then
+        parent_mode=0700
+    fi
     if grep -Fqx -- "$path" "$ROLLBACK_PRESENT"; then
-        install -d -m 0755 "$(dirname "$path")" || return
+        install -d -m "$parent_mode" -o root -g root "$(dirname "$path")" || return
         rm -f -- "$path" || return
         cp -a -- "$source" "$path" || return
     elif grep -Fqx -- "$path" "$ROLLBACK_ABSENT"; then
@@ -2129,31 +2184,22 @@ assert_capture_interpretation_quiescent() {
 
 restore_capture_interpretation_runtime() {
     local timer=finance-radar-capture-interpretation.timer
-    local was_enabled=0 was_active=0
-    if grep -Fqx -- "$timer" "$ROLLBACK_ENABLED_UNITS"; then
-        was_enabled=1
-    fi
-    if grep -Fqx -- "$timer" "$ROLLBACK_ACTIVE_UNITS"; then
-        was_active=1
-    fi
-
-    if [ "$was_enabled" -eq 1 ]; then
-        systemctl enable "$timer" || return 1
-    else
-        systemctl disable "$timer" || return 1
-    fi
-    if [ "$was_active" -eq 1 ]; then
+    if [ "$CAPTURE_EXECUTOR_SHOULD_RUN" -eq 1 ]; then
         [ "$DEEPSEEK_CREDENTIAL_READY" -eq 1 ] || {
             printf 'cannot resume capture interpretation timer without a validated credential\n' >&2
             return 1
         }
-        systemctl start "$timer" || return 1
+        systemctl enable --now "$timer" || return 1
+        systemctl is-enabled --quiet "$timer" || return 1
         systemctl is-active --quiet "$timer" || return 1
-        printf 'capture_interpretation_timer=RESTORED_ACTIVE enabled=%s\n' "$was_enabled"
+        printf 'capture_interpretation_timer=ACTIVE_ENABLED public_gate=%s\n' \
+            "$CAPTURE_REQUEST_GATE"
     else
-        systemctl stop "$timer" 2>/dev/null || true
-        systemctl is-active --quiet "$timer" && return 1
-        printf 'capture_interpretation_timer=RESTORED_INACTIVE enabled=%s\n' "$was_enabled"
+        systemctl disable --now "$timer" 2>/dev/null || return 1
+        ! systemctl is-active --quiet "$timer" || return 1
+        ! systemctl is-enabled --quiet "$timer" || return 1
+        printf 'capture_interpretation_timer=INACTIVE_DISABLED public_gate=%s\n' \
+            "$CAPTURE_REQUEST_GATE"
     fi
 }
 
@@ -2184,19 +2230,8 @@ assert_qwen_risk_worker_quiescent() {
 
 restore_qwen_risk_runtime() {
     local timer=finance-radar-qwen-risk-worker.timer
-    local was_enabled=0 was_active=0
-    grep -Fqx -- "$timer" "$ROLLBACK_ENABLED_UNITS" && was_enabled=1
-    grep -Fqx -- "$timer" "$ROLLBACK_ACTIVE_UNITS" && was_active=1
-    if [ "$was_enabled" -eq 1 ]; then
-        systemctl enable "$timer" || return 1
-    else
-        systemctl disable "$timer" || return 1
-    fi
-    if [ "$was_active" -eq 1 ]; then
-        [ -s /etc/finance-radar-qwen-risk.env ] && \
-        [ -s /opt/finance-radar/qwen-risk/model-manifest.json ] && \
-        [ -s /opt/finance-radar/qwen-risk/qwen2.5-1.5b-instruct-q4_k_m.gguf ] && \
-        [ -s /opt/finance-radar/qwen-risk/finance-radar-qwen-risk-v3-lora-f16.gguf ] || {
+    if [ "$QWEN_EXECUTOR_SHOULD_RUN" -eq 1 ]; then
+        qwen_risk_bundle_ready || {
             printf 'cannot resume Qwen risk timer without its accepted model bundle\n' >&2
             return 1
         }
@@ -2205,14 +2240,167 @@ restore_qwen_risk_runtime() {
         # is still active and leaves the new worker talking to stale runtime
         # parameters, so restart only after the worker has been quiesced.
         systemctl restart finance-radar-qwen-risk-model.service || return 1
-        systemctl start "$timer" || return 1
+        systemctl enable --now "$timer" || return 1
+        systemctl is-enabled --quiet "$timer" || return 1
         systemctl is-active --quiet finance-radar-qwen-risk-model.service "$timer" || return 1
-        printf 'qwen_risk_timer=RESTORED_ACTIVE enabled=%s\n' "$was_enabled"
+        printf 'qwen_risk_timer=ACTIVE_ENABLED public_gate=%s\n' \
+            "$QWEN_REQUEST_GATE"
     else
-        systemctl stop "$timer" 2>/dev/null || true
-        systemctl is-active --quiet "$timer" && return 1
-        printf 'qwen_risk_timer=RESTORED_INACTIVE enabled=%s\n' "$was_enabled"
+        systemctl disable --now "$timer" 2>/dev/null || return 1
+        systemctl stop finance-radar-qwen-risk-model.service 2>/dev/null || true
+        ! systemctl is-active --quiet "$timer" || return 1
+        ! systemctl is-enabled --quiet "$timer" || return 1
+        ! systemctl is-active --quiet finance-radar-qwen-risk-model.service || return 1
+        printf 'qwen_risk_timer=INACTIVE_DISABLED public_gate=%s\n' \
+            "$QWEN_REQUEST_GATE"
     fi
+}
+
+qwen_risk_bundle_ready() {
+    [ -s /etc/finance-radar-qwen-risk.env ] && \
+    [ -s /opt/finance-radar/qwen-risk/model-manifest.json ] && \
+    [ -s /opt/finance-radar/qwen-risk/qwen2.5-1.5b-instruct-q4_k_m.gguf ] && \
+    [ -s /opt/finance-radar/qwen-risk/finance-radar-qwen-risk-v3-lora-f16.gguf ]
+}
+
+set_shared_env_boolean() {
+    local name="$1" value="$2"
+    case "$name" in
+        FINANCE_RADAR_CAPTURE_LLM_ENABLED|FINANCE_RADAR_QWEN_RISK_ENABLED) ;;
+        *) return 2 ;;
+    esac
+    case "$value" in 0|1) ;; *) return 2 ;; esac
+    if grep -q "^${name}=" /etc/finance-radar.env; then
+        sed -i "s#^${name}=.*#${name}=${value}#" /etc/finance-radar.env
+    else
+        printf '%s=%s\n' "$name" "$value" >> /etc/finance-radar.env
+    fi
+}
+
+read_shared_env_boolean() {
+    local name="$1" raw
+    case "$name" in
+        FINANCE_RADAR_CAPTURE_LLM_ENABLED|FINANCE_RADAR_QWEN_RISK_ENABLED) ;;
+        *) return 2 ;;
+    esac
+    raw="$(awk -v key="$name" '
+        index($0, key "=") == 1 {
+            count += 1
+            value = substr($0, length(key) + 2)
+        }
+        END {
+            if (count == 0) {
+                print "__MISSING__"
+            } else if (count == 1) {
+                print value
+            } else {
+                exit 42
+            }
+        }
+    ' /etc/finance-radar.env)" || {
+        printf 'shared environment contains duplicate values for %s\n' "$name" >&2
+        return 1
+    }
+    case "${raw,,}" in
+        __missing__) printf '0\n' ;;
+        1|true|yes|on) printf '1\n' ;;
+        0|false|no|off) printf '0\n' ;;
+        *)
+            printf 'shared environment contains an invalid boolean for %s\n' "$name" >&2
+            return 1
+            ;;
+    esac
+}
+
+prepare_model_request_runtime_gates() {
+    PREVIOUS_CAPTURE_REQUEST_GATE="$(
+        read_shared_env_boolean FINANCE_RADAR_CAPTURE_LLM_ENABLED
+    )" || return 1
+    PREVIOUS_QWEN_REQUEST_GATE="$(
+        read_shared_env_boolean FINANCE_RADAR_QWEN_RISK_ENABLED
+    )" || return 1
+
+    CAPTURE_EXECUTOR_SHOULD_RUN=0
+    QWEN_EXECUTOR_SHOULD_RUN=0
+    if grep -Fqx -- finance-radar-capture-interpretation.timer "$ROLLBACK_ENABLED_UNITS" || \
+       grep -Fqx -- finance-radar-capture-interpretation.timer "$ROLLBACK_ACTIVE_UNITS"; then
+        CAPTURE_EXECUTOR_SHOULD_RUN=1
+    fi
+    if grep -Fqx -- finance-radar-qwen-risk-worker.timer "$ROLLBACK_ENABLED_UNITS" || \
+       grep -Fqx -- finance-radar-qwen-risk-worker.timer "$ROLLBACK_ACTIVE_UNITS"; then
+        QWEN_EXECUTOR_SHOULD_RUN=1
+    fi
+
+    CAPTURE_REQUEST_GATE="$PREVIOUS_CAPTURE_REQUEST_GATE"
+    QWEN_REQUEST_GATE="$PREVIOUS_QWEN_REQUEST_GATE"
+    case "$CAPTURE_REQUEST_ACTIVATION" in
+        enable) CAPTURE_REQUEST_GATE=1; CAPTURE_EXECUTOR_SHOULD_RUN=1 ;;
+        disable) CAPTURE_REQUEST_GATE=0; CAPTURE_EXECUTOR_SHOULD_RUN=0 ;;
+    esac
+    case "$QWEN_REQUEST_ACTIVATION" in
+        enable) QWEN_REQUEST_GATE=1; QWEN_EXECUTOR_SHOULD_RUN=1 ;;
+        disable) QWEN_REQUEST_GATE=0; QWEN_EXECUTOR_SHOULD_RUN=0 ;;
+    esac
+
+    if [ "$CAPTURE_REQUEST_GATE" -eq 1 ] && [ "$CAPTURE_EXECUTOR_SHOULD_RUN" -ne 1 ]; then
+        printf 'capture public request gate is enabled without a restorable executor\n' >&2
+        return 1
+    fi
+    if [ "$QWEN_REQUEST_GATE" -eq 1 ] && [ "$QWEN_EXECUTOR_SHOULD_RUN" -ne 1 ]; then
+        printf 'Qwen public request gate is enabled without a restorable executor\n' >&2
+        return 1
+    fi
+    if [ "$CAPTURE_EXECUTOR_SHOULD_RUN" -eq 1 ]; then
+        [ "$DEEPSEEK_CREDENTIAL_READY" -eq 1 ] || {
+            printf 'capture executor was requested but its credential is unavailable\n' >&2
+            return 1
+        }
+    fi
+    if [ "$QWEN_EXECUTOR_SHOULD_RUN" -eq 1 ]; then
+        qwen_risk_bundle_ready || {
+            printf 'Qwen executor was requested but its accepted model bundle is unavailable\n' >&2
+            return 1
+        }
+    fi
+    set_shared_env_boolean FINANCE_RADAR_CAPTURE_LLM_ENABLED "$CAPTURE_REQUEST_GATE" || return
+    set_shared_env_boolean FINANCE_RADAR_QWEN_RISK_ENABLED "$QWEN_REQUEST_GATE" || return
+    printf 'model_request_runtime=prepared capture_gate=%s capture_executor=%s qwen_gate=%s qwen_executor=%s capture_activation=%s qwen_activation=%s\n' \
+        "$CAPTURE_REQUEST_GATE" "$CAPTURE_EXECUTOR_SHOULD_RUN" \
+        "$QWEN_REQUEST_GATE" "$QWEN_EXECUTOR_SHOULD_RUN" \
+        "$CAPTURE_REQUEST_ACTIVATION" "$QWEN_REQUEST_ACTIVATION"
+}
+
+assert_model_request_runtime_alignment() {
+    local capture_flag qwen_flag
+    capture_flag="$(awk -F= '$1 == "FINANCE_RADAR_CAPTURE_LLM_ENABLED" { value=$2 } END { print value }' /etc/finance-radar.env)"
+    qwen_flag="$(awk -F= '$1 == "FINANCE_RADAR_QWEN_RISK_ENABLED" { value=$2 } END { print value }' /etc/finance-radar.env)"
+    [ "$capture_flag" = "$CAPTURE_REQUEST_GATE" ] && \
+        [ "$qwen_flag" = "$QWEN_REQUEST_GATE" ] || return 1
+    if [ "$CAPTURE_REQUEST_GATE" -eq 1 ] && [ "$CAPTURE_EXECUTOR_SHOULD_RUN" -ne 1 ]; then
+        return 1
+    fi
+    if [ "$QWEN_REQUEST_GATE" -eq 1 ] && [ "$QWEN_EXECUTOR_SHOULD_RUN" -ne 1 ]; then
+        return 1
+    fi
+    if [ "$CAPTURE_EXECUTOR_SHOULD_RUN" -eq 1 ]; then
+        systemctl is-active --quiet finance-radar-capture-interpretation.timer || return 1
+        systemctl is-enabled --quiet finance-radar-capture-interpretation.timer || return 1
+    else
+        ! systemctl is-active --quiet finance-radar-capture-interpretation.timer || return 1
+        ! systemctl is-enabled --quiet finance-radar-capture-interpretation.timer || return 1
+    fi
+    if [ "$QWEN_EXECUTOR_SHOULD_RUN" -eq 1 ]; then
+        systemctl is-active --quiet finance-radar-qwen-risk-model.service \
+            finance-radar-qwen-risk-worker.timer || return 1
+        systemctl is-enabled --quiet finance-radar-qwen-risk-worker.timer || return 1
+    else
+        ! systemctl is-active --quiet finance-radar-qwen-risk-worker.timer || return 1
+        ! systemctl is-enabled --quiet finance-radar-qwen-risk-worker.timer || return 1
+        ! systemctl is-active --quiet finance-radar-qwen-risk-model.service || return 1
+    fi
+    printf 'model_request_runtime_alignment=PASS capture_gate=%s capture_executor=%s qwen_gate=%s qwen_executor=%s\n' \
+        "$CAPTURE_REQUEST_GATE" "$CAPTURE_EXECUTOR_SHOULD_RUN" \
+        "$QWEN_REQUEST_GATE" "$QWEN_EXECUTOR_SHOULD_RUN"
 }
 
 preserve_failed_predeploy_backup_hold() {
@@ -2237,6 +2425,46 @@ preserve_failed_predeploy_backup_hold() {
         "$failure_phase" "$PREDEPLOY_HOLD_PATH" >&2
 }
 
+freeze_model_request_runtime_for_rollback() {
+    # Freeze every candidate model writer before any release symlink,
+    # environment or unit file is restored. A failed candidate must never keep
+    # writing jobs or results through the predecessor runtime after rollback.
+    local timer
+    for timer in \
+        finance-radar-capture-interpretation.timer \
+        finance-radar-qwen-risk-worker.timer; do
+        if systemctl cat "$timer" >/dev/null 2>&1; then
+            systemctl stop "$timer" || return 1
+        fi
+        ! systemctl is-active --quiet "$timer" || return 1
+    done
+    if ! assert_capture_interpretation_quiescent; then
+        printf 'rollback_warning=capture_worker_forced_stop\n' >&2
+        systemctl stop finance-radar-capture-interpretation.service 2>/dev/null || true
+        ! systemctl is-active --quiet finance-radar-capture-interpretation.service || return 1
+    fi
+    if ! assert_qwen_risk_worker_quiescent; then
+        printf 'rollback_warning=qwen_worker_forced_stop\n' >&2
+        systemctl stop finance-radar-qwen-risk-worker.service 2>/dev/null || true
+        ! systemctl is-active --quiet finance-radar-qwen-risk-worker.service || return 1
+    fi
+    if systemctl cat finance-radar-qwen-risk-model.service >/dev/null 2>&1; then
+        systemctl stop finance-radar-qwen-risk-model.service || return 1
+    fi
+    ! systemctl is-active --quiet finance-radar-qwen-risk-model.service || return 1
+    printf 'rollback_model_request_runtime=FROZEN\n' >&2
+}
+
+record_rollback_blocked() {
+    local reason="$1" pending="$ROLLBACK_DIR/.ROLLBACK_BLOCKED.pending.$$"
+    [[ "$ROLLBACK_DIR" == /var/tmp/finance-radar-install-* ]] || return 1
+    [ -d "$ROLLBACK_DIR" ] || return 1
+    install -m 0600 -o root -g root /dev/null "$pending" || return 1
+    printf 'activation_state=ROLLBACK_BLOCKED\nrelease=%s\nreason=%s\nrecorded_at=%s\n' \
+        "$RELEASE_ID" "$reason" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$pending" || return 1
+    mv -f -- "$pending" "$ROLLBACK_DIR/ROLLBACK_BLOCKED.txt"
+}
+
 rollback() {
     local status=${1:-1}
     local path
@@ -2244,6 +2472,25 @@ rollback() {
     set +e
     printf 'activation_state=ROLLBACK candidate_release_id=%s; restoring previous release and configuration\n' \
         "$RELEASE_ID" >&2
+    # Revoke a candidate success receipt before any operation that can block a
+    # rollback. This is a safe mutation inside the candidate release itself and
+    # prevents ROLLBACK_BLOCKED from leaving a durable false ACCEPTED record.
+    if [ "$ACTIVATION_RECORD_COMMITTED" -eq 1 ]; then
+        rm -f -- "$RELEASE_RECORDS/ACTIVATION.txt" || {
+            record_rollback_blocked activation_receipt_revoke_failed || true
+            printf 'activation_state=ROLLBACK_BLOCKED candidate activation receipt could not be revoked\n' >&2
+            exit 70
+        }
+        ACTIVATION_RECORD_COMMITTED=0
+    fi
+    if [ -n "$ACTIVATION_PENDING" ] && \
+       [[ "$ACTIVATION_PENDING" == "$RELEASE_RECORDS/.ACTIVATION.pending."* ]]; then
+        rm -f -- "$ACTIVATION_PENDING" || {
+            record_rollback_blocked activation_pending_revoke_failed || true
+            printf 'activation_state=ROLLBACK_BLOCKED candidate activation pending receipt could not be revoked\n' >&2
+            exit 70
+        }
+    fi
     # A code-only failure before the current symlink changes has touched only
     # the backup timer and byte-identical unit/config files.  Do not turn an
     # eligibility or preparation failure into an avoidable API/Web/collector
@@ -2251,6 +2498,11 @@ rollback() {
     # runtime before restoring its release/configuration snapshot as before.
     if [ "$SERVICES_TOUCHED" -eq 1 ] && \
        { [ "$DEPLOY_MODE" = full ] || [ "$CUTOVER_STARTED" -eq 1 ]; }; then
+        if ! freeze_model_request_runtime_for_rollback; then
+            record_rollback_blocked model_request_runtime_freeze_failed || true
+            printf 'activation_state=ROLLBACK_BLOCKED model request runtime could not be frozen; refusing cross-version restore\n' >&2
+            exit 70
+        fi
         systemctl stop finance-radar-evidence-llm \
             finance-radar-worker finance-radar-api finance-radar-web finance-radar-backup.timer \
             2>/dev/null || true
@@ -2262,19 +2514,6 @@ rollback() {
         printf 'rollback_warning=backup_start_inhibit_cleanup_failed\n' >&2
     clear_worker_resume_inhibit || \
         printf 'rollback_warning=worker_resume_inhibit_cleanup_failed\n' >&2
-    if [ "$ACTIVATION_RECORD_COMMITTED" -eq 1 ]; then
-        # ACTIVATION.txt belongs to the candidate tree, which the archive was
-        # required not to contain. Never retain an accepted receipt for a
-        # release whose symlink, services or public marker are being rolled back.
-        rm -f -- "$RELEASE_RECORDS/ACTIVATION.txt" || \
-            printf 'rollback_warning=activation_receipt_cleanup_failed\n' >&2
-        ACTIVATION_RECORD_COMMITTED=0
-    fi
-    if [ -n "$ACTIVATION_PENDING" ] && \
-       [[ "$ACTIVATION_PENDING" == "$RELEASE_RECORDS/.ACTIVATION.pending."* ]]; then
-        rm -f -- "$ACTIVATION_PENDING" || \
-            printf 'rollback_warning=activation_pending_cleanup_failed\n' >&2
-    fi
     if [ "$CUTOVER_STARTED" -eq 1 ]; then
         if [ -n "$PREVIOUS_RELEASE" ]; then
             ln -sfn "$PREVIOUS_RELEASE" "$BASE/current" || true
@@ -2324,6 +2563,21 @@ if systemctl is-active --quiet finance-radar-backup.service; then
     printf 'daily backup is already active; retry deployment after it finishes\n' >&2
     exit 4
 fi
+if { [ -e /etc/finance-radar/public-model-request-token ] || \
+     [ -L /etc/finance-radar/public-model-request-token ]; } && \
+   ! validate_public_model_request_credential; then
+    printf 'existing public model request credential failed preflight before quiesce\n' >&2
+    exit 4
+fi
+if [ "$CAPTURE_REQUEST_ACTIVATION" = enable ] && \
+   [ "$DEEPSEEK_CREDENTIAL_READY" -ne 1 ]; then
+    printf 'cannot explicitly enable DeepSeek requests without a validated credential\n' >&2
+    exit 4
+fi
+if [ "$QWEN_REQUEST_ACTIVATION" = enable ] && ! qwen_risk_bundle_ready; then
+    printf 'cannot explicitly enable Qwen requests without the accepted model bundle\n' >&2
+    exit 4
+fi
 snapshot_rollback_state || {
     snapshot_status=$?
     if [[ "$ROLLBACK_DIR" == /var/tmp/finance-radar-install-* ]]; then
@@ -2369,6 +2623,7 @@ clear_scheduled_backup_start_inhibit || \
 # without its root-only credential is already an unsafe state to carry forward.
 if { grep -Fqx -- finance-radar-capture-interpretation.timer "$ROLLBACK_ENABLED_UNITS" || \
      grep -Fqx -- finance-radar-capture-interpretation.timer "$ROLLBACK_ACTIVE_UNITS"; } && \
+   [ "$CAPTURE_REQUEST_ACTIVATION" != disable ] && \
    [ "$DEEPSEEK_CREDENTIAL_READY" -ne 1 ]; then
     abort_cutover 'capture interpretation was enabled or active but its new root-only credential is unavailable' 4
 fi
@@ -2509,6 +2764,8 @@ fi
 if ! grep -q '^FINANCE_RADAR_OPERATOR_TOKEN=' /etc/finance-radar.env; then
     printf 'FINANCE_RADAR_OPERATOR_TOKEN=%s\n' "$(openssl rand -hex 32)" >> /etc/finance-radar.env
 fi
+ensure_public_model_request_credential || \
+    abort_cutover 'public model request credential provisioning failed' 4
 # Human-review principals are deliberately separate from the shared Reviewer
 # UI access token.  An empty array keeps label submission fail-closed until an
 # operator installs an owner-approved, per-person credential file.
@@ -2623,6 +2880,8 @@ remove_legacy_backup_retention_dropin || \
 systemctl daemon-reload
 assert_bounded_backup_unit || \
     abort_cutover 'candidate backup service memory budget is not effective' 4
+prepare_model_request_runtime_gates || \
+    abort_cutover 'public model request gates do not match the restorable executor state' 4
 
 if systemctl is-active --quiet finance-radar-admin; then
     abort_cutover 'finance-radar-admin is active; stop the manual loopback session before cutover' 5
@@ -2903,6 +3162,19 @@ systemctl start finance-radar-backup.timer || \
 systemctl is-active --quiet finance-radar-backup.timer || \
     abort_cutover 'daily backup timer is not active after activation checks' 6
 
+# Resume provider execution only after the public runtime, recovery point and
+# core timers are healthy. A Persistent timer can immediately launch a missed
+# run, so its durable active+enabled state is part of acceptance rather than an
+# unverified action taken after an ACCEPTED receipt already exists.
+if ! restore_capture_interpretation_runtime; then
+    abort_cutover 'capture interpretation timer state could not be restored after activation checks' 6
+fi
+if ! restore_qwen_risk_runtime; then
+    abort_cutover 'Qwen risk timer state could not be restored after activation checks' 6
+fi
+assert_model_request_runtime_alignment || \
+    abort_cutover 'public model request gates and executors are not aligned' 6
+
 install -d -m 0750 -o root -g finance-radar "$RELEASE_RECORDS"
 ACTIVATION_PENDING="$RELEASE_RECORDS/.ACTIVATION.pending.$$"
 [ ! -e "$RELEASE_RECORDS/ACTIVATION.txt" ] && \
@@ -2911,13 +3183,15 @@ ACTIVATION_PENDING="$RELEASE_RECORDS/.ACTIVATION.pending.$$"
 [ ! -e "$ACTIVATION_PENDING" ] && [ ! -L "$ACTIVATION_PENDING" ] || \
     abort_cutover 'activation pending record path is unsafe' 6
 install -m 0640 -o root -g finance-radar /dev/null "$ACTIVATION_PENDING"
-printf 'activation_state=ACCEPTED\nactivation=PASS\nrelease=%s\nprevious_release=%s\npublic_web=%s\ndeploy_mode=%s\nrecovery_basis=%s\npredeploy_backup_run_id=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_format=%s\npredeploy_backup_receipt_sha256=%s\npostdeploy_backup_run_id=%s\npostdeploy_backup_snapshot_id=%s\npostdeploy_backup_manifest_sha256=%s\npostdeploy_full_bundle=%s\nservices=active\noverview_snapshot_timer=active\nbackup_timer=active\nnginx_edge=PASS\n' \
+printf 'activation_state=ACCEPTED\nactivation=PASS\nrelease=%s\nprevious_release=%s\npublic_web=%s\ndeploy_mode=%s\nrecovery_basis=%s\npredeploy_backup_run_id=%s\npredeploy_backup_snapshot_id=%s\npredeploy_backup_format=%s\npredeploy_backup_receipt_sha256=%s\npostdeploy_backup_run_id=%s\npostdeploy_backup_snapshot_id=%s\npostdeploy_backup_manifest_sha256=%s\npostdeploy_full_bundle=%s\nservices=active\noverview_snapshot_timer=active\nbackup_timer=active\ncapture_request_gate=%s\ncapture_executor=%s\nqwen_request_gate=%s\nqwen_executor=%s\nnginx_edge=PASS\n' \
     "$RELEASE_ID" "${PREVIOUS_RELEASE:-none}" "$PUBLIC_WEB_URL" \
     "$DEPLOY_MODE" "$RECOVERY_BASIS" \
     "${PREDEPLOY_BACKUP_RUN_ID:-not-recorded}" \
     "$PREDEPLOY_BACKUP_ID" "$PREDEPLOY_BACKUP_KIND" "$PREDEPLOY_BACKUP_RECEIPT_SHA256" \
     "${POSTDEPLOY_BACKUP_RUN_ID:-not-recorded}" \
     "$POSTDEPLOY_BACKUP_ID" "$POSTDEPLOY_BACKUP_MANIFEST_SHA256" "$POSTDEPLOY_FULL_BUNDLE_STATUS" \
+    "$CAPTURE_REQUEST_GATE" "$CAPTURE_EXECUTOR_SHOULD_RUN" \
+    "$QWEN_REQUEST_GATE" "$QWEN_EXECUTOR_SHOULD_RUN" \
     > "$ACTIVATION_PENDING"
 # The atomic rename is the deployment commit point. Before it, every failure
 # rolls back and the protected hold remains. Afterwards, failure to delete the
@@ -2931,19 +3205,11 @@ ACTIVATION_RECORD_COMMITTED=1
     grep -Fx 'activation_state=ACCEPTED' "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null && \
     grep -Fx 'activation=PASS' "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null && \
     grep -Fx "release=$RELEASE_ID" "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null && \
-    grep -Fx 'services=active' "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null || {
+    grep -Fx 'services=active' "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null && \
+    grep -Fx "capture_request_gate=$CAPTURE_REQUEST_GATE" "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null && \
+    grep -Fx "qwen_request_gate=$QWEN_REQUEST_GATE" "$RELEASE_RECORDS/ACTIVATION.txt" >/dev/null || {
         abort_cutover 'committed activation record failed validation' 6
     }
-# Resume provider interpretation last.  A Persistent timer can immediately
-# launch a missed run, so keep it quiescent until the activation record itself
-# has been atomically committed and validated.  If restoration fails, remove
-# that record and execute the normal rollback transaction.
-if ! restore_capture_interpretation_runtime; then
-    abort_cutover 'capture interpretation timer state could not be restored after activation checks' 6
-fi
-if ! restore_qwen_risk_runtime; then
-    abort_cutover 'Qwen risk timer state could not be restored after activation checks' 6
-fi
 # Recheck every public runtime and persistent timer after the activation receipt
 # and optional interpretation timer have settled. The accepted public marker is
 # the last deployment mutation: no candidate release_id is advertised as final

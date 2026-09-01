@@ -323,6 +323,17 @@ cp -a /etc/systemd/system/finance-radar-*.service \
     /etc/systemd/system/finance-radar-*.timer \
     /etc/systemd/system/finance-radar.slice \
     "$STAGE/config/etc/systemd/system/" 2>/dev/null || true
+if [ -f /etc/systemd/system/radarqwen.slice ]; then
+    cp -a /etc/systemd/system/radarqwen.slice \
+        "$STAGE/config/etc/systemd/system/"
+fi
+# Provider credentials and the Qwen risk bundle are deliberately excluded from
+# migration archives.  Record the resulting restore policy explicitly so a
+# clean replacement cannot mistake copied unit files for runnable capability.
+printf '%s\n' \
+    'deepseek=disabled_restore_policy' \
+    'qwen=disabled_missing_bundle' \
+    > "$STAGE/config/MODEL_RUNTIME_RESTORE_POLICY.txt"
 
 while IFS= read -r file; do
     cp --parents "$file" "$STAGE/config"
@@ -336,7 +347,10 @@ done < <(
 certbot certificates > "$STAGE/config/CERTIFICATE_STATUS.txt" 2>&1 || true
 systemctl status finance-radar.slice finance-radar-api finance-radar-web finance-radar-admin \
     finance-radar-reviewer finance-radar-operator \
-    finance-radar-worker finance-radar-backup.timer finance-radar-evidence-llm.service --no-pager \
+    finance-radar-worker finance-radar-backup.timer finance-radar-evidence-llm.service \
+    finance-radar-capture-interpretation.timer finance-radar-capture-interpretation.service \
+    radarqwen.slice finance-radar-qwen-risk-model.service \
+    finance-radar-qwen-risk-worker.timer finance-radar-qwen-risk-worker.service --no-pager \
     > "$STAGE/config/SERVICE_STATUS.txt" 2>&1 || true
 "$BASE/venv/bin/python" --version > "$STAGE/config/PYTHON_VERSION.txt" 2>&1
 "$BASE/venv/bin/pip" freeze > "$STAGE/config/PIP_FREEZE.txt"
