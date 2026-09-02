@@ -1,0 +1,97 @@
+{
+  "run": {
+    "tested_at": "2026-08-26T02:05:00Z",
+    "git_commit": "f775ae4306ed396c7ba9ee2b5761aae7eaa7b7ab",
+    "version_file": "2026.08.25.1",
+    "api_reported_service_version": "2026.08.25.1",
+    "target": "local instance of the exact production commit",
+    "browser": "Chromium 1194 via Playwright, real clicks",
+    "viewports": ["1440x1000", "820x1180", "390x844"],
+    "ledger_events": 37,
+    "collection_cycles_run": 1,
+    "public_production_reached": false
+  },
+  "public_access_blocker": {
+    "host": "edge.zb1og.cn",
+    "dns": ["2606:4700:3033::6815:5450", "2606:4700:3030::ac43:bcaa"],
+    "origin_ip": "18.208.34.152",
+    "edge": "cloudflare",
+    "response": "HTTP 403 with cf-mitigated: challenge",
+    "challenge_type": "managed / turnstile",
+    "blocked_dependency": "brunhild.challenges.cloudflare.com",
+    "blocked_reason": "session egress gateway answered 502 to CONNECT",
+    "browser_error": "net::ERR_TUNNEL_CONNECTION_FAILED",
+    "consequence": "cf_clearance cookie never issued; page stays on the verification interstitial",
+    "note": "environment limitation of the test session, not a product defect"
+  },
+  "finding_01_titles": {
+    "endpoint": "GET /api/v1/events?limit=40",
+    "events": 37,
+    "unique_company_name_values": 17,
+    "repeated": {"Iran": 9, "Federal Reserve": 9, "European Central Bank": 4, "Federal Deposit Insurance Corporation": 2},
+    "public_fact_summary_present": 0,
+    "citation_ready_true": 0,
+    "evidence_posture_distribution": {"SOURCE_CAPTURED": 37},
+    "null_claim_fields": ["claim_subject", "claim_action", "claim_stage"]
+  },
+  "finding_02_pagination_scroll": {
+    "scroll_container": "section.stMain",
+    "scrollTop_before_click": 4238,
+    "pager_viewport_y_before_click": 826,
+    "scrollTop_after_click": 0,
+    "feed_header_viewport_y_after_click": 1058,
+    "viewport_height": 1000,
+    "url_after": "http://127.0.0.1:8501/?preview_sort=latest&preview_page_size=24&preview_page=2#live-events",
+    "note": "window.scrollY is always 0 here because Streamlit scrolls an inner container; measuring window.scrollY yields a false result"
+  },
+  "finding_03_boilerplate": {
+    "feed_total_chars": 8496,
+    "boilerplate_chars": 1658,
+    "boilerplate_share": "19.5%",
+    "phrase_a": {"text": "这只说明系统采集到了什么，不等于原文已经支持一条确定事实。", "chars": 29, "occurrences": 24},
+    "phrase_b": {"pattern": "为什么关注：先确认具体动作、阶段和原始来源，再判断这条⟨类别⟩线索是否值得关注。", "chars": 40, "occurrences": 24}
+  },
+  "finding_04_duplicate_capture_text": {
+    "endpoint": "GET /api/v1/events/FR-LIVE-fdc003557677de1b1a2c40167e10eaeb/capture-explanation",
+    "state": "ELIGIBLE_NOT_QUEUED",
+    "source_title_equals_source_excerpt": true,
+    "code": "app/web/Home.py:197-199"
+  },
+  "finding_06_above_the_fold": {
+    "page_scroll_height_px": 5238,
+    "px_before_first_event_row": 1058,
+    "count_37_repetitions_above_fold": 5,
+    "zero_citable_restatements_above_fold": 3
+  },
+  "finding_08_performance": {
+    "api_median_ms": {"overview": 3.7, "events_limit_24": 6.9, "facets": 2.4},
+    "browser_ms": {"home_usable": 6800, "nav_to_replay_lab": 5600, "next_page": 4500},
+    "attribution": "three orders of magnitude between backend and perceived latency; cost is Streamlit rerun + websocket repaint",
+    "scale_caveat": "measured on a 37-event ledger; production holds 14506"
+  },
+  "responsive": {
+    "390x844":  {"scrollWidth": 390, "clientWidth": 390, "horizontal_overflow": false, "overflowing_elements": 0},
+    "820x1180": {"scrollWidth": 820, "clientWidth": 820, "horizontal_overflow": false, "overflowing_elements": 0}
+  },
+  "passing_checks": {
+    "external_cdn_requests": 0,
+    "failed_requests": 0,
+    "fonts_self_hosted": true,
+    "material_symbols_loaded": true,
+    "search_SEC_results": 7,
+    "search_nonsense_results": 0,
+    "empty_state_honest": true,
+    "deep_link_restores_preview": true
+  },
+  "product_quality_metrics_shown_publicly": {
+    "values_observed": {"discovery_latency_p95": "26.8 天", "citable_evidence_coverage": "51.4%", "fact_closure_rate": "0.0%", "pending_review_age_p95": "3.9 分钟"},
+    "caveat": "cold single-cycle local instance; NOT representative of production",
+    "concern": "these internal health metrics render on the public page for anonymous visitors"
+  },
+  "not_tested": [
+    "Reviewer / Operator / Admin internal UIs (loopback + token, no credentials)",
+    "DeepSeek capture interpretation output (queue not running locally)",
+    "production Cloudflare interstitial impact on real first paint",
+    "pagination and API latency at production scale (14506 events)"
+  ]
+}
